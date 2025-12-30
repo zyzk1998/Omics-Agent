@@ -1,0 +1,88 @@
+# GIBH-AGENT 配置文件
+# 支持本地和云端 LLM 切换
+
+# LLM 配置
+llm:
+  # 默认使用的 LLM 类型: "local" 或 "cloud"
+  default: "local"
+  
+  # 本地模型配置（vLLM/Ollama）
+  local:
+    logic:
+      base_url: "${VLLM_LOGIC_URL:http://localhost:8001/v1}"
+      api_key: "EMPTY"
+      model: "${LLM_LOGIC_MODEL:qwen3-coder-awq}"
+      temperature: 0.1
+      max_tokens: 2048
+    
+    vision:
+      base_url: "${VLLM_VL_URL:http://localhost:8000/v1}"
+      api_key: "EMPTY"
+      model: "${LLM_VL_MODEL:qwen3-vl}"
+      temperature: 0.3
+      max_tokens: 2048
+  
+  # 云端模型配置
+  cloud:
+    deepseek:
+      base_url: "https://api.deepseek.com/v1"
+      api_key: "${DEEPSEEK_API_KEY:}"
+      model: "deepseek-chat"
+      temperature: 0.7
+      max_tokens: 4096
+    
+    siliconflow:
+      base_url: "https://api.siliconflow.cn/v1"
+      api_key: "${SILICONFLOW_API_KEY:}"
+      model: "deepseek-chat"
+      temperature: 0.7
+      max_tokens: 4096
+
+# 数据路径配置
+paths:
+  upload_dir: "${UPLOAD_DIR:/app/uploads}"
+  results_dir: "${RESULTS_DIR:/app/results}"
+  hpc_work_dir: "${HPC_WORK_DIR:/scratch/gibh}"
+
+# HPC/任务分发配置
+dispatcher:
+  # 任务提交方式: "local", "slurm", "ssh"
+  type: "local"
+  
+  # Slurm 配置
+  slurm:
+    partition: "compute"
+    account: "${SLURM_ACCOUNT:}"
+    time_limit: "24:00:00"
+    memory: "32G"
+    cpus: 8
+  
+  # SSH 远程提交配置
+  ssh:
+    host: "${SSH_HOST:}"
+    username: "${SSH_USER:}"
+    key_path: "${SSH_KEY_PATH:~/.ssh/id_rsa}"
+    work_dir: "/scratch/gibh"
+
+# Redis 配置（Celery）
+redis:
+  url: "${REDIS_URL:redis://localhost:6379/0}"
+
+# 工具配置
+tools:
+  cellranger:
+    path: "${CELLRANGER_PATH:/opt/cellranger}"
+    reference: "${CELLRANGER_REF:/data/refdata-cellranger-GRCh38-3.0.0}"
+  
+  scanpy:
+    python_path: "${PYTHON_PATH:/usr/bin/python3}"
+  
+  gatk:
+    path: "${GATK_PATH:/opt/gatk}"
+    reference: "${GATK_REF:/data/hg38.fa}"
+
+# 日志配置
+logging:
+  level: "INFO"
+  file: "${LOG_FILE:/var/log/gibh-agent.log}"
+
