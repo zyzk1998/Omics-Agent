@@ -446,11 +446,13 @@ You have access to:
                         pc1=int(params.get("pc1", "1")),
                         pc2=int(params.get("pc2", "2"))
                     )
-                    plot_path = result.get("plot_path")
+                    plot_path = result.get("plot_path") or result.get("plot_file")
                     if plot_path:
-                        # 转换为相对路径
+                        # 转换为相对路径（相对于 output_dir）
                         if os.path.isabs(plot_path):
                             plot_path = os.path.relpath(plot_path, output_dir)
+                        # 确保路径使用正斜杠（Web 兼容）
+                        plot_path = plot_path.replace("\\", "/")
                         final_plot = plot_path
                     steps_details.append({
                         "step_id": step_id,
@@ -458,7 +460,7 @@ You have access to:
                         "name": step.get("desc", step_id),
                         "summary": "PCA 可视化完成",
                         "status": result.get("status", "success"),
-                        "plot": plot_path
+                        "plot": plot_path.replace("\\", "/") if plot_path else None
                     })
                 
                 elif tool_id == "visualize_volcano":
@@ -476,11 +478,13 @@ You have access to:
                         p_value_threshold=float(params.get("p_value_threshold", "0.05")),
                         fold_change_threshold=float(params.get("fold_change_threshold", "1.5"))
                     )
-                    plot_path = result.get("plot_path")
+                    plot_path = result.get("plot_path") or result.get("plot_file")
                     if plot_path:
-                        # 转换为相对路径
+                        # 转换为相对路径（相对于 output_dir）
                         if os.path.isabs(plot_path):
                             plot_path = os.path.relpath(plot_path, output_dir)
+                        # 确保路径使用正斜杠（Web 兼容）
+                        plot_path = plot_path.replace("\\", "/")
                         if not final_plot:
                             final_plot = plot_path
                     steps_details.append({
@@ -489,7 +493,7 @@ You have access to:
                         "name": step.get("desc", step_id),
                         "summary": "火山图可视化完成",
                         "status": result.get("status", "success"),
-                        "plot": plot_path
+                        "plot": plot_path.replace("\\", "/") if plot_path else None
                     })
             
             return {

@@ -1,6 +1,6 @@
 """
 GIBH-AGENT-V2 测试服务器
-提供简单的 Web 接口用于测试功能，支持实时日志监控
+提供简单的 Web 接口用于测试功能
 """
 import os
 import sys
@@ -115,7 +115,7 @@ class ChatRequest(BaseModel):
     test_dataset_id: Optional[str] = None
 
 
-# 日志缓冲区（用于实时日志流）
+# 日志缓冲区（保留用于未来扩展）
 log_buffer = deque(maxlen=1000)
 log_listeners: Set[asyncio.Queue] = set()
 
@@ -194,10 +194,10 @@ async def index():
             padding: 20px;
         }
         .container {
-            max-width: 1400px;
+            max-width: 1200px;
             margin: 0 auto;
-            display: grid;
-            grid-template-columns: 1fr 1fr;
+            display: flex;
+            flex-direction: column;
             gap: 20px;
             height: calc(100vh - 40px);
         }
@@ -216,10 +216,7 @@ async def index():
             padding-bottom: 10px;
         }
         .chat-panel {
-            grid-column: 1;
-        }
-        .log-panel {
-            grid-column: 2;
+            flex: 1;
         }
         .chat-area {
             flex: 1;
@@ -233,18 +230,6 @@ async def index():
             min-height: 300px;
             word-wrap: break-word;
             overflow-wrap: break-word;
-        }
-        .log-area {
-            flex: 1;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            padding: 15px;
-            overflow-y: auto;
-            background: #1e1e1e;
-            color: #d4d4d4;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            min-height: 300px;
         }
         .message {
             margin-bottom: 10px;
@@ -267,14 +252,6 @@ async def index():
             background: #ffebee;
             color: #c62828;
         }
-        .log-entry {
-            margin-bottom: 5px;
-            line-height: 1.5;
-        }
-        .log-entry.INFO { color: #4CAF50; }
-        .log-entry.WARNING { color: #FF9800; }
-        .log-entry.ERROR { color: #f44336; }
-        .log-entry.DEBUG { color: #2196F3; }
         .input-area {
             display: flex;
             gap: 10px;
@@ -455,14 +432,6 @@ async def index():
             margin-top: 10px;
             padding: 10px;
         }
-        .status {
-            padding: 5px 10px;
-            border-radius: 4px;
-            font-size: 12px;
-            margin-bottom: 10px;
-        }
-        .status.connected { background: #4CAF50; color: white; }
-        .status.disconnected { background: #f44336; color: white; }
         .test-data-selection {
             background: #f1f8e9 !important;
             max-width: 100%;
@@ -503,7 +472,6 @@ async def index():
     <div class="container">
         <div class="panel chat-panel">
             <h2>💬 对话界面</h2>
-            <div id="status" class="status disconnected">未连接</div>
             <div id="chatArea" class="chat-area"></div>
             <div class="input-area">
                 <input type="text" id="messageInput" placeholder="输入消息或上传文件进行分析..." />
@@ -512,21 +480,9 @@ async def index():
             </div>
             <div id="fileInfo" class="file-info" style="display:none;"></div>
         </div>
-        
-        <div class="panel log-panel">
-            <h2>📋 实时日志</h2>
-            <div id="logArea" class="log-area"></div>
-            <div style="margin-top: 10px;">
-                <button onclick="clearLogs()">清空日志</button>
-                <button onclick="toggleAutoScroll()" id="autoScrollBtn">自动滚动: 开启</button>
-            </div>
-        </div>
     </div>
 
     <script>
-        let autoScroll = true;
-        let logEventSource = null;
-        
         // 文件上下文管理（记住已上传的文件）
         let uploadedFilesContext = [];
         
@@ -817,30 +773,12 @@ async def index():
                 html += '</div>';
             }
             
-            // 可视化图片
-            if (data.final_plot) {
-                html += '<div class="visualization">';
-                html += '<h4>📈 可视化结果</h4>';
-                // 处理图片路径
-                let plotUrl = data.final_plot;
-                if (!plotUrl.startsWith('http') && !plotUrl.startsWith('/')) {
-                    // 如果路径包含 results，直接使用
-                    if (plotUrl.includes('results/')) {
-                        plotUrl = '/' + plotUrl;
-                    } else {
-                        plotUrl = '/results/' + plotUrl;
-                    }
-                }
-                html += `<img src="${plotUrl}" alt="UMAP Visualization" style="max-width: 100%; border-radius: 4px; margin-top: 10px;" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"><p style="display:none; color: #999;">图片加载失败: ${plotUrl}</p>`;
-                html += '</div>';
-            }
-            
-            // 所有步骤的图片
+            // 可视化图片（只显示步骤的图片，避免与 final_plot 重复）
             if (data.steps_details) {
                 const plotSteps = data.steps_details.filter(s => s.plot);
                 if (plotSteps.length > 0) {
                     html += '<div class="step-plots">';
-                    html += '<h4>📊 步骤可视化</h4>';
+                    html += '<h4>📈 可视化结果</h4>';
                     plotSteps.forEach(step => {
                         let plotUrl = step.plot;
                         if (!plotUrl.startsWith('http') && !plotUrl.startsWith('/')) {
@@ -853,11 +791,39 @@ async def index():
                         }
                         html += `<div style="margin: 10px 0;">`;
                         html += `<strong>${step.name || step.tool_id}</strong><br>`;
-                        html += `<img src="${plotUrl}" alt="${step.name}" style="max-width: 100%; border-radius: 4px;" onerror="this.style.display='none';">`;
+                        html += `<img src="${plotUrl}" alt="${step.name}" style="max-width: 100%; border-radius: 4px; margin-top: 10px;" onerror="this.style.display='none';">`;
                         html += `</div>`;
                     });
                     html += '</div>';
+                } else if (data.final_plot) {
+                    // 如果没有步骤图片，使用 final_plot（向后兼容）
+                    html += '<div class="visualization">';
+                    html += '<h4>📈 可视化结果</h4>';
+                    let plotUrl = data.final_plot;
+                    if (!plotUrl.startsWith('http') && !plotUrl.startsWith('/')) {
+                        if (plotUrl.includes('results/')) {
+                            plotUrl = '/' + plotUrl;
+                        } else {
+                            plotUrl = '/results/' + plotUrl;
+                        }
+                    }
+                    html += `<img src="${plotUrl}" alt="Visualization" style="max-width: 100%; border-radius: 4px; margin-top: 10px;" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"><p style="display:none; color: #999;">图片加载失败: ${plotUrl}</p>`;
+                    html += '</div>';
                 }
+            } else if (data.final_plot) {
+                // 如果没有 steps_details，使用 final_plot
+                html += '<div class="visualization">';
+                html += '<h4>📈 可视化结果</h4>';
+                let plotUrl = data.final_plot;
+                if (!plotUrl.startsWith('http') && !plotUrl.startsWith('/')) {
+                    if (plotUrl.includes('results/')) {
+                        plotUrl = '/' + plotUrl;
+                    } else {
+                        plotUrl = '/results/' + plotUrl;
+                    }
+                }
+                html += `<img src="${plotUrl}" alt="Visualization" style="max-width: 100%; border-radius: 4px; margin-top: 10px;" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"><p style="display:none; color: #999;">图片加载失败: ${plotUrl}</p>`;
+                html += '</div>';
             }
             
             // Marker 基因表格（如果有）
@@ -1072,79 +1038,7 @@ async def index():
         window.toggleThink = toggleThink;
         window.selectTestDataset = selectTestDataset;
 
-        // 连接日志流
-        function connectLogStream() {
-            if (logEventSource) {
-                logEventSource.close();
-            }
-
-            logEventSource = new EventSource('/api/logs/stream');
-            
-            logEventSource.onopen = function() {
-                document.getElementById('status').textContent = '已连接';
-                document.getElementById('status').className = 'status connected';
-                addLogEntry({
-                    timestamp: new Date().toISOString(),
-                    level: 'INFO',
-                    message: '日志流连接成功',
-                    module: 'client'
-                });
-            };
-
-            logEventSource.onerror = function(e) {
-                document.getElementById('status').textContent = '连接断开';
-                document.getElementById('status').className = 'status disconnected';
-                console.error('日志流错误:', e);
-                // 3秒后重连
-                setTimeout(connectLogStream, 3000);
-            };
-
-            logEventSource.onmessage = function(event) {
-                try {
-                    const logEntry = JSON.parse(event.data);
-                    // 忽略心跳消息
-                    if (logEntry.type !== 'heartbeat') {
-                        addLogEntry(logEntry);
-                    }
-                } catch (e) {
-                    console.error('解析日志失败:', e, event.data);
-                    // 即使解析失败，也尝试显示原始数据
-                    addLogEntry({
-                        timestamp: new Date().toISOString(),
-                        level: 'ERROR',
-                        message: `日志解析失败: ${event.data.substring(0, 100)}`,
-                        module: 'client'
-                    });
-                }
-            };
-        }
-
-        // 添加日志条目
-        function addLogEntry(entry) {
-            const logArea = document.getElementById('logArea');
-            const logDiv = document.createElement('div');
-            logDiv.className = `log-entry ${entry.level}`;
-            
-            // 格式化时间戳
-            const timestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : '';
-            logDiv.textContent = `[${timestamp}] [${entry.level}] ${entry.message}`;
-            logArea.appendChild(logDiv);
-            
-            if (autoScroll) {
-                logArea.scrollTop = logArea.scrollHeight;
-            }
-        }
-
-        // 清空日志
-        function clearLogs() {
-            document.getElementById('logArea').innerHTML = '';
-        }
-
-        // 切换自动滚动
-        function toggleAutoScroll() {
-            autoScroll = !autoScroll;
-            document.getElementById('autoScrollBtn').textContent = `自动滚动: ${autoScroll ? '开启' : '关闭'}`;
-        }
+        // 日志功能已移除
 
         // 回车发送
         document.getElementById('messageInput').addEventListener('keypress', function(e) {
@@ -1153,8 +1047,7 @@ async def index():
             }
         });
 
-        // 初始化
-        connectLogStream();
+        // 初始化完成
     </script>
 </body>
 </html>

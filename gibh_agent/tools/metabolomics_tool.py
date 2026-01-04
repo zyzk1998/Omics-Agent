@@ -665,7 +665,8 @@ class MetabolomicsTool:
             result = {
                 "status": "success",
                 "message": "PCA 可视化完成",
-                "plot_file": str(plot_path)
+                "plot_path": str(plot_path),
+                "plot_file": str(plot_path)  # 兼容旧字段名
             }
             
             logger.info(f"✅ PCA 图已保存: {plot_path}")
@@ -759,7 +760,8 @@ class MetabolomicsTool:
             result = {
                 "status": "success",
                 "message": "火山图生成完成",
-                "plot_file": str(plot_path)
+                "plot_path": str(plot_path),
+                "plot_file": str(plot_path)  # 兼容旧字段名
             }
             
             logger.info(f"✅ 火山图已保存: {plot_path}")
