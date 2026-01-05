@@ -175,6 +175,18 @@ logger.info("🔍 测试日志输出 - 这应该出现在前端")
 @app.get("/", response_class=HTMLResponse)
 async def index():
     """返回前端页面"""
+    # 🔥 优先读取外部 HTML 文件（如果存在）
+    html_file_path = Path(__file__).parent / "services" / "nginx" / "html" / "index.html"
+    if html_file_path.exists():
+        try:
+            with open(html_file_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
+            logger.info(f"✅ 已加载外部前端文件: {html_file_path}")
+            return HTMLResponse(content=html_content)
+        except Exception as e:
+            logger.warning(f"⚠️ 读取外部 HTML 文件失败，使用内嵌版本: {e}")
+    
+    # 如果外部文件不存在，使用内嵌的 HTML
     html_content = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -1056,38 +1068,137 @@ async def index():
 
 
 @app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)):
-    """文件上传接口"""
+async def upload_file(files: List[UploadFile] = File(...)):
+    """文件上传接口（支持多文件上传）"""
     try:
-        logger.info(f"📤 收到文件上传: {file.filename}")
+        if not files or len(files) == 0:
+            raise HTTPException(status_code=400, detail="No files provided")
         
-        # 保存文件
-        file_path = UPLOAD_DIR / file.filename
-        with open(file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
+        logger.info(f"📤 收到文件上传: {len(files)} 个文件")
         
-        logger.info(f"✅ 文件保存成功: {file_path}")
+        # 检测是否是10x Genomics文件（matrix.mtx, barcodes.tsv, features.tsv）
+        is_10x_data = False
+        tenx_files = []
+        other_files = []
         
-        # 🔥 主动检测：立即生成元数据
-        # 这样 Agent 在对话时就不用再读大文件了，直接读 meta.json
-        try:
-            metadata = file_inspector.generate_metadata(file.filename)
-            if metadata:
-                logger.info(f"📊 文件元数据已生成: {metadata.get('file_type', 'unknown')}")
-        except Exception as e:
-            logger.warning(f"⚠️ 生成文件元数据失败: {e}")
+        for file in files:
+            filename_lower = file.filename.lower()
+            if any(pattern in filename_lower for pattern in ['matrix.mtx', 'barcodes.tsv', 'features.tsv']):
+                is_10x_data = True
+                tenx_files.append(file)
+            else:
+                other_files.append(file)
         
+        uploaded_results = []
+        
+        # 如果是10x数据，创建子目录并保存
+        if is_10x_data and len(tenx_files) >= 2:  # 至少需要2个文件（通常是matrix + barcodes/features）
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            tenx_dir = UPLOAD_DIR / f"10x_data_{timestamp}"
+            tenx_dir.mkdir(exist_ok=True)
+            
+            logger.info(f"📁 检测到10x数据，创建目录: {tenx_dir}")
+            
+            # 保存10x文件到子目录
+            for file in tenx_files:
+                file_path = tenx_dir / file.filename
+                with open(file_path, "wb") as f:
+                    content = await file.read()
+                    f.write(content)
+                
+                logger.info(f"✅ 10x文件保存成功: {file_path}")
+                
+                # 生成元数据
+                try:
+                    metadata = file_inspector.generate_metadata(str(file_path.relative_to(UPLOAD_DIR)))
+                except Exception as e:
+                    logger.warning(f"⚠️ 生成文件元数据失败: {e}")
+                    metadata = None
+                
+                uploaded_results.append({
+                    "file_id": str(tenx_dir.relative_to(UPLOAD_DIR)),
+                    "file_name": file.filename,
+                    "file_path": str(file_path),
+                    "file_size": len(content),
+                    "metadata": metadata,
+                    "is_10x": True,
+                    "group_dir": str(tenx_dir.relative_to(UPLOAD_DIR))
+                })
+            
+            # 返回10x目录路径（而不是单个文件路径）
+            file_paths = [str(tenx_dir.relative_to(UPLOAD_DIR))]
+            return {
+                "status": "success",
+                "is_10x_data": True,
+                "group_dir": str(tenx_dir.relative_to(UPLOAD_DIR)),
+                "files": uploaded_results,
+                "file_paths": file_paths,  # 🔥 添加 file_paths 数组
+                "message": f"10x数据已保存到: {tenx_dir.relative_to(UPLOAD_DIR)}"
+            }
+        
+        # 处理其他文件（非10x或单独的10x文件）
+        for file in other_files + (tenx_files if not is_10x_data else []):
+            file_path = UPLOAD_DIR / file.filename
+            with open(file_path, "wb") as f:
+                content = await file.read()
+                f.write(content)
+            
+            logger.info(f"✅ 文件保存成功: {file_path}")
+            
+            # 生成元数据
+            try:
+                metadata = file_inspector.generate_metadata(file.filename)
+                if metadata:
+                    logger.info(f"📊 文件元数据已生成: {metadata.get('file_type', 'unknown')}")
+            except Exception as e:
+                logger.warning(f"⚠️ 生成文件元数据失败: {e}")
+                metadata = None
+            
+            uploaded_results.append({
+                "file_id": file.filename,
+                "file_name": file.filename,
+                "file_path": str(file_path),
+                "file_size": len(content),
+                "metadata": metadata,
+                "is_10x": False
+            })
+        
+        # 🔥 统一返回格式：始终返回 file_paths 数组（用于前端发送聊天请求）
+        # 注意：使用相对路径，因为前端需要相对于 UPLOAD_DIR 的路径
+        file_paths = []
+        for result in uploaded_results:
+            # 转换为相对路径（相对于 UPLOAD_DIR）
+            file_path_abs = result["file_path"]
+            if isinstance(file_path_abs, str) and str(UPLOAD_DIR) in file_path_abs:
+                # 提取相对路径
+                rel_path = str(Path(file_path_abs).relative_to(UPLOAD_DIR))
+            else:
+                rel_path = result["file_id"]  # 回退到 file_id
+            file_paths.append(rel_path)
+        
+        # 如果只有一个文件，返回单个文件格式（兼容旧版本）
+        if len(uploaded_results) == 1:
+            result = uploaded_results[0]
+            return {
+                "status": "success",
+                "file_id": result["file_id"],
+                "file_name": result["file_name"],
+                "file_path": result["file_path"],
+                "file_size": result["file_size"],
+                "metadata": result["metadata"],
+                "file_paths": file_paths  # 🔥 添加 file_paths 数组
+            }
+        
+        # 多个文件返回列表格式
         return {
             "status": "success",
-            "file_id": file.filename,
-            "file_name": file.filename,
-            "file_path": str(file_path),
-            "file_size": len(content),
-            "metadata": metadata if 'metadata' in locals() else None
+            "files": uploaded_results,
+            "count": len(uploaded_results),
+            "file_paths": file_paths  # 🔥 添加 file_paths 数组
         }
+        
     except Exception as e:
-        logger.error(f"❌ 文件上传失败: {e}")
+        logger.error(f"❌ 文件上传失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1181,11 +1292,18 @@ async def chat_endpoint(req: ChatRequest):
             result_file_paths = result.get("file_paths", [])
             if not result_file_paths:
                 result_file_paths = [f["path"] for f in uploaded_files]
-            return JSONResponse(content={
+            
+            response_content = {
                 "type": "workflow_config",
                 "workflow_data": result.get("workflow_data"),
                 "file_paths": result_file_paths
-            })
+            }
+            
+            # 如果包含诊断报告，也返回给前端
+            if "diagnosis_report" in result:
+                response_content["diagnosis_report"] = result["diagnosis_report"]
+            
+            return JSONResponse(content=response_content)
         
         # 如果是测试数据选择请求，格式化为用户友好的文本
         if result.get("type") == "test_data_selection":
@@ -1263,13 +1381,28 @@ async def chat_endpoint(req: ChatRequest):
                 try:
                     response_iter = result.get("response")
                     if response_iter:
+                        # 确保 response_iter 是异步迭代器
                         async for chunk in response_iter:
-                            yield chunk
+                            if chunk:
+                                yield chunk
+                    else:
+                        logger.warning("⚠️ 聊天响应中没有 response 迭代器")
+                        yield "❌ 错误: 无法获取响应"
                 except Exception as e:
                     logger.error(f"❌ 流式响应错误: {e}", exc_info=True)
-                    yield f"\\n\\n❌ 错误: {str(e)}"
+                    import traceback
+                    logger.error(f"详细错误: {traceback.format_exc()}")
+                    yield f"\n\n❌ 错误: {str(e)}"
             
-            return StreamingResponse(generate(), media_type="text/plain")
+            return StreamingResponse(
+                generate(), 
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
+                }
+            )
         
         # 其他情况返回 JSON
         return JSONResponse(content=result)
@@ -1389,9 +1522,9 @@ async def execute_workflow(request: dict):
                     plot_path = f"/results/{run_name}/{plot_path}"
             report["final_plot"] = plot_path
         
-        # 处理步骤中的图片路径
+        # 处理步骤中的图片路径（steps_details）
+        run_name = os.path.basename(output_dir)
         if report.get("steps_details"):
-            run_name = os.path.basename(output_dir)
             for step in report["steps_details"]:
                 if step.get("plot"):
                     plot_path = step["plot"]
@@ -1404,6 +1537,85 @@ async def execute_workflow(request: dict):
                         else:
                             plot_path = f"/results/{run_name}/{plot_path}"
                     step["plot"] = plot_path
+                
+                # 处理 step_result 中的图片路径
+                if step.get("step_result") and step["step_result"].get("data", {}).get("images"):
+                    images = step["step_result"]["data"]["images"]
+                    fixed_images = []
+                    for img_path in images:
+                        if not img_path.startswith("/results/"):
+                            if img_path.startswith("results/"):
+                                img_path = "/" + img_path
+                            elif "/" in img_path:
+                                img_path = f"/results/{img_path}"
+                            else:
+                                img_path = f"/results/{run_name}/{img_path}"
+                        fixed_images.append(img_path)
+                    step["step_result"]["data"]["images"] = fixed_images
+        
+        # 确保 steps_results 存在（前端可直接使用）
+        if "steps_results" not in report and "steps_details" in report:
+            steps_results = []
+            for step_detail in report.get("steps_details", []):
+                if "step_result" in step_detail:
+                    step_result = step_detail["step_result"].copy()
+                    # 确保图片路径正确
+                    if step_result.get("data", {}).get("images"):
+                        images = step_result["data"]["images"]
+                        fixed_images = []
+                        for img_path in images:
+                            if not img_path.startswith("/results/"):
+                                if img_path.startswith("results/"):
+                                    img_path = "/" + img_path
+                                elif "/" in img_path:
+                                    img_path = f"/results/{img_path}"
+                                else:
+                                    img_path = f"/results/{run_name}/{img_path}"
+                                fixed_images.append(img_path)
+                            else:
+                                fixed_images.append(img_path)
+                        step_result["data"]["images"] = fixed_images
+                    steps_results.append(step_result)
+                else:
+                    # 兼容旧格式
+                    step_result = {
+                        "step_name": step_detail.get("name", "Unknown"),
+                        "status": step_detail.get("status", "success"),
+                        "logs": step_detail.get("summary", ""),
+                        "data": {}
+                    }
+                    # 如果有 plot，添加到 data.images
+                    if step_detail.get("plot"):
+                        plot_path = step_detail["plot"]
+                        if not plot_path.startswith("/results/"):
+                            if plot_path.startswith("results/"):
+                                plot_path = "/" + plot_path
+                            elif "/" in plot_path:
+                                plot_path = f"/results/{plot_path}"
+                            else:
+                                plot_path = f"/results/{run_name}/{plot_path}"
+                        step_result["data"]["images"] = [plot_path]
+                    steps_results.append(step_result)
+            report["steps_results"] = steps_results
+        
+        # 处理 steps_results 中的图片路径（如果存在）
+        if report.get("steps_results"):
+            for step_result in report["steps_results"]:
+                if step_result.get("data", {}).get("images"):
+                    images = step_result["data"]["images"]
+                    fixed_images = []
+                    for img_path in images:
+                        if not img_path.startswith("/results/"):
+                            if img_path.startswith("results/"):
+                                img_path = "/" + img_path
+                            elif "/" in img_path:
+                                img_path = f"/results/{img_path}"
+                            else:
+                                img_path = f"/results/{run_name}/{img_path}"
+                            fixed_images.append(img_path)
+                        else:
+                            fixed_images.append(img_path)
+                    step_result["data"]["images"] = fixed_images
         
         return JSONResponse(content=report)
         

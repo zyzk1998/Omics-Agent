@@ -412,7 +412,8 @@
         const dropOverlay = document.getElementById('dropOverlay');
 
         let chatHistory = []; 
-        let uploadedFiles = []; 
+        let uploadedFiles = []; // 已上传的文件（用于聊天请求）
+        let pendingFiles = []; // 🔥 Staging: 待上传的文件（File 对象）
         let isProcessing = false; 
         let abortController = null;
 
@@ -426,7 +427,8 @@
 
         function checkInput() {
             if (isProcessing) { sendBtn.classList.remove('active'); return; }
-            if (userInput.value.trim() !== '' || uploadedFiles.length > 0) sendBtn.classList.add('active');
+            // 🔥 更新：检查文本输入或待上传文件
+            if (userInput.value.trim() !== '' || pendingFiles.length > 0 || uploadedFiles.length > 0) sendBtn.classList.add('active');
             else sendBtn.classList.remove('active');
         }
 
@@ -485,30 +487,154 @@
         window.addEventListener('drop', (e) => { e.preventDefault(); dropOverlay.style.display = 'none'; if (!isProcessing && e.dataTransfer.files.length > 0) handleFileSelect(e.dataTransfer.files); });
         window.addEventListener('paste', (e) => { if (!isProcessing && e.clipboardData.files.length > 0) { e.preventDefault(); handleFileSelect(e.clipboardData.files); } });
 
-        async function handleFileSelect(files) {
+        // 🔥 重写：Staging 模式 - 只添加到待上传列表，不立即上传
+        function handleFileSelect(files) {
             if (files.length === 0) return;
-            toggleLoadingState(true);
-            for (let i = 0; i < files.length; i++) await uploadSingleFile(files[i]);
-            document.getElementById('fileInput').value = ''; 
-            toggleLoadingState(false);
+            
+            // 将新文件添加到 pendingFiles 数组
+            for (let i = 0; i < files.length; i++) {
+                pendingFiles.push(files[i]);
+            }
+            
+            // 渲染文件 chips
+            renderPendingFileChips();
+            
+            // 清空文件输入框（允许重新选择相同文件）
+            document.getElementById('fileInput').value = '';
+            
+            // 更新发送按钮状态
+            checkInput();
         }
-
-        async function uploadSingleFile(file) {
-            const tempId = 'temp-' + Date.now();
-            addFileTag(file.name, true, tempId);
+        
+        // 🔥 渲染待上传文件的 chips（Staging UI）
+        function renderPendingFileChips() {
+            filePreviewArea.innerHTML = '';
+            pendingFiles.forEach((file, index) => {
+                const div = document.createElement('div');
+                div.className = 'file-chip';
+                div.innerHTML = `
+                    <i class="bi bi-file-earmark-text"></i>
+                    <span>${file.name}</span>
+                    <i class="bi bi-x" style="cursor:pointer" onclick="removePendingFile(${index})" title="移除"></i>
+                `;
+                filePreviewArea.appendChild(div);
+            });
+        }
+        
+        // 🔥 从 staging 中移除文件
+        function removePendingFile(index) {
+            if (!isProcessing && index >= 0 && index < pendingFiles.length) {
+                pendingFiles.splice(index, 1);
+                renderPendingFileChips();
+                checkInput();
+            }
+        }
+        
+        // 🔥 批量上传文件（在发送消息时调用）
+        async function uploadPendingFiles() {
+            if (pendingFiles.length === 0) return [];
+            
             const formData = new FormData();
-            formData.append('file', file);
+            pendingFiles.forEach(file => {
+                formData.append('files', file); // 使用 'files' (复数) 匹配后端 List[UploadFile]
+            });
+            
             try {
-                const res = await fetch('/api/upload', { method: 'POST', body: formData });
+                const res = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    let errorData;
+                    try {
+                        errorData = JSON.parse(errorText);
+                    } catch {
+                        errorData = { detail: errorText || `HTTP ${res.status}` };
+                    }
+                    throw new Error(errorData.detail || errorData.message || `上传失败: HTTP ${res.status}`);
+                }
+                
                 const data = await res.json();
-                removeFileTag(tempId);
-                if (data.status === 'success') {
-                    uploadedFiles.push({ id: data.file_id, name: data.file_name });
-                    renderFileTags();
-                } else alert(`上传失败: ${data.message}`);
-            } catch (e) { removeFileTag(tempId); alert(`网络错误: ${e}`); }
+                
+                if (data.status !== 'success') {
+                    throw new Error(data.message || data.error || '文件上传失败');
+                }
+                
+                // 处理返回的文件路径
+                const uploadedFilePaths = [];
+                
+                if (data.file_paths && Array.isArray(data.file_paths)) {
+                    // 使用 file_paths 数组（新格式）
+                    data.file_paths.forEach((path, idx) => {
+                        let name;
+                        if (data.is_10x_data) {
+                            name = `10x数据 (${data.files?.length || pendingFiles.length} 个文件)`;
+                        } else if (data.files && data.files[idx]) {
+                            name = data.files[idx].file_name;
+                        } else if (data.file_name) {
+                            name = data.file_name;
+                        } else {
+                            name = path.split('/').pop() || `文件 ${idx + 1}`;
+                        }
+                        uploadedFilePaths.push({
+                            name: name,
+                            file_name: name,  // 兼容后端 API
+                            path: path,
+                            file_path: path,  // 兼容后端 API
+                            file_id: data.files?.[idx]?.file_id || path,
+                            is_10x: data.is_10x_data || false,
+                            group_dir: data.group_dir || null
+                        });
+                    });
+                } else {
+                    // 兼容旧格式
+                    if (data.is_10x_data && data.group_dir) {
+                        uploadedFilePaths.push({
+                            name: `10x数据 (${data.files?.length || pendingFiles.length} 个文件)`,
+                            file_name: `10x数据 (${data.files?.length || pendingFiles.length} 个文件)`,  // 兼容后端 API
+                            path: data.group_dir,
+                            file_path: data.group_dir,  // 兼容后端 API
+                            file_id: data.group_dir,
+                            is_10x: true,
+                            group_dir: data.group_dir
+                        });
+                    } else if (data.files && Array.isArray(data.files)) {
+                        data.files.forEach(f => {
+                            uploadedFilePaths.push({
+                                name: f.file_name,
+                                file_name: f.file_name,  // 兼容后端 API
+                                path: f.file_path || f.file_id,
+                                file_path: f.file_path || f.file_id,  // 兼容后端 API
+                                file_id: f.file_id,
+                                is_10x: f.is_10x || false
+                            });
+                        });
+                    } else {
+                        uploadedFilePaths.push({
+                            name: data.file_name || '文件',
+                            file_name: data.file_name || '文件',  // 兼容后端 API
+                            path: data.file_path || data.file_id,
+                            file_path: data.file_path || data.file_id,  // 兼容后端 API
+                            file_id: data.file_id
+                        });
+                    }
+                }
+                
+                // 清空 staging
+                pendingFiles = [];
+                renderPendingFileChips();
+                
+                return uploadedFilePaths;
+                
+            } catch (e) {
+                const errorMsg = e.message || String(e);
+                throw new Error(`文件上传失败: ${errorMsg}`);
+            }
         }
-
+        
+        // 保留旧的 renderFileTags 和 removeFile 用于已上传文件的显示（向后兼容）
         function renderFileTags() {
             filePreviewArea.innerHTML = '';
             uploadedFiles.forEach((f, index) => {
@@ -518,31 +644,50 @@
                 filePreviewArea.appendChild(div);
             });
         }
-        function addFileTag(name, isLoading, tempId) {
-            const div = document.createElement('div');
-            div.className = 'file-chip'; div.id = tempId;
-            div.innerHTML = `<i class="bi bi-${isLoading ? 'hourglass-split' : 'file-earmark-text'}"></i><span>${name} ${isLoading ? '(上传中...)' : ''}</span>`;
-            filePreviewArea.appendChild(div);
+        function removeFile(index) { 
+            if(!isProcessing && index >= 0 && index < uploadedFiles.length) { 
+                uploadedFiles.splice(index, 1); 
+                renderFileTags(); 
+                checkInput(); 
+            } 
         }
-        function removeFileTag(id) { const el = document.getElementById(id); if (el) el.remove(); }
-        function removeFile(index) { if(!isProcessing) { uploadedFiles.splice(index, 1); renderFileTags(); checkInput(); } }
 
         async function sendMessage(selectedTool = null, originalQuery = null, toolParams = null, workflowData = null, useHistoryFiles = false) {
             if (isProcessing) return;
             let text = userInput.value.trim();
             if (originalQuery) text = originalQuery;
             
-            if (!text && uploadedFiles.length === 0 && !workflowData && !useHistoryFiles) return;
-
-            if (!selectedTool && !workflowData && !useHistoryFiles) {
-                appendMessage('user', text || `[发送了 ${uploadedFiles.length} 个文件]`);
-                userInput.value = ''; userInput.style.height = '24px'; 
-                checkInput();
-            }
+            // 🔥 更新：检查文本、待上传文件或已上传文件
+            if (!text && pendingFiles.length === 0 && uploadedFiles.length === 0 && !workflowData && !useHistoryFiles) return;
 
             toggleLoadingState(true);
             const startTime = Date.now();
             
+            // 🔥 Step 1: 如果有待上传文件，先上传
+            let newlyUploadedFiles = [];
+            if (pendingFiles.length > 0) {
+                try {
+                    newlyUploadedFiles = await uploadPendingFiles();
+                    // 将新上传的文件添加到 uploadedFiles 数组
+                    uploadedFiles.push(...newlyUploadedFiles);
+                } catch (e) {
+                    toggleLoadingState(false);
+                    const errorMsg = e.message || String(e);
+                    alert(`文件上传失败: ${errorMsg}`);
+                    appendMessage('assistant', `❌ 错误: ${errorMsg}`);
+                    return; // 上传失败，停止后续处理
+                }
+            }
+            
+            // 显示用户消息
+            if (!selectedTool && !workflowData && !useHistoryFiles) {
+                const fileCount = newlyUploadedFiles.length + uploadedFiles.length;
+                appendMessage('user', text || (fileCount > 0 ? `[发送了 ${fileCount} 个文件]` : ''));
+                userInput.value = ''; 
+                userInput.style.height = '24px'; 
+                checkInput();
+            }
+
             const aiMessageDiv = appendMessage('ai', '<span class="spinner-border spinner-border-sm text-primary" role="status"></span><span style="margin-left:8px; color:#666;">思考中...</span>', null, null, true);
             const aiContentDiv = aiMessageDiv; 
             
@@ -560,11 +705,12 @@
 
             abortController = new AbortController();
 
+            // 🔥 Step 2: 发送聊天请求（包含已上传的文件）
             const payload = { 
                 message: text, 
                 history: chatHistory, 
                 selected_tool: selectedTool, 
-                uploaded_files: uploadedFiles,
+                uploaded_files: uploadedFiles, // 包含所有已上传的文件（包括刚上传的）
                 tool_params: toolParams,
                 workflow_data: workflowData,
                 use_history_files: useHistoryFiles
