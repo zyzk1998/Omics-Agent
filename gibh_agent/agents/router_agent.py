@@ -35,7 +35,8 @@ class RouterAgent(BaseAgent):
         ],
         "metabolomics": [
             "metabolite", "metabolism", "lc-ms", "gc-ms", "xcms",
-            "代谢组", "代谢物"
+            "代谢组", "代谢物", "代谢组学", "代谢组分析", "代谢分析",
+            "metabolomics", "metabolomic", "metabonomics"
         ],
         "proteomics": [
             "protein", "proteome", "mass spec", "maxquant",
@@ -147,21 +148,36 @@ class RouterAgent(BaseAgent):
         
         logger.debug(f"📁 检测到的文件类型: {file_types}")
         
+        # 🔧 修复：优先检查查询中的代谢组关键词（即使没有文件）
+        metabolomics_keywords = [
+            "代谢组", "代谢物", "代谢组学", "代谢组分析", "代谢分析",
+            "metabolite", "metabolism", "metabolomics", "metabolomic", "metabonomics",
+            "lc-ms", "gc-ms", "xcms"
+        ]
+        if any(kw in query_lower for kw in metabolomics_keywords):
+            logger.info(f"✅ 快速路由: 查询包含代谢组关键词 → metabolomics_agent")
+            return {
+                "modality": "metabolomics",
+                "intent": self._detect_intent(query),
+                "confidence": 0.95,  # 高置信度
+                "routing": "metabolomics_agent",
+                "reasoning": "Query contains metabolomics keywords"
+            }
+        
         # 特殊规则：CSV 文件 + 代谢组关键词 = 高置信度快速路由
         if "csv" in file_types:
             # 检查是否有代谢组相关关键词
-            metabolomics_keywords = ["代谢组", "代谢物", "metabolite", "metabolism", "metabolomics"]
             if any(kw in query_lower for kw in metabolomics_keywords):
                 logger.info(f"✅ 快速路由: CSV 文件 + 代谢组关键词 → metabolomics_agent")
                 return {
                     "modality": "metabolomics",
                     "intent": self._detect_intent(query),
-                    "confidence": 0.95,  # 高置信度
+                    "confidence": 0.98,  # 极高置信度
                     "routing": "metabolomics_agent",
                     "reasoning": "CSV file with metabolomics keywords"
                 }
             # 即使没有明确关键词，CSV 文件也优先考虑代谢组（除非有明确的其他关键词）
-            elif not any(kw in query_lower for kw in ["rna", "转录", "单细胞", "scrna", "gene", "表达"]):
+            elif not any(kw in query_lower for kw in ["rna", "转录", "单细胞", "scrna", "gene", "表达", "transcript"]):
                 logger.info(f"✅ 快速路由: CSV 文件（无其他关键词）→ metabolomics_agent")
                 return {
                     "modality": "metabolomics",
@@ -182,13 +198,18 @@ class RouterAgent(BaseAgent):
                     score += 1
                     matched_keywords.append(keyword)
             
+            # 🔧 修复：提高代谢组关键词的权重
+            if modality == "metabolomics" and matched_keywords:
+                # 代谢组关键词匹配给予更高权重（每个匹配的关键词额外 +2 分）
+                score += len(matched_keywords) * 2
+            
             # 文件类型匹配（给予更高权重）
             if modality == "transcriptomics" and ("fastq" in file_types or "h5ad" in file_types):
                 score += 3  # 提高权重
             elif modality == "genomics" and ("bam" in file_types or "vcf" in file_types):
                 score += 3
             elif modality == "metabolomics" and "csv" in file_types:
-                score += 3  # CSV 文件强烈暗示代谢组数据
+                score += 5  # 🔧 修复：CSV 文件强烈暗示代谢组数据，提高权重
             
             if score > 0:
                 scores[modality] = score

@@ -25,22 +25,36 @@ services:
     ports:
       - "8028:8028"  # 直接暴露 API 服务器端口
     environment:
+      - TZ=Asia/Shanghai
       - REDIS_URL=redis://redis:6379/0
       - UPLOAD_DIR=/app/uploads
       - RESULTS_DIR=/app/results
       - PYTHONPATH=/app
-      # LLM 配置（硅基流动 DeepSeek API）
-      - SILICONFLOW_API_KEY=sk-xgwvrxknbzbewlhkvlwenngtoppluiceipbglpgshyaxgjqc
+      # 🔒 安全：从环境变量读取 API 密钥，不要硬编码
+      - SILICONFLOW_API_KEY=${SILICONFLOW_API_KEY}
       - SILICONFLOW_MODEL=${SILICONFLOW_MODEL:-Pro/deepseek-ai/DeepSeek-V3.2}
+      # 🔒 安全：文件上传限制
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-104857600}
+      # 🔒 安全：CORS 配置
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      # 修复 Numba 和 Matplotlib 权限问题
+      - NUMBA_CACHE_DIR=/home/appuser/.cache/numba
+      - MPLCONFIGDIR=/home/appuser/.config/matplotlib
+      - HOME=/home/appuser
+      # 禁用 Numba 缓存调试（帮助解决缓存问题）
+      - NUMBA_DEBUG_CACHE=1
     volumes:
       - .:/app
       - ./data/uploads:/app/uploads
       - ./results:/app/results
       - ./data:/app/data
+      - /etc/localtime:/etc/localtime:ro
     depends_on:
       - redis
     networks:
       - gibh-network
+    # 🔧 修复：使用 entrypoint 脚本修复权限
+    entrypoint: ["/entrypoint.sh"]
     command: gunicorn server:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8028 --timeout 300
 
   # =========================================
@@ -54,20 +68,35 @@ services:
     container_name: gibh_v2_worker
     restart: always
     environment:
+      - TZ=Asia/Shanghai
       - REDIS_URL=redis://redis:6379/0
       - UPLOAD_DIR=/app/uploads
       - RESULTS_DIR=/app/results
       - PYTHONPATH=/app
-      - SILICONFLOW_API_KEY=sk-xgwvrxknbzbewlhkvlwenngtoppluiceipbglpgshyaxgjqc
+      # 🔒 安全：从环境变量读取 API 密钥
+      - SILICONFLOW_API_KEY=${SILICONFLOW_API_KEY}
       - SILICONFLOW_MODEL=${SILICONFLOW_MODEL:-Pro/deepseek-ai/DeepSeek-V3.2}
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-104857600}
+      # 修复 Numba 和 Matplotlib 权限问题
+      - NUMBA_CACHE_DIR=/home/appuser/.cache/numba
+      - MPLCONFIGDIR=/home/appuser/.config/matplotlib
+      - HOME=/home/appuser
+      # 禁用 Numba 缓存调试（帮助解决缓存问题）
+      - NUMBA_DEBUG_CACHE=1
     volumes:
       - .:/app
       - ./data/uploads:/app/uploads
       - ./results:/app/results
       - ./data:/app/data
-    depends_on:
-      - redis
-      - api-server
+      - /etc/localtime:/etc/localtime:ro
+    # 🔧 修复：在容器启动时修复挂载目录的权限
+    entrypoint: |
+      sh -c "
+        # 修复挂载目录的权限（确保 appuser 可以写入）
+        chown -R appuser:appuser /app/uploads /app/results /app/data 2>/dev/null || true
+        # 执行原始命令
+        exec celery -A gibh_agent.core.celery_app worker --loglevel=info --concurrency=4
+      "
     networks:
       - gibh-network
     command: celery -A gibh_agent.core.celery_app worker --loglevel=info --concurrency=4

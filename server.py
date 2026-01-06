@@ -7,12 +7,14 @@ import sys
 import json
 import logging
 import asyncio
+import re
+import secrets
 from pathlib import Path
 from typing import List, Optional, Set
 from datetime import datetime
 from collections import deque
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -38,20 +40,113 @@ logger = logging.getLogger(__name__)
 # 创建 FastAPI 应用
 app = FastAPI(title="GIBH-AGENT-V2 Test Server")
 
-# 配置 CORS
+# 配置 CORS（安全配置）
+# 生产环境应该限制为特定域名
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+if ALLOWED_ORIGINS == ["*"]:
+    logger.warning("⚠️  CORS 配置允许所有来源，生产环境应限制为特定域名")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
-# 创建上传目录
-UPLOAD_DIR = Path("uploads")
-RESULTS_DIR = Path("results")
-UPLOAD_DIR.mkdir(exist_ok=True)
-RESULTS_DIR.mkdir(exist_ok=True)
+# 创建上传目录（使用绝对路径，兼容容器环境）
+# 🔧 修复：优先使用环境变量，否则使用相对路径
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
+RESULTS_DIR = Path(os.getenv("RESULTS_DIR", "results"))
+
+# 确保目录存在且可写
+try:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # 检查目录权限
+    if not os.access(UPLOAD_DIR, os.W_OK):
+        logger.warning(f"⚠️ 上传目录不可写: {UPLOAD_DIR}")
+    if not os.access(RESULTS_DIR, os.W_OK):
+        logger.warning(f"⚠️ 结果目录不可写: {RESULTS_DIR}")
+    
+    logger.info(f"📁 上传目录: {UPLOAD_DIR.absolute()} (可写: {os.access(UPLOAD_DIR, os.W_OK)})")
+    logger.info(f"📁 结果目录: {RESULTS_DIR.absolute()} (可写: {os.access(RESULTS_DIR, os.W_OK)})")
+except Exception as e:
+    logger.error(f"❌ 创建目录失败: {e}", exc_info=True)
+    raise
+
+# 安全配置
+MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 100 * 1024 * 1024))  # 默认 100MB
+ALLOWED_EXTENSIONS = {'.h5ad', '.mtx', '.tsv', '.csv', '.txt', '.gz', '.tar', '.zip'}
+ALLOWED_MIME_TYPES = {
+    'text/csv', 'text/tab-separated-values', 'text/plain',
+    'application/gzip', 'application/x-gzip',
+    'application/zip', 'application/x-tar'
+}
+
+def sanitize_filename(filename: str) -> str:
+    """
+    清理文件名，防止路径遍历攻击
+    
+    Args:
+        filename: 原始文件名
+    
+    Returns:
+        清理后的安全文件名
+    """
+    if not filename:
+        # 如果文件名为空，生成随机名称
+        return f"file_{secrets.token_hex(8)}"
+    
+    # 移除路径分隔符和危险字符
+    filename = os.path.basename(filename)  # 移除路径部分
+    filename = re.sub(r'[<>:"|?*\x00-\x1f]', '', filename)  # 移除危险字符
+    filename = filename.strip('. ')  # 移除开头和结尾的点/空格
+    
+    # 如果清理后为空，生成随机名称
+    if not filename:
+        filename = f"file_{secrets.token_hex(8)}"
+    
+    # 限制文件名长度
+    if len(filename) > 255:
+        name, ext = os.path.splitext(filename)
+        filename = name[:255-len(ext)] + ext
+    
+    return filename
+
+def validate_file_path(file_path: Path, base_dir: Path) -> Path:
+    """
+    验证文件路径是否在允许的目录内（防止路径遍历）
+    
+    Args:
+        file_path: 要验证的路径
+        base_dir: 基础目录
+    
+    Returns:
+        规范化的安全路径
+    
+    Raises:
+        HTTPException: 如果路径不安全
+    """
+    try:
+        # 解析并规范化路径
+        resolved_path = file_path.resolve()
+        resolved_base = base_dir.resolve()
+        
+        # 检查路径是否在基础目录内
+        if not str(resolved_path).startswith(str(resolved_base)):
+            raise HTTPException(
+                status_code=403,
+                detail="文件路径不安全：不允许访问基础目录外的文件"
+            )
+        
+        return resolved_path
+    except (ValueError, OSError) as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"无效的文件路径: {str(e)}"
+        )
 
 # 初始化文件检测器
 file_inspector = FileInspector(str(UPLOAD_DIR))
@@ -1074,6 +1169,10 @@ async def upload_file(files: List[UploadFile] = File(...)):
         if not files or len(files) == 0:
             raise HTTPException(status_code=400, detail="No files provided")
         
+        # 限制文件数量
+        if len(files) > 20:
+            raise HTTPException(status_code=400, detail="一次最多上传20个文件")
+        
         logger.info(f"📤 收到文件上传: {len(files)} 个文件")
         
         # 检测是否是10x Genomics文件（matrix.mtx, barcodes.tsv, features.tsv）
@@ -1082,7 +1181,25 @@ async def upload_file(files: List[UploadFile] = File(...)):
         other_files = []
         
         for file in files:
-            filename_lower = file.filename.lower()
+            # 🔒 安全：清理文件名
+            if not file.filename:
+                raise HTTPException(status_code=400, detail="文件名不能为空")
+            
+            original_filename = file.filename
+            safe_filename = sanitize_filename(original_filename)
+            
+            # 🔒 安全：验证文件扩展名
+            file_ext = Path(safe_filename).suffix.lower()
+            if file_ext and file_ext not in ALLOWED_EXTENSIONS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"不允许的文件类型: {file_ext}。允许的类型: {', '.join(ALLOWED_EXTENSIONS)}"
+                )
+            
+            # 更新文件名为安全版本
+            file.filename = safe_filename
+            
+            filename_lower = safe_filename.lower()
             if any(pattern in filename_lower for pattern in ['matrix.mtx', 'barcodes.tsv', 'features.tsv']):
                 is_10x_data = True
                 tenx_files.append(file)
@@ -1101,10 +1218,34 @@ async def upload_file(files: List[UploadFile] = File(...)):
             
             # 保存10x文件到子目录
             for file in tenx_files:
+                # 🔒 安全：验证文件路径
                 file_path = tenx_dir / file.filename
-                with open(file_path, "wb") as f:
-                    content = await file.read()
-                    f.write(content)
+                try:
+                    file_path = validate_file_path(file_path, UPLOAD_DIR)
+                except HTTPException as e:
+                    logger.error(f"❌ 文件路径验证失败: {file.filename} -> {e.detail}")
+                    raise
+                
+                # 🔒 安全：检查文件大小
+                content = await file.read()
+                if len(content) > MAX_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"文件 {file.filename} 超过最大大小限制 ({MAX_FILE_SIZE / 1024 / 1024:.0f}MB)"
+                    )
+                
+                # 🔧 修复：确保父目录存在
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                try:
+                    with open(file_path, "wb") as f:
+                        f.write(content)
+                except PermissionError as e:
+                    logger.error(f"❌ 文件写入权限错误: {file_path} -> {e}")
+                    raise HTTPException(status_code=500, detail=f"文件保存失败：权限不足 ({file.filename})")
+                except OSError as e:
+                    logger.error(f"❌ 文件写入系统错误: {file_path} -> {e}")
+                    raise HTTPException(status_code=500, detail=f"文件保存失败：{str(e)} ({file.filename})")
                 
                 logger.info(f"✅ 10x文件保存成功: {file_path}")
                 
@@ -1138,10 +1279,34 @@ async def upload_file(files: List[UploadFile] = File(...)):
         
         # 处理其他文件（非10x或单独的10x文件）
         for file in other_files + (tenx_files if not is_10x_data else []):
+            # 🔒 安全：验证文件路径
             file_path = UPLOAD_DIR / file.filename
-            with open(file_path, "wb") as f:
-                content = await file.read()
-                f.write(content)
+            try:
+                file_path = validate_file_path(file_path, UPLOAD_DIR)
+            except HTTPException as e:
+                logger.error(f"❌ 文件路径验证失败: {file.filename} -> {e.detail}")
+                raise
+            
+            # 🔒 安全：检查文件大小
+            content = await file.read()
+            if len(content) > MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"文件 {file.filename} 超过最大大小限制 ({MAX_FILE_SIZE / 1024 / 1024:.0f}MB)"
+                )
+            
+            # 🔧 修复：确保父目录存在
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            try:
+                with open(file_path, "wb") as f:
+                    f.write(content)
+            except PermissionError as e:
+                logger.error(f"❌ 文件写入权限错误: {file_path} -> {e}")
+                raise HTTPException(status_code=500, detail=f"文件保存失败：权限不足 ({file.filename})")
+            except OSError as e:
+                logger.error(f"❌ 文件写入系统错误: {file_path} -> {e}")
+                raise HTTPException(status_code=500, detail=f"文件保存失败：{str(e)} ({file.filename})")
             
             logger.info(f"✅ 文件保存成功: {file_path}")
             
@@ -1197,9 +1362,30 @@ async def upload_file(files: List[UploadFile] = File(...)):
             "file_paths": file_paths  # 🔥 添加 file_paths 数组
         }
         
+    except HTTPException:
+        # 重新抛出 HTTP 异常（保持状态码和详细信息）
+        raise
     except Exception as e:
-        logger.error(f"❌ 文件上传失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        # 🔧 改进：记录详细错误信息，但返回用户友好的错误消息
+        import traceback
+        error_detail = f"{type(e).__name__}: {str(e)}"
+        logger.error(f"❌ 文件上传失败: {error_detail}", exc_info=True)
+        logger.error(f"详细堆栈:\n{traceback.format_exc()}")
+        
+        # 根据错误类型返回更具体的错误信息
+        if "Permission" in error_detail or "permission" in error_detail.lower():
+            raise HTTPException(status_code=500, detail="文件上传失败：权限不足，请检查服务器配置")
+        elif "No such file" in error_detail or "directory" in error_detail.lower():
+            raise HTTPException(status_code=500, detail="文件上传失败：目录不存在，请检查服务器配置")
+        elif "disk" in error_detail.lower() or "space" in error_detail.lower():
+            raise HTTPException(status_code=500, detail="文件上传失败：磁盘空间不足")
+        else:
+            # 开发环境返回更详细的错误信息，生产环境返回通用错误
+            import os
+            if os.getenv("DEBUG", "false").lower() == "true":
+                raise HTTPException(status_code=500, detail=f"文件上传失败: {error_detail}")
+            else:
+                raise HTTPException(status_code=500, detail="文件上传失败，请稍后重试")
 
 
 @app.post("/api/chat")
@@ -1208,8 +1394,12 @@ async def chat_endpoint(req: ChatRequest):
     # #region debug log - entry point
     import json
     import traceback
+    # 🔧 修复：使用容器内的日志路径（统一使用 /app/debug.log）
+    debug_log_path = Path("/app/debug.log")
     try:
-        with open('/home/ubuntu/GIBH-AGENT-V2/.cursor/debug.log', 'a') as f:
+        # 确保目录存在
+        debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(debug_log_path, 'a') as f:
             f.write(json.dumps({"location":"server.py:1112","message":"chat_endpoint entry","data":{"agent_is_none":agent is None,"req_message":req.message[:100] if req.message else None},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"ENTRY"})+"\n")
     except Exception as log_err:
         pass  # 即使日志写入失败也不影响主流程
@@ -1231,20 +1421,98 @@ async def chat_endpoint(req: ChatRequest):
     try:
         logger.info(f"💬 收到聊天请求: {req.message}")
         logger.info(f"📁 上传文件数: {len(req.uploaded_files)}")
+        logger.info(f"🔄 工作流数据: {req.workflow_data is not None}")
+        
+        # 🔧 修复：如果包含工作流数据，直接执行工作流（而不是通过 agent.process_query）
+        if req.workflow_data:
+            logger.info("🚀 检测到工作流执行请求，直接调用 execute_workflow")
+            try:
+                # 🔧 修复：优先使用 workflow_data 中的 file_paths（前端已经设置好）
+                file_paths = req.workflow_data.get("file_paths", [])
+                logger.info(f"📁 从 workflow_data 获取的文件路径: {file_paths}")
+                
+                # 如果 workflow_data 中没有 file_paths，再从 uploaded_files 中提取
+                if not file_paths:
+                    logger.info("⚠️ workflow_data 中没有 file_paths，从 uploaded_files 中提取")
+                    for file_info in req.uploaded_files:
+                        file_name = file_info.get("file_name", "")
+                        file_path_str = file_info.get("file_path", "")
+                        
+                        if file_path_str:
+                            file_path = Path(file_path_str)
+                        else:
+                            file_path = UPLOAD_DIR / file_name if file_name else None
+                        
+                        if file_path and file_path.exists():
+                            file_paths.append(str(file_path))
+                
+                logger.info(f"📂 最终文件路径列表: {file_paths}")
+                
+                # 验证文件路径是否存在
+                valid_file_paths = []
+                for fp in file_paths:
+                    fp_path = Path(fp)
+                    if fp_path.exists():
+                        valid_file_paths.append(str(fp_path))
+                    else:
+                        logger.warning(f"⚠️ 文件不存在，跳过: {fp}")
+                
+                if not valid_file_paths:
+                    raise ValueError("没有找到有效的输入文件。请确保文件已正确上传。")
+                
+                # 直接调用 execute_workflow 函数（不通过 HTTP）
+                execute_request = {
+                    "workflow_data": req.workflow_data,
+                    "file_paths": valid_file_paths
+                }
+                # 调用 execute_workflow 函数（定义在下方）
+                result = await execute_workflow(execute_request)
+                return result
+            except Exception as e:
+                logger.error(f"❌ 工作流执行失败: {e}", exc_info=True)
+                return JSONResponse(
+                    status_code=500,
+                    content={
+                        "type": "error",
+                        "error": str(e),
+                        "message": f"工作流执行失败: {str(e)}"
+                    }
+                )
         
         # 转换文件路径
         uploaded_files = []
         for file_info in req.uploaded_files:
-            file_path = file_info.get("file_path") or UPLOAD_DIR / file_info.get("file_name", "")
-            if isinstance(file_path, str):
-                file_path = Path(file_path)
+            file_name = file_info.get("file_name", "")
+            file_path_str = file_info.get("file_path", "")
+            
+            # 🔒 安全：清理文件名
+            if file_name:
+                file_name = sanitize_filename(file_name)
+            
+            # 🔒 安全：构建并验证路径
+            if file_path_str:
+                file_path = Path(file_path_str)
+            else:
+                file_path = UPLOAD_DIR / file_name if file_name else None
+            
+            if file_path is None:
+                logger.warning(f"⚠️ 无法确定文件路径，跳过: {file_info}")
+                continue
+            
+            # 🔒 安全：验证路径在允许的目录内
+            try:
+                file_path = validate_file_path(file_path, UPLOAD_DIR)
+            except HTTPException:
+                logger.warning(f"⚠️ 不安全的文件路径，跳过: {file_path}")
+                continue
             
             # 检查文件是否存在
             if not file_path.exists():
                 logger.warning(f"⚠️ 文件不存在: {file_path}")
+                continue
             
             uploaded_files.append({
-                "name": file_info.get("file_name", ""),
+                "name": file_name,
                 "path": str(file_path)
             })
         
@@ -1253,7 +1521,9 @@ async def chat_endpoint(req: ChatRequest):
         # 处理查询
         # #region debug log
         try:
-            with open('/home/ubuntu/GIBH-AGENT-V2/.cursor/debug.log', 'a') as f:
+            debug_log_path = Path("/app/debug.log")
+            debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(debug_log_path, 'a') as f:
                 f.write(json.dumps({"location":"server.py:1161","message":"Before process_query","data":{"query":req.message,"uploaded_files_count":len(uploaded_files),"test_dataset_id":req.test_dataset_id},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
         except Exception as log_err:
             pass  # 日志写入失败不影响主流程
@@ -1268,7 +1538,9 @@ async def chat_endpoint(req: ChatRequest):
         except Exception as process_err:
             # #region debug log
             try:
-                with open('/home/ubuntu/GIBH-AGENT-V2/.cursor/debug.log', 'a') as f:
+                debug_log_path = Path("/app/debug.log")
+                debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(debug_log_path, 'a') as f:
                     f.write(json.dumps({"location":"server.py:1156","message":"process_query exception","data":{"error_type":type(process_err).__name__,"error_message":str(process_err),"traceback":traceback.format_exc()},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"PROCESS_QUERY"})+"\n")
             except:
                 pass
@@ -1277,7 +1549,9 @@ async def chat_endpoint(req: ChatRequest):
         
         # #region debug log
         try:
-            with open('/home/ubuntu/GIBH-AGENT-V2/.cursor/debug.log', 'a') as f:
+            debug_log_path = Path("/app/debug.log")
+            debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(debug_log_path, 'a') as f:
                 f.write(json.dumps({"location":"server.py:1168","message":"After process_query","data":{"result_type":type(result).__name__,"result_keys":list(result.keys()) if isinstance(result,dict) else None,"result_type_value":result.get('type') if isinstance(result,dict) else None},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
         except:
             pass
@@ -1309,22 +1583,37 @@ async def chat_endpoint(req: ChatRequest):
         if result.get("type") == "test_data_selection":
             # #region debug log
             import json
-            with open('/home/ubuntu/GIBH-AGENT-V2/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"location":"server.py:1178","message":"Entering test_data_selection handler","data":{"has_message":"message" in result,"has_options":"options" in result,"has_datasets_display":"datasets_display" in result,"has_datasets_json":"datasets_json" in result},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
+            try:
+                debug_log_path = Path("/app/debug.log")
+                debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(debug_log_path, 'a') as f:
+                    f.write(json.dumps({"location":"server.py:1178","message":"Entering test_data_selection handler","data":{"has_message":"message" in result,"has_options":"options" in result,"has_datasets_display":"datasets_display" in result,"has_datasets_json":"datasets_json" in result},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
+            except:
+                pass  # 日志写入失败不影响主流程
             # #endregion
             async def generate():
                 try:
                     # #region debug log
-                    with open('/home/ubuntu/GIBH-AGENT-V2/.cursor/debug.log', 'a') as f:
-                        f.write(json.dumps({"location":"server.py:1181","message":"Inside generate()","data":{},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
+                    try:
+                        debug_log_path = Path("/app/debug.log")
+                        debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(debug_log_path, 'a') as f:
+                            f.write(json.dumps({"location":"server.py:1181","message":"Inside generate()","data":{},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
+                    except:
+                        pass
                     # #endregion
                     # 构建用户友好的消息
                     message = result.get("message", "检测到您没有上传相关数据。请选择：")
                     options = result.get("options", [])
                     datasets_display = result.get("datasets_display", "")
                     # #region debug log
-                    with open('/home/ubuntu/GIBH-AGENT-V2/.cursor/debug.log', 'a') as f:
-                        f.write(json.dumps({"location":"server.py:1187","message":"Before datasets_json processing","data":{"message_type":type(message).__name__,"options_type":type(options).__name__,"datasets_display_type":type(datasets_display).__name__,"datasets_display_len":len(str(datasets_display)) if datasets_display else 0},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
+                    try:
+                        debug_log_path = Path("/app/debug.log")
+                        debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(debug_log_path, 'a') as f:
+                            f.write(json.dumps({"location":"server.py:1187","message":"Before datasets_json processing","data":{"message_type":type(message).__name__,"options_type":type(options).__name__,"datasets_display_type":type(datasets_display).__name__,"datasets_display_len":len(str(datasets_display)) if datasets_display else 0},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
+                    except:
+                        pass
                     # #endregion
                     
                     response_text = f"{message}\n\n"
@@ -1341,37 +1630,67 @@ async def chat_endpoint(req: ChatRequest):
                     # 将 JSON 中的换行符替换为空格，避免破坏 HTML 注释
                     datasets_json_raw = result.get('datasets_json', '[]')
                     # #region debug log
-                    with open('/home/ubuntu/GIBH-AGENT-V2/.cursor/debug.log', 'a') as f:
-                        f.write(json.dumps({"location":"server.py:1200","message":"Before datasets_json replace","data":{"datasets_json_type":type(datasets_json_raw).__name__,"datasets_json_is_none":datasets_json_raw is None,"datasets_json_len":len(str(datasets_json_raw)) if datasets_json_raw else 0},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
+                    try:
+                        debug_log_path = Path("/app/debug.log")
+                        debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(debug_log_path, 'a') as f:
+                            f.write(json.dumps({"location":"server.py:1200","message":"Before datasets_json replace","data":{"datasets_json_type":type(datasets_json_raw).__name__,"datasets_json_is_none":datasets_json_raw is None,"datasets_json_len":len(str(datasets_json_raw)) if datasets_json_raw else 0},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
+                    except:
+                        pass
                     # #endregion
                     datasets_json = str(datasets_json_raw).replace('\n', ' ').replace('\r', '') if datasets_json_raw else '[]'
                     # #region debug log
-                    with open('/home/ubuntu/GIBH-AGENT-V2/.cursor/debug.log', 'a') as f:
-                        f.write(json.dumps({"location":"server.py:1203","message":"After datasets_json replace","data":{"datasets_json_len":len(datasets_json),"response_text_len":len(response_text)},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
+                    try:
+                        debug_log_path = Path("/app/debug.log")
+                        debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(debug_log_path, 'a') as f:
+                            f.write(json.dumps({"location":"server.py:1203","message":"After datasets_json replace","data":{"datasets_json_len":len(datasets_json),"response_text_len":len(response_text)},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
+                    except:
+                        pass
                     # #endregion
                     response_text += f"\n<!-- DATASETS_JSON: {datasets_json} -->\n"
                     
                     # #region debug log
-                    with open('/home/ubuntu/GIBH-AGENT-V2/.cursor/debug.log', 'a') as f:
-                        f.write(json.dumps({"location":"server.py:1207","message":"Before yield","data":{"final_response_text_len":len(response_text)},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
+                    try:
+                        debug_log_path = Path("/app/debug.log")
+                        debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(debug_log_path, 'a') as f:
+                            f.write(json.dumps({"location":"server.py:1207","message":"Before yield","data":{"final_response_text_len":len(response_text)},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
+                    except:
+                        pass
                     # #endregion
                     yield response_text
                     # #region debug log
-                    with open('/home/ubuntu/GIBH-AGENT-V2/.cursor/debug.log', 'a') as f:
-                        f.write(json.dumps({"location":"server.py:1209","message":"After yield","data":{},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
+                    try:
+                        debug_log_path = Path("/app/debug.log")
+                        debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(debug_log_path, 'a') as f:
+                            f.write(json.dumps({"location":"server.py:1209","message":"After yield","data":{},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
+                    except:
+                        pass
                     # #endregion
                 except Exception as e:
                     # #region debug log
                     import traceback
-                    with open('/home/ubuntu/GIBH-AGENT-V2/.cursor/debug.log', 'a') as f:
-                        f.write(json.dumps({"location":"server.py:1212","message":"Exception in generate()","data":{"error_type":type(e).__name__,"error_message":str(e),"traceback":traceback.format_exc()},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
+                    try:
+                        debug_log_path = Path("/app/debug.log")
+                        debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(debug_log_path, 'a') as f:
+                            f.write(json.dumps({"location":"server.py:1212","message":"Exception in generate()","data":{"error_type":type(e).__name__,"error_message":str(e),"traceback":traceback.format_exc()},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
+                    except:
+                        pass
                     # #endregion
                     logger.error(f"❌ 格式化测试数据选择响应错误: {e}", exc_info=True)
                     yield f"\n\n❌ 错误: {str(e)}"
             
             # #region debug log
-            with open('/home/ubuntu/GIBH-AGENT-V2/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"location":"server.py:1218","message":"Before StreamingResponse","data":{},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"E"})+"\n")
+            try:
+                debug_log_path = Path("/app/debug.log")
+                debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(debug_log_path, 'a') as f:
+                    f.write(json.dumps({"location":"server.py:1218","message":"Before StreamingResponse","data":{},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"E"})+"\n")
+            except:
+                pass
             # #endregion
             return StreamingResponse(generate(), media_type="text/plain")
         
@@ -1410,8 +1729,13 @@ async def chat_endpoint(req: ChatRequest):
     except Exception as e:
         # #region debug log
         import traceback
-        with open('/home/ubuntu/GIBH-AGENT-V2/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"location":"server.py:1210","message":"Exception in chat_endpoint","data":{"error_type":type(e).__name__,"error_message":str(e),"traceback":traceback.format_exc()},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"ALL"})+"\n")
+        try:
+            debug_log_path = Path("/app/debug.log")
+            debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(debug_log_path, 'a') as f:
+                f.write(json.dumps({"location":"server.py:1210","message":"Exception in chat_endpoint","data":{"error_type":type(e).__name__,"error_message":str(e),"traceback":traceback.format_exc()},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"ALL"})+"\n")
+        except:
+            pass  # 日志写入失败不影响主流程
         # #endregion
         error_detail = f"{type(e).__name__}: {str(e)}"
         logger.error(f"❌ 处理失败: {error_detail}", exc_info=True)
@@ -1431,13 +1755,26 @@ async def execute_workflow(request: dict):
         
         logger.info(f"🚀 开始执行工作流: {len(file_paths)} 个文件")
         
-        # 使用 RouterAgent 进行智能路由（而不是硬编码 if/else）
-        # 构建一个查询来让 RouterAgent 判断应该使用哪个 Agent
+        # 🔧 修复：优先检查 workflow_name 中是否包含代谢组关键词
         workflow_name = workflow_data.get("workflow_name", "")
+        routing = None
+        target_agent = None
+        route_query = None
         
-        # 方法1: 如果有 workflow_name，使用它作为查询
+        # 方法1: 如果有 workflow_name，优先检查是否包含代谢组关键词
         if workflow_name:
-            route_query = workflow_name
+            workflow_name_lower = workflow_name.lower()
+            # 如果 workflow_name 包含代谢组关键词，直接路由到 metabolomics_agent
+            if any(kw in workflow_name_lower for kw in ["metabolomics", "代谢组", "代谢"]):
+                logger.info(f"✅ 根据 workflow_name 直接路由到 metabolomics_agent: {workflow_name}")
+                routing = "metabolomics_agent"
+                target_agent = agent.agents.get(routing)
+                if not target_agent:
+                    logger.warning(f"⚠️ metabolomics_agent 不存在，使用默认 rna_agent")
+                    target_agent = agent.agents.get("rna_agent")
+                    routing = "rna_agent"
+            else:
+                route_query = workflow_name
         # 方法2: 根据文件类型构建查询
         elif file_paths:
             file_path = file_paths[0]
@@ -1461,35 +1798,36 @@ async def execute_workflow(request: dict):
                 "path": file_path
             })
         
-        # 使用 RouterAgent 进行路由决策
-        try:
-            route_result = await agent.router.process_query(
-                query=route_query,
-                history=[],
-                uploaded_files=uploaded_files_for_router
-            )
-            
-            routing = route_result.get("routing", "rna_agent")
-            target_agent = agent.agents.get(routing)
-            
-            # 如果路由的智能体不存在，使用默认的 RNA Agent
-            if not target_agent:
-                logger.warning(f"⚠️ 路由的智能体不存在: {routing}，使用默认 rna_agent")
+        # 🔧 修复：如果还没有路由，使用 RouterAgent 进行路由决策
+        if not routing or not target_agent:
+            try:
+                route_result = await agent.router.process_query(
+                    query=route_query,
+                    history=[],
+                    uploaded_files=uploaded_files_for_router
+                )
+                
+                routing = route_result.get("routing", "rna_agent")
+                target_agent = agent.agents.get(routing)
+                
+                # 如果路由的智能体不存在，使用默认的 RNA Agent
+                if not target_agent:
+                    logger.warning(f"⚠️ 路由的智能体不存在: {routing}，使用默认 rna_agent")
+                    target_agent = agent.agents.get("rna_agent")
+                    routing = "rna_agent"
+                
+                if not target_agent:
+                    raise HTTPException(status_code=500, detail="RNA Agent 未找到")
+                
+                logger.info(f"✅ RouterAgent 路由结果: {routing} (confidence: {route_result.get('confidence', 0):.2f}, modality: {route_result.get('modality', 'unknown')})")
+                
+            except Exception as e:
+                logger.error(f"❌ RouterAgent 路由失败: {e}，使用默认 rna_agent", exc_info=True)
+                # 降级到默认 Agent
                 target_agent = agent.agents.get("rna_agent")
                 routing = "rna_agent"
-            
-            if not target_agent:
-                raise HTTPException(status_code=500, detail="RNA Agent 未找到")
-            
-            logger.info(f"✅ RouterAgent 路由结果: {routing} (confidence: {route_result.get('confidence', 0):.2f}, modality: {route_result.get('modality', 'unknown')})")
-            
-        except Exception as e:
-            logger.error(f"❌ RouterAgent 路由失败: {e}，使用默认 rna_agent", exc_info=True)
-            # 降级到默认 Agent
-            target_agent = agent.agents.get("rna_agent")
-            routing = "rna_agent"
-            if not target_agent:
-                raise HTTPException(status_code=500, detail="RNA Agent 未找到")
+                if not target_agent:
+                    raise HTTPException(status_code=500, detail="RNA Agent 未找到")
         
         # 设置输出目录
         output_dir = str(RESULTS_DIR / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
@@ -1504,7 +1842,7 @@ async def execute_workflow(request: dict):
         
         logger.info(f"✅ 工作流执行完成: {report.get('status')}")
         
-        # 处理图片路径，转换为可访问的 URL
+        # 处理图片路径，转换为可访问的 URL（在返回之前）
         # 图片保存在 results/run_xxx/ 目录，需要转换为 /results/run_xxx/filename
         if report.get("final_plot"):
             plot_path = report["final_plot"]
@@ -1617,7 +1955,12 @@ async def execute_workflow(request: dict):
                             fixed_images.append(img_path)
                     step_result["data"]["images"] = fixed_images
         
-        return JSONResponse(content=report)
+        # 🔧 修复：返回正确的工作流执行结果格式
+        return JSONResponse(content={
+            "type": "analysis_report",
+            "status": "success",
+            "report_data": report
+        })
         
     except Exception as e:
         import traceback

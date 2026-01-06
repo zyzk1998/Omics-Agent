@@ -95,10 +95,22 @@ class BaseAgent(ABC):
             if stream:
                 # 流式输出：直接传递内容，让前端处理 think 标签
                 # DeepSeek 的 think 过程会以 <think>...</think> 标签形式返回
-                async for chunk in self.llm_client.astream(messages):
-                    if chunk.choices and chunk.choices[0].delta.content:
-                        # 直接传递内容，前端会检测和处理 think 标签
-                        yield chunk.choices[0].delta.content
+                has_yielded = False
+                try:
+                    async for chunk in self.llm_client.astream(messages):
+                        if chunk.choices and chunk.choices[0].delta.content:
+                            content = chunk.choices[0].delta.content
+                            if content:
+                                # 直接传递内容，前端会检测和处理 think 标签
+                                yield content
+                                has_yielded = True
+                except Exception as stream_error:
+                    logger.error(f"❌ 流式响应错误: {stream_error}", exc_info=True)
+                    if not has_yielded:
+                        yield f"\n\n❌ 错误: {str(stream_error)}\n\n请检查服务器日志获取详细信息。"
+                    else:
+                        # 如果已经有一些输出，只记录错误，不重复输出错误信息
+                        logger.warning(f"⚠️ 流式响应中断，但已有部分输出")
             else:
                 completion = await self.llm_client.achat(messages)
                 # 提取 think 过程和实际内容

@@ -553,7 +553,15 @@
                     } catch {
                         errorData = { detail: errorText || `HTTP ${res.status}` };
                     }
-                    throw new Error(errorData.detail || errorData.message || `上传失败: HTTP ${res.status}`);
+                    // 🔧 改进：提供更详细的错误信息
+                    const errorMsg = errorData.detail || errorData.message || errorData.error || `上传失败: HTTP ${res.status}`;
+                    console.error('文件上传失败:', {
+                        status: res.status,
+                        statusText: res.statusText,
+                        errorData: errorData,
+                        errorText: errorText
+                    });
+                    throw new Error(errorMsg);
                 }
                 
                 const data = await res.json();
@@ -681,8 +689,14 @@
             
             // 显示用户消息
             if (!selectedTool && !workflowData && !useHistoryFiles) {
-                const fileCount = newlyUploadedFiles.length + uploadedFiles.length;
-                appendMessage('user', text || (fileCount > 0 ? `[发送了 ${fileCount} 个文件]` : ''));
+                // 🔧 修复：只计算本次新上传的文件数量，避免重复计算
+                const fileCount = newlyUploadedFiles.length > 0 ? newlyUploadedFiles.length : uploadedFiles.length;
+                // 🔧 修复：如果只有文件没有文本，显示更友好的消息
+                if (!text && fileCount > 0) {
+                    appendMessage('user', `[发送了 ${fileCount} 个文件]`);
+                } else if (text) {
+                    appendMessage('user', text);
+                }
                 userInput.value = ''; 
                 userInput.style.height = '24px'; 
                 checkInput();
@@ -734,8 +748,16 @@
                     aiMessageDiv.closest('.message-row').remove();
                     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
+                    // 处理错误响应
+                    if (data.type === 'error' || data.status === 'error') {
+                        const errorMsg = data.message || data.error || '未知错误';
+                        appendMessage('ai', `❌ ${errorMsg}`, null, duration);
+                        console.error('Server error:', data);
+                        return;
+                    }
+
                     if (data.type === 'workflow_config') {
-                        appendMessage('ai', data.reply, null, duration);
+                        appendMessage('ai', data.reply || '工作流配置已生成，请查看下方表单', null, duration);
                         renderWorkflowForm(data);
                     }
                     else if (data.type === 'tool_config') {
@@ -967,13 +989,33 @@
                 // 动态生成标题：保留步骤编号 (如 "5. PCA" -> "5. PCA 可视化结果")
                 const plotTitle = `${keyStep.name} 可视化结果`;
 
+                // 🔥 修复图片路径（支持多种格式）
+                let imagePath = keyStep.plot;
+                if (keyStep.data && keyStep.data.image) {
+                    imagePath = keyStep.data.image;
+                } else if (keyStep.data && keyStep.data.images && Array.isArray(keyStep.data.images) && keyStep.data.images.length > 0) {
+                    imagePath = keyStep.data.images[0];
+                }
+                
+                // 标准化图片路径
+                if (imagePath) {
+                    // 移除 Docker 内部路径，确保以 /results/ 开头
+                    let normalizedPath = imagePath.replace(/^\/app\/results\//, '').replace(/^\/app\//, '');
+                    normalizedPath = normalizedPath.replace(/^results\//, '');
+                    if (!normalizedPath.startsWith('/results/')) {
+                        normalizedPath = '/results/' + normalizedPath;
+                    }
+                    imagePath = normalizedPath;
+                }
+
                 keyPlotHtml = `
                     <div class="report-section">
                         <h6>3. ${plotTitle}</h6>
                         <div class="card border-0 shadow-sm">
                             <div class="card-body text-center">
-                                <img src="${keyStep.plot}" style="max-width:95%; border-radius:8px; cursor:zoom-in;" onclick="openLightbox(this.src)">
-                                <p class="mt-2 text-secondary">${keyStep.summary}</p>
+                                <img src="${imagePath}" style="max-width:95%; border-radius:8px; cursor:zoom-in;" onclick="openLightbox(this.src)" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                                <p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${imagePath}</p>
+                                ${keyStep.summary ? `<p class="mt-2 text-secondary">${keyStep.summary}</p>` : ''}
                             </div>
                         </div>
                     </div>`;
@@ -1008,14 +1050,107 @@
                     const stepId = `step-${reportId}-${index}`;
                     const statusIcon = step.status === 'success' ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-x-circle-fill text-danger"></i>';
                     
-                    // 如果该步骤的图已经被作为 Key Plot 展示了，这里就不重复展示大图，只保留提示
-                    const isKeyPlot = keyStep && keyStep.name === step.name;
-                    const plotHtml = step.plot ? 
-                        (isKeyPlot ? `<div class="mt-2 small text-muted"><i class="bi bi-image"></i> 图片已在下方“最终结果”区域展示</div>` : 
-                        `<div class="mt-2"><img src="${step.plot}" style="max-width:100%; border-radius:4px; border:1px solid #eee;"></div>`) 
-                        : '';
+                    // 🔥 构建步骤内容 HTML（支持通用数据格式）
+                    let contentHtml = '';
                     
-                    const detailsHtml = step.details ? `<div class="small text-secondary mb-2 overflow-auto" style="max-height:200px;">${step.details}</div>` : '';
+                    // 1. 显示摘要（如果有）
+                    if (step.summary) {
+                        contentHtml += `<div class="alert alert-info mb-3"><strong>📋 摘要：</strong>${step.summary}</div>`;
+                    }
+                    
+                    // 2. 处理图片路径（支持多种格式）
+                    let imagePath = null;
+                    if (step.data && step.data.image) {
+                        imagePath = step.data.image;
+                    } else if (step.plot) {
+                        imagePath = step.plot;
+                    } else if (step.data && step.data.images && Array.isArray(step.data.images) && step.data.images.length > 0) {
+                        imagePath = step.data.images[0];
+                    }
+                    
+                    // 修复图片路径：移除 Docker 内部路径，确保以 /results/ 开头
+                    if (imagePath) {
+                        // 移除 /app/results 前缀
+                        let normalizedPath = imagePath.replace(/^\/app\/results\//, '').replace(/^\/app\//, '');
+                        // 移除 results/ 前缀（如果存在）
+                        normalizedPath = normalizedPath.replace(/^results\//, '');
+                        // 确保以 /results/ 开头
+                        if (!normalizedPath.startsWith('/results/')) {
+                            normalizedPath = '/results/' + normalizedPath;
+                        }
+                        
+                        // 如果该步骤的图已经被作为 Key Plot 展示了，这里就不重复展示大图
+                        const isKeyPlot = keyStep && keyStep.name === step.name;
+                        if (isKeyPlot) {
+                            contentHtml += `<div class="mt-2 small text-muted"><i class="bi bi-image"></i> 图片已在下方"最终结果"区域展示</div>`;
+                        } else {
+                            contentHtml += `<div class="mt-2 mb-3"><img src="${normalizedPath}" class="img-fluid rounded border" style="max-width:100%; cursor:zoom-in;" onclick="openLightbox(this.src)" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"><p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${normalizedPath}</p></div>`;
+                        }
+                    }
+                    
+                    // 3. 处理 JSON 表格数据（Metabolomics 等工具返回的 preview_table）
+                    if (step.data && step.data.preview_table && Array.isArray(step.data.preview_table)) {
+                        const tableData = step.data.preview_table;
+                        if (tableData.length > 0) {
+                            const headers = Object.keys(tableData[0]);
+                            let tableHtml = '<div class="table-responsive mt-3 mb-3" style="max-height: 400px; overflow-y: auto;"><table class="table table-sm table-striped table-hover table-bordered">';
+                            
+                            // 表头
+                            tableHtml += '<thead class="table-light"><tr>';
+                            headers.forEach(h => {
+                                tableHtml += `<th style="white-space: nowrap;">${h}</th>`;
+                            });
+                            tableHtml += '</tr></thead>';
+                            
+                            // 表体
+                            tableHtml += '<tbody>';
+                            tableData.forEach((row, rowIdx) => {
+                                tableHtml += '<tr>';
+                                headers.forEach(h => {
+                                    const cellValue = row[h];
+                                    // 处理各种数据类型
+                                    let displayValue = '';
+                                    if (cellValue === null || cellValue === undefined) {
+                                        displayValue = '<span class="text-muted">-</span>';
+                                    } else if (typeof cellValue === 'number') {
+                                        // 如果是数字，保留适当的小数位数
+                                        displayValue = Number.isInteger(cellValue) ? cellValue.toString() : cellValue.toFixed(4);
+                                    } else if (typeof cellValue === 'object') {
+                                        displayValue = JSON.stringify(cellValue);
+                                    } else {
+                                        displayValue = String(cellValue);
+                                    }
+                                    tableHtml += `<td style="word-wrap: break-word; max-width: 200px;">${displayValue}</td>`;
+                                });
+                                tableHtml += '</tr>';
+                            });
+                            tableHtml += '</tbody></table></div>';
+                            contentHtml += tableHtml;
+                        }
+                    }
+                    
+                    // 4. 处理其他数据字段（如 step.data 中的其他内容）
+                    if (step.data && Object.keys(step.data).length > 0) {
+                        // 如果已经有 preview_table 或 image，就不重复显示整个 data 对象
+                        const hasTableOrImage = step.data.preview_table || step.data.image || (step.data.images && step.data.images.length > 0);
+                        if (!hasTableOrImage) {
+                            // 显示其他数据字段
+                            let dataHtml = '<div class="mt-3"><h6 class="small">📊 数据详情：</h6><div class="small text-secondary">';
+                            for (const [key, value] of Object.entries(step.data)) {
+                                if (key !== 'preview_table' && key !== 'image' && key !== 'images') {
+                                    const displayValue = typeof value === 'object' ? JSON.stringify(value, null, 2) : value;
+                                    dataHtml += `<div class="mb-1"><strong>${key}:</strong> ${displayValue}</div>`;
+                                }
+                            }
+                            dataHtml += '</div></div>';
+                            contentHtml += dataHtml;
+                        }
+                    }
+                    
+                    // 5. 处理旧的 details 字段（向后兼容）
+                    if (step.details && typeof step.details === 'string') {
+                        contentHtml += `<div class="small text-secondary mb-2 overflow-auto" style="max-height:200px;">${step.details}</div>`;
+                    }
                     
                     html += `
                     <div class="accordion-item">
@@ -1027,8 +1162,7 @@
                         </h2>
                         <div id="${stepId}" class="accordion-collapse collapse" data-bs-parent="#acc-${reportId}">
                             <div class="accordion-body">
-                                ${detailsHtml}
-                                ${plotHtml}
+                                ${contentHtml || '<div class="text-muted small">暂无详细内容</div>'}
                             </div>
                         </div>
                     </div>`;
@@ -1080,54 +1214,219 @@
         }
 
         function renderWorkflowForm(data) {
+            // 🔥 V2 结构：从 workflow_data 中提取信息
+            const workflowData = data.workflow_data || data;
+            const workflowName = workflowData.workflow_name || '工作流';
+            const steps = workflowData.steps || [];
+            const filePaths = data.file_paths || [];
+            
+            if (!steps || steps.length === 0) {
+                appendMessage('ai', '❌ 工作流配置无效：没有找到步骤', null, null);
+                return;
+            }
+            
             const formId = `wf-${Date.now()}`;
-            let formHtml = `<div class="params-form" id="${formId}"><h5>📋 ${data.workflow_name}</h5><p class="text-muted">请确认或修改每一步的参数：</p><div class="accordion" id="acc-${formId}">`;
-            data.steps.forEach((step, index) => {
+            let formHtml = `<div class="params-form" id="${formId}">
+                <h5>📋 ${workflowName}</h5>
+                <p class="text-muted">请确认或修改每一步的参数：</p>
+                <div class="accordion" id="acc-${formId}">`;
+            
+            steps.forEach((step, index) => {
                 const stepId = `step-${index}`;
-                formHtml += `<div class="accordion-item"><h2 class="accordion-header d-flex align-items-center"><div class="form-check ms-3 me-2"><input class="form-check-input step-checkbox" type="checkbox" checked data-index="${index}"></div><button class="accordion-button ${index > 0 ? 'collapsed' : ''}" type="button" data-bs-toggle="collapse" data-bs-target="#${stepId}">${step.name}</button></h2><div id="${stepId}" class="accordion-collapse collapse ${index === 0 ? 'show' : ''}" data-bs-parent="#acc-${formId}"><div class="accordion-body"><p class="text-muted small">${step.desc || ''}</p><input type="hidden" name="tool_id_${index}" value="${step.tool_id}"><input type="hidden" name="step_name_${index}" value="${step.name}">`;
-                if (Array.isArray(step.params)) {
-                    step.params.forEach(p => {
+                const stepName = step.name || step.step_name || `步骤 ${index + 1}`;
+                const toolId = step.tool_id || step.tool || '';
+                const stepDesc = step.desc || step.description || '';
+                const stepParams = step.params || {}; // V2: params 是对象（字典），不是数组
+                
+                formHtml += `<div class="accordion-item">
+                    <h2 class="accordion-header d-flex align-items-center">
+                        <div class="form-check ms-3 me-2">
+                            <input class="form-check-input step-checkbox" type="checkbox" checked data-index="${index}">
+                        </div>
+                        <button class="accordion-button ${index > 0 ? 'collapsed' : ''}" type="button" data-bs-toggle="collapse" data-bs-target="#${stepId}">
+                            ${stepName}
+                        </button>
+                    </h2>
+                    <div id="${stepId}" class="accordion-collapse collapse ${index === 0 ? 'show' : ''}" data-bs-parent="#acc-${formId}">
+                        <div class="accordion-body">
+                            <p class="text-muted small">${stepDesc}</p>
+                            <input type="hidden" name="tool_id_${index}" value="${toolId}">
+                            <input type="hidden" name="step_name_${index}" value="${stepName}">
+                            <input type="hidden" name="step_id_${index}" value="${step.step_id || toolId}">`;
+                
+                // 🔥 V2: params 是对象，需要转换为表单输入
+                if (stepParams && typeof stepParams === 'object' && !Array.isArray(stepParams)) {
+                    Object.keys(stepParams).forEach(paramName => {
+                        const paramValue = stepParams[paramName];
+                        const inputName = `param_${index}_${paramName}`;
+                        const displayName = paramName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                        
+                        formHtml += `<div class="mb-2">
+                            <label class="form-label small">${displayName}</label>`;
+                        
+                        // 根据值类型选择合适的输入控件
+                        if (typeof paramValue === 'boolean') {
+                            const checked = paramValue ? 'checked' : '';
+                            formHtml += `<div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="${inputName}" ${checked}>
+                            </div>`;
+                        } else if (Array.isArray(paramValue) && paramValue.length > 0 && typeof paramValue[0] === 'object') {
+                            // 如果是选项数组（select）
+                            formHtml += `<select class="form-select form-select-sm" name="${inputName}">`;
+                            paramValue.forEach(opt => {
+                                const optValue = opt.value || opt;
+                                const optLabel = opt.label || opt.name || optValue;
+                                formHtml += `<option value="${optValue}">${optLabel}</option>`;
+                            });
+                            formHtml += `</select>`;
+                        } else {
+                            // 文本输入
+                            const valueStr = paramValue !== null && paramValue !== undefined ? String(paramValue) : '';
+                            formHtml += `<input type="text" class="form-control form-control-sm" name="${inputName}" value="${valueStr}" placeholder="${displayName}">`;
+                        }
+                        
+                        formHtml += `</div>`;
+                    });
+                } else if (Array.isArray(stepParams)) {
+                    // 兼容旧格式（数组格式）
+                    stepParams.forEach(p => {
                         const inputName = `param_${index}_${p.name}`;
                         formHtml += `<div class="mb-2"><label class="form-label small">${p.label || p.name}</label>`;
                         if (p.type === 'select') {
                             formHtml += `<select class="form-select form-select-sm" name="${inputName}">`;
-                            p.options.forEach(opt => { const selected = opt.value === p.value ? 'selected' : ''; formHtml += `<option value="${opt.value}" ${selected}>${opt.label}</option>`; });
+                            p.options.forEach(opt => { 
+                                const selected = opt.value === p.value ? 'selected' : ''; 
+                                formHtml += `<option value="${opt.value}" ${selected}>${opt.label}</option>`; 
+                            });
                             formHtml += `</select>`;
                         } else if (p.type === 'boolean') {
                             const checked = p.value === 'true' ? 'checked' : '';
                             formHtml += `<div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="${inputName}" ${checked}></div>`;
-                        } else { formHtml += `<input type="text" class="form-control form-control-sm" name="${inputName}" value="${p.value || ''}">`; }
+                        } else { 
+                            formHtml += `<input type="text" class="form-control form-control-sm" name="${inputName}" value="${p.value || ''}">`; 
+                        }
                         formHtml += `</div>`;
                     });
                 }
+                
                 formHtml += `</div></div></div>`;
             });
-            formHtml += `</div><button class="btn btn-success btn-run mt-3" onclick="submitWorkflow('${formId}', ${data.steps.length})">🚀 执行工作流</button></div>`;
+            
+            formHtml += `</div>
+                <button class="btn btn-success btn-run mt-3" onclick="submitWorkflow('${formId}', ${steps.length}, ${JSON.stringify(filePaths).replace(/"/g, '&quot;')})">
+                    🚀 执行工作流
+                </button>
+            </div>`;
+            
             appendMessage('ai', formHtml, null, null, true);
         }
 
-        function submitWorkflow(formId, totalSteps) {
-            if (uploadedFiles.length === 0) { alert("⚠️ 请先上传单细胞数据文件 (.h5ad, .mtx 等) 再执行工作流！"); document.getElementById('fileInput').click(); return; }
+        function submitWorkflow(formId, totalSteps, filePathsJson = '[]') {
+            // 解析文件路径
+            let filePaths = [];
+            try {
+                filePaths = JSON.parse(filePathsJson.replace(/&quot;/g, '"'));
+            } catch (e) {
+                console.warn('Failed to parse file paths:', e);
+                // 如果没有提供文件路径，使用已上传的文件
+                if (uploadedFiles.length > 0) {
+                    filePaths = uploadedFiles.map(f => f.path || f.file_path || f.name);
+                }
+            }
+            
+            // 检查是否有文件
+            if (filePaths.length === 0 && uploadedFiles.length === 0) { 
+                alert("⚠️ 请先上传数据文件再执行工作流！"); 
+                document.getElementById('fileInput')?.click(); 
+                return; 
+            }
+            
             const formContainer = document.getElementById(formId);
+            if (!formContainer) {
+                alert("❌ 无法找到工作流表单！");
+                return;
+            }
+            
             const stepsData = [];
             const checkboxes = formContainer.querySelectorAll('.step-checkbox');
+            
             checkboxes.forEach((cb, i) => {
                 if (cb.checked) {
-                    const toolId = formContainer.querySelector(`input[name="tool_id_${i}"]`).value;
-                    const stepName = formContainer.querySelector(`input[name="step_name_${i}"]`).value;
+                    const toolIdInput = formContainer.querySelector(`input[name="tool_id_${i}"]`);
+                    const stepNameInput = formContainer.querySelector(`input[name="step_name_${i}"]`);
+                    const stepIdInput = formContainer.querySelector(`input[name="step_id_${i}"]`);
+                    
+                    if (!toolIdInput || !stepNameInput) {
+                        console.warn(`步骤 ${i} 缺少必要字段，跳过`);
+                        return;
+                    }
+                    
+                    const toolId = toolIdInput.value;
+                    const stepName = stepNameInput.value;
+                    const stepId = stepIdInput ? stepIdInput.value : toolId;
+                    
+                    // 收集参数
                     const params = {};
                     const inputs = formContainer.querySelectorAll(`[name^="param_${i}_"]`);
                     inputs.forEach(input => {
                         const originalName = input.name.replace(`param_${i}_`, '');
-                        if (input.type === 'checkbox') params[originalName] = input.checked;
-                        else params[originalName] = input.value;
+                        if (input.type === 'checkbox') {
+                            params[originalName] = input.checked;
+                        } else if (input.type === 'select-one') {
+                            params[originalName] = input.value;
+                        } else {
+                            // 尝试转换数字
+                            const value = input.value.trim();
+                            if (value === '') {
+                                params[originalName] = null;
+                            } else if (!isNaN(value) && value !== '') {
+                                params[originalName] = Number(value);
+                            } else {
+                                params[originalName] = value;
+                            }
+                        }
                     });
-                    stepsData.push({ name: stepName, tool_id: toolId, params: params });
+                    
+                    stepsData.push({
+                        step_id: stepId,
+                        tool_id: toolId,
+                        name: stepName,
+                        desc: stepName, // 使用名称作为描述
+                        params: params
+                    });
                 }
             });
-            if (stepsData.length === 0) { alert("请至少选择一个步骤！"); return; }
-            const btn = formContainer.querySelector('button'); btn.disabled = true; btn.innerText = "工作流执行中...";
-            sendMessage(null, "Execute Workflow", null, { steps: stepsData });
+            
+            if (stepsData.length === 0) { 
+                alert("请至少选择一个步骤！"); 
+                return; 
+            }
+            
+            const btn = formContainer.querySelector('button.btn-run');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerText = "⏳ 工作流执行中...";
+            }
+            
+            // 🔥 V2: 发送工作流执行请求
+            // 🔧 修复：确保 file_paths 是有效的路径数组
+            let finalFilePaths = [];
+            if (filePaths.length > 0) {
+                finalFilePaths = filePaths;
+            } else if (uploadedFiles.length > 0) {
+                finalFilePaths = uploadedFiles.map(f => f.path || f.file_path || f.name).filter(p => p);
+            }
+            
+            console.log('📁 工作流执行 - 文件路径:', finalFilePaths);
+            
+            const workflowPayload = {
+                workflow_name: formContainer.querySelector('h5')?.textContent?.replace('📋 ', '') || '工作流',
+                steps: stepsData,
+                file_paths: finalFilePaths  // 🔧 修复：确保传递有效的文件路径数组
+            };
+            
+            // 使用 sendMessage 发送工作流执行请求
+            sendMessage(null, "执行工作流", null, workflowPayload);
         }
 
         function renderToolForm(data) {

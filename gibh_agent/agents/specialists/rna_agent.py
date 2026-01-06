@@ -8,11 +8,15 @@ import os
 from typing import Dict, Any, List, Optional, AsyncIterator
 from ..base_agent import BaseAgent
 from ...core.llm_client import LLMClient
-from ...core.prompt_manager import PromptManager
+from ...core.prompt_manager import PromptManager, RNA_REPORT_PROMPT, DATA_DIAGNOSIS_PROMPT
+from ...core.utils import sanitize_for_json
 from ...core.dispatcher import TaskDispatcher
 from ...core.test_data_manager import TestDataManager
 from ...tools.cellranger_tool import CellRangerTool
 from ...tools.scanpy_tool import ScanpyTool
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class RNAAgent(BaseAgent):
@@ -188,6 +192,7 @@ class RNAAgent(BaseAgent):
         """
         # 强制检查：如果有文件，先检查
         inspection_result = None
+        diagnosis_report = None
         if file_paths:
             input_path = file_paths[0]
             try:
@@ -197,13 +202,16 @@ class RNAAgent(BaseAgent):
                     import logging
                     logger = logging.getLogger(__name__)
                     logger.warning(f"File inspection failed: {inspection_result.get('error')}")
+                else:
+                    # 🔥 生成数据诊断和参数推荐
+                    diagnosis_report = await self._generate_diagnosis_and_recommendation(inspection_result)
             except Exception as e:
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.error(f"Error inspecting file: {e}", exc_info=True)
         
-        # 使用 LLM 提取参数（传入检查结果）
-        extracted_params = await self._extract_workflow_params(query, file_paths, inspection_result)
+        # 使用 LLM 提取参数（传入检查结果和诊断报告）
+        extracted_params = await self._extract_workflow_params(query, file_paths, inspection_result, diagnosis_report)
         
         # 构建工作流配置
         workflow_config = {
@@ -234,17 +242,75 @@ class RNAAgent(BaseAgent):
             
             workflow_config["steps"].append(step)
         
-        return {
+        # 如果生成了诊断报告，将其包含在返回结果中
+        result = {
             "type": "workflow_config",
             "workflow_data": workflow_config,
             "file_paths": file_paths
         }
+        
+        if diagnosis_report:
+            result["diagnosis_report"] = diagnosis_report
+        
+        return result
+    
+    async def _generate_diagnosis_and_recommendation(
+        self,
+        inspection_result: Dict[str, Any]
+    ) -> str:
+        """
+        生成数据诊断和参数推荐报告
+        
+        Args:
+            inspection_result: 文件检查结果
+        
+        Returns:
+            Markdown格式的诊断和推荐报告
+        """
+        try:
+            import json
+            # 格式化检查结果为JSON字符串
+            inspection_json = json.dumps(inspection_result, ensure_ascii=False, indent=2)
+            
+            # 使用 PromptManager 获取诊断模板
+            try:
+                prompt = self.prompt_manager.get_prompt(
+                    "data_diagnosis",
+                    {"inspection_data": inspection_json},
+                    fallback=DATA_DIAGNOSIS_PROMPT.format(inspection_data=inspection_json)
+                )
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"⚠️ 获取诊断模板失败，使用默认模板: {e}")
+                prompt = DATA_DIAGNOSIS_PROMPT.format(inspection_data=inspection_json)
+            
+            # 调用LLM生成诊断报告
+            messages = [
+                {"role": "system", "content": "You are a Senior Bioinformatician. Generate data diagnosis and parameter recommendations in Simplified Chinese."},
+                {"role": "user", "content": prompt}
+            ]
+            
+            completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=1500)
+            think_content, response = self.llm_client.extract_think_and_content(completion)
+            
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info("✅ 数据诊断和参数推荐已生成")
+            return response
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"❌ 生成诊断报告失败: {e}", exc_info=True)
+            return f"诊断报告生成失败: {str(e)}"
     
     async def _extract_workflow_params(
         self,
         query: str,
         file_paths: List[str],
-        inspection_result: Optional[Dict[str, Any]] = None
+        inspection_result: Optional[Dict[str, Any]] = None,
+        diagnosis_report: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         使用 LLM 提取工作流参数
@@ -464,20 +530,20 @@ You have access to:
             )
             
             if cellranger_result.get("status") != "success":
-                return {
+                return sanitize_for_json({
                     "status": "error",
                     "error": f"Cell Ranger failed: {cellranger_result.get('error', 'Unknown error')}",
                     "cellranger_result": cellranger_result
-                }
+                })
             
             # 转换 Cell Ranger 输出为 .h5ad
             matrix_dir = cellranger_result.get("matrix_dir")
             if not matrix_dir:
-                return {
+                return sanitize_for_json({
                     "status": "error",
                     "error": "Cell Ranger output matrix directory not found",
                     "cellranger_result": cellranger_result
-                }
+                })
             
             h5ad_path = os.path.join(output_dir, f"{sample_id}_filtered.h5ad")
             convert_result = self.scanpy_tool.convert_cellranger_to_h5ad(
@@ -486,12 +552,12 @@ You have access to:
             )
             
             if convert_result.get("status") != "success":
-                return {
+                return sanitize_for_json({
                     "status": "error",
                     "error": f"Conversion failed: {convert_result.get('error', 'Unknown error')}",
                     "cellranger_result": cellranger_result,
                     "convert_result": convert_result
-                }
+                })
             
             # 使用转换后的 .h5ad 文件继续执行 Scanpy 分析
             input_path = h5ad_path
@@ -516,12 +582,101 @@ You have access to:
                     "n_vars": convert_result.get("n_vars")
                 }
             
-            return report
+            # 🔥 生成最终分析报告（将工具结果反馈给LLM进行解释）
+            if report.get("status") == "success":
+                try:
+                    final_report = await self.generate_final_report(report)
+                    report["final_report"] = final_report
+                except Exception as e:
+                    logger.warning(f"⚠️ 生成最终报告失败: {e}")
+                    report["final_report"] = None
+            
+            # 🔥 清理数据以确保 JSON 序列化安全（处理 Numpy 类型、NaN/Infinity 等）
+            logger.info("✅ Workflow finished. Sanitizing data for JSON serialization...")
+            sanitized_report = sanitize_for_json(report)
+            logger.info("✅ Data sanitization completed. Returning result to frontend.")
+            
+            return sanitized_report
         else:
-            # 如果 FASTQ 处理失败，返回错误
-            return {
+            # 如果 FASTQ 处理失败，返回错误（也需要清理）
+            error_result = {
                 "status": "error",
                 "error": "Failed to process FASTQ files",
                 "convert_result": convert_result
             }
+            return sanitize_for_json(error_result)
+    
+    async def generate_final_report(self, execution_results: Dict[str, Any]) -> str:
+        """
+        生成最终分析报告
+        
+        将工具执行结果反馈给LLM，生成科学解释报告
+        
+        Args:
+            execution_results: 执行结果字典，包含：
+                - qc_metrics: 质量指标
+                - steps_details: 步骤详情
+                - final_plot: 最终图片路径
+                - marker_genes: Marker基因（如果有）
+        
+        Returns:
+            Markdown格式的分析报告
+        """
+        try:
+            # 收集所有输出数据
+            results_summary = {
+                "qc_metrics": execution_results.get("qc_metrics", {}),
+                "steps_completed": len(execution_results.get("steps_details", [])),
+                "final_plot": execution_results.get("final_plot"),
+                "output_file": execution_results.get("output_file"),
+                "steps_summary": [
+                    {
+                        "name": step.get("name"),
+                        "status": step.get("status"),
+                        "summary": step.get("summary")
+                    }
+                    for step in execution_results.get("steps_details", [])
+                ]
+            }
+            
+            # 提取Marker基因（如果有）
+            marker_genes = []
+            for step in execution_results.get("steps_details", []):
+                if step.get("name") == "local_markers" and step.get("details"):
+                    # 尝试从details中提取marker基因信息
+                    marker_genes.append(step.get("details"))
+            
+            if marker_genes:
+                results_summary["marker_genes"] = marker_genes
+            
+            # 构建提示词
+            import json
+            results_json = json.dumps(results_summary, ensure_ascii=False, indent=2)
+            
+            # 使用 PromptManager 获取报告模板
+            try:
+                prompt = self.prompt_manager.get_prompt(
+                    "rna_report",
+                    {"results_summary": results_json},
+                    fallback=RNA_REPORT_PROMPT.format(results_summary=results_json)
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ 获取报告模板失败，使用默认模板: {e}")
+                prompt = RNA_REPORT_PROMPT.format(results_summary=results_json)
+            
+            # 调用LLM生成报告
+            messages = [
+                {"role": "system", "content": "You are a Senior Bioinformatician. Write analysis reports in Simplified Chinese."},
+                {"role": "user", "content": prompt}
+            ]
+            
+            completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=2000)
+            think_content, response = self.llm_client.extract_think_and_content(completion)
+            
+            logger.info("✅ 最终分析报告已生成")
+            return response
+            
+        except Exception as e:
+            logger.error(f"❌ 生成最终报告失败: {e}", exc_info=True)
+            return f"报告生成失败: {str(e)}"
 

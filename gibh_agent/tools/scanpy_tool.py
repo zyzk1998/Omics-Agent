@@ -3,6 +3,27 @@ Scanpy 分析工具
 参考旧版本实现，直接执行单细胞转录组分析流程
 支持十步标准流程
 """
+# 🔧 修复：在容器环境中设置 Numba 缓存目录（避免权限问题）
+import os
+# 如果 NUMBA_CACHE_DIR 未设置，使用临时目录
+if 'NUMBA_CACHE_DIR' not in os.environ:
+    import tempfile
+    cache_dir = tempfile.mkdtemp(prefix='numba_cache_')
+    os.environ['NUMBA_CACHE_DIR'] = cache_dir
+    os.makedirs(cache_dir, exist_ok=True)
+
+# 在导入 scanpy 之前配置 Numba（避免缓存错误）
+try:
+    import numba
+    # 设置缓存目录
+    if 'NUMBA_CACHE_DIR' in os.environ:
+        numba.config.CACHE_DIR = os.environ['NUMBA_CACHE_DIR']
+    # 启用缓存调试（帮助诊断问题）
+    numba.config.DEBUG_CACHE = 1
+except (ImportError, AttributeError):
+    # 如果 numba 未安装或没有该配置，忽略
+    pass
+
 import scanpy as sc
 import os
 import matplotlib

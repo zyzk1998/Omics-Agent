@@ -3,6 +3,11 @@
 支持代谢组学数据的下载、预处理和分析
 """
 import os
+# 🔧 修复：设置 Matplotlib 配置目录（避免权限问题）
+if 'MPLCONFIGDIR' not in os.environ:
+    import tempfile
+    os.environ['MPLCONFIGDIR'] = tempfile.mkdtemp(prefix='matplotlib_')
+
 import requests
 import pandas as pd
 import numpy as np
@@ -16,6 +21,7 @@ from scipy import stats
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 import logging
+import gc
 
 logger = logging.getLogger(__name__)
 
@@ -159,11 +165,19 @@ class MetabolomicsTool:
         Returns:
             包含数据摘要的字典
         """
+        logger.info(f"🔍 [CHECKPOINT] inspect_data START")
+        logger.info(f"   File path: {file_path}")
+        logger.info(f"   File exists? {os.path.exists(file_path)}")
+        if os.path.exists(file_path):
+            logger.info(f"   File size: {os.path.getsize(file_path)} bytes")
+        
         try:
             logger.info(f"📖 正在检查数据文件: {file_path}")
             
             # 读取 CSV 文件
+            logger.info(f"   Attempting to read CSV file...")
             df = pd.read_csv(file_path)
+            logger.info(f"   ✅ CSV file read successfully: {len(df)} rows, {len(df.columns)} columns")
             
             # 识别元数据列（通常是前几列，如 Patient ID, Group 等）
             # 假设第一列是样本ID，第二列是分组信息
@@ -207,8 +221,8 @@ class MetabolomicsTool:
                 "median": float(metabolite_data.median().median()),
             }
             
-            # 预览前几行
-            preview = df.head(3).to_dict('records')
+            # 预览前5行（前端表格显示）
+            preview = df.head(5).to_dict('records')
             
             result = {
                 "status": "success",
@@ -224,17 +238,37 @@ class MetabolomicsTool:
                 },
                 "group_info": group_info,
                 "data_statistics": data_stats,
-                "preview": preview
+                # 前端可用的数据
+                "data": {
+                    "preview": preview,  # 前5行数据，用于前端表格显示
+                    "summary": {
+                        "n_samples": n_samples,
+                        "n_metabolites": n_metabolites,
+                        "missing_percentage": round(missing_percentage, 2),
+                        "group_info": group_info
+                    }
+                }
             }
             
             logger.info(f"✅ 数据检查完成: {n_samples} 个样本, {n_metabolites} 个代谢物")
+            logger.info(f"✅ [CHECKPOINT] inspect_data SUCCESS")
             return result
             
         except Exception as e:
-            logger.error(f"❌ 数据检查失败: {e}", exc_info=True)
+            import traceback
+            error_traceback = traceback.format_exc()
+            logger.error("=" * 80)
+            logger.error(f"❌ [CHECKPOINT] inspect_data FAILED")
+            logger.error(f"   File path: {file_path}")
+            logger.error(f"   Error type: {type(e).__name__}")
+            logger.error(f"   Error message: {str(e)}")
+            logger.error(f"   Full traceback:")
+            logger.error(error_traceback)
+            logger.error("=" * 80)
             return {
                 "status": "error",
                 "error": str(e),
+                "error_type": type(e).__name__,
                 "file_path": file_path
             }
     
@@ -257,11 +291,18 @@ class MetabolomicsTool:
         Returns:
             预处理结果字典
         """
+        logger.info(f"🔍 [CHECKPOINT] preprocess_data START")
+        logger.info(f"   File path: {file_path}")
+        logger.info(f"   File exists? {os.path.exists(file_path)}")
+        logger.info(f"   Parameters: missing_threshold={missing_threshold}, normalization={normalization}, scale={scale}")
+        
         try:
             logger.info(f"🔧 开始预处理数据: {file_path}")
             
             # 读取数据
+            logger.info(f"   Attempting to read CSV file...")
             df = pd.read_csv(file_path)
+            logger.info(f"   ✅ CSV file read successfully: {len(df)} rows, {len(df.columns)} columns")
             
             # 分离元数据和代谢物数据
             metadata_cols = []
@@ -313,6 +354,9 @@ class MetabolomicsTool:
             preprocessed_df = pd.concat([self.metadata, self.metabolites], axis=1)
             preprocessed_df.to_csv(preprocessed_path, index=False)
             
+            # 生成预处理后的数据预览（前5行）
+            preprocessed_preview = preprocessed_df.head(5).to_dict('records')
+            
             result = {
                 "status": "success",
                 "message": "数据预处理完成",
@@ -321,17 +365,39 @@ class MetabolomicsTool:
                 "removed_metabolites": removed_count,
                 "normalization": normalization,
                 "scaled": scale,
-                "preprocessed_file": str(preprocessed_path)
+                "preprocessed_file": str(preprocessed_path),
+                # 前端可用的数据
+                "data": {
+                    "preview": preprocessed_preview,  # 预处理后的前5行数据
+                    "summary": {
+                        "n_samples": len(self.metabolites),
+                        "n_metabolites": len(self.metabolites.columns),
+                        "removed_metabolites": removed_count,
+                        "normalization": normalization,
+                        "scaled": scale
+                    }
+                }
             }
             
             logger.info(f"✅ 预处理完成: {result['n_metabolites']} 个代谢物保留")
+            logger.info(f"✅ [CHECKPOINT] preprocess_data SUCCESS")
             return result
             
         except Exception as e:
-            logger.error(f"❌ 预处理失败: {e}", exc_info=True)
+            import traceback
+            error_traceback = traceback.format_exc()
+            logger.error("=" * 80)
+            logger.error(f"❌ [CHECKPOINT] preprocess_data FAILED")
+            logger.error(f"   File path: {file_path}")
+            logger.error(f"   Error type: {type(e).__name__}")
+            logger.error(f"   Error message: {str(e)}")
+            logger.error(f"   Full traceback:")
+            logger.error(error_traceback)
+            logger.error("=" * 80)
             return {
                 "status": "error",
-                "error": str(e)
+                "error": str(e),
+                "error_type": type(e).__name__
             }
     
     def pca_analysis(
@@ -350,44 +416,156 @@ class MetabolomicsTool:
             PCA 分析结果
         """
         try:
-            logger.info(f"📊 开始 PCA 分析 (n_components={n_components})")
+            logger.info("=" * 80)
+            logger.info("👉 [STEP 1] pca_analysis START")
+            logger.info(f"   Parameters: n_components={n_components}, file_path={file_path}")
+            logger.info("=" * 80)
             
             # 如果数据未加载，从文件读取
+            logger.info("👉 [STEP 2] Checking if data is loaded...")
             if self.metabolites is None:
+                logger.info("   Data not loaded, need to read from file")
                 if file_path is None:
+                    logger.error("❌ [STEP 2] 数据未加载且未提供文件路径")
                     return {
                         "status": "error",
                         "error": "数据未加载且未提供文件路径"
                     }
                 # 读取预处理后的数据或原始数据
+                logger.info(f"   Reading CSV from: {file_path}")
                 df = pd.read_csv(file_path)
+                logger.info(f"   Loaded CSV. Shape: {df.shape}")
                 metadata_cols = [col for col in df.columns if not pd.api.types.is_numeric_dtype(df[col])]
+                logger.info(f"   Found {len(metadata_cols)} metadata columns: {metadata_cols}")
                 self.metabolites = df.drop(columns=metadata_cols)
+                logger.info(f"   Metabolites shape: {self.metabolites.shape}")
                 if len(metadata_cols) > 0:
                     self.metadata = df[metadata_cols]
+                    logger.info(f"   Metadata shape: {self.metadata.shape}")
+                logger.info("✅ [STEP 2] Data loaded")
+                gc.collect()
+            else:
+                logger.info(f"✅ [STEP 2] Data already loaded. Metabolites shape: {self.metabolites.shape}")
             
             # 执行 PCA
-            pca = PCA(n_components=min(n_components, len(self.metabolites.columns), len(self.metabolites)))
-            pca_result = pca.fit_transform(self.metabolites)
+            logger.info("👉 [STEP 3] Initializing PCA...")
+            try:
+                actual_n_components = min(n_components, len(self.metabolites.columns), len(self.metabolites))
+                logger.info(f"   Actual n_components: {actual_n_components} (requested: {n_components}, features: {len(self.metabolites.columns)}, samples: {len(self.metabolites)})")
+                pca = PCA(n_components=actual_n_components)
+                logger.info("✅ [STEP 3] PCA initialized")
+            except Exception as e:
+                logger.error(f"❌ [STEP 3] Failed to initialize PCA: {e}", exc_info=True)
+                raise
+            
+            logger.info("👉 [STEP 4] Fitting and transforming PCA...")
+            try:
+                pca_result = pca.fit_transform(self.metabolites)
+                logger.info(f"✅ [STEP 4] PCA completed. Result shape: {pca_result.shape}")
+            except Exception as e:
+                logger.error(f"❌ [STEP 4] Failed to fit/transform PCA: {e}", exc_info=True)
+                raise
             
             # 计算解释方差
-            explained_variance = pca.explained_variance_ratio_
-            cumulative_variance = np.cumsum(explained_variance)
+            logger.info("👉 [STEP 5] Calculating explained variance...")
+            try:
+                explained_variance = pca.explained_variance_ratio_
+                cumulative_variance = np.cumsum(explained_variance)
+                logger.info(f"✅ [STEP 5] Explained variance calculated. PC1: {explained_variance[0]*100:.2f}%")
+            except Exception as e:
+                logger.error(f"❌ [STEP 5] Failed to calculate variance: {e}", exc_info=True)
+                raise
             
             # 保存 PCA 结果
-            pca_df = pd.DataFrame(
-                pca_result,
-                columns=[f"PC{i+1}" for i in range(pca_result.shape[1])],
-                index=self.metabolites.index
-            )
+            logger.info("👉 [STEP 6] Creating PCA DataFrame...")
+            try:
+                pca_df = pd.DataFrame(
+                    pca_result,
+                    columns=[f"PC{i+1}" for i in range(pca_result.shape[1])],
+                    index=self.metabolites.index
+                )
+                logger.info(f"✅ [STEP 6] PCA DataFrame created. Shape: {pca_df.shape}")
+            except Exception as e:
+                logger.error(f"❌ [STEP 6] Failed to create DataFrame: {e}", exc_info=True)
+                raise
             
             # 如果有元数据，合并
-            if self.metadata is not None:
-                pca_df = pd.concat([self.metadata, pca_df], axis=1)
+            logger.info("👉 [STEP 7] Merging with metadata...")
+            try:
+                if self.metadata is not None:
+                    pca_df = pd.concat([self.metadata, pca_df], axis=1)
+                    logger.info(f"✅ [STEP 7] Merged with metadata. Final shape: {pca_df.shape}")
+                else:
+                    logger.info("✅ [STEP 7] No metadata to merge")
+            except Exception as e:
+                logger.error(f"❌ [STEP 7] Failed to merge metadata: {e}", exc_info=True)
+                raise
             
+            logger.info("👉 [STEP 8] Saving PCA results to CSV...")
             pca_path = self.output_dir / "pca_results.csv"
-            pca_df.to_csv(pca_path, index=False)
+            try:
+                pca_df.to_csv(pca_path, index=False)
+                logger.info(f"✅ [STEP 8] Saved to {pca_path}")
+                gc.collect()  # 强制垃圾回收
+            except Exception as e:
+                logger.error(f"❌ [STEP 8] Failed to save CSV: {e}", exc_info=True)
+                raise
             
+            # PCA 结果预览（前5行，包含中文列名）
+            logger.info("👉 [STEP 9] Generating preview table...")
+            try:
+                pca_preview_df = pca_df.head(5).copy()
+                pca_preview = []
+                for _, row in pca_preview_df.iterrows():
+                    preview_row = {}
+                    for col in pca_preview_df.columns:
+                        preview_row[col] = row[col]
+                        # 添加中文列名映射（如果列名是 PC1, PC2 等）
+                        if col.startswith("PC"):
+                            preview_row[f"主成分{col}"] = row[col]
+                    pca_preview.append(preview_row)
+                logger.info(f"✅ [STEP 9] Preview table generated. Rows: {len(pca_preview)}")
+            except Exception as e:
+                logger.error(f"❌ [STEP 9] Failed to generate preview: {e}", exc_info=True)
+                raise
+            
+            # 生成统计表格（前10个主成分的解释方差，中英文双语）
+            logger.info("👉 [STEP 10] Generating variance table...")
+            try:
+                variance_table = []
+                for i in range(min(10, len(explained_variance))):
+                    variance_table.append({
+                        "主成分": f"PC{i+1}",
+                        "PC": f"PC{i+1}",
+                        "解释方差": f"{explained_variance[i]*100:.2f}%",
+                        "Explained Variance": f"{explained_variance[i]*100:.2f}%",
+                        "累积方差": f"{cumulative_variance[i]*100:.2f}%",
+                        "Cumulative Variance": f"{cumulative_variance[i]*100:.2f}%"
+                    })
+                logger.info(f"✅ [STEP 10] Variance table generated. Rows: {len(variance_table)}")
+            except Exception as e:
+                logger.error(f"❌ [STEP 10] Failed to generate variance table: {e}", exc_info=True)
+                raise
+            
+            # 获取载荷表格（中英文双语）
+            logger.info("👉 [STEP 11] Getting top loadings...")
+            try:
+                top_loadings_raw = self._get_top_loadings(pca.components_[0], self.metabolites.columns, 10)
+                top_loadings = [
+                    {
+                        "代谢物": item["metabolite"],
+                        "Metabolite": item["metabolite"],
+                        "载荷值": round(item["loading"], 4),
+                        "Loading": round(item["loading"], 4)
+                    }
+                    for item in top_loadings_raw
+                ]
+                logger.info(f"✅ [STEP 11] Top loadings retrieved. Count: {len(top_loadings)}")
+            except Exception as e:
+                logger.error(f"❌ [STEP 11] Failed to get loadings: {e}", exc_info=True)
+                raise
+            
+            logger.info("👉 [STEP 12] Building result dictionary...")
             result = {
                 "status": "success",
                 "message": "PCA 分析完成",
@@ -400,15 +578,36 @@ class MetabolomicsTool:
                 "cumulative_variance_pc10": float(cumulative_variance[min(9, len(cumulative_variance)-1)]),
                 "pca_file": str(pca_path),
                 "loadings": {
-                    "top_10_pc1": self._get_top_loadings(pca.components_[0], self.metabolites.columns, 10)
+                    "top_10_pc1": top_loadings_raw  # 保留原始格式以兼容
+                },
+                # 前端可用的数据
+                "data": {
+                    "preview": pca_preview,  # PCA 结果前5行（包含中文列名）
+                    "tables": {
+                        "variance_table": variance_table,  # 解释方差表格（中英文双语）
+                        "top_loadings": top_loadings  # 载荷表格（中英文双语）
+                    }
                 }
             }
             
-            logger.info(f"✅ PCA 完成: PC1 解释 {result['explained_variance']['PC1']*100:.2f}% 方差")
+            logger.info("=" * 80)
+            logger.info("✅ [STEP 13] pca_analysis SUCCESS")
+            logger.info(f"   PC1 explains {result['explained_variance']['PC1']*100:.2f}% variance")
+            logger.info("=" * 80)
+            gc.collect()  # 最终垃圾回收
             return result
             
         except Exception as e:
-            logger.error(f"❌ PCA 分析失败: {e}", exc_info=True)
+            import traceback
+            error_traceback = traceback.format_exc()
+            logger.error("=" * 80)
+            logger.error(f"❌ [STEP X] pca_analysis FAILED")
+            logger.error(f"   Error type: {type(e).__name__}")
+            logger.error(f"   Error message: {str(e)}")
+            logger.error(f"   Full traceback:")
+            logger.error(error_traceback)
+            logger.error("=" * 80)
+            gc.collect()
             return {
                 "status": "error",
                 "error": str(e)
@@ -449,30 +648,51 @@ class MetabolomicsTool:
             差异分析结果
         """
         try:
-            logger.info(f"🔬 开始差异代谢物分析 (分组: {group_column})")
+            logger.info("=" * 80)
+            logger.info("👉 [STEP 1] differential_analysis START")
+            logger.info(f"   Parameters: group_column={group_column}, method={method}, p_value_threshold={p_value_threshold}, fold_change_threshold={fold_change_threshold}")
+            logger.info("=" * 80)
             
             # 如果数据未加载，从文件读取
+            logger.info("👉 [STEP 2] Checking if data is loaded...")
             if self.metabolites is None or self.metadata is None:
+                logger.info("   Data not loaded, need to read from file")
                 if file_path is None:
+                    logger.error("❌ [STEP 2] 数据未加载且未提供文件路径")
                     return {
                         "status": "error",
                         "error": "数据未加载且未提供文件路径"
                     }
+                logger.info(f"   Reading CSV from: {file_path}")
                 df = pd.read_csv(file_path)
+                logger.info(f"   Loaded CSV. Shape: {df.shape}")
                 metadata_cols = [col for col in df.columns if not pd.api.types.is_numeric_dtype(df[col])]
+                logger.info(f"   Found {len(metadata_cols)} metadata columns: {metadata_cols}")
                 self.metabolites = df.drop(columns=metadata_cols)
                 self.metadata = df[metadata_cols]
+                logger.info(f"   Metabolites shape: {self.metabolites.shape}, Metadata shape: {self.metadata.shape}")
+                logger.info("✅ [STEP 2] Data loaded")
+                gc.collect()
+            else:
+                logger.info(f"✅ [STEP 2] Data already loaded. Metabolites: {self.metabolites.shape}, Metadata: {self.metadata.shape}")
             
             # 检查分组列是否存在
+            logger.info("👉 [STEP 3] Validating group column...")
             if group_column not in self.metadata.columns:
+                logger.error(f"❌ [STEP 3] 分组列 '{group_column}' 不存在。可用列: {list(self.metadata.columns)}")
                 return {
                     "status": "error",
                     "error": f"分组列 '{group_column}' 不存在。可用列: {list(self.metadata.columns)}"
                 }
+            logger.info(f"✅ [STEP 3] Group column '{group_column}' found")
             
             # 获取分组
+            logger.info("👉 [STEP 4] Getting unique groups...")
             groups = self.metadata[group_column].unique()
+            logger.info(f"   Found {len(groups)} groups: {list(groups)}")
+            
             if len(groups) < 2:
+                logger.error(f"❌ [STEP 4] 需要至少2个分组，但找到 {len(groups)} 个: {groups}")
                 return {
                     "status": "error",
                     "error": f"需要至少2个分组，但找到 {len(groups)} 个: {groups}"
@@ -481,13 +701,16 @@ class MetabolomicsTool:
                 # 如果用户指定了 group1 和 group2，使用它们
                 if group1 and group2:
                     if group1 not in groups or group2 not in groups:
+                        logger.error(f"❌ [STEP 4] 指定的分组不存在。可用分组: {list(groups)}")
                         return {
                             "status": "error",
                             "error": f"指定的分组不存在。可用分组: {list(groups)}"
                         }
+                    logger.info(f"✅ [STEP 4] Using specified groups: {group1} vs {group2}")
                     # 使用指定的分组
                     pass  # group1 和 group2 已经设置
                 else:
+                    logger.warning(f"⚠️ [STEP 4] 检测到 {len(groups)} 个分组，需要用户选择")
                     # 返回需要用户选择的信息
                     return {
                         "status": "need_selection",
@@ -499,11 +722,20 @@ class MetabolomicsTool:
             # 如果没有指定分组，使用前两个
             if not group1 or not group2:
                 group1, group2 = groups[0], groups[1]
+                logger.info(f"✅ [STEP 4] Using first two groups: {group1} vs {group2}")
+            
+            logger.info("👉 [STEP 5] Creating group masks...")
             group1_mask = self.metadata[group_column] == group1
             group2_mask = self.metadata[group_column] == group2
+            logger.info(f"   Group1 ({group1}): {group1_mask.sum()} samples")
+            logger.info(f"   Group2 ({group2}): {group2_mask.sum()} samples")
+            logger.info("✅ [STEP 5] Group masks created")
             
             # 对每个代谢物执行统计检验
+            logger.info("👉 [STEP 6] Running statistical tests for each metabolite...")
+            logger.info(f"   Total metabolites: {len(self.metabolites.columns)}")
             results = []
+            processed = 0
             for metabolite in self.metabolites.columns:
                 group1_data = self.metabolites.loc[group1_mask, metabolite].values
                 group2_data = self.metabolites.loc[group2_mask, metabolite].values
@@ -550,17 +782,88 @@ class MetabolomicsTool:
                     "statistic": float(stat),
                     "significant": is_significant
                 })
+                processed += 1
+                if processed % 100 == 0:
+                    logger.info(f"   Processed {processed}/{len(self.metabolites.columns)} metabolites...")
+            
+            logger.info(f"✅ [STEP 6] Statistical tests completed. Processed {len(results)} metabolites")
+            gc.collect()  # 强制垃圾回收
             
             # 转换为 DataFrame
-            results_df = pd.DataFrame(results)
-            results_df = results_df.sort_values("p_value")
+            logger.info("👉 [STEP 7] Converting results to DataFrame...")
+            try:
+                results_df = pd.DataFrame(results)
+                results_df = results_df.sort_values("p_value")
+                logger.info(f"✅ [STEP 7] DataFrame created. Shape: {results_df.shape}")
+            except Exception as e:
+                logger.error(f"❌ [STEP 7] Failed to create DataFrame: {e}", exc_info=True)
+                raise
             
             # 保存结果
+            logger.info("👉 [STEP 8] Saving results to CSV...")
             diff_path = self.output_dir / "differential_analysis.csv"
-            results_df.to_csv(diff_path, index=False)
+            try:
+                results_df.to_csv(diff_path, index=False)
+                logger.info(f"✅ [STEP 8] Saved to {diff_path}")
+                gc.collect()
+            except Exception as e:
+                logger.error(f"❌ [STEP 8] Failed to save CSV: {e}", exc_info=True)
+                raise
             
             # 统计显著代谢物
+            logger.info("👉 [STEP 9] Identifying significant metabolites...")
             significant = results_df[results_df["significant"] == True]
+            logger.info(f"✅ [STEP 9] Found {len(significant)} significant metabolites out of {len(results_df)} total")
+            
+            # 生成差异分析结果表格（前20个显著代谢物，包含中文列名）
+            top_significant_df = significant.head(20).copy()
+            # 添加中文列名映射
+            top_significant_table = []
+            for _, row in top_significant_df.iterrows():
+                top_significant_table.append({
+                    "代谢物": row["metabolite"],
+                    "Metabolite": row["metabolite"],  # 保留英文列名以兼容
+                    "P值": round(row["p_value"], 6),
+                    "P-value": round(row["p_value"], 6),
+                    "倍数变化": round(row["fold_change"], 3),
+                    "Fold Change": round(row["fold_change"], 3),
+                    "Log2倍数变化": round(row["log2_fold_change"], 3),
+                    "Log2 Fold Change": round(row["log2_fold_change"], 3),
+                    "组1均值": round(row["group1_mean"], 3),
+                    "Group1 Mean": round(row["group1_mean"], 3),
+                    "组2均值": round(row["group2_mean"], 3),
+                    "Group2 Mean": round(row["group2_mean"], 3),
+                    "状态": "上调" if row["log2_fold_change"] > 0 else "下调",
+                    "Status": "Up-regulated" if row["log2_fold_change"] > 0 else "Down-regulated"
+                })
+            
+            # 生成统计摘要表格（中英文双语）
+            summary_table = [
+                {
+                    "类别": "总代谢物数",
+                    "Category": "Total Metabolites",
+                    "数量": len(results_df),
+                    "Count": len(results_df)
+                },
+                {
+                    "类别": "显著代谢物数",
+                    "Category": "Significant Metabolites",
+                    "数量": len(significant),
+                    "Count": len(significant)
+                },
+                {
+                    "类别": "上调代谢物",
+                    "Category": "Up-regulated",
+                    "数量": len(significant[significant["log2_fold_change"] > 0]),
+                    "Count": len(significant[significant["log2_fold_change"] > 0])
+                },
+                {
+                    "类别": "下调代谢物",
+                    "Category": "Down-regulated",
+                    "数量": len(significant[significant["log2_fold_change"] < 0]),
+                    "Count": len(significant[significant["log2_fold_change"] < 0])
+                }
+            ]
             
             result = {
                 "status": "success",
@@ -571,15 +874,44 @@ class MetabolomicsTool:
                     "group1": str(group1),
                     "group2": str(group2)
                 },
-                "top_significant": significant.head(20).to_dict('records'),
-                "results_file": str(diff_path)
+                "top_significant": top_significant_table,
+                "results_file": str(diff_path),
+                # 前端可用的数据
+                "data": {
+                    "tables": {
+                        "top_significant": top_significant_table,  # 前20个显著代谢物表格
+                        "summary": summary_table  # 统计摘要表格
+                    },
+                    "summary": {
+                        "n_total": len(results_df),
+                        "n_significant": len(significant),
+                        "groups": {
+                            "group1": str(group1),
+                            "group2": str(group2)
+                        }
+                    }
+                }
             }
             
-            logger.info(f"✅ 差异分析完成: {result['n_significant']} 个显著代谢物")
+            logger.info("=" * 80)
+            logger.info("✅ [STEP 12] differential_analysis SUCCESS")
+            logger.info(f"   Total metabolites: {result['n_total']}")
+            logger.info(f"   Significant metabolites: {result['n_significant']}")
+            logger.info("=" * 80)
+            gc.collect()  # 最终垃圾回收
             return result
             
         except Exception as e:
-            logger.error(f"❌ 差异分析失败: {e}", exc_info=True)
+            import traceback
+            error_traceback = traceback.format_exc()
+            logger.error("=" * 80)
+            logger.error(f"❌ [STEP X] differential_analysis FAILED")
+            logger.error(f"   Error type: {type(e).__name__}")
+            logger.error(f"   Error message: {str(e)}")
+            logger.error(f"   Full traceback:")
+            logger.error(error_traceback)
+            logger.error("=" * 80)
+            gc.collect()
             return {
                 "status": "error",
                 "error": str(e)
@@ -605,23 +937,36 @@ class MetabolomicsTool:
             可视化结果
         """
         try:
-            logger.info(f"📈 生成 PCA 可视化图")
+            logger.info("=" * 80)
+            logger.info("👉 [STEP 1] visualize_pca START")
+            logger.info(f"   Parameters: group_column={group_column}, pca_file={pca_file}, pc1={pc1}, pc2={pc2}")
+            logger.info("=" * 80)
             
             # 读取 PCA 结果
+            logger.info("👉 [STEP 2] Loading PCA results file...")
             if pca_file is None:
                 pca_file = self.output_dir / "pca_results.csv"
             
+            logger.info(f"   Checking file: {pca_file}")
             if not os.path.exists(pca_file):
+                logger.error(f"❌ [STEP 2] PCA 结果文件不存在: {pca_file}")
                 return {
                     "status": "error",
                     "error": f"PCA 结果文件不存在: {pca_file}"
                 }
             
+            logger.info(f"   File exists. Reading CSV...")
             df = pd.read_csv(pca_file)
+            logger.info(f"✅ [STEP 2] Loaded PCA data. Shape: {df.shape}, Columns: {list(df.columns)[:5]}...")
+            gc.collect()  # 强制垃圾回收
             
             # 查找主成分列
+            logger.info("👉 [STEP 3] Validating principal components...")
             pc_cols = [col for col in df.columns if col.startswith("PC")]
+            logger.info(f"   Found {len(pc_cols)} PC columns: {pc_cols[:5]}...")
+            
             if len(pc_cols) < max(pc1, pc2):
+                logger.error(f"❌ [STEP 3] 主成分数量不足: 需要 PC{pc1} 和 PC{pc2}, 但只有 {len(pc_cols)} 个")
                 return {
                     "status": "error",
                     "error": f"主成分数量不足: 需要 PC{pc1} 和 PC{pc2}"
@@ -629,51 +974,129 @@ class MetabolomicsTool:
             
             pc1_col = f"PC{pc1}"
             pc2_col = f"PC{pc2}"
+            logger.info(f"✅ [STEP 3] Using {pc1_col} and {pc2_col}")
             
             # 创建图形
-            plt.figure(figsize=(10, 8))
+            logger.info("👉 [STEP 4] Creating matplotlib figure...")
+            try:
+                plt.figure(figsize=(10, 8))
+                logger.info("✅ [STEP 4] Figure created")
+            except Exception as e:
+                logger.error(f"❌ [STEP 4] Failed to create figure: {e}", exc_info=True)
+                raise
             
-            if group_column and group_column in df.columns:
-                # 按分组着色
-                groups = df[group_column].unique()
-                colors = plt.cm.Set3(np.linspace(0, 1, len(groups)))
-                for i, group in enumerate(groups):
-                    mask = df[group_column] == group
-                    plt.scatter(
-                        df.loc[mask, pc1_col],
-                        df.loc[mask, pc2_col],
-                        label=str(group),
-                        alpha=0.7,
-                        s=100,
-                        c=[colors[i]]
-                    )
-                plt.legend(title=group_column)
-            else:
-                plt.scatter(df[pc1_col], df[pc2_col], alpha=0.7, s=100)
+            # 绘制散点图
+            logger.info("👉 [STEP 5] Plotting scatter points...")
+            try:
+                if group_column and group_column in df.columns:
+                    # 按分组着色
+                    groups = df[group_column].unique()
+                    logger.info(f"   Found {len(groups)} groups: {list(groups)}")
+                    colors = plt.cm.Set3(np.linspace(0, 1, len(groups)))
+                    for i, group in enumerate(groups):
+                        mask = df[group_column] == group
+                        logger.info(f"   Plotting group {group}: {mask.sum()} points")
+                        plt.scatter(
+                            df.loc[mask, pc1_col],
+                            df.loc[mask, pc2_col],
+                            label=str(group),
+                            alpha=0.7,
+                            s=100,
+                            c=[colors[i]]
+                        )
+                    plt.legend(title=group_column)
+                else:
+                    logger.info("   Plotting without grouping")
+                    plt.scatter(df[pc1_col], df[pc2_col], alpha=0.7, s=100)
+                logger.info("✅ [STEP 5] Scatter points plotted")
+            except Exception as e:
+                logger.error(f"❌ [STEP 5] Failed to plot scatter: {e}", exc_info=True)
+                plt.close('all')
+                gc.collect()
+                raise
             
-            plt.xlabel(f"{pc1_col}", fontsize=12)
-            plt.ylabel(f"{pc2_col}", fontsize=12)
-            plt.title(f"PCA Plot: {pc1_col} vs {pc2_col}", fontsize=14)
-            plt.grid(True, alpha=0.3)
+            # 设置标签和标题
+            logger.info("👉 [STEP 6] Setting labels and title...")
+            try:
+                plt.xlabel(f"{pc1_col}", fontsize=12)
+                plt.ylabel(f"{pc2_col}", fontsize=12)
+                plt.title(f"PCA Plot: {pc1_col} vs {pc2_col}", fontsize=14)
+                plt.grid(True, alpha=0.3)
+                logger.info("✅ [STEP 6] Labels and title set")
+            except Exception as e:
+                logger.error(f"❌ [STEP 6] Failed to set labels: {e}", exc_info=True)
+                plt.close('all')
+                gc.collect()
+                raise
             
             # 保存图片
+            logger.info("👉 [STEP 7] Saving figure to file...")
             plot_path = self.output_dir / f"pca_plot_pc{pc1}_pc{pc2}.png"
-            plt.tight_layout()
-            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-            plt.close()
+            logger.info(f"   Output path: {plot_path}")
+            try:
+                plt.tight_layout()
+                logger.info("   Layout adjusted, saving...")
+                plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+                logger.info(f"✅ [STEP 7] Figure saved to {plot_path}")
+            except Exception as e:
+                logger.error(f"❌ [STEP 7] Failed to save figure: {e}", exc_info=True)
+                plt.close('all')
+                gc.collect()
+                raise
+            
+            # CRITICAL: 关闭所有图形以释放内存
+            logger.info("👉 [STEP 8] Closing matplotlib figures and freeing memory...")
+            try:
+                plt.close('all')
+                gc.collect()
+                logger.info("✅ [STEP 8] Figures closed and memory freed")
+            except Exception as e:
+                logger.warning(f"⚠️ [STEP 8] Error closing figures: {e}")
+                gc.collect()  # 即使关闭失败也强制 GC
+            
+            # 转换为相对路径（相对于 output_dir）
+            logger.info("👉 [STEP 9] Converting to relative path...")
+            relative_path = str(plot_path)
+            if os.path.isabs(relative_path):
+                relative_path = os.path.relpath(relative_path, self.output_dir)
+            relative_path = relative_path.replace("\\", "/")
+            logger.info(f"✅ [STEP 9] Relative path: {relative_path}")
             
             result = {
                 "status": "success",
                 "message": "PCA 可视化完成",
                 "plot_path": str(plot_path),
-                "plot_file": str(plot_path)  # 兼容旧字段名
+                "plot_file": str(plot_path),  # 兼容旧字段名
+                # 前端可用的数据
+                "data": {
+                    "images": [relative_path]  # 相对路径，前端可以直接使用
+                }
             }
             
-            logger.info(f"✅ PCA 图已保存: {plot_path}")
+            logger.info("=" * 80)
+            logger.info("✅ [STEP 10] visualize_pca SUCCESS")
+            logger.info(f"   Plot saved: {plot_path}")
+            logger.info("=" * 80)
             return result
             
         except Exception as e:
-            logger.error(f"❌ PCA 可视化失败: {e}", exc_info=True)
+            import traceback
+            error_traceback = traceback.format_exc()
+            logger.error("=" * 80)
+            logger.error(f"❌ [STEP X] visualize_pca FAILED")
+            logger.error(f"   Error type: {type(e).__name__}")
+            logger.error(f"   Error message: {str(e)}")
+            logger.error(f"   Full traceback:")
+            logger.error(error_traceback)
+            logger.error("=" * 80)
+            
+            # 确保清理资源
+            try:
+                plt.close('all')
+            except:
+                pass
+            gc.collect()
+            
             return {
                 "status": "error",
                 "error": str(e)
@@ -697,78 +1120,186 @@ class MetabolomicsTool:
             可视化结果
         """
         try:
-            logger.info(f"📈 生成火山图")
+            logger.info("=" * 80)
+            logger.info("👉 [STEP 1] visualize_volcano START")
+            logger.info(f"   Parameters: diff_file={diff_file}, p_value_threshold={p_value_threshold}, fold_change_threshold={fold_change_threshold}")
+            logger.info("=" * 80)
             
             # 读取差异分析结果
+            logger.info("👉 [STEP 2] Loading differential analysis results...")
             if diff_file is None:
                 diff_file = self.output_dir / "differential_analysis.csv"
             
+            logger.info(f"   Checking file: {diff_file}")
             if not os.path.exists(diff_file):
+                logger.error(f"❌ [STEP 2] 差异分析结果文件不存在: {diff_file}")
                 return {
                     "status": "error",
                     "error": f"差异分析结果文件不存在: {diff_file}"
                 }
             
+            logger.info(f"   File exists. Reading CSV...")
             df = pd.read_csv(diff_file)
+            logger.info(f"✅ [STEP 2] Loaded differential data. Shape: {df.shape}, Columns: {list(df.columns)[:5]}...")
+            gc.collect()  # 强制垃圾回收
             
             # 计算 -log10(p_value)
-            df["neg_log10_p"] = -np.log10(df["p_value"] + 1e-10)  # 避免 log(0)
+            logger.info("👉 [STEP 3] Calculating -log10(p_value)...")
+            try:
+                df["neg_log10_p"] = -np.log10(df["p_value"] + 1e-10)  # 避免 log(0)
+                logger.info(f"✅ [STEP 3] Calculated -log10(p). Range: [{df['neg_log10_p'].min():.2f}, {df['neg_log10_p'].max():.2f}]")
+            except Exception as e:
+                logger.error(f"❌ [STEP 3] Failed to calculate -log10(p): {e}", exc_info=True)
+                raise
             
             # 分类：显著上调、显著下调、不显著
-            df["category"] = "Not Significant"
-            df.loc[
-                (df["p_value"] < p_value_threshold) & (df["log2_fold_change"] > np.log2(fold_change_threshold)),
-                "category"
-            ] = "Up"
-            df.loc[
-                (df["p_value"] < p_value_threshold) & (df["log2_fold_change"] < -np.log2(fold_change_threshold)),
-                "category"
-            ] = "Down"
+            logger.info("👉 [STEP 4] Categorizing metabolites...")
+            try:
+                df["category"] = "Not Significant"
+                df.loc[
+                    (df["p_value"] < p_value_threshold) & (df["log2_fold_change"] > np.log2(fold_change_threshold)),
+                    "category"
+                ] = "Up"
+                df.loc[
+                    (df["p_value"] < p_value_threshold) & (df["log2_fold_change"] < -np.log2(fold_change_threshold)),
+                    "category"
+                ] = "Down"
+                
+                category_counts = df["category"].value_counts().to_dict()
+                logger.info(f"✅ [STEP 4] Categorized. Counts: {category_counts}")
+            except Exception as e:
+                logger.error(f"❌ [STEP 4] Failed to categorize: {e}", exc_info=True)
+                raise
             
             # 创建火山图
-            plt.figure(figsize=(12, 8))
+            logger.info("👉 [STEP 5] Creating matplotlib figure...")
+            try:
+                plt.figure(figsize=(12, 8))
+                logger.info("✅ [STEP 5] Figure created")
+            except Exception as e:
+                logger.error(f"❌ [STEP 5] Failed to create figure: {e}", exc_info=True)
+                raise
             
-            colors = {"Up": "red", "Down": "blue", "Not Significant": "gray"}
-            for cat in ["Not Significant", "Up", "Down"]:
-                mask = df["category"] == cat
-                plt.scatter(
-                    df.loc[mask, "log2_fold_change"],
-                    df.loc[mask, "neg_log10_p"],
-                    label=cat,
-                    alpha=0.6,
-                    s=50,
-                    c=colors[cat]
-                )
+            # 绘制散点图
+            logger.info("👉 [STEP 6] Plotting scatter points by category...")
+            try:
+                colors = {"Up": "red", "Down": "blue", "Not Significant": "gray"}
+                for cat in ["Not Significant", "Up", "Down"]:
+                    mask = df["category"] == cat
+                    count = mask.sum()
+                    logger.info(f"   Plotting {cat}: {count} points")
+                    if count > 0:
+                        plt.scatter(
+                            df.loc[mask, "log2_fold_change"],
+                            df.loc[mask, "neg_log10_p"],
+                            label=cat,
+                            alpha=0.6,
+                            s=50,
+                            c=colors[cat]
+                        )
+                logger.info("✅ [STEP 6] Scatter points plotted")
+            except Exception as e:
+                logger.error(f"❌ [STEP 6] Failed to plot scatter: {e}", exc_info=True)
+                plt.close('all')
+                gc.collect()
+                raise
             
             # 添加阈值线
-            plt.axhline(y=-np.log10(p_value_threshold), color='black', linestyle='--', alpha=0.5, label=f'p={p_value_threshold}')
-            plt.axvline(x=np.log2(fold_change_threshold), color='black', linestyle='--', alpha=0.5)
-            plt.axvline(x=-np.log2(fold_change_threshold), color='black', linestyle='--', alpha=0.5)
+            logger.info("👉 [STEP 7] Adding threshold lines...")
+            try:
+                plt.axhline(y=-np.log10(p_value_threshold), color='black', linestyle='--', alpha=0.5, label=f'p={p_value_threshold}')
+                plt.axvline(x=np.log2(fold_change_threshold), color='black', linestyle='--', alpha=0.5)
+                plt.axvline(x=-np.log2(fold_change_threshold), color='black', linestyle='--', alpha=0.5)
+                logger.info("✅ [STEP 7] Threshold lines added")
+            except Exception as e:
+                logger.error(f"❌ [STEP 7] Failed to add threshold lines: {e}", exc_info=True)
+                plt.close('all')
+                gc.collect()
+                raise
             
-            plt.xlabel("Log2 Fold Change", fontsize=12)
-            plt.ylabel("-Log10 P-value", fontsize=12)
-            plt.title("Volcano Plot: Differential Metabolites", fontsize=14)
-            plt.legend()
-            plt.grid(True, alpha=0.3)
+            # 设置标签和标题
+            logger.info("👉 [STEP 8] Setting labels and title...")
+            try:
+                plt.xlabel("Log2 Fold Change", fontsize=12)
+                plt.ylabel("-Log10 P-value", fontsize=12)
+                plt.title("Volcano Plot: Differential Metabolites", fontsize=14)
+                plt.legend()
+                plt.grid(True, alpha=0.3)
+                logger.info("✅ [STEP 8] Labels and title set")
+            except Exception as e:
+                logger.error(f"❌ [STEP 8] Failed to set labels: {e}", exc_info=True)
+                plt.close('all')
+                gc.collect()
+                raise
             
             # 保存图片
+            logger.info("👉 [STEP 9] Saving figure to file...")
             plot_path = self.output_dir / "volcano_plot.png"
-            plt.tight_layout()
-            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-            plt.close()
+            logger.info(f"   Output path: {plot_path}")
+            try:
+                plt.tight_layout()
+                logger.info("   Layout adjusted, saving...")
+                plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+                logger.info(f"✅ [STEP 9] Figure saved to {plot_path}")
+            except Exception as e:
+                logger.error(f"❌ [STEP 9] Failed to save figure: {e}", exc_info=True)
+                plt.close('all')
+                gc.collect()
+                raise
+            
+            # CRITICAL: 关闭所有图形以释放内存
+            logger.info("👉 [STEP 10] Closing matplotlib figures and freeing memory...")
+            try:
+                plt.close('all')
+                gc.collect()
+                logger.info("✅ [STEP 10] Figures closed and memory freed")
+            except Exception as e:
+                logger.warning(f"⚠️ [STEP 10] Error closing figures: {e}")
+                gc.collect()  # 即使关闭失败也强制 GC
+            
+            # 转换为相对路径（相对于 output_dir）
+            logger.info("👉 [STEP 11] Converting to relative path...")
+            relative_path = str(plot_path)
+            if os.path.isabs(relative_path):
+                relative_path = os.path.relpath(relative_path, self.output_dir)
+            relative_path = relative_path.replace("\\", "/")
+            logger.info(f"✅ [STEP 11] Relative path: {relative_path}")
             
             result = {
                 "status": "success",
                 "message": "火山图生成完成",
                 "plot_path": str(plot_path),
-                "plot_file": str(plot_path)  # 兼容旧字段名
+                "plot_file": str(plot_path),  # 兼容旧字段名
+                # 前端可用的数据
+                "data": {
+                    "images": [relative_path]  # 相对路径，前端可以直接使用
+                }
             }
             
-            logger.info(f"✅ 火山图已保存: {plot_path}")
+            logger.info("=" * 80)
+            logger.info("✅ [STEP 12] visualize_volcano SUCCESS")
+            logger.info(f"   Plot saved: {plot_path}")
+            logger.info("=" * 80)
             return result
             
         except Exception as e:
-            logger.error(f"❌ 火山图生成失败: {e}", exc_info=True)
+            import traceback
+            error_traceback = traceback.format_exc()
+            logger.error("=" * 80)
+            logger.error(f"❌ [STEP X] visualize_volcano FAILED")
+            logger.error(f"   Error type: {type(e).__name__}")
+            logger.error(f"   Error message: {str(e)}")
+            logger.error(f"   Full traceback:")
+            logger.error(error_traceback)
+            logger.error("=" * 80)
+            
+            # 确保清理资源
+            try:
+                plt.close('all')
+            except:
+                pass
+            gc.collect()
+            
             return {
                 "status": "error",
                 "error": str(e)
