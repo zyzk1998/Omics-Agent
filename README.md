@@ -58,7 +58,7 @@ Domain Agents (领域智能体)
     ├── RNAAgent (转录组) ✅ 已实现
     ├── DNAAgent (基因组) ⏳ 占位符
     ├── EpigenomicsAgent (表观遗传) ⏳ 占位符
-    ├── MetabolomicsAgent (代谢组) ⏳ 占位符
+    ├── MetabolomicsAgent (代谢组) ✅ 已实现
     ├── ProteomicsAgent (蛋白质组) ⏳ 占位符
     ├── SpatialAgent (空间组学) ⏳ 占位符
     └── ImagingAgent (影像分析) ⏳ 占位符
