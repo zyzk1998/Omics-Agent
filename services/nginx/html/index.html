@@ -1130,8 +1130,17 @@
             if (!data || !data.report_data) { throw new Error("报告数据为空"); }
             const reportId = `report-${Date.now()}`;
             const reportData = data.report_data;
-            const diagnosis = data.diagnosis || "暂无诊断信息";
+            // 🔥 Task 1: 修复诊断数据获取逻辑 - 优先从 report_data.diagnosis 获取
+            const diagnosis = reportData.diagnosis || data.diagnosis || "暂无诊断信息";
             const stepsDetails = reportData.steps_details || [];
+            
+            // 调试日志
+            console.log('📝 [DEBUG] Diagnosis data:', {
+                'data.diagnosis': data.diagnosis,
+                'reportData.diagnosis': reportData.diagnosis,
+                'final diagnosis': diagnosis,
+                'diagnosis length': diagnosis ? diagnosis.length : 0
+            });
             
             // 🔍 智能寻找 Key Plot (本次任务的最高级产出)
             // 逻辑：倒序遍历，找到第一个有图的步骤，它就是本次运行的“最终结果”
@@ -1332,7 +1341,7 @@
             html += `</div></div>
                 <div class="report-section">
                     <h6>2. AI 专家诊断</h6>
-                    <div class="llm-diagnosis">${marked.parse(diagnosis)}</div>
+                    <div class="llm-diagnosis" style="display: block; padding: 15px; background: #f0f7ff; border-left: 4px solid #4d6bfe; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333;">${diagnosis && diagnosis !== "暂无诊断信息" ? marked.parse(diagnosis) : '<p class="text-muted">暂无诊断信息</p>'}</div>
                 </div>
                 ${keyPlotHtml}
             </div>`;

@@ -325,41 +325,74 @@ llm_json_monitor() {
     echo -e "${CYAN}${BOLD}🧠 实时监听 LLM JSON${NC}\n"
     echo -e "${YELLOW}按 Ctrl+C 退出${NC}\n"
     
+    # 🔥 Task 2: 检查 jq 是否安装
+    if command -v jq >/dev/null 2>&1; then
+        USE_JQ=true
+    else
+        USE_JQ=false
+        echo -e "${YELLOW}⚠️  jq 未安装，将使用 Python 格式化 JSON${NC}\n"
+    fi
+    
     if ! check_docker_permission; then
         print_status "warning" "无法访问 Docker，使用本地日志..."
-        tail -f ${PROJECT_DIR}/gibh_agent.log 2>/dev/null | grep --line-buffered "LLM_RAW_DUMP" | python3 -u -c "
+        if [ "$USE_JQ" = true ]; then
+            tail -f ${PROJECT_DIR}/gibh_agent.log 2>/dev/null | grep --line-buffered "LLM_RAW_DUMP" | sed 's/.*\[LLM_RAW_DUMP\] //' | jq . 2>/dev/null || \
+            tail -f ${PROJECT_DIR}/gibh_agent.log 2>/dev/null | grep --line-buffered "LLM_RAW_DUMP" | sed 's/.*\[LLM_RAW_DUMP\] //' | sed 's/^/\033[0;36m🔥 [LLM_RAW_DUMP]\033[0m /'
+        else
+            tail -f ${PROJECT_DIR}/gibh_agent.log 2>/dev/null | grep --line-buffered "LLM_RAW_DUMP" | python3 -u -c "
 import sys, json
 
 for line in sys.stdin:
     line = line.rstrip()
     if '[LLM_RAW_DUMP]' in line:
-        parts = line.split('[LLM_RAW_DUMP]', 1)
-        if len(parts) > 1:
-            json_str = parts[1].strip()
-            try:
-                parsed = json.loads(json_str)
-                pretty = json.dumps(parsed, indent=2, ensure_ascii=False)
-                print(f'\033[0;36m🔥 [LLM_RAW_DUMP]\033[0m\n\033[0;36m{pretty}\033[0m', flush=True)
-            except:
-                print(f'\033[0;36m🔥 [LLM_RAW_DUMP]\033[0m {json_str}', flush=True)
+        # 提取 JSON 部分（可能在行中的任何位置）
+        idx = line.find('[LLM_RAW_DUMP]')
+        if idx >= 0:
+            json_str = line[idx + len('[LLM_RAW_DUMP]'):].strip()
+            if json_str:
+                try:
+                    parsed = json.loads(json_str)
+                    pretty = json.dumps(parsed, indent=2, ensure_ascii=False)
+                    print(f'\033[0;36m🔥 [LLM_RAW_DUMP]\033[0m\n\033[0;36m{pretty}\033[0m', flush=True)
+                except json.JSONDecodeError:
+                    # 如果不是完整 JSON，尝试提取并显示
+                    print(f'\033[0;36m🔥 [LLM_RAW_DUMP]\033[0m {json_str[:500]}...', flush=True)
+                except:
+                    print(f'\033[0;36m🔥 [LLM_RAW_DUMP]\033[0m {json_str}', flush=True)
 " || echo "无法读取日志文件"
+        fi
     else
-        docker_compose_cmd logs -f api-server worker 2>/dev/null | grep --line-buffered "LLM_RAW_DUMP" | python3 -u -c "
+        # 🔥 Task 2: 使用更简单、更健壮的命令
+        if [ "$USE_JQ" = true ]; then
+            docker_compose_cmd logs -f api-server worker 2>/dev/null | grep --line-buffered "LLM_RAW_DUMP" | sed 's/.*\[LLM_RAW_DUMP\] //' | jq . 2>/dev/null || \
+            docker_compose_cmd logs -f api-server worker 2>/dev/null | grep --line-buffered "LLM_RAW_DUMP" | sed 's/.*\[LLM_RAW_DUMP\] //' | sed 's/^/\033[0;36m🔥 [LLM_RAW_DUMP]\033[0m /'
+        else
+            docker_compose_cmd logs -f api-server worker 2>/dev/null | grep --line-buffered "LLM_RAW_DUMP" | python3 -u -c "
 import sys, json
 
 for line in sys.stdin:
     line = line.rstrip()
     if '[LLM_RAW_DUMP]' in line:
-        parts = line.split('[LLM_RAW_DUMP]', 1)
-        if len(parts) > 1:
-            json_str = parts[1].strip()
-            try:
-                parsed = json.loads(json_str)
-                pretty = json.dumps(parsed, indent=2, ensure_ascii=False)
-                print(f'\033[0;36m🔥 [LLM_RAW_DUMP]\033[0m\n\033[0;36m{pretty}\033[0m', flush=True)
-            except:
-                print(f'\033[0;36m🔥 [LLM_RAW_DUMP]\033[0m {json_str}', flush=True)
+        # 提取 JSON 部分（可能在行中的任何位置，Docker logs 可能包含时间戳和容器名）
+        idx = line.find('[LLM_RAW_DUMP]')
+        if idx >= 0:
+            json_str = line[idx + len('[LLM_RAW_DUMP]'):].strip()
+            # 移除可能的前导空格
+            json_str = json_str.lstrip()
+            if json_str:
+                try:
+                    parsed = json.loads(json_str)
+                    pretty = json.dumps(parsed, indent=2, ensure_ascii=False)
+                    print(f'\033[0;36m🔥 [LLM_RAW_DUMP]\033[0m\n\033[0;36m{pretty}\033[0m', flush=True)
+                except json.JSONDecodeError as e:
+                    # 如果不是完整 JSON，显示原始内容（可能被截断）
+                    print(f'\033[0;36m🔥 [LLM_RAW_DUMP]\033[0m {json_str[:500]}...', flush=True)
+                    print(f'\033[0;33m⚠️  JSON 解析失败: {e}\033[0m', flush=True)
+                except Exception as e:
+                    print(f'\033[0;36m🔥 [LLM_RAW_DUMP]\033[0m {json_str}', flush=True)
+                    print(f'\033[0;33m⚠️  处理失败: {e}\033[0m', flush=True)
 " || echo "无法读取 Docker 日志"
+        fi
     fi
 }
 
