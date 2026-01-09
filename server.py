@@ -1278,7 +1278,17 @@ async def upload_file(files: List[UploadFile] = File(...)):
             }
         
         # 处理其他文件（非10x或单独的10x文件）
-        for file in other_files + (tenx_files if not is_10x_data else []):
+        # 🔧 修复：如果只有1个10x文件，也当作普通文件处理
+        files_to_process = other_files
+        if is_10x_data and len(tenx_files) == 1:
+            # 只有1个10x文件，当作普通文件处理
+            logger.info(f"⚠️ 只有1个10x文件，当作普通文件处理: {tenx_files[0].filename}")
+            files_to_process = other_files + tenx_files
+        elif not is_10x_data:
+            # 不是10x数据，处理所有文件
+            files_to_process = other_files + tenx_files
+        
+        for file in files_to_process:
             # 🔒 安全：验证文件路径
             file_path = UPLOAD_DIR / file.filename
             try:
@@ -1601,9 +1611,15 @@ async def chat_endpoint(req: ChatRequest):
                 "file_paths": result_file_paths
             }
             
-            # 如果包含诊断报告，也返回给前端
+            # 🔧 修复：如果包含诊断报告，也返回给前端
             if "diagnosis_report" in result:
                 response_content["diagnosis_report"] = result["diagnosis_report"]
+            
+            # 🔧 修复：如果包含推荐信息，也返回给前端（代谢组学）
+            if "recommendation" in result:
+                response_content["recommendation"] = result["recommendation"]
+            
+            logger.info(f"📤 返回工作流配置: 包含推荐={('recommendation' in response_content)}, 包含诊断={('diagnosis_report' in response_content)}")
             
             return JSONResponse(content=response_content)
         

@@ -5,6 +5,7 @@
 """
 import json
 import os
+from pathlib import Path
 from typing import Dict, Any, List, Optional, AsyncIterator
 from ..base_agent import BaseAgent
 from ...core.llm_client import LLMClient
@@ -108,8 +109,14 @@ class RNAAgent(BaseAgent):
                     "response": self._stream_string_response("没有检测到上传的文件。请先上传文件后再询问。")
                 }
             
-            # 检查第一个文件（如果是 h5ad，使用 scanpy 工具）
-            input_path = file_paths[0]
+            # 🔧 修复：优先使用最新上传的文件（列表最后一个），而不是第一个
+            # 检查最新上传的文件（如果是 h5ad，使用 scanpy 工具）
+            input_path = file_paths[-1] if file_paths else None
+            if not input_path:
+                return {
+                    "type": "chat",
+                    "response": self._stream_string_response("没有检测到上传的文件。请先上传文件后再询问。")
+                }
             try:
                 # 使用 scanpy 工具检查文件
                 if input_path.endswith('.h5ad'):
@@ -127,11 +134,59 @@ class RNAAgent(BaseAgent):
                         "response": self._stream_string_response(explanation)
                     }
                 else:
-                    # 其他文件类型，返回基本信息
-                    return {
-                        "type": "chat",
-                        "response": self._stream_string_response(f"文件路径: {input_path}\n文件类型: {os.path.splitext(input_path)[1]}")
-                    }
+                    # 其他文件类型，读取文件内容并使用 LLM 解释
+                    try:
+                        # 使用 file_inspector 读取文件元数据和内容
+                        from ..core.file_inspector import FileInspector
+                        import os
+                        
+                        # 获取上传目录
+                        upload_dir = os.getenv("UPLOAD_DIR", "/app/uploads")
+                        file_inspector = FileInspector(upload_dir)
+                        
+                        # 获取文件元数据
+                        file_name = os.path.basename(input_path)
+                        metadata = file_inspector.generate_metadata(file_name)
+                        
+                        # 读取文件前几行作为内容预览
+                        file_path_obj = Path(input_path)
+                        if not file_path_obj.is_absolute():
+                            file_path_obj = Path(upload_dir) / file_name
+                        
+                        file_summary = f"文件路径: {input_path}\n文件类型: {os.path.splitext(input_path)[1]}\n"
+                        
+                        if metadata:
+                            file_summary += f"文件大小: {metadata.get('size_mb', 'unknown')} MB\n"
+                            if metadata.get('estimated_cells'):
+                                file_summary += f"估算细胞数: {metadata.get('estimated_cells')}\n"
+                            if metadata.get('estimated_genes'):
+                                file_summary += f"估算基因数: {metadata.get('estimated_genes')}\n"
+                        
+                        # 读取文件前几行
+                        try:
+                            if file_path_obj.exists() and file_path_obj.is_file():
+                                head_lines = file_inspector._read_head(file_path_obj, 10)
+                                if head_lines:
+                                    file_summary += f"\n文件内容预览（前10行）：\n"
+                                    for i, line in enumerate(head_lines[:10], 1):
+                                        file_summary += f"{i}: {line[:200]}\n"  # 限制每行长度
+                        except Exception as e:
+                            logger.warning(f"⚠️ 读取文件内容失败: {e}")
+                            file_summary += "\n（无法读取文件内容）\n"
+                        
+                        # 使用 LLM 生成文件解释
+                        explanation = await self._explain_file_with_llm(query, file_summary, input_path)
+                        return {
+                            "type": "chat",
+                            "response": self._stream_string_response(explanation)
+                        }
+                    except Exception as e:
+                        logger.error(f"❌ 文件解释失败: {e}", exc_info=True)
+                        # 回退到基本信息
+                        return {
+                            "type": "chat",
+                            "response": self._stream_string_response(f"文件路径: {input_path}\n文件类型: {os.path.splitext(input_path)[1]}\n\n（文件内容读取失败，请检查文件格式）")
+                        }
             except Exception as e:
                 logger.error(f"❌ 文件解释失败: {e}", exc_info=True)
                 return {

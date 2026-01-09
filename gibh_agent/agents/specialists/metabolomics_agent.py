@@ -87,8 +87,14 @@ class MetabolomicsAgent(BaseAgent):
                     "response": self._stream_string_response("没有检测到上传的文件。请先上传文件后再询问。")
                 }
             
-            # 检查第一个文件
-            input_path = file_paths[0]
+            # 🔧 修复：优先使用最新上传的文件（列表最后一个），而不是第一个
+            # 检查最新上传的文件
+            input_path = file_paths[-1] if file_paths else None
+            if not input_path:
+                return {
+                    "type": "chat",
+                    "response": self._stream_string_response("没有检测到上传的文件。请先上传文件后再询问。")
+                }
             try:
                 inspection_result = self.metabolomics_tool.inspect_data(input_path)
                 if "error" in inspection_result:
@@ -720,7 +726,9 @@ Return JSON only:
     
     async def _peek_data_lightweight(self, file_path: str) -> Dict[str, Any]:
         """
-        轻量级数据预览（只读前10行，不加载完整数据）
+        轻量级数据预览（使用 FileInspector）
+        
+        🔧 升级：委托给 FileInspector，获得准确的统计信息
         
         Args:
             file_path: 文件路径
@@ -728,46 +736,57 @@ Return JSON only:
         Returns:
             包含基本信息的字典（样本数、列数、数值范围等）
         """
-        import pandas as pd
-        import numpy as np
-        import os
-        
         try:
-            # 只读前10行
-            df_peek = pd.read_csv(file_path, nrows=10)
+            # 🔧 使用 FileInspector（Universal Eyes）
+            from ...core.file_inspector import FileInspector
+            upload_dir = os.getenv("UPLOAD_DIR", "/app/uploads")
+            inspector = FileInspector(upload_dir)
             
-            # 获取文件总行数（不加载数据）
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                total_lines = sum(1 for _ in f) - 1  # 减去表头
+            # 使用通用检查器
+            result = inspector.inspect_file(file_path)
             
-            # 识别列类型
-            numeric_cols = df_peek.select_dtypes(include=[np.number]).columns.tolist()
-            metadata_cols = [col for col in df_peek.columns if col not in numeric_cols]
-            
-            # 计算数值范围（基于前10行）
-            numeric_stats = {}
-            if len(numeric_cols) > 0:
-                numeric_data = df_peek[numeric_cols]
-                numeric_stats = {
-                    "min": float(numeric_data.min().min()),
-                    "max": float(numeric_data.max().max()),
-                    "mean": float(numeric_data.mean().mean()),
-                    "has_negative": bool((numeric_data < 0).any().any()),
-                    "has_large_values": bool((numeric_data.abs() > 1000).any().any())
+            if result.get("status") == "success" and result.get("file_type") == "tabular":
+                # 转换为兼容格式
+                summary = result.get("data", {}).get("summary", {})
+                data_range = result.get("data_range", {})
+                
+                # 构建兼容格式
+                peek_result = {
+                    "n_samples": summary.get("n_samples", "N/A"),
+                    "n_metabolites": summary.get("n_features", 0),
+                    "n_metadata_cols": result.get("n_metadata_cols", 0),
+                    "metadata_columns": result.get("metadata_columns", []),
+                    "data_range": data_range,  # 🔧 添加数据范围（用于 Log2 判断）
+                    "missing_rate": summary.get("missing_rate", 0),
+                    "numeric_stats": {
+                        "min": data_range.get("min", 0),
+                        "max": data_range.get("max", 0),
+                        "mean": data_range.get("mean", 0),
+                        "median": data_range.get("median", 0),
+                        "has_large_values": data_range.get("max", 0) > 1000 if isinstance(data_range.get("max"), (int, float)) else False,
+                        "has_negative": data_range.get("min", 0) < 0 if isinstance(data_range.get("min"), (int, float)) else False
+                    },
+                    "is_sampled": summary.get("is_sampled", False),
+                    "file_path": file_path
                 }
-            
-            return {
-                "n_samples": total_lines,
-                "n_metabolites": len(numeric_cols),
-                "n_metadata_cols": len(metadata_cols),
-                "metadata_columns": metadata_cols[:5],  # 只返回前5个
-                "numeric_stats": numeric_stats,
-                "preview_rows": 10,
-                "file_path": file_path
-            }
+                
+                return peek_result
+            else:
+                # 检查失败
+                logger.warning(f"⚠️ File inspection failed: {result.get('error', 'Unknown error')}")
+                return {
+                    "error": result.get("error", "File inspection failed"),
+                    "n_samples": "N/A",
+                    "n_metabolites": 0
+                }
+                
         except Exception as e:
-            logger.error(f"❌ 轻量级预览失败: {e}", exc_info=True)
-            return {"error": str(e)}
+            logger.error(f"❌ Error in _peek_data_lightweight: {e}", exc_info=True)
+            return {
+                "error": str(e),
+                "n_samples": "N/A",
+                "n_metabolites": 0
+            }
     
     async def _generate_parameter_recommendations(
         self,
@@ -797,11 +816,28 @@ Return JSON only:
 - 数值范围: {peek_result.get('numeric_stats', {})}
 """
             
-            prompt = f"""基于数据预览结果，生成参数推荐。
+            # 🔧 升级：只传递统计信息，不传递原始数据行
+            summary = peek_result.get("data", {}).get("summary", {})
+            data_range = peek_result.get("data_range", {})
+            
+            stats_summary = f"""
+数据统计信息（基于完整文件或大文件采样）：
+- 样本数: {summary.get('n_samples', 'N/A')}
+- 特征数: {summary.get('n_features', 'N/A')}
+- 缺失率: {summary.get('missing_rate', 0):.2f}%
+- 数据范围:
+  * 最小值: {data_range.get('min', 'N/A')}
+  * 最大值: {data_range.get('max', 'N/A')}
+  * 平均值: {data_range.get('mean', 'N/A'):.2f if isinstance(data_range.get('mean'), (int, float)) else 'N/A'}
+  * 中位数: {data_range.get('median', 'N/A'):.2f if isinstance(data_range.get('median'), (int, float)) else 'N/A'}
+- 是否采样: {summary.get('is_sampled', False)}
+"""
+            
+            prompt = f"""基于数据统计信息，生成参数推荐。
 
 用户查询: {query}
 
-{preview_summary}
+{stats_summary}
 
 请分析数据特征并推荐合适的参数。返回 JSON 格式：
 {{
@@ -814,11 +850,14 @@ Return JSON only:
     }}
 }}
 
-重要：
-- 如果数值范围很大（max > 1000），推荐 "log2"
-- 如果数值范围较小且已标准化，推荐 "none" 或 "zscore"
-- 如果数据包含负值，不推荐 "log2"
-- 根据样本数推荐 n_components（通常为 min(10, 样本数/2)）
+重要判断规则：
+- **Log2 变换判断**：如果最大值 > 1000 且最小值 >= 0，推荐 "log2"（数据跨度大，需要对数变换）
+- **Z-score 标准化**：如果数据已标准化（均值接近0，标准差接近1）或包含负值，推荐 "zscore"
+- **缺失值阈值**：根据缺失率推荐，如果缺失率 > 50%，推荐更高的阈值（如 0.7）
+- **PCA 主成分数**：根据样本数推荐，通常为 min(10, 样本数/2)
+- **缩放（Scale）**：如果数据范围差异大，推荐 true
+
+注意：只基于统计信息（最大值、最小值、缺失率等）进行推荐，不查看原始数据行。
 """
             
             messages = [
@@ -945,17 +984,21 @@ Return JSON only:
                 elif tool_id == "pca_analysis":
                     pca_result = step_result.get("data", {})
             
-            # 构建结果摘要
+            # 🔧 修复：构建结果摘要（修复字段名不匹配问题）
+            # 差异分析：工具返回 n_significant 和 n_total，不是 significant_count 和 total_count
+            # PCA：工具返回 explained_variance 在顶层，不在 data.summary 中
             results_summary = {
                 "workflow_name": workflow_config.get("workflow_name", "Metabolomics Analysis"),
                 "steps_completed": len(steps_details),
                 "inspection": inspection_result.get("summary", {}) if inspection_result else None,
                 "differential_analysis": {
-                    "significant_metabolites": differential_result.get("summary", {}).get("significant_count", "N/A") if differential_result else "N/A",
-                    "total_metabolites": differential_result.get("summary", {}).get("total_count", "N/A") if differential_result else "N/A"
+                    "significant_metabolites": differential_result.get("summary", {}).get("n_significant", "N/A") if differential_result else "N/A",
+                    "total_metabolites": differential_result.get("summary", {}).get("n_total", "N/A") if differential_result else "N/A"
                 } if differential_result else None,
                 "pca": {
-                    "variance_explained": pca_result.get("summary", {}).get("variance_explained", "N/A") if pca_result else "N/A"
+                    # 🔧 修复：PCA 结果在 step_result.data 中，但 explained_variance 在顶层的 result 中
+                    # 需要从步骤详情中获取完整的 result
+                    "variance_explained": self._extract_pca_variance_explained(steps_details) if pca_result else "N/A"
                 } if pca_result else None
             }
             
@@ -990,6 +1033,34 @@ Return JSON only:
         except Exception as e:
             logger.error(f"❌ 生成最终诊断失败: {e}", exc_info=True)
             return None
+    
+    def _extract_pca_variance_explained(self, steps_details: List[Dict[str, Any]]) -> str:
+        """
+        从步骤详情中提取 PCA 解释方差
+        
+        Args:
+            steps_details: 步骤详情列表
+        
+        Returns:
+            解释方差字符串，格式如 "PC1: 45.23%, PC2: 12.56%"
+        """
+        for step_detail in steps_details:
+            if step_detail.get("tool_id") == "pca_analysis":
+                step_result = step_detail.get("step_result", {})
+                # 优先从 _full_result 中获取
+                full_result = step_result.get("_full_result", {})
+                if full_result and "explained_variance" in full_result:
+                    pc1_var = full_result["explained_variance"].get("PC1", 0) * 100
+                    pc2_var = full_result["explained_variance"].get("PC2", 0) * 100
+                    return f"PC1: {pc1_var:.2f}%, PC2: {pc2_var:.2f}%"
+                # 如果没有，尝试从 data.tables.variance_table 中提取
+                elif step_result.get("data", {}).get("tables", {}).get("variance_table"):
+                    variance_table = step_result["data"]["tables"]["variance_table"]
+                    if variance_table and len(variance_table) > 0:
+                        pc1_var = variance_table[0].get("解释方差", variance_table[0].get("Explained Variance", "N/A"))
+                        pc2_var = variance_table[1].get("解释方差", variance_table[1].get("Explained Variance", "N/A")) if len(variance_table) > 1 else "N/A"
+                        return f"PC1: {pc1_var}, PC2: {pc2_var}"
+        return "N/A"
     
     async def _stream_chat_response(
         self,
@@ -1216,11 +1287,15 @@ You have access to:
                         n_components=int(params.get("n_components", "10")),
                         file_path=preprocessed_file or params.get("file_path", input_path)
                     )
+                    # 🔧 修复：保存完整的 PCA 结果，以便后续提取 variance_explained
+                    if result.get("status") == "success":
+                        self.metabolomics_tool._last_pca_result = result
                     step_result = {
                         "step_name": step.get("desc", step_id),
                         "status": result.get("status", "success"),
                         "logs": result.get("message", "PCA 分析完成"),
-                        "data": result.get("data", {})  # 包含 preview 和 tables
+                        "data": result.get("data", {}),  # 包含 preview 和 tables
+                        "_full_result": result  # 🔧 修复：保存完整结果以便后续提取
                     }
                     steps_details.append({
                         "step_id": step_id,

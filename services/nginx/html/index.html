@@ -645,16 +645,20 @@
         async function uploadPendingFiles() {
             if (pendingFiles.length === 0) return [];
             
+            console.log('📤 开始上传文件，待上传文件数:', pendingFiles.length);
             const formData = new FormData();
             pendingFiles.forEach(file => {
                 formData.append('files', file); // 使用 'files' (复数) 匹配后端 List[UploadFile]
+                console.log('  - 添加文件到 FormData:', file.name);
             });
             
             try {
+                console.log('📡 发送上传请求到 /api/upload');
                 const res = await fetch('/api/upload', {
                     method: 'POST',
                     body: formData
                 });
+                console.log('📥 收到上传响应，状态码:', res.status);
                 
                 if (!res.ok) {
                     const errorText = await res.text();
@@ -676,6 +680,7 @@
                 }
                 
                 const data = await res.json();
+                console.log('📦 上传响应数据:', data);
                 
                 if (data.status !== 'success') {
                     throw new Error(data.message || data.error || '文件上传失败');
@@ -683,6 +688,7 @@
                 
                 // 处理返回的文件路径
                 const uploadedFilePaths = [];
+                console.log('📁 处理返回的文件路径，file_paths:', data.file_paths);
                 
                 if (data.file_paths && Array.isArray(data.file_paths)) {
                     // 使用 file_paths 数组（新格式）
@@ -745,6 +751,7 @@
                 pendingFiles = [];
                 renderPendingFileChips();
                 
+                console.log('✅ 文件上传成功，返回文件路径:', uploadedFilePaths);
                 return uploadedFilePaths;
                 
             } catch (e) {
@@ -785,17 +792,23 @@
             // 🔥 Step 1: 如果有待上传文件，先上传
             let newlyUploadedFiles = [];
             if (pendingFiles.length > 0) {
+                console.log('📤 检测到待上传文件，开始上传...');
                 try {
                     newlyUploadedFiles = await uploadPendingFiles();
+                    console.log('✅ 文件上传完成，新上传文件数:', newlyUploadedFiles.length);
                     // 将新上传的文件添加到 uploadedFiles 数组
                     uploadedFiles.push(...newlyUploadedFiles);
+                    console.log('📋 当前 uploadedFiles 总数:', uploadedFiles.length);
                 } catch (e) {
+                    console.error('❌ 文件上传失败:', e);
                     toggleLoadingState(false);
                     const errorMsg = e.message || String(e);
                     alert(`文件上传失败: ${errorMsg}`);
                     appendMessage('assistant', `❌ 错误: ${errorMsg}`);
                     return; // 上传失败，停止后续处理
                 }
+            } else {
+                console.log('ℹ️ 没有待上传文件，使用已上传的文件:', uploadedFiles.length);
             }
             
             // 显示用户消息
@@ -833,6 +846,7 @@
             abortController = new AbortController();
 
             // 🔥 Step 2: 发送聊天请求（包含已上传的文件）
+            console.log('💬 准备发送聊天请求，uploaded_files:', uploadedFiles);
             const payload = { 
                 message: text, 
                 history: chatHistory, 
@@ -842,6 +856,7 @@
                 workflow_data: workflowData,
                 use_history_files: useHistoryFiles
             };
+            console.log('📤 发送聊天请求，payload:', JSON.stringify(payload, null, 2));
             
             try {
                 const res = await fetch('/api/chat', { 
@@ -1023,7 +1038,7 @@
                         // 找到最后一个可能的开始标签位置
                         const lastThinkPos = processChunk.lastIndexOf('<think');
                         const lastRedactedPos = processChunk.lastIndexOf('<redacted_reasoning');
-                        const lastPos = Math.max(lastThinkPos, lastRedactedPos);
+                        const lastPos = Math.max(lastThinkPos >= 0 ? lastThinkPos : -1, lastRedactedPos >= 0 ? lastRedactedPos : -1);
                         if (lastPos >= 0) {
                             pendingChunk = processChunk.substring(lastPos);
                             // 从当前处理的内容中移除这部分
@@ -1430,6 +1445,14 @@
             const steps = workflowData.steps || [];
             const filePaths = data.file_paths || [];
             const recommendation = data.recommendation || null;
+            const diagnosisReport = data.diagnosis_report || null;
+            
+            console.log('📋 [DEBUG] renderWorkflowForm:', {
+                hasRecommendation: !!recommendation,
+                hasDiagnosisReport: !!diagnosisReport,
+                recommendation: recommendation,
+                diagnosisReport: diagnosisReport ? diagnosisReport.substring(0, 100) + '...' : null
+            });
             
             if (!steps || steps.length === 0) {
                 appendMessage('ai', '❌ 工作流配置无效：没有找到步骤', null, null);
@@ -1440,23 +1463,41 @@
             let formHtml = `<div class="params-form" id="${formId}">
                 <h5>📋 ${workflowName}</h5>`;
             
-            // 🔥 Task 2: 渲染 AI 推荐卡片
-            if (recommendation) {
+            // 🔧 修复：渲染诊断报告（如果有，优先显示）
+            if (diagnosisReport) {
+                formHtml += `<div class="alert alert-success mb-3" style="background-color: #f0f7ff; border-left: 4px solid #4d6bfe; padding: 15px; border-radius: 4px;">
+                    <h6 style="margin-top: 0; color: #1976D2; margin-bottom: 10px;">
+                        <i class="bi bi-clipboard-check"></i> 数据诊断与参数推荐报告
+                    </h6>
+                    <div style="font-size: 14px; line-height: 1.6; color: #333;">
+                        ${marked.parse(diagnosisReport)}
+                    </div>
+                </div>`;
+            }
+            
+            // 🔥 Task 2: 渲染 AI 推荐卡片（如果没有诊断报告，显示推荐）
+            if (recommendation && !diagnosisReport) {
                 const summary = recommendation.summary || 'AI 已分析数据特征并生成参数推荐';
                 const params = recommendation.params || {};
                 
-                formHtml += `<div class="alert alert-info mb-3" style="background-color: #e7f3ff; border-left: 4px solid #2196F3; padding: 12px;">
-                    <h6 style="margin-top: 0; color: #1976D2;"><i class="bi bi-lightbulb"></i> AI 推荐与推理</h6>
-                    <p style="margin-bottom: 8px;"><strong>数据摘要：</strong>${summary}</p>`;
+                formHtml += `<div class="alert alert-info mb-3" style="background-color: #e7f3ff; border-left: 4px solid #2196F3; padding: 12px; border-radius: 4px;">
+                    <h6 style="margin-top: 0; color: #1976D2; margin-bottom: 10px;">
+                        <i class="bi bi-lightbulb"></i> AI 推荐与推理
+                    </h6>
+                    <p style="margin-bottom: 8px; font-size: 14px;"><strong>数据摘要：</strong>${summary}</p>`;
                 
                 // 显示关键参数推荐
                 if (Object.keys(params).length > 0) {
-                    formHtml += `<div style="margin-top: 10px;"><strong>参数推荐：</strong><ul style="margin-bottom: 0;">`;
+                    formHtml += `<div style="margin-top: 10px;"><strong style="font-size: 14px;">参数推荐：</strong><ul style="margin-bottom: 0; font-size: 13px;">`;
                     for (const [paramName, paramRec] of Object.entries(params)) {
                         if (paramRec && paramRec.value !== undefined) {
                             const displayName = paramName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                             const reason = paramRec.reason || '基于数据特征推荐';
-                            formHtml += `<li style="margin-bottom: 4px;"><strong>${displayName}:</strong> <code>${paramRec.value}</code> - ${reason}</li>`;
+                            formHtml += `<li style="margin-bottom: 6px;">
+                                <strong>${displayName}:</strong> 
+                                <code style="background-color: #fff3cd; padding: 2px 6px; border-radius: 3px; font-size: 12px;">${paramRec.value}</code> 
+                                <span style="color: #666; font-size: 12px;">- ${reason}</span>
+                            </li>`;
                         }
                     }
                     formHtml += `</ul></div>`;

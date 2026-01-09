@@ -159,101 +159,85 @@ class MetabolomicsTool:
         """
         检查代谢组学数据文件，返回数据摘要
         
+        🔧 重构：委托给 FileInspector（Universal Eyes）
+        不再重复实现检查逻辑，统一使用核心检查器
+        
         Args:
             file_path: CSV 文件路径
         
         Returns:
-            包含数据摘要的字典
+            包含数据摘要的字典（兼容原有格式）
         """
-        logger.info(f"🔍 [CHECKPOINT] inspect_data START")
+        logger.info(f"🔍 [CHECKPOINT] inspect_data START (Delegating to FileInspector)")
         logger.info(f"   File path: {file_path}")
-        logger.info(f"   File exists? {os.path.exists(file_path)}")
-        if os.path.exists(file_path):
-            logger.info(f"   File size: {os.path.getsize(file_path)} bytes")
         
         try:
-            logger.info(f"📖 正在检查数据文件: {file_path}")
+            # 🔧 委托给 FileInspector
+            from ..core.file_inspector import FileInspector
+            upload_dir = os.getenv("UPLOAD_DIR", "/app/uploads")
+            inspector = FileInspector(upload_dir)
             
-            # 读取 CSV 文件
-            logger.info(f"   Attempting to read CSV file...")
-            df = pd.read_csv(file_path)
-            logger.info(f"   ✅ CSV file read successfully: {len(df)} rows, {len(df.columns)} columns")
+            # 使用通用检查器
+            result = inspector.inspect_file(file_path)
             
-            # 识别元数据列（通常是前几列，如 Patient ID, Group 等）
-            # 假设第一列是样本ID，第二列是分组信息
-            metadata_cols = []
-            metabolite_cols = []
-            
-            for col in df.columns:
-                # 检查是否是数值列（代谢物数据）
-                if pd.api.types.is_numeric_dtype(df[col]):
-                    metabolite_cols.append(col)
-                else:
-                    metadata_cols.append(col)
-            
-            # 基本信息
-            n_samples = len(df)
-            n_metabolites = len(metabolite_cols)
-            
-            # 检查缺失值
-            missing_counts = df[metabolite_cols].isnull().sum()
-            total_missing = missing_counts.sum()
-            missing_percentage = (total_missing / (n_samples * n_metabolites)) * 100 if n_metabolites > 0 else 0
-            
-            # 检查分组信息（如果有）
-            group_info = {}
-            if len(metadata_cols) > 1:
-                group_col = metadata_cols[1]  # 假设第二列是分组
-                if group_col in df.columns:
-                    group_counts = df[group_col].value_counts().to_dict()
+            if result.get("status") == "success" and result.get("file_type") == "tabular":
+                # 转换为代谢组学工具期望的格式（保持兼容性）
+                summary = result.get("data", {}).get("summary", {})
+                data_range = result.get("data_range", {})
+                potential_groups = result.get("potential_groups", {})
+                
+                # 提取分组信息（如果有）
+                group_info = {}
+                if potential_groups:
+                    # 使用第一个潜在分组列
+                    first_group_col = list(potential_groups.keys())[0]
                     group_info = {
-                        "column": group_col,
-                        "groups": group_counts,
-                        "n_groups": len(group_counts)
+                        "column": first_group_col,
+                        "groups": {str(v): 0 for v in potential_groups[first_group_col]["values"]},
+                        "n_groups": potential_groups[first_group_col]["n_unique"]
                     }
-            
-            # 数据范围
-            metabolite_data = df[metabolite_cols]
-            data_stats = {
-                "min": float(metabolite_data.min().min()),
-                "max": float(metabolite_data.max().max()),
-                "mean": float(metabolite_data.mean().mean()),
-                "median": float(metabolite_data.median().median()),
-            }
-            
-            # 预览前5行（前端表格显示）
-            preview = df.head(5).to_dict('records')
-            
-            result = {
-                "status": "success",
-                "file_path": file_path,
-                "n_samples": n_samples,
-                "n_metabolites": n_metabolites,
-                "metadata_columns": metadata_cols,
-                "metabolite_columns": metabolite_cols[:10],  # 只显示前10个
-                "total_metabolite_columns": len(metabolite_cols),
-                "missing_values": {
-                    "total": int(total_missing),
-                    "percentage": round(missing_percentage, 2)
-                },
-                "group_info": group_info,
-                "data_statistics": data_stats,
-                # 前端可用的数据
-                "data": {
-                    "preview": preview,  # 前5行数据，用于前端表格显示
-                    "summary": {
-                        "n_samples": n_samples,
-                        "n_metabolites": n_metabolites,
-                        "missing_percentage": round(missing_percentage, 2),
-                        "group_info": group_info
+                
+                # 构建兼容格式的结果
+                compatible_result = {
+                    "status": "success",
+                    "file_path": file_path,
+                    "n_samples": summary.get("n_samples", "N/A"),
+                    "n_metabolites": summary.get("n_features", 0),
+                    "metadata_columns": result.get("metadata_columns", []),
+                    "metabolite_columns": result.get("feature_columns", [])[:10],
+                    "total_metabolite_columns": result.get("total_feature_columns", 0),
+                    "missing_values": {
+                        "total": 0,  # 不提供具体数值，只提供百分比
+                        "percentage": summary.get("missing_rate", 0)
+                    },
+                    "group_info": group_info,
+                    "data_statistics": {
+                        "min": data_range.get("min", 0),
+                        "max": data_range.get("max", 0),
+                        "mean": data_range.get("mean", 0),
+                        "median": data_range.get("median", 0)
+                    },
+                    # 前端可用的数据
+                    "data": {
+                        "summary": {
+                            "n_samples": summary.get("n_samples", "N/A"),
+                            "n_metabolites": summary.get("n_features", 0),
+                            "missing_percentage": summary.get("missing_rate", 0),
+                            "group_info": group_info,
+                            "data_range": data_range,
+                            "is_sampled": summary.get("is_sampled", False)
+                        }
                     }
                 }
-            }
-            
-            logger.info(f"✅ 数据检查完成: {n_samples} 个样本, {n_metabolites} 个代谢物")
-            logger.info(f"✅ [CHECKPOINT] inspect_data SUCCESS")
-            return result
-            
+                
+                logger.info(f"✅ [CHECKPOINT] inspect_data SUCCESS (via FileInspector)")
+                logger.info(f"   Samples: {summary.get('n_samples')}, Features: {summary.get('n_features')}, Missing: {summary.get('missing_rate', 0):.2f}%")
+                return compatible_result
+            else:
+                # 检查失败或非表格文件
+                logger.error(f"❌ [CHECKPOINT] inspect_data FAILED: {result.get('error', 'Unknown error')}")
+                return result
+                
         except Exception as e:
             import traceback
             error_traceback = traceback.format_exc()

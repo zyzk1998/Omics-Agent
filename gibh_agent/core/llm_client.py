@@ -389,8 +389,8 @@ class LLMClientFactory:
         if api_key is None:
             api_key = os.getenv("SILICONFLOW_API_KEY", "")
         if model is None:
-            # 默认使用 DeepSeek-V3.2，可通过环境变量 SILICONFLOW_MODEL 覆盖
-            model = os.getenv("SILICONFLOW_MODEL", "Pro/deepseek-ai/DeepSeek-V3.2")
+            # 默认使用 DeepSeek-R1（支持思考过程流式输出），可通过环境变量 SILICONFLOW_MODEL 覆盖
+            model = os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-R1")
         return LLMClient(
             base_url="https://api.siliconflow.cn/v1",
             api_key=api_key,

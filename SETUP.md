@@ -30,8 +30,8 @@ export LLM_VL_MODEL="qwen3-vl"
 
 # 云端 LLM（可选）
 export SILICONFLOW_API_KEY="sk-xgwvrxknbzbewlhkvlwenngtoppluiceipbglpgshyaxgjqc"
-# 可选：自定义模型名称（默认: Pro/deepseek-ai/DeepSeek-V3.2）
-# export SILICONFLOW_MODEL="Pro/deepseek-ai/DeepSeek-V3.2"  # 推荐使用 V3.2
+# 可选：自定义模型名称（默认: deepseek-ai/DeepSeek-R1）
+# export SILICONFLOW_MODEL="deepseek-ai/DeepSeek-R1"  # 推荐使用 R1（支持思考过程流式输出）
 
 # 路径配置
 export UPLOAD_DIR="/app/uploads"

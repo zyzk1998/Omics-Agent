@@ -160,8 +160,24 @@ class RouterAgent(BaseAgent):
             # 代谢组文件扩展名
             metabolomics_extensions = {'.csv', '.txt', '.xlsx', '.xls', '.tsv'}
             
+            # 🔧 修复：优先使用最新上传的文件（列表最后一个）
             # 检查是否有 RNA 文件
             if file_extensions & rna_extensions:
+                # 如果同时有 RNA 和代谢组文件，优先使用最新上传的文件（最后一个）
+                if file_extensions & metabolomics_extensions:
+                    # 检查最后一个文件的扩展名
+                    last_file_path = file_paths[-1] if file_paths else ""
+                    last_ext = os.path.splitext(last_file_path)[1].lower()
+                    if last_ext in metabolomics_extensions:
+                        logger.info(f"✅ 文件优先路由: 检测到最新文件是代谢组文件 {last_ext} → metabolomics_agent")
+                        return {
+                            "modality": "metabolomics",
+                            "intent": self._detect_intent(query) if query else "analysis",
+                            "confidence": 0.95,
+                            "routing": "metabolomics_agent",
+                            "reasoning": f"Latest file extension-based routing: {last_ext}"
+                        }
+                
                 logger.info(f"✅ 文件优先路由: 检测到 RNA 文件扩展名 {file_extensions & rna_extensions} → rna_agent")
                 return {
                     "modality": "transcriptomics",

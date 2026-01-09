@@ -10,7 +10,7 @@ from openai import OpenAI
 def test_api_config():
     """测试 API 配置"""
     api_key = os.getenv('SILICONFLOW_API_KEY', '')
-    model_name = 'Pro/deepseek-ai/DeepSeek-V3.2'
+    model_name = os.getenv('SILICONFLOW_MODEL', 'deepseek-ai/DeepSeek-R1')
     
     print("=" * 60)
     print("API 配置测试")
@@ -59,6 +59,7 @@ def test_api_config():
             print()
             print("💡 提示: 模型名称可能不正确")
             print("   请检查模型名称是否正确，或尝试其他模型:")
+            print("   - deepseek-ai/DeepSeek-R1（推荐，支持思考过程流式输出）")
             print("   - Pro/deepseek-ai/DeepSeek-V3.2")
             print("   - deepseek-ai/DeepSeek-V2.5")
             print("   - deepseek-ai/DeepSeek-V3")
