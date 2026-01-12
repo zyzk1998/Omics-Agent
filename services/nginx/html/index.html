@@ -611,12 +611,12 @@
             renderPendingFileChips();
             
             // 清空文件输入框（允许重新选择相同文件）
-            document.getElementById('fileInput').value = '';
+            document.getElementById('fileInput').value = ''; 
             
             // 更新发送按钮状态
             checkInput();
         }
-        
+
         // 🔥 渲染待上传文件的 chips（Staging UI）
         function renderPendingFileChips() {
             filePreviewArea.innerHTML = '';
@@ -759,7 +759,7 @@
                 throw new Error(`文件上传失败: ${errorMsg}`);
             }
         }
-        
+
         // 保留旧的 renderFileTags 和 removeFile 用于已上传文件的显示（向后兼容）
         function renderFileTags() {
             filePreviewArea.innerHTML = '';
@@ -827,7 +827,7 @@
                 userInput.style.height = '24px'; 
                 checkInput();
             }
-
+            
             const aiMessageDiv = appendMessage('ai', '<span class="spinner-border spinner-border-sm text-primary" role="status"></span><span style="margin-left:8px; color:#666;">思考中...</span>', null, null, true);
             const aiContentDiv = aiMessageDiv; 
             
@@ -962,8 +962,8 @@
                     if (done) break;
                     
                     const chunk = decoder.decode(value, { stream: true });
-                    fullText += chunk;
-                    
+                    fullText += chunk; 
+
                     // 合并待处理的 chunk
                     const processChunk = pendingChunk + chunk;
                     pendingChunk = "";
@@ -1017,7 +1017,7 @@
                         let cleanChunk = processChunk.replace(/<think>/g, '').replace(/<think>/g, '');
                         thoughtBuffer += cleanChunk;
                         const thoughtDiv = aiContentDiv.querySelector('.thought-content');
-                        if(thoughtDiv) thoughtDiv.innerText = thoughtBuffer;
+                        if(thoughtDiv) thoughtDiv.innerText = thoughtBuffer; 
                     } else {
                         // 处理正文内容
                         if (!hasThoughtBlock) {
@@ -1305,7 +1305,7 @@
                         }
                         
                         // 如果该步骤的图已经被作为 Key Plot 展示了，这里就不重复展示大图
-                        const isKeyPlot = keyStep && keyStep.name === step.name;
+                    const isKeyPlot = keyStep && keyStep.name === step.name;
                         if (isKeyPlot) {
                             contentHtml += `<div class="mt-2 small text-muted"><i class="bi bi-image"></i> 图片已在下方"最终结果"区域展示</div>`;
                         } else {

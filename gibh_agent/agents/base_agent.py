@@ -7,7 +7,8 @@ from typing import Dict, Any, Optional, List, AsyncIterator
 import logging
 from openai import AuthenticationError, APIError
 from ..core.llm_client import LLMClient
-from ..core.prompt_manager import PromptManager
+from ..core.prompt_manager import PromptManager, DATA_DIAGNOSIS_PROMPT
+from ..core.data_diagnostician import DataDiagnostician
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,8 @@ class BaseAgent(ABC):
         self.llm_client = llm_client
         self.prompt_manager = prompt_manager
         self.expert_role = expert_role
+        self.diagnostician = DataDiagnostician()
+        self.context: Dict[str, Any] = {}  # 上下文存储（用于存储诊断报告等）
     
     @abstractmethod
     async def process_query(
@@ -145,25 +148,49 @@ class BaseAgent(ABC):
     
     def get_file_paths(self, uploaded_files: List[Dict[str, str]]) -> List[str]:
         """
-        从上传文件列表中提取文件路径
+        从上传文件列表中提取文件路径，并转换为绝对路径
         
         核心原则：智能体只处理文件路径（字符串），不处理二进制数据
+        **关键修复**：确保返回绝对路径，避免 "File Not Found" 错误
         
         Args:
-            uploaded_files: 文件列表
+            uploaded_files: 文件列表（可能包含相对路径或 file_id）
         
         Returns:
-            文件路径列表
+            绝对文件路径列表
         """
+        import os
+        from pathlib import Path
+        
+        # 获取上传目录（与 server.py 保持一致）
+        upload_dir = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
+        
         paths = []
         for file_info in uploaded_files:
             if isinstance(file_info, dict):
-                path = file_info.get("path") or file_info.get("name")
+                path = file_info.get("path") or file_info.get("name") or file_info.get("file_path") or file_info.get("file_id")
             else:
-                path = getattr(file_info, "path", None) or getattr(file_info, "name", None)
+                path = getattr(file_info, "path", None) or getattr(file_info, "name", None) or getattr(file_info, "file_path", None) or getattr(file_info, "file_id", None)
             
-            if path:
-                paths.append(path)
+            if not path:
+                continue
+            
+            # 🔥 修复：转换为绝对路径
+            path_obj = Path(path)
+            
+            # 如果已经是绝对路径，直接使用
+            if path_obj.is_absolute():
+                absolute_path = str(path_obj.resolve())
+            else:
+                # 如果是相对路径，拼接 UPLOAD_DIR
+                absolute_path = str((upload_dir / path_obj).resolve())
+            
+            # 验证路径是否存在（如果不存在，记录警告但继续处理，让调用方处理错误）
+            if not os.path.exists(absolute_path):
+                logger.warning(f"⚠️ 文件路径不存在: {absolute_path} (原始路径: {path})")
+                # 仍然添加到列表，让调用方处理（可能文件稍后会被创建）
+            
+            paths.append(absolute_path)
         
         return paths
     
@@ -218,4 +245,217 @@ class BaseAgent(ABC):
                 return file_type
         
         return "unknown"
+    
+    async def _perform_data_diagnosis(
+        self,
+        file_metadata: Dict[str, Any],
+        omics_type: str,
+        dataframe: Optional[Any] = None
+    ) -> Optional[str]:
+        """
+        执行数据诊断并生成 Markdown 报告
+        
+        这是统一的数据诊断入口，所有 Agent 都应该调用此方法。
+        
+        Args:
+            file_metadata: FileInspector 返回的文件元数据
+            omics_type: 组学类型（"scRNA", "Metabolomics", "BulkRNA", "default"）
+            dataframe: 可选的数据预览（DataFrame 或 AnnData）
+        
+        Returns:
+            Markdown 格式的诊断报告，如果失败返回 None
+        """
+        try:
+            logger.info(f"🔍 [DataDiagnostician] 开始数据诊断 - 组学类型: {omics_type}")
+            
+            # Step 1: 使用 DataDiagnostician 计算统计事实
+            diagnosis_result = self.diagnostician.analyze(
+                file_metadata=file_metadata,
+                omics_type=omics_type,
+                dataframe=dataframe
+            )
+            
+            if diagnosis_result.get("status") != "success":
+                logger.warning(f"⚠️ 数据诊断失败: {diagnosis_result.get('error')}")
+                return None
+            
+            stats = diagnosis_result.get("stats", {})
+            logger.info(f"✅ [DataDiagnostician] 统计计算完成: {len(stats)} 个指标")
+            
+            # Step 2: 构建 LLM Prompt
+            # 将统计事实格式化为 JSON 字符串
+            import json
+            try:
+                stats_json = json.dumps(stats, ensure_ascii=False, indent=2)
+                logger.debug(f"📝 [DEBUG] Stats JSON length: {len(stats_json)}")
+            except Exception as json_err:
+                logger.error(f"❌ [DataDiagnostician] JSON 序列化失败: {json_err}")
+                stats_json = json.dumps({"error": "无法序列化统计信息"}, ensure_ascii=False)
+            
+            # 🔥 修复：安全地截断 JSON 字符串（而不是字典）
+            # 如果 JSON 太长，截断它（但保留完整的结构）
+            max_json_length = 2000  # 限制 JSON 长度
+            if len(stats_json) > max_json_length:
+                logger.warning(f"⚠️ Stats JSON 太长 ({len(stats_json)} 字符)，截断到 {max_json_length} 字符")
+                # 截断字符串，但确保 JSON 结构完整
+                truncated_json = stats_json[:max_json_length]
+                # 尝试找到最后一个完整的 JSON 对象/数组边界
+                last_brace = truncated_json.rfind('}')
+                last_bracket = truncated_json.rfind(']')
+                last_comma = max(truncated_json.rfind(','), truncated_json.rfind('\n'))
+                # 选择最接近末尾的边界
+                cut_point = max(last_brace, last_bracket, last_comma)
+                if cut_point > max_json_length * 0.8:  # 如果截断点不太早
+                    stats_json = truncated_json[:cut_point + 1] + "\n  ... (truncated)"
+                else:
+                    stats_json = truncated_json + "\n  ... (truncated)"
+            
+            # 🔥 安全地提取文件预览信息（如果可用）
+            # 注意：file_metadata 是字典，不能直接切片
+            head_preview = ""
+            try:
+                head_data = file_metadata.get("head", {})
+                if isinstance(head_data, dict):
+                    # head_data 是字典，包含 "markdown" 或 "json" 键
+                    if "markdown" in head_data:
+                        head_preview = head_data["markdown"]
+                    elif "json" in head_data:
+                        # 如果是 JSON 格式，转换为字符串
+                        head_preview = json.dumps(head_data["json"], ensure_ascii=False, indent=2)
+                    else:
+                        head_preview = str(head_data)
+                elif isinstance(head_data, str):
+                    # 如果已经是字符串，直接使用
+                    head_preview = head_data
+                else:
+                    head_preview = str(head_data)
+                
+                # 🔥 安全地截断字符串预览（不是字典）
+                if len(head_preview) > 1000:
+                    head_preview = head_preview[:1000] + "\n... (truncated)"
+            except Exception as head_err:
+                logger.warning(f"⚠️ 提取文件预览失败: {head_err}")
+                head_preview = "无法提取数据预览"
+            
+            # 使用 PromptManager 获取诊断模板
+            try:
+                # 🔥 确保只传递字符串给模板，不传递字典
+                prompt = self.prompt_manager.get_prompt(
+                    "data_diagnosis",
+                    {
+                        "inspection_data": stats_json,  # 字符串
+                        "head_preview": head_preview[:500] if head_preview else ""  # 字符串，截断到 500 字符
+                    },
+                    fallback=DATA_DIAGNOSIS_PROMPT.format(inspection_data=stats_json)
+                )
+                logger.debug(f"📝 [DEBUG] Prompt length: {len(prompt)}")
+            except Exception as prompt_err:
+                logger.warning(f"⚠️ 获取诊断模板失败，使用默认模板: {prompt_err}")
+                try:
+                    # 🔥 安全地格式化 prompt，避免 format 错误
+                    # 确保 stats_json 是字符串
+                    if not isinstance(stats_json, str):
+                        stats_json = json.dumps(stats_json, ensure_ascii=False)
+                    prompt = DATA_DIAGNOSIS_PROMPT.format(inspection_data=stats_json)
+                except Exception as format_err:
+                    logger.error(f"❌ [DataDiagnostician] Prompt 格式化失败: {format_err}")
+                    # 使用简单的 prompt
+                    # 🔥 确保 stats_json 是字符串
+                    if not isinstance(stats_json, str):
+                        stats_json = json.dumps(stats_json, ensure_ascii=False)
+                    prompt = f"""You are a Senior Bioinformatician specializing in {omics_type}.
+
+Based on the following data statistics:
+{stats_json}
+
+Please generate a data diagnosis and parameter recommendation report in Simplified Chinese (简体中文).
+
+Format:
+### 🔍 数据体检报告
+- **数据规模**: [样本数、代谢物数]
+- **数据特征**: [缺失值率、数据范围等]
+- **数据质量**: [质量评估]
+
+### 💡 参数推荐
+Create a Markdown table with parameter recommendations.
+
+Use Simplified Chinese for all content."""
+            
+            # Step 3: 调用 LLM 生成 Markdown 报告
+            # 根据组学类型调整系统提示
+            system_prompt_map = {
+                "scRNA": "You are a Senior Bioinformatician specializing in Single-Cell RNA-seq analysis. Generate data diagnosis and parameter recommendations in Simplified Chinese.",
+                "Metabolomics": "You are a Senior Bioinformatician specializing in Metabolomics. Generate data diagnosis and parameter recommendations in Simplified Chinese.",
+                "BulkRNA": "You are a Senior Bioinformatician specializing in Bulk RNA-seq analysis. Generate data diagnosis and parameter recommendations in Simplified Chinese.",
+            }
+            
+            system_prompt = system_prompt_map.get(omics_type, "You are a Senior Bioinformatician. Generate data diagnosis and parameter recommendations in Simplified Chinese.")
+            
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ]
+            
+            # 🔥 Step 3: 调用 LLM 生成 Markdown 报告
+            # 🔥 CRITICAL DEBUGGING: 包装在详细的 try-except 中
+            try:
+                logger.info(f"📞 [DataDiagnostician] 调用 LLM 生成报告...")
+                logger.debug(f"📝 [DEBUG] LLM Client type: {type(self.llm_client)}")
+                logger.debug(f"📝 [DEBUG] LLM Client methods: {dir(self.llm_client)}")
+                
+                completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=1500)
+                
+                logger.debug(f"📝 [DEBUG] LLM completion type: {type(completion)}")
+                logger.debug(f"📝 [DEBUG] LLM completion: {completion}")
+                
+                think_content, response = self.llm_client.extract_think_and_content(completion)
+                
+                # 🔥 DEBUG: 打印诊断报告信息
+                if response:
+                    logger.info(f"✅ [DataDiagnostician] 诊断报告生成成功，长度: {len(response)}")
+                    logger.debug(f"📝 [DEBUG] Diagnosis report preview: {response[:200]}...")
+                else:
+                    logger.warning(f"⚠️ [DataDiagnostician] 诊断报告为空")
+                    logger.warning(f"⚠️ [DEBUG] Think content: {think_content[:200] if think_content else 'None'}")
+                
+                # Step 4: 保存到上下文（供 UI 和后续步骤使用）
+                self.context["diagnosis_report"] = response
+                self.context["diagnosis_stats"] = stats
+                
+                return response
+                
+            except AttributeError as attr_err:
+                # LLM 客户端方法不存在
+                import traceback
+                error_msg = (
+                    f"LLM 客户端方法调用失败: {str(attr_err)}\n"
+                    f"LLM Client type: {type(self.llm_client)}\n"
+                    f"Available methods: {[m for m in dir(self.llm_client) if not m.startswith('_')]}\n"
+                    f"Stack trace:\n{traceback.format_exc()}"
+                )
+                logger.error(f"❌ [DataDiagnostician] {error_msg}")
+                return f"⚠️ **诊断报告生成失败**\n\nLLM 客户端错误: {str(attr_err)}\n\n请检查服务器日志获取详细信息。"
+                
+            except Exception as llm_err:
+                # LLM 调用失败
+                import traceback
+                error_msg = (
+                    f"LLM 调用失败: {str(llm_err)}\n"
+                    f"Error type: {type(llm_err).__name__}\n"
+                    f"Stack trace:\n{traceback.format_exc()}"
+                )
+                logger.error(f"❌ [DataDiagnostician] {error_msg}")
+                return f"⚠️ **诊断报告生成失败**\n\n错误: {str(llm_err)}\n\n请检查服务器日志获取详细信息。"
+            
+        except Exception as e:
+            # 整体异常处理
+            import traceback
+            error_msg = (
+                f"数据诊断过程失败: {str(e)}\n"
+                f"Error type: {type(e).__name__}\n"
+                f"Stack trace:\n{traceback.format_exc()}"
+            )
+            logger.error(f"❌ [DataDiagnostician] {error_msg}")
+            # 🔥 返回详细的错误信息，而不是 None，这样用户可以在 UI 中看到
+            return f"⚠️ **诊断报告生成失败**\n\n错误: {str(e)}\n\n请检查服务器日志获取详细信息。"
 

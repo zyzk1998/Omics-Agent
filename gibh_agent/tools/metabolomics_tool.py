@@ -1,6 +1,10 @@
 """
 代谢组学分析工具
 支持代谢组学数据的下载、预处理和分析
+
+包含两个类：
+1. MetabolomicsToolkit: 标准工作流工具包（仅使用标准库）
+2. MetabolomicsTool: 原有工具（保持兼容性）
 """
 import os
 # 🔧 修复：设置 Matplotlib 配置目录（避免权限问题）
@@ -11,19 +15,386 @@ if 'MPLCONFIGDIR' not in os.environ:
 import requests
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
+from statsmodels.stats.multitest import multipletests
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 import logging
 import gc
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# 🔥 Step 2: MetabolomicsToolkit - 标准工作流工具包
+# ============================================================================
+
+class MetabolomicsToolkit:
+    """
+    标准代谢组学工作流工具包
+    
+    使用标准库实现：
+    - pandas, numpy, scipy, statsmodels, sklearn, seaborn, matplotlib
+    
+    不依赖外部 API 或 Web 服务
+    """
+    
+    def __init__(self, output_dir: Optional[str] = None):
+        """
+        初始化工具包
+        
+        Args:
+            output_dir: 输出目录（用于保存图片和结果）
+        """
+        if output_dir:
+            self.output_dir = Path(output_dir)
+        else:
+            self.output_dir = Path(os.getcwd()) / "results" / "metabolomics"
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+    
+    def preprocess_data(
+        self,
+        df: pd.DataFrame,
+        method: str = 'log2_scale',
+        missing_imputation: str = 'min'
+    ) -> pd.DataFrame:
+        """
+        预处理代谢组学数据
+        
+        Args:
+            df: 输入 DataFrame（只包含数值列，不包含元数据）
+            method: 预处理方法 ('log2_scale', 'zscore', 'none')
+            missing_imputation: 缺失值填充方法 ('min', 'median', 'mean')
+        
+        Returns:
+            预处理后的 DataFrame
+        """
+        df_processed = df.copy()
+        
+        # 1. 处理缺失值
+        if missing_imputation == 'min':
+            df_processed = df_processed.fillna(df_processed.min())
+        elif missing_imputation == 'median':
+            df_processed = df_processed.fillna(df_processed.median())
+        elif missing_imputation == 'mean':
+            df_processed = df_processed.fillna(df_processed.mean())
+        else:
+            df_processed = df_processed.fillna(0)
+        
+        # 2. 标准化
+        if method == 'log2_scale':
+            # Log2 转换（处理零值和负值）
+            df_processed = df_processed.apply(lambda x: np.log2(x + 1))
+            # Z-score 标准化
+            scaler = StandardScaler()
+            df_processed = pd.DataFrame(
+                scaler.fit_transform(df_processed),
+                columns=df_processed.columns,
+                index=df_processed.index
+            )
+        elif method == 'zscore':
+            scaler = StandardScaler()
+            df_processed = pd.DataFrame(
+                scaler.fit_transform(df_processed),
+                columns=df_processed.columns,
+                index=df_processed.index
+            )
+        # method == 'none': 不做标准化
+        
+        return df_processed
+    
+    def differential_analysis(
+        self,
+        df: pd.DataFrame,
+        group_col: str,
+        case_group: str,
+        control_group: str
+    ) -> pd.DataFrame:
+        """
+        差异代谢物分析
+        
+        Args:
+            df: 包含代谢物数据和分组信息的 DataFrame
+            group_col: 分组列名
+            case_group: 实验组名称
+            control_group: 对照组名称
+        
+        Returns:
+            包含以下列的 DataFrame:
+            - metabolite: 代谢物名称
+            - p_value: T-test p值
+            - fdr: FDR 校正后的 p值
+            - log2fc: Log2 倍数变化
+            - regulation: 'Up' 或 'Down'
+        """
+        # 分离分组信息
+        if group_col not in df.columns:
+            raise ValueError(f"分组列 '{group_col}' 不存在于 DataFrame 中")
+        
+        groups = df[group_col]
+        case_mask = groups == case_group
+        control_mask = groups == control_group
+        
+        if not case_mask.any():
+            raise ValueError(f"实验组 '{case_group}' 不存在")
+        if not control_mask.any():
+            raise ValueError(f"对照组 '{control_group}' 不存在")
+        
+        # 提取代谢物列（数值列，排除分组列）
+        metabolite_cols = [col for col in df.columns 
+                          if col != group_col and pd.api.types.is_numeric_dtype(df[col])]
+        
+        results = []
+        
+        for metabolite in metabolite_cols:
+            case_values = df.loc[case_mask, metabolite].dropna()
+            control_values = df.loc[control_mask, metabolite].dropna()
+            
+            if len(case_values) < 2 or len(control_values) < 2:
+                continue  # 跳过样本数不足的代谢物
+            
+            # T-test
+            t_stat, p_value = stats.ttest_ind(case_values, control_values)
+            
+            # 计算 Log2FC
+            case_mean = case_values.mean()
+            control_mean = control_values.mean()
+            
+            # 避免除零或对数域错误
+            if control_mean <= 0:
+                log2fc = np.nan
+            else:
+                log2fc = np.log2(case_mean / control_mean) if case_mean > 0 else np.nan
+            
+            results.append({
+                'metabolite': metabolite,
+                'p_value': p_value,
+                'log2fc': log2fc
+            })
+        
+        # 转换为 DataFrame
+        diff_df = pd.DataFrame(results)
+        
+        # FDR 校正（Benjamini-Hochberg）
+        if len(diff_df) > 0:
+            _, fdr, _, _ = multipletests(
+                diff_df['p_value'].fillna(1.0),
+                method='fdr_bh',
+                alpha=0.05
+            )
+            diff_df['fdr'] = fdr
+            
+            # 判断上调/下调
+            diff_df['regulation'] = diff_df.apply(
+                lambda row: 'Up' if row['log2fc'] > 0 else 'Down' if not np.isnan(row['log2fc']) else 'N/A',
+                axis=1
+            )
+        else:
+            diff_df['fdr'] = np.nan
+            diff_df['regulation'] = 'N/A'
+        
+        return diff_df
+    
+    def run_pca(
+        self,
+        df: pd.DataFrame,
+        group_col: Optional[str] = None,
+        n_components: int = 10
+    ) -> Dict[str, Any]:
+        """
+        执行主成分分析 (PCA)
+        
+        Args:
+            df: 输入 DataFrame（只包含数值列）
+            group_col: 可选的分组列名（用于可视化）
+            n_components: 主成分数量
+        
+        Returns:
+            包含以下键的字典:
+            - coordinates: PCA 坐标 (DataFrame)
+            - explained_variance: 解释方差比例 (array)
+            - explained_variance_ratio: 解释方差比例 (array)
+            - components: 主成分载荷 (DataFrame)
+            - groups: 分组信息（如果提供了 group_col）
+        """
+        # 确保只使用数值列
+        numeric_df = df.select_dtypes(include=[np.number])
+        
+        # 执行 PCA
+        n_components = min(n_components, numeric_df.shape[0], numeric_df.shape[1])
+        pca = PCA(n_components=n_components)
+        pca_result = pca.fit_transform(numeric_df)
+        
+        # 构建结果
+        result = {
+            'coordinates': pd.DataFrame(
+                pca_result,
+                columns=[f'PC{i+1}' for i in range(n_components)],
+                index=numeric_df.index
+            ),
+            'explained_variance': pca.explained_variance_,
+            'explained_variance_ratio': pca.explained_variance_ratio_,
+            'components': pd.DataFrame(
+                pca.components_.T,
+                columns=[f'PC{i+1}' for i in range(n_components)],
+                index=numeric_df.columns
+            )
+        }
+        
+        # 如果有分组信息，添加到结果中
+        if group_col and group_col in df.columns:
+            result['groups'] = df[group_col]
+        
+        return result
+    
+    def plot_volcano(
+        self,
+        diff_df: pd.DataFrame,
+        output_path: Optional[str] = None,
+        fdr_threshold: float = 0.05,
+        log2fc_threshold: float = 1.0
+    ) -> str:
+        """
+        生成火山图 (Volcano Plot)
+        
+        Args:
+            diff_df: 差异分析结果 DataFrame（必须包含 'log2fc', 'fdr' 列）
+            output_path: 输出文件路径（如果为 None，自动生成）
+            fdr_threshold: FDR 阈值
+            log2fc_threshold: Log2FC 阈值
+        
+        Returns:
+            保存的图片路径
+        """
+        if output_path is None:
+            output_path = str(self.output_dir / "volcano_plot.png")
+        
+        # 准备数据
+        diff_df = diff_df.copy()
+        diff_df['-log10_fdr'] = -np.log10(diff_df['fdr'].replace(0, 1e-10))
+        
+        # 判断显著性
+        diff_df['significant'] = (
+            (diff_df['fdr'] < fdr_threshold) & 
+            (np.abs(diff_df['log2fc']) > log2fc_threshold)
+        )
+        
+        # 绘图
+        plt.figure(figsize=(10, 8))
+        
+        # 非显著点
+        non_sig = diff_df[~diff_df['significant']]
+        plt.scatter(non_sig['log2fc'], non_sig['-log10_fdr'], 
+                   alpha=0.5, color='gray', s=30, label='Not significant')
+        
+        # 显著点
+        sig = diff_df[diff_df['significant']]
+        if len(sig) > 0:
+            up = sig[sig['log2fc'] > 0]
+            down = sig[sig['log2fc'] < 0]
+            
+            if len(up) > 0:
+                plt.scatter(up['log2fc'], up['-log10_fdr'], 
+                           alpha=0.7, color='red', s=50, label=f'Up (n={len(up)})')
+            if len(down) > 0:
+                plt.scatter(down['log2fc'], down['-log10_fdr'], 
+                           alpha=0.7, color='blue', s=50, label=f'Down (n={len(down)})')
+        
+        # 添加阈值线
+        plt.axhline(y=-np.log10(fdr_threshold), color='black', linestyle='--', alpha=0.5)
+        plt.axvline(x=log2fc_threshold, color='black', linestyle='--', alpha=0.5)
+        plt.axvline(x=-log2fc_threshold, color='black', linestyle='--', alpha=0.5)
+        
+        plt.xlabel('Log2 Fold Change', fontsize=12)
+        plt.ylabel('-Log10 FDR', fontsize=12)
+        plt.title('Volcano Plot', fontsize=14, fontweight='bold')
+        plt.legend()
+        plt.grid(alpha=0.3)
+        plt.tight_layout()
+        
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        return output_path
+    
+    def plot_heatmap(
+        self,
+        df: pd.DataFrame,
+        top_n: int = 50,
+        output_path: Optional[str] = None,
+        group_col: Optional[str] = None
+    ) -> str:
+        """
+        生成聚类热图
+        
+        Args:
+            df: 输入 DataFrame（只包含数值列）
+            top_n: 选择变异最大的 top_n 个代谢物
+            output_path: 输出文件路径（如果为 None，自动生成）
+            group_col: 可选的分组列名（用于添加分组注释）
+        
+        Returns:
+            保存的图片路径
+        """
+        if output_path is None:
+            output_path = str(self.output_dir / "heatmap.png")
+        
+        # 选择变异最大的 top_n 个代谢物
+        numeric_df = df.select_dtypes(include=[np.number])
+        variances = numeric_df.var().sort_values(ascending=False)
+        top_metabolites = variances.head(top_n).index
+        top_df = numeric_df[top_metabolites]
+        
+        # 如果有分组信息，添加分组注释
+        row_colors = None
+        if group_col and group_col in df.columns:
+            # 创建分组颜色映射
+            unique_groups = df[group_col].unique()
+            colors = plt.cm.Set3(np.linspace(0, 1, len(unique_groups)))
+            group_color_map = dict(zip(unique_groups, colors))
+            row_colors = df[group_col].map(group_color_map)
+        
+        # 绘制热图（clustermap 返回 figure 对象）
+        if row_colors is not None:
+            g = sns.clustermap(
+                top_df.T,
+                cmap='RdYlBu_r',
+                center=0,
+                robust=True,
+                row_cluster=True,
+                col_cluster=True,
+                figsize=(12, max(8, len(top_df) * 0.2)),
+                cbar_kws={'label': 'Normalized Intensity'},
+                row_colors=row_colors if row_colors is not None else None
+            )
+        else:
+            g = sns.clustermap(
+                top_df.T,
+                cmap='RdYlBu_r',
+                center=0,
+                robust=True,
+                row_cluster=True,
+                col_cluster=True,
+                figsize=(12, max(8, len(top_df) * 0.2)),
+                cbar_kws={'label': 'Normalized Intensity'}
+            )
+        
+        # 保存图片
+        g.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close(g.fig)
+        
+        return output_path
+
+
+# ============================================================================
+# 原有 MetabolomicsTool 类（保持兼容性）
+# ============================================================================
 
 
 class MetabolomicsTool:
@@ -283,8 +654,27 @@ class MetabolomicsTool:
         try:
             logger.info(f"🔧 开始预处理数据: {file_path}")
             
+            # 🔥 修复：如果文件不存在，尝试智能路径解析
+            if not os.path.exists(file_path):
+                logger.warning(f"⚠️ 文件不存在: {file_path}，尝试智能路径解析...")
+                from ..core.file_inspector import FileInspector
+                upload_dir = os.getenv("UPLOAD_DIR", "/app/uploads")
+                inspector = FileInspector(upload_dir)
+                resolved_path, searched_paths = inspector._resolve_actual_path(file_path)
+                if resolved_path:
+                    file_path = resolved_path
+                    logger.info(f"✅ 找到文件: {file_path}")
+                else:
+                    error_msg = f"文件未找到: {file_path}\n已搜索路径: {searched_paths[:5]}"
+                    logger.error(f"❌ {error_msg}")
+                    return {
+                        "status": "error",
+                        "message": error_msg,
+                        "data": {}
+                    }
+            
             # 读取数据
-            logger.info(f"   Attempting to read CSV file...")
+            logger.info(f"   Attempting to read CSV file: {file_path}")
             df = pd.read_csv(file_path)
             logger.info(f"   ✅ CSV file read successfully: {len(df)} rows, {len(df.columns)} columns")
             
@@ -415,6 +805,26 @@ class MetabolomicsTool:
                         "status": "error",
                         "error": "数据未加载且未提供文件路径"
                     }
+                
+                # 🔥 修复：如果文件不存在，尝试智能路径解析
+                if not os.path.exists(file_path):
+                    logger.warning(f"⚠️ 文件不存在: {file_path}，尝试智能路径解析...")
+                    from ..core.file_inspector import FileInspector
+                    upload_dir = os.getenv("UPLOAD_DIR", "/app/uploads")
+                    inspector = FileInspector(upload_dir)
+                    resolved_path, searched_paths = inspector._resolve_actual_path(file_path)
+                    if resolved_path:
+                        file_path = resolved_path
+                        logger.info(f"✅ 找到文件: {file_path}")
+                    else:
+                        error_msg = f"文件未找到: {file_path}\n已搜索路径: {searched_paths[:5]}"
+                        logger.error(f"❌ {error_msg}")
+                        return {
+                            "status": "error",
+                            "error": error_msg,
+                            "data": {}
+                        }
+                
                 # 读取预处理后的数据或原始数据
                 logger.info(f"   Reading CSV from: {file_path}")
                 df = pd.read_csv(file_path)

@@ -2,7 +2,7 @@
 from typing import Dict, Any, List, AsyncIterator, Optional
 from ..base_agent import BaseAgent
 from ...core.llm_client import LLMClient
-from ...core.prompt_manager import PromptManager, DATA_DIAGNOSIS_PROMPT
+from ...core.prompt_manager import PromptManager
 from ...core.utils import sanitize_for_json
 from ...tools.metabolomics_tool import MetabolomicsTool
 import logging
@@ -307,44 +307,145 @@ File Path: {file_path}
         """
         生成工作流配置
         
+        🔥 修复版本：在 planning 阶段生成诊断报告，修复变量映射问题
+        
         流程：
-        1. 先检查数据（inspect_data）
-        2. 使用 LLM 提取目标步骤（支持用户指定"只运行步骤1"等）
-        3. 基于检查结果提取参数
-        4. 生成工作流配置（只包含目标步骤）
+        1. 立即检查文件（inspect_file）- 修复 N/A 问题
+        2. 映射 shape.rows/cols 到 n_samples/n_features - 修复变量不匹配
+        3. 立即生成诊断报告 - 修复 UI 缺失报告问题
+        4. 使用 LLM 提取目标步骤
+        5. 基于检查结果提取参数
+        6. 生成工作流配置
         """
         logger.info("=" * 80)
-        logger.info("🚀 [CHECKPOINT] _generate_workflow_config START")
+        logger.info("🚀 [CHECKPOINT] _generate_workflow_config START (FIXED VERSION)")
         logger.info(f"   Query: {query}")
         logger.info(f"   File paths: {file_paths}")
         logger.info("=" * 80)
         
-        # 🔥 Task 1: 轻量级检查（只读前10行，不加载完整数据）
-        peek_result = None
+        # 🔥 Step 1: 立即检查文件（修复 N/A 问题）
+        file_metadata = None
+        stats = {"n_samples": "N/A", "n_features": "N/A"}
+        diagnosis_report = None
         recommendation = None
-        if file_paths:
-            input_path = file_paths[0]
-            logger.info(f"🔍 [CHECKPOINT] Peeking at file (lightweight): {input_path}")
-            try:
-                # 使用轻量级检查，只读前10行
-                peek_result = await self._peek_data_lightweight(input_path)
-                if "error" in peek_result:
-                    logger.warning(f"⚠️ File peek failed: {peek_result.get('error')}")
-                else:
-                    logger.info(f"✅ [CHECKPOINT] File peek successful")
-                    # 🔥 生成 AI 推荐（基于轻量级预览）
-                    try:
-                        logger.info(f"🔍 [CHECKPOINT] Generating AI recommendations...")
-                        recommendation = await self._generate_parameter_recommendations(peek_result, query)
-                        logger.info(f"✅ [CHECKPOINT] Recommendations generated")
-                    except Exception as rec_err:
-                        logger.error(f"❌ [CHECKPOINT] Recommendation generation failed: {rec_err}", exc_info=True)
-                        recommendation = None  # 继续执行，不阻塞
-            except Exception as e:
-                logger.error(f"❌ [CHECKPOINT] Error peeking file: {e}", exc_info=True)
         
-        # 为了兼容性，使用 peek_result 作为 inspection_result（但只包含基本信息）
-        inspection_result = peek_result
+        if not file_paths:
+            logger.warning("⚠️ 没有提供文件路径")
+            return {
+                "type": "workflow_config",
+                "workflow_data": {
+                    "workflow_name": "Metabolomics Analysis Pipeline",
+                    "steps": []
+                },
+                "file_paths": [],
+                "diagnosis_report": "⚠️ 未提供数据文件，无法生成诊断报告。"
+            }
+        
+        current_file = file_paths[0]
+        logger.info(f"🔍 [CHECKPOINT] Inspecting file IMMEDIATELY: {current_file}")
+        
+        try:
+            # 🔥 使用 FileInspector 立即检查文件
+            from ...core.file_inspector import FileInspector
+            import os
+            upload_dir = os.getenv("UPLOAD_DIR", "/app/uploads")
+            inspector = FileInspector(upload_dir)
+            
+            file_metadata = inspector.inspect_file(current_file)
+            
+            if file_metadata.get("status") != "success" or not file_metadata.get("success", True):
+                error_msg = file_metadata.get("error", "未知错误")
+                logger.warning(f"⚠️ File inspection failed: {error_msg}")
+                
+                # 🔥 修复：使用详细的错误信息，而不是硬编码消息
+                # 这样用户可以看到系统在哪里查找文件
+                diagnosis_report = f"⚠️ **文件读取失败**\n\n{error_msg}"
+                
+                # Fallback: 使用默认值
+                stats = {"n_samples": "N/A", "n_features": "N/A"}
+            else:
+                logger.info(f"✅ [CHECKPOINT] File inspection successful")
+                
+                # 🔥 CRITICAL FIX: 映射 shape.rows/cols 到 n_samples/n_features
+                shape = file_metadata.get("shape", {})
+                stats = {
+                    "n_samples": shape.get("rows", file_metadata.get("n_samples", "N/A")),
+                    "n_features": shape.get("cols", file_metadata.get("n_features", "N/A"))
+                }
+                
+                # 如果 shape 中没有，尝试从 file_metadata 直接获取
+                if stats["n_samples"] == "N/A" or stats["n_samples"] == 0:
+                    stats["n_samples"] = file_metadata.get("n_samples", "N/A")
+                if stats["n_features"] == "N/A" or stats["n_features"] == 0:
+                    stats["n_features"] = file_metadata.get("n_features", "N/A")
+                
+                logger.info(f"📊 [CHECKPOINT] Stats mapped: n_samples={stats['n_samples']}, n_features={stats['n_features']}")
+                
+                # 🔥 Step 2: 立即生成诊断报告（修复 UI 缺失报告问题）
+                try:
+                    logger.info(f"🔍 [CHECKPOINT] Generating diagnosis report IMMEDIATELY...")
+                    
+                    # 尝试加载数据预览（用于更准确的诊断）
+                    dataframe = None
+                    try:
+                        import pandas as pd
+                        head_data = file_metadata.get("head", {})
+                        if head_data and isinstance(head_data, dict) and "json" in head_data:
+                            dataframe = pd.DataFrame(head_data["json"])
+                    except Exception as e:
+                        logger.debug(f"无法构建数据预览: {e}")
+                    
+                    # 调用统一的诊断方法（在 planning 阶段）
+                    diagnosis_report = await self._perform_data_diagnosis(
+                        file_metadata=file_metadata,
+                        omics_type="Metabolomics",
+                        dataframe=dataframe
+                    )
+                    
+                    if diagnosis_report:
+                        logger.info(f"✅ [CHECKPOINT] Diagnosis report generated, length: {len(diagnosis_report)}")
+                    else:
+                        logger.warning(f"⚠️ [CHECKPOINT] Diagnosis report is None")
+                        diagnosis_report = "⚠️ 诊断报告生成失败，但可以继续进行分析。"
+                    
+                except Exception as diag_err:
+                    logger.error(f"❌ [CHECKPOINT] Diagnosis generation failed: {diag_err}", exc_info=True)
+                    diagnosis_report = "⚠️ 诊断报告生成失败，但可以继续进行分析。"
+                
+                # 从诊断结果中提取推荐参数（如果可用）
+                if diagnosis_report and hasattr(self, 'context') and self.context.get("diagnosis_stats"):
+                    stats_context = self.context.get("diagnosis_stats", {})
+                    recommendations = stats_context.get("recommendations", {})
+                    if recommendations:
+                        # 转换为 MetabolomicsAgent 期望的格式
+                        recommendation = {
+                            "params": {
+                                "normalization": {
+                                    "value": recommendations.get("normalization", {}).get("recommended", "log2")
+                                },
+                                "missing_threshold": {
+                                    "value": "0.5"  # 默认值
+                                },
+                                "scale": {
+                                    "value": True
+                                },
+                                "n_components": {
+                                    "value": "10"
+                                }
+                            }
+                        }
+                    else:
+                        recommendation = None
+                else:
+                    recommendation = None
+                    
+        except Exception as e:
+            logger.error(f"❌ [CHECKPOINT] Error inspecting file: {e}", exc_info=True)
+            stats = {"n_samples": "N/A", "n_features": "N/A"}
+            diagnosis_report = "⚠️ 文件检查失败，请检查文件路径和格式。"
+        
+        # 使用 file_metadata 作为 inspection_result
+        inspection_result = file_metadata
         
         # 使用 LLM 提取目标结束步骤（例如："做到PCA" -> "pca_analysis"）
         target_end_step = None
@@ -385,8 +486,8 @@ File Path: {file_path}
                 "tool_id": "inspect_data",
                 "name": "数据检查",  # 🔧 修复：添加 name 字段
                 "step_name": "数据检查",  # 🔧 修复：添加 step_name 字段（兼容前端）
-                "desc": "检查数据文件的基本信息（样本数、代谢物数、缺失值、分组信息等）",
-                "params": {"file_path": file_paths[0] if file_paths else ""}
+                "desc": f"检查数据文件的基本信息（样本数: {stats.get('n_samples', 'N/A')}, 代谢物数: {stats.get('n_features', 'N/A')}）",
+                "params": {"file_path": current_file if file_paths else ""}
             },
             {
                 "step_id": "preprocess_data",
@@ -395,7 +496,7 @@ File Path: {file_path}
                 "step_name": "数据预处理",  # 🔧 修复：添加 step_name 字段（兼容前端）
                 "desc": "数据预处理：处理缺失值、标准化、缩放",
                 "params": {
-                    "file_path": file_paths[0] if file_paths else "",
+                    "file_path": current_file if file_paths else "",
                     "missing_threshold": extracted_params.get("missing_threshold", "0.5"),
                     "normalization": extracted_params.get("normalization", "log2"),
                     "scale": extracted_params.get("scale", "true")
@@ -472,12 +573,20 @@ File Path: {file_path}
             "steps": selected_steps
         }
         
-        # 🔥 Task 1: 构建返回结果，包含推荐信息
+        # 🔥 Task 1: 构建返回结果，包含推荐信息和诊断报告
         result = {
             "type": "workflow_config",
             "workflow_data": workflow_config,
             "file_paths": file_paths
         }
+        
+        # 添加诊断报告（如果生成成功）
+        # 🔥 修复：检查 diagnosis_report 是否为有效字符串（非 None 且非空）
+        if diagnosis_report and isinstance(diagnosis_report, str) and diagnosis_report.strip():
+            result["diagnosis_report"] = diagnosis_report
+            logger.info(f"📝 [DEBUG] Adding diagnosis_report to result, length: {len(diagnosis_report)}")
+        else:
+            logger.warning(f"⚠️ [DEBUG] diagnosis_report is invalid (None/empty), NOT adding to result. Type: {type(diagnosis_report)}, Value: {diagnosis_report}")
         
         # 添加推荐信息（如果生成成功）
         if recommendation:
@@ -490,54 +599,19 @@ File Path: {file_path}
         logger.info(f"   Workflow name: {workflow_config.get('workflow_name')}")
         logger.info(f"   Steps count: {len(workflow_config.get('steps', []))}")
         logger.info(f"   Has recommendation: {recommendation is not None}")
+        logger.info(f"   Has diagnosis_report: {diagnosis_report is not None}")
+        
+        # 🔥 DEBUG: 打印最终返回结构
+        logger.info(f"📤 [DEBUG] MetabolomicsAgent returning result with keys: {list(result.keys())}")
+        logger.info(f"📤 [DEBUG] MetabolomicsAgent has diagnosis_report: {'diagnosis_report' in result}")
+        if 'diagnosis_report' in result:
+            logger.info(f"📤 [DEBUG] MetabolomicsAgent diagnosis_report length: {len(result['diagnosis_report'])}")
         logger.info("=" * 80)
         
         return result
     
-    async def _generate_diagnosis_and_recommendation(
-        self,
-        inspection_result: Dict[str, Any]
-    ) -> Optional[str]:
-        """
-        生成数据诊断和参数推荐报告
-        
-        Args:
-            inspection_result: 文件检查结果
-        
-        Returns:
-            Markdown格式的诊断和推荐报告，如果失败返回 None
-        """
-        try:
-            import json
-            # 格式化检查结果为JSON字符串
-            inspection_json = json.dumps(inspection_result, ensure_ascii=False, indent=2)
-            
-            # 使用 PromptManager 获取诊断模板
-            try:
-                prompt = self.prompt_manager.get_prompt(
-                    "data_diagnosis",
-                    {"inspection_data": inspection_json},
-                    fallback=DATA_DIAGNOSIS_PROMPT.format(inspection_data=inspection_json)
-                )
-            except Exception as e:
-                logger.warning(f"⚠️ 获取诊断模板失败，使用默认模板: {e}")
-                prompt = DATA_DIAGNOSIS_PROMPT.format(inspection_data=inspection_json)
-            
-            # 调用LLM生成诊断报告
-            messages = [
-                {"role": "system", "content": "You are a Senior Bioinformatician specializing in Metabolomics. Generate data diagnosis and parameter recommendations in Simplified Chinese."},
-                {"role": "user", "content": prompt}
-            ]
-            
-            completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=1500)
-            think_content, response = self.llm_client.extract_think_and_content(completion)
-            
-            logger.info("✅ 数据诊断和参数推荐已生成")
-            return response
-            
-        except Exception as e:
-            logger.error(f"❌ 生成诊断报告失败: {e}", exc_info=True)
-            return None  # 返回 None，不阻塞工作流生成
+    # 🔥 已移除：_generate_diagnosis_and_recommendation 方法
+    # 现在使用 BaseAgent._perform_data_diagnosis() 统一方法
     
     async def _extract_target_end_step(
         self,
@@ -820,8 +894,39 @@ Return JSON only:
             summary = peek_result.get("data", {}).get("summary", {})
             data_range = peek_result.get("data_range", {})
             
+            # 🔥 Step 1: 使用新的元数据字段（head, columns, separator）
+            columns = peek_result.get('columns', [])
+            head_data = peek_result.get('head', {})
+            separator = peek_result.get('separator', ',')
+            file_path = peek_result.get('file_path', 'N/A')
+            
+            # 构建列信息摘要
+            columns_summary = ""
+            if columns:
+                metadata_cols = peek_result.get('metadata_columns', [])
+                feature_cols = [col for col in columns if col not in metadata_cols]
+                columns_summary = f"""
+- 总列数: {len(columns)}
+- 元数据列 ({len(metadata_cols)}): {', '.join(metadata_cols[:5])}{'...' if len(metadata_cols) > 5 else ''}
+- 特征列 ({len(feature_cols)}): {', '.join(feature_cols[:10])}{'...' if len(feature_cols) > 10 else ''}
+"""
+            
+            # 构建数据预览摘要（使用 head）
+            head_summary = ""
+            if head_data:
+                head_markdown = head_data.get('markdown', '')
+                if head_markdown:
+                    # 只显示前3行，避免 prompt 过长
+                    head_lines = head_markdown.split('\n')[:4]  # 表头 + 前3行数据
+                    head_summary = f"""
+- 数据预览（前3行）:
+{chr(10).join(head_lines)}
+"""
+            
             stats_summary = f"""
 数据统计信息（基于完整文件或大文件采样）：
+- 文件路径: {file_path}
+- 分隔符: {separator}
 - 样本数: {summary.get('n_samples', 'N/A')}
 - 特征数: {summary.get('n_features', 'N/A')}
 - 缺失率: {summary.get('missing_rate', 0):.2f}%
@@ -831,6 +936,7 @@ Return JSON only:
   * 平均值: {data_range.get('mean', 'N/A'):.2f if isinstance(data_range.get('mean'), (int, float)) else 'N/A'}
   * 中位数: {data_range.get('median', 'N/A'):.2f if isinstance(data_range.get('median'), (int, float)) else 'N/A'}
 - 是否采样: {summary.get('is_sampled', False)}
+{columns_summary}{head_summary}
 """
             
             prompt = f"""基于数据统计信息，生成参数推荐。
@@ -1005,25 +1111,53 @@ Return JSON only:
             # 格式化结果摘要
             summary_json = json.dumps(results_summary, ensure_ascii=False, indent=2)
             
-            prompt = f"""作为代谢组学分析专家，基于工作流执行结果生成最终诊断报告。
+            # 🔥 修复：严格的数据驱动诊断 prompt（防止幻觉）
+            prompt = f"""You are a strict Data Analyst. Generate a concise diagnosis report based ONLY on the execution results below.
 
-工作流执行结果摘要：
+执行结果摘要：
 {summary_json}
 
-请生成一份专业的诊断报告，包括：
-1. 数据质量评估
-2. 主要发现（显著差异代谢物、PCA 结果等）
-3. 生物学意义解释
-4. 建议和下一步分析方向
+**CRITICAL RULES:**
 
-使用 Markdown 格式，使用中文，语言专业但易懂。"""
+1. **Fact-Check First**: Look at `differential_analysis.significant_metabolites`.
+   - If it is 0 or "N/A", state clearly: "本次分析未发现显著差异代谢物。"
+   - DO NOT invent hypotheses or excuses (like "technical noise", "metabolic homeostasis", "biological similarity") unless there is explicit evidence in the QC metrics.
+   - DO NOT write long essays about why there might be no differences.
+
+2. **Interpret PCA**: Look at `pca.variance_explained`.
+   - If PC1 is very high (>50%), mention it might indicate a strong batch effect or dominant biological factor.
+   - If PC1 is low (<20%), mention the data might be highly heterogeneous.
+
+3. **Concise Conclusion**: Keep it short (3-5 sentences max). Do not write a thesis.
+   - Focus on what the data shows, not what it might mean theoretically.
+
+4. **Actionable Advice**: If 0 differences found, suggest:
+   - "尝试放宽 P 值阈值（如 0.1）"
+   - "检查分组标签是否正确"
+   - "考虑增加样本量"
+   - DO NOT suggest complex biological interpretations without evidence.
+
+**Output Format:**
+- Use Simplified Chinese (简体中文)
+- Use Markdown format
+- Be direct and factual
+- Maximum 200 words
+
+**Example of Good Output (when n_significant = 0):**
+"本次分析未发现显著差异代谢物（FDR < 0.05, |Log2FC| > 1）。建议：1) 尝试放宽 P 值阈值至 0.1；2) 检查分组标签是否正确；3) 考虑增加样本量以提高统计功效。"
+
+**Example of Bad Output (DO NOT DO THIS):**
+"虽然未发现显著差异，但这可能反映了代谢稳态的维持机制，表明两组样本在代谢水平上保持了高度的生物学相似性..." (This is speculation without evidence!)
+
+现在生成诊断报告："""
             
             messages = [
-                {"role": "system", "content": "You are a Senior Bioinformatician specializing in Metabolomics. Generate comprehensive diagnosis reports in Simplified Chinese using Markdown format."},
+                {"role": "system", "content": "You are a strict Data Analyst. You must base your diagnosis ONLY on the provided data. Do not invent hypotheses or write speculative essays. Be concise and factual. Use Simplified Chinese."},
                 {"role": "user", "content": prompt}
             ]
             
-            completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=2000)
+            # 🔥 修复：降低 max_tokens 以匹配简洁性要求（最多 200 字）
+            completion = await self.llm_client.achat(messages, temperature=0.2, max_tokens=500)
             think_content, response = self.llm_client.extract_think_and_content(completion)
             
             logger.info(f"📝 Generating diagnosis... Result length: {len(response)}")
@@ -1225,11 +1359,27 @@ You have access to:
                 logger.info(f"   Step params: {params}")
                 
                 if tool_id == "inspect_data":
+                    # 🔥 Step 3: 确保使用绝对路径
                     file_path_to_inspect = params.get("file_path", input_path)
-                    logger.info(f"🔍 [CHECKPOINT] inspect_data: Trying to read file at: {file_path_to_inspect}")
+                    
+                    # 如果路径不是绝对路径，转换为绝对路径
+                    if not os.path.isabs(file_path_to_inspect):
+                        from pathlib import Path
+                        upload_dir = os.getenv("UPLOAD_DIR", "/app/uploads")
+                        file_path_to_inspect = str(Path(upload_dir) / file_path_to_inspect)
+                    
+                    # 确保路径存在
+                    file_path_to_inspect = os.path.abspath(file_path_to_inspect)
+                    
+                    logger.info(f"🔍 [CHECKPOINT] inspect_data: Using absolute path: {file_path_to_inspect}")
                     logger.info(f"   File exists? {os.path.exists(file_path_to_inspect)}")
                     if os.path.exists(file_path_to_inspect):
                         logger.info(f"   File size: {os.path.getsize(file_path_to_inspect)} bytes")
+                    else:
+                        logger.error(f"❌ File not found: {file_path_to_inspect}")
+                        logger.error(f"   Original path: {params.get('file_path', input_path)}")
+                        logger.error(f"   Upload dir: {os.getenv('UPLOAD_DIR', '/app/uploads')}")
+                    
                     result = self.metabolomics_tool.inspect_data(file_path_to_inspect)
                     logger.info(f"✅ [CHECKPOINT] inspect_data completed: {result.get('status', 'unknown')}")
                     step_result = {
@@ -1248,7 +1398,19 @@ You have access to:
                     })
                 
                 elif tool_id == "preprocess_data":
+                    # 🔥 修复：使用智能路径解析，确保文件能被找到
                     file_path_to_preprocess = params.get("file_path", input_path)
+                    
+                    # 如果路径不是绝对路径或文件不存在，尝试智能路径解析
+                    if not os.path.isabs(file_path_to_preprocess) or not os.path.exists(file_path_to_preprocess):
+                        from ...core.file_inspector import FileInspector
+                        upload_dir = os.getenv("UPLOAD_DIR", "/app/uploads")
+                        inspector = FileInspector(upload_dir)
+                        resolved_path, _ = inspector._resolve_actual_path(file_path_to_preprocess)
+                        if resolved_path:
+                            file_path_to_preprocess = resolved_path
+                            logger.info(f"✅ [CHECKPOINT] preprocess_data: Resolved path to: {file_path_to_preprocess}")
+                    
                     logger.info(f"🔍 [CHECKPOINT] preprocess_data: Trying to read file at: {file_path_to_preprocess}")
                     logger.info(f"   File exists? {os.path.exists(file_path_to_preprocess)}")
                     logger.info(f"   Parameters: missing_threshold={params.get('missing_threshold', '0.5')}, normalization={params.get('normalization', 'log2')}, scale={params.get('scale', 'true')}")

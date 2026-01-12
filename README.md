@@ -212,7 +212,7 @@ docker compose exec api-server bash
 ### 常见问题
 
 1. **502 Bad Gateway**: 检查 API 服务是否正常启动
-   ```bash
+```bash
    docker compose logs api-server
    ```
 

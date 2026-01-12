@@ -55,9 +55,10 @@ app.add_middleware(
 )
 
 # 创建上传目录（使用绝对路径，兼容容器环境）
-# 🔧 修复：优先使用环境变量，否则使用相对路径
-UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads"))
-RESULTS_DIR = Path(os.getenv("RESULTS_DIR", "results"))
+# 🔧 修复：优先使用环境变量，否则使用容器内的默认路径
+# 注意：在容器环境中，默认路径应该是 /app/uploads，而不是相对路径
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
+RESULTS_DIR = Path(os.getenv("RESULTS_DIR", "/app/results"))
 
 # 确保目录存在且可写
 try:

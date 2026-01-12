@@ -1101,7 +1101,8 @@ interface WorkflowConfigResponse {
   type: 'workflow_config';
   workflow_data: WorkflowConfig;
   file_paths: string[];
-  recommendation?: Recommendation;
+  diagnosis_report?: string;  // Markdown 格式的数据诊断报告（所有 Agent 统一生成）
+  recommendation?: Recommendation;  // 参数推荐（Metabolomics Agent 特有）
 }
 
 interface AnalysisReportResponse {

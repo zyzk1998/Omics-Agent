@@ -62,12 +62,42 @@ print_status() {
 # 1. 服务管理
 # ============================================
 
+wait_for_service() {
+    local max_attempts=30  # 30次 * 2秒 = 60秒超时
+    local attempt=0
+    local spinner_chars="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    local spinner_idx=0
+    
+    echo -ne "${YELLOW}⏳ 等待服务就绪...${NC}"
+    
+    while [ $attempt -lt $max_attempts ]; do
+        # 尝试检查健康端点或根路径
+        if curl -s -f "http://localhost:${API_PORT}/health" > /dev/null 2>&1 || \
+           curl -s -f "http://localhost:${API_PORT}/" > /dev/null 2>&1; then
+            echo -e "\r${GREEN}✅ 服务已启动！${NC}                    "
+            return 0
+        fi
+        
+        # 显示旋转器
+        spinner_char="${spinner_chars:$spinner_idx:1}"
+        echo -ne "\r${YELLOW}⏳ 等待服务就绪... ${spinner_char}${NC} (${attempt}/${max_attempts})"
+        
+        spinner_idx=$(( (spinner_idx + 1) % ${#spinner_chars} ))
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+    
+    echo -e "\r${RED}❌ 启动超时，请检查日志${NC}                    "
+    return 1
+}
+
 manage_services() {
     clear
     echo -e "${CYAN}${BOLD}🚀 服务管理${NC}\n"
     echo "1) 启动服务"
     echo "2) 停止服务"
-    echo "3) 重启服务"
+    echo "3) 🔄 快速重启 (代码生效)"
+    echo "4) 🔨 重建并重启 (依赖/配置生效)"
     echo "0) 返回"
     echo ""
     read -p "请选择: " choice
@@ -83,7 +113,7 @@ manage_services() {
             echo "🚀 启动服务..."
             mkdir -p ${PROJECT_DIR}/data/uploads ${PROJECT_DIR}/results ${PROJECT_DIR}/data/redis
             docker_compose_cmd up -d
-            sleep 3
+            wait_for_service
             docker_compose_cmd ps
             ;;
         2)
@@ -92,9 +122,16 @@ manage_services() {
             print_status "ok" "服务已停止"
             ;;
         3)
-            echo "🔄 重启服务..."
-            docker_compose_cmd restart
-            sleep 3
+            echo "🔄 快速重启 (代码生效)..."
+            docker_compose_cmd restart api-server worker
+            wait_for_service
+            docker_compose_cmd ps
+            ;;
+        4)
+            echo "🔨 重建并重启 (依赖/配置生效)..."
+            echo -e "${YELLOW}⚠️  这将重新构建镜像，可能需要几分钟...${NC}"
+            docker_compose_cmd up -d --build
+            wait_for_service
             docker_compose_cmd ps
             ;;
     esac

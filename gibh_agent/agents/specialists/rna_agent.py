@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, AsyncIterator
 from ..base_agent import BaseAgent
 from ...core.llm_client import LLMClient
-from ...core.prompt_manager import PromptManager, RNA_REPORT_PROMPT, DATA_DIAGNOSIS_PROMPT
+from ...core.prompt_manager import PromptManager, RNA_REPORT_PROMPT
 from ...core.utils import sanitize_for_json
 from ...core.dispatcher import TaskDispatcher
 from ...core.test_data_manager import TestDataManager
@@ -443,25 +443,43 @@ File Path: {file_path}
         2. 基于检查结果提取参数
         3. 生成工作流配置
         """
-        # 强制检查：如果有文件，先检查
+        # 🔥 Step 1: 文件检查和数据诊断（使用统一的 BaseAgent 方法）
         inspection_result = None
         diagnosis_report = None
         if file_paths:
             input_path = file_paths[0]
             try:
+                # 使用 ScanpyTool 检查文件
                 inspection_result = self.scanpy_tool.inspect_file(input_path)
                 if "error" in inspection_result:
-                    # 检查失败，但仍然继续（可能是文件路径问题）
-                    import logging
-                    logger = logging.getLogger(__name__)
                     logger.warning(f"File inspection failed: {inspection_result.get('error')}")
                 else:
-                    # 🔥 生成数据诊断和参数推荐
-                    diagnosis_report = await self._generate_diagnosis_and_recommendation(inspection_result)
+                    # 🔥 使用 BaseAgent 的统一诊断方法
+                    # 尝试加载数据预览（用于更准确的诊断）
+                    dataframe = None
+                    try:
+                        if input_path.endswith('.h5ad'):
+                            adata = self.scanpy_tool.load_data(input_path)
+                            # 提取 obs 表作为预览（包含 QC 指标）
+                            if hasattr(adata, 'obs') and len(adata.obs) > 0:
+                                dataframe = adata.obs.head(1000)  # 最多1000行
+                    except Exception as e:
+                        logger.debug(f"无法加载数据预览: {e}")
+                    
+                    # 调用统一的诊断方法
+                    diagnosis_report = await self._perform_data_diagnosis(
+                        file_metadata=inspection_result,
+                        omics_type="scRNA",
+                        dataframe=dataframe
+                    )
+                    # 🔥 DEBUG: 打印诊断报告信息
+                    if diagnosis_report:
+                        logger.info(f"📝 [DEBUG] RNAAgent diagnosis report generated, length: {len(diagnosis_report)}")
+                    else:
+                        logger.warning(f"⚠️ [DEBUG] RNAAgent diagnosis report is None")
             except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.error(f"Error inspecting file: {e}", exc_info=True)
+                diagnosis_report = None  # 🔥 确保在异常时也设置为 None
         
         # 使用 LLM 提取参数（传入检查结果和诊断报告）
         extracted_params = await self._extract_workflow_params(query, file_paths, inspection_result, diagnosis_report)
@@ -502,61 +520,21 @@ File Path: {file_path}
             "file_paths": file_paths
         }
         
-        if diagnosis_report:
+        # 🔥 修复：检查 diagnosis_report 是否为有效字符串（非 None 且非空）
+        if diagnosis_report and isinstance(diagnosis_report, str) and diagnosis_report.strip():
             result["diagnosis_report"] = diagnosis_report
+            logger.info(f"📝 [DEBUG] RNAAgent: Adding diagnosis_report to result, length: {len(diagnosis_report)}")
+        else:
+            logger.warning(f"⚠️ [DEBUG] RNAAgent: diagnosis_report is invalid (None/empty), NOT adding to result. Type: {type(diagnosis_report)}, Value: {diagnosis_report}")
+        
+        # 🔥 DEBUG: 打印最终返回结构
+        logger.info(f"📤 [DEBUG] RNAAgent returning result with keys: {list(result.keys())}")
+        logger.info(f"📤 [DEBUG] RNAAgent has diagnosis_report: {'diagnosis_report' in result}")
         
         return result
     
-    async def _generate_diagnosis_and_recommendation(
-        self,
-        inspection_result: Dict[str, Any]
-    ) -> str:
-        """
-        生成数据诊断和参数推荐报告
-        
-        Args:
-            inspection_result: 文件检查结果
-        
-        Returns:
-            Markdown格式的诊断和推荐报告
-        """
-        try:
-            import json
-            # 格式化检查结果为JSON字符串
-            inspection_json = json.dumps(inspection_result, ensure_ascii=False, indent=2)
-            
-            # 使用 PromptManager 获取诊断模板
-            try:
-                prompt = self.prompt_manager.get_prompt(
-                    "data_diagnosis",
-                    {"inspection_data": inspection_json},
-                    fallback=DATA_DIAGNOSIS_PROMPT.format(inspection_data=inspection_json)
-                )
-            except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"⚠️ 获取诊断模板失败，使用默认模板: {e}")
-                prompt = DATA_DIAGNOSIS_PROMPT.format(inspection_data=inspection_json)
-            
-            # 调用LLM生成诊断报告
-            messages = [
-                {"role": "system", "content": "You are a Senior Bioinformatician. Generate data diagnosis and parameter recommendations in Simplified Chinese."},
-                {"role": "user", "content": prompt}
-            ]
-            
-            completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=1500)
-            think_content, response = self.llm_client.extract_think_and_content(completion)
-            
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info("✅ 数据诊断和参数推荐已生成")
-            return response
-            
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"❌ 生成诊断报告失败: {e}", exc_info=True)
-            return f"诊断报告生成失败: {str(e)}"
+    # 🔥 已移除：_generate_diagnosis_and_recommendation 方法
+    # 现在使用 BaseAgent._perform_data_diagnosis() 统一方法
     
     async def _extract_workflow_params(
         self,

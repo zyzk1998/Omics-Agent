@@ -7,7 +7,7 @@ import json
 import gzip
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, List, Tuple
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -35,51 +35,159 @@ class FileInspector:
             upload_dir: 上传文件目录
         """
         self.upload_dir = Path(upload_dir)
-        self.upload_dir.mkdir(parents=True, exist_ok=True)
+        # 尝试创建目录，如果失败则记录警告（可能在容器外测试）
+        try:
+            self.upload_dir.mkdir(parents=True, exist_ok=True)
+        except (PermissionError, OSError) as e:
+            logger.warning(f"⚠️ 无法创建上传目录 {self.upload_dir}: {e}。将在运行时尝试查找文件。")
+        
+        # 常见 Docker 挂载路径列表（用于智能路径解析）
+        self.common_mount_paths = [
+            "/app/uploads",
+            "/app/data/uploads",
+            "/app/data",
+            "/workspace/uploads",
+            "./uploads",
+            "./data"
+        ]
+    
+    def _resolve_actual_path(self, file_path: str) -> Tuple[Optional[str], List[str]]:
+        """
+        智能路径解析：尝试在多个常见路径中查找文件
+        
+        Args:
+            file_path: 原始文件路径（可能是相对路径、绝对路径或仅文件名）
+        
+        Returns:
+            (actual_path, searched_paths): 
+            - actual_path: 找到的实际路径，如果未找到则为 None
+            - searched_paths: 已搜索的路径列表（用于错误报告）
+        """
+        import os
+        from pathlib import Path
+        
+        searched_paths = []
+        
+        # Step 1: 检查原始路径是否存在
+        original_path = Path(file_path)
+        if original_path.exists():
+            searched_paths.append(str(original_path.resolve()))
+            return str(original_path.resolve()), searched_paths
+        
+        # 如果原始路径不存在，记录它
+        if original_path.is_absolute():
+            searched_paths.append(str(original_path))
+        else:
+            # 尝试相对于当前工作目录
+            cwd_path = Path(os.getcwd()) / original_path
+            searched_paths.append(str(cwd_path.resolve()))
+        
+        # Step 2: 提取文件名
+        filename = original_path.name
+        if not filename:
+            # 如果路径是目录或无效，返回 None
+            return None, searched_paths
+        
+        # Step 3: 在常见挂载路径中搜索
+        for mount_path in self.common_mount_paths:
+            mount_path_obj = Path(mount_path)
+            
+            # 如果是相对路径，转换为绝对路径
+            if not mount_path_obj.is_absolute():
+                mount_path_obj = Path(os.getcwd()) / mount_path_obj
+            
+            # 尝试解析路径
+            try:
+                resolved_mount = mount_path_obj.resolve()
+                candidate_path = resolved_mount / filename
+                
+                searched_paths.append(str(candidate_path))
+                
+                if candidate_path.exists() and candidate_path.is_file():
+                    logger.info(f"✅ [Smart Path Resolution] Found file at: {candidate_path}")
+                    return str(candidate_path), searched_paths
+            except (OSError, ValueError) as e:
+                # 路径无效，跳过
+                logger.debug(f"⚠️ [Smart Path Resolution] Invalid path {mount_path}: {e}")
+                continue
+        
+        # Step 4: 如果仍未找到，返回 None 和已搜索的路径列表
+        logger.warning(f"❌ [Smart Path Resolution] File not found: {filename}")
+        logger.warning(f"   Searched in {len(searched_paths)} locations")
+        return None, searched_paths
     
     def inspect_file(self, file_path: str) -> Dict[str, Any]:
         """
         多模态文件检查主入口（分发器）
         
+        🔥 升级：使用智能路径解析，自动在多个常见路径中查找文件
+        
         Args:
-            file_path: 文件路径
+            file_path: 文件路径（相对或绝对）
         
         Returns:
-            包含检查结果的字典
+            包含检查结果的字典，包含绝对路径（file_path字段）
         """
-        filepath = Path(file_path)
+        import os
         
-        if not filepath.exists():
+        # 🔥 Step 1: 使用智能路径解析
+        actual_path, searched_paths = self._resolve_actual_path(file_path)
+        
+        if actual_path is None:
+            # 🔥 CRITICAL: 返回详细的错误信息，列出所有搜索过的路径
+            current_cwd = os.getcwd()
+            error_msg = (
+                f"File not found: '{file_path}'\n\n"
+                f"**Searched locations ({len(searched_paths)}):**\n"
+                + "\n".join(f"  - {path}" for path in searched_paths[:10])  # 最多显示10个
+                + f"\n\n**Current working directory:** {current_cwd}\n"
+                f"**Upload directory (configured):** {self.upload_dir}\n"
+                f"**Environment UPLOAD_DIR:** {os.getenv('UPLOAD_DIR', 'Not set')}"
+            )
+            
+            logger.error(f"❌ [FileInspector] {error_msg}")
+            
             return {
                 "status": "error",
-                "error": f"File not found: {file_path}",
-                "file_type": "unknown"
+                "success": False,  # 🔥 添加 success 字段用于前端检查
+                "error": error_msg,
+                "file_type": "unknown",
+                "file_path": file_path,  # 返回原始路径
+                "searched_paths": searched_paths,  # 调试信息
+                "current_cwd": current_cwd
             }
         
-        # 检查文件类型并分发到相应的检查器
+        # Step 2: 使用找到的实际路径继续处理
+        filepath = Path(actual_path)
+        absolute_path = str(filepath.resolve())
+        
+        logger.info(f"✅ [FileInspector] Using resolved path: {absolute_path}")
+        
+        # 检查文件类型并分发到相应的检查器（传递绝对路径）
         if filepath.is_dir():
             # 10x Genomics 目录
-            return self._inspect_anndata(file_path)
+            return self._inspect_anndata(absolute_path)
         
         file_ext = filepath.suffix.lower()
         
         # Tabular 数据
         if file_ext in ['.csv', '.tsv', '.txt', '.xlsx']:
-            return self._inspect_tabular(file_path)
+            return self._inspect_tabular(absolute_path)
         
         # Single-Cell 数据
         elif file_ext in ['.h5ad', '.mtx'] or file_ext.endswith('.mtx.gz'):
-            return self._inspect_anndata(file_path)
+            return self._inspect_anndata(absolute_path)
         
         # 图像数据
         elif file_ext in ['.jpg', '.jpeg', '.png', '.tiff', '.tif']:
-            return self._inspect_image(file_path)
+            return self._inspect_image(absolute_path)
         
         else:
             return {
                 "status": "error",
                 "error": f"Unsupported file type: {file_ext}",
-                "file_type": "unknown"
+                "file_type": "unknown",
+                "file_path": absolute_path  # 返回绝对路径
             }
     
     def _inspect_tabular(
@@ -94,33 +202,65 @@ class FileInspector:
         - 大文件（>200MB）：采样10000行防止OOM
         
         Args:
-            file_path: 文件路径
+            file_path: 文件路径（相对或绝对）
         
         Returns:
-            包含统计信息的字典
+            包含统计信息的字典，包括：
+            - file_path: 绝对路径
+            - columns: 列名列表
+            - shape: (rows, cols) 元组
+            - head: 前10行（markdown格式）
+            - separator: 分隔符（',' 或 '\t'）
         """
         import pandas as pd
         
         try:
+            # 🔥 Step 1: 转换为绝对路径
             filepath = Path(file_path)
+            if not filepath.is_absolute():
+                # 如果是相对路径，尝试相对于 upload_dir
+                filepath = self.upload_dir / filepath
+            absolute_path = str(filepath.resolve())
+            
+            if not filepath.exists():
+                return {
+                    "status": "error",
+                    "error": f"File not found: {absolute_path}",
+                    "file_type": "tabular"
+                }
+            
             file_size_mb = filepath.stat().st_size / (1024 * 1024)
             
-            logger.info(f"🔍 [Tabular Inspector] File: {file_path}, Size: {file_size_mb:.2f} MB")
+            logger.info(f"🔍 [Tabular Inspector] File: {absolute_path}, Size: {file_size_mb:.2f} MB")
+            
+            # 🔥 Step 2: 检测分隔符（先读第一行）
+            separator = ','
+            try:
+                with open(absolute_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    first_line = f.readline()
+                    if '\t' in first_line:
+                        separator = '\t'
+                    elif ',' in first_line:
+                        separator = ','
+                    elif ';' in first_line:
+                        separator = ';'
+            except:
+                pass  # 使用默认分隔符
             
             # 决定读取策略
             if file_size_mb < self.LARGE_FILE_THRESHOLD_MB:
                 # 小文件：完整读取
                 logger.info(f"   📖 Reading full file (size < {self.LARGE_FILE_THRESHOLD_MB}MB)")
-                df = pd.read_csv(file_path)
+                df = pd.read_csv(absolute_path, sep=separator)
                 is_sampled = False
             else:
                 # 大文件：采样读取
                 logger.info(f"   📖 Sampling {self.SAMPLE_SIZE_LARGE_FILE} rows (size >= {self.LARGE_FILE_THRESHOLD_MB}MB)")
-                df = pd.read_csv(file_path, nrows=self.SAMPLE_SIZE_LARGE_FILE)
+                df = pd.read_csv(absolute_path, sep=separator, nrows=self.SAMPLE_SIZE_LARGE_FILE)
                 is_sampled = True
                 # 估算总行数
                 try:
-                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    with open(absolute_path, 'r', encoding='utf-8', errors='ignore') as f:
                         total_lines = sum(1 for _ in f) - 1  # 减去表头
                 except:
                     total_lines = None
@@ -169,13 +309,41 @@ class FileInspector:
                         "values": df[col].unique().tolist()[:10]  # 只显示前10个
                     }
             
-            # 构建结果（只包含统计信息，不包含原始数据行）
+            # 🔥 Step 3: 提取前10行作为 head（markdown格式）
+            head_df = df.head(10)
+            head_json = head_df.to_dict(orient='records')
+            
+            # 🔥 修复：处理 tabulate 依赖缺失问题
+            try:
+                head_markdown = head_df.to_markdown(index=False)
+            except ImportError:
+                # 如果 tabulate 不可用，生成简单的文本表格
+                logger.warning("⚠️ tabulate 不可用，使用文本格式替代 markdown")
+                try:
+                    # 使用 pandas 的 to_string 方法生成文本表格
+                    head_markdown = head_df.to_string(index=False, max_rows=10)
+                except Exception as e:
+                    # 如果 to_string 也失败，使用简单的 CSV 格式
+                    logger.warning(f"⚠️ to_string 失败，使用 CSV 格式: {e}")
+                    head_markdown = head_df.to_csv(index=False)
+            
+            # 构建结果（包含完整元数据，作为单一数据源）
             result = {
                 "status": "success",
-                "file_path": file_path,
+                "file_path": absolute_path,  # 🔥 绝对路径
                 "file_type": "tabular",
                 "file_size_mb": round(file_size_mb, 2),
                 "is_sampled": is_sampled,
+                "separator": separator,  # 🔥 分隔符
+                "columns": list(df.columns),  # 🔥 所有列名
+                "shape": {
+                    "rows": n_samples if isinstance(n_samples, int) else (total_lines if total_lines else len(df)),
+                    "cols": len(df.columns)
+                },
+                "head": {  # 🔥 前10行数据
+                    "markdown": head_markdown,
+                    "json": head_json
+                },
                 "n_samples": n_samples if isinstance(n_samples, int) else f"~{n_samples}",
                 "n_features": n_features,
                 "n_metadata_cols": len(metadata_cols),
