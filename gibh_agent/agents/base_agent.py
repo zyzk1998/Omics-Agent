@@ -40,7 +40,123 @@ class BaseAgent(ABC):
         self.prompt_manager = prompt_manager
         self.expert_role = expert_role
         self.diagnostician = DataDiagnostician()
-        self.context: Dict[str, Any] = {}  # 上下文存储（用于存储诊断报告等）
+        # 🔥 架构重构：会话级文件注册表
+        self.context: Dict[str, Any] = {
+            "file_registry": {},  # Key: filename, Value: {path, metadata, timestamp}
+            "active_file": None   # 当前活动的文件名
+        }
+    
+    def register_file(
+        self,
+        filename: str,
+        file_path: str,
+        file_metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        注册文件到会话注册表
+        
+        🔥 架构重构：维护文件历史，而不是清除
+        
+        Args:
+            filename: 文件名（用作注册表的 key）
+            file_path: 文件的绝对路径
+            file_metadata: 文件元数据（可选，稍后可以更新）
+        """
+        import time
+        if "file_registry" not in self.context:
+            self.context["file_registry"] = {}
+        
+        self.context["file_registry"][filename] = {
+            "path": file_path,
+            "metadata": file_metadata,
+            "timestamp": time.time(),
+            "registered_at": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        logger.info(f"📝 [FileRegistry] Registered file: {filename} (Total: {len(self.context['file_registry'])} files)")
+    
+    def set_active_file(self, filename: str) -> None:
+        """
+        设置当前活动的文件
+        
+        Args:
+            filename: 文件名（必须在注册表中存在）
+        """
+        if filename not in self.context.get("file_registry", {}):
+            logger.warning(f"⚠️ [FileRegistry] File {filename} not in registry. Registering...")
+            # 如果文件不在注册表中，尝试注册（使用路径作为文件名）
+            self.register_file(filename, filename)
+        
+        old_active = self.context.get("active_file")
+        self.context["active_file"] = filename
+        
+        if old_active != filename:
+            logger.info(f"🔄 [FileRegistry] Active file changed: {old_active} -> {filename}")
+        else:
+            logger.debug(f"✅ [FileRegistry] Active file unchanged: {filename}")
+    
+    def get_active_file_info(self) -> Optional[Dict[str, Any]]:
+        """
+        获取当前活动文件的信息
+        
+        🔥 架构重构：统一接口获取活动文件信息
+        
+        Returns:
+            包含 path 和 metadata 的字典，如果没有活动文件返回 None
+        """
+        active_file = self.context.get("active_file")
+        if not active_file:
+            logger.debug("⚠️ [FileRegistry] No active file set")
+            return None
+        
+        registry = self.context.get("file_registry", {})
+        if active_file not in registry:
+            logger.warning(f"⚠️ [FileRegistry] Active file '{active_file}' not found in registry")
+            return None
+        
+        file_info = registry[active_file]
+        logger.debug(f"✅ [FileRegistry] Retrieved active file info: {active_file}")
+        return {
+            "filename": active_file,
+            "path": file_info.get("path"),
+            "metadata": file_info.get("metadata"),
+            "timestamp": file_info.get("timestamp")
+        }
+    
+    def _refresh_context_for_new_files(self, uploaded_files: List[Dict[str, str]]) -> None:
+        """
+        刷新上下文以处理新文件
+        
+        🔥 修复：当新文件上传时，清除旧的上下文，确保使用新文件作为单一数据源
+        
+        Args:
+            uploaded_files: 当前请求中的文件列表
+        """
+        if uploaded_files and len(uploaded_files) > 0:
+            # 提取文件名用于日志
+            file_names = []
+            for file_info in uploaded_files:
+                if isinstance(file_info, dict):
+                    name = file_info.get("name") or file_info.get("path") or file_info.get("file_id", "unknown")
+                else:
+                    name = getattr(file_info, "name", None) or getattr(file_info, "path", None) or "unknown"
+                file_names.append(name)
+            
+            # 清除旧的上下文
+            old_file_paths = self.context.get("file_paths", [])
+            old_file_metadata = self.context.get("file_metadata")
+            
+            if old_file_paths or old_file_metadata:
+                logger.info(f"🔄 [System] Context refreshed. Clearing old context:")
+                logger.info(f"   Old files: {old_file_paths}")
+                logger.info(f"   New active files: {file_names}")
+            
+            # 清除文件相关的上下文
+            self.context.pop("file_paths", None)
+            self.context.pop("file_metadata", None)
+            self.context.pop("diagnosis_report", None)
+            self.context.pop("diagnosis_stats", None)
+            
+            logger.info(f"✅ [System] Context refreshed. New active file: {file_names[0] if file_names else 'None'}")
     
     @abstractmethod
     async def process_query(
@@ -250,10 +366,13 @@ class BaseAgent(ABC):
         self,
         file_metadata: Dict[str, Any],
         omics_type: str,
-        dataframe: Optional[Any] = None
+        dataframe: Optional[Any] = None,
+        system_instruction: Optional[str] = None
     ) -> Optional[str]:
         """
         执行数据诊断并生成 Markdown 报告
+        
+        🔥 架构重构：使用策略模式，接受 domain-specific system_instruction
         
         这是统一的数据诊断入口，所有 Agent 都应该调用此方法。
         
@@ -261,6 +380,7 @@ class BaseAgent(ABC):
             file_metadata: FileInspector 返回的文件元数据
             omics_type: 组学类型（"scRNA", "Metabolomics", "BulkRNA", "default"）
             dataframe: 可选的数据预览（DataFrame 或 AnnData）
+            system_instruction: 领域特定的系统指令（由各个 Agent 提供）
         
         Returns:
             Markdown 格式的诊断报告，如果失败返回 None
@@ -382,14 +502,22 @@ Create a Markdown table with parameter recommendations.
 Use Simplified Chinese for all content."""
             
             # Step 3: 调用 LLM 生成 Markdown 报告
-            # 根据组学类型调整系统提示
-            system_prompt_map = {
-                "scRNA": "You are a Senior Bioinformatician specializing in Single-Cell RNA-seq analysis. Generate data diagnosis and parameter recommendations in Simplified Chinese.",
-                "Metabolomics": "You are a Senior Bioinformatician specializing in Metabolomics. Generate data diagnosis and parameter recommendations in Simplified Chinese.",
-                "BulkRNA": "You are a Senior Bioinformatician specializing in Bulk RNA-seq analysis. Generate data diagnosis and parameter recommendations in Simplified Chinese.",
-            }
+            # 🔥 架构重构：使用策略模式，从 Agent 传入 system_instruction
+            if system_instruction:
+                # 使用 Agent 提供的领域特定指令
+                system_prompt = system_instruction
+                logger.debug(f"✅ [DataDiagnostician] Using domain-specific system instruction (length: {len(system_instruction)})")
+            else:
+                # 回退到通用指令（向后兼容）
+                logger.warning(f"⚠️ [DataDiagnostician] No system_instruction provided, using generic prompt")
+                system_prompt = "You are a Senior Bioinformatician. Generate data diagnosis and parameter recommendations in Simplified Chinese."
             
-            system_prompt = system_prompt_map.get(omics_type, "You are a Senior Bioinformatician. Generate data diagnosis and parameter recommendations in Simplified Chinese.")
+            # 🔥 架构重构：将 system_instruction 前置到用户 prompt（确保上下文隔离）
+            if system_instruction:
+                # 在用户 prompt 前添加系统指令，确保 LLM 理解领域约束
+                prompt = f"""{system_instruction}
+
+{prompt}"""
             
             messages = [
                 {"role": "system", "content": system_prompt},

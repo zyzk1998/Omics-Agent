@@ -10,6 +10,37 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# 🔥 架构重构：领域特定的系统指令（策略模式）
+METABO_INSTRUCTION = """You are an expert Chemist/Metabolomics Analyst specializing in Metabolomics data analysis.
+
+**CRITICAL CONSTRAINTS:**
+- The data represents **Metabolite Abundance** (Chemical Compounds), NOT Gene Expression.
+- Rows = Samples (Biological Samples), Columns = Metabolites (Chemical Compounds).
+- This is Mass Spectrometry or LC-MS/GC-MS data, measuring chemical concentrations.
+
+**STRICTLY FORBIDDEN TERMS:**
+- Cell, Cells, Cellular
+- Gene, Genes, Gene Expression, Transcript
+- Mitochondria, Mitochondrial
+- scRNA, Single-Cell RNA-seq, scRNA-seq
+- Transcriptomics, Transcriptome
+- RNA-seq, RNA sequencing
+
+**REQUIRED TERMINOLOGY:**
+- Metabolite, Metabolites, Metabolite Abundance
+- Sample, Samples, Biological Sample
+- Metabolomics, Metabolomic Analysis
+- Mass Spectrometry, LC-MS, GC-MS
+- Chemical Compound, Compound
+
+**CONTEXT ISOLATION:**
+This is NOT single-cell data. This is NOT transcriptomics data.
+This is Metabolomics data representing metabolite abundance levels measured by mass spectrometry.
+
+Generate data diagnosis and parameter recommendations in Simplified Chinese (简体中文).
+Focus on metabolite-specific quality metrics (missing values, abundance range, normalization needs)."""
+
+
 class MetabolomicsAgent(BaseAgent):
     """代谢组学智能体"""
     
@@ -61,8 +92,46 @@ class MetabolomicsAgent(BaseAgent):
             - chat: 聊天响应（流式）
             - workflow_config: 工作流配置
         """
+        # 🔥 架构重构：会话级文件注册表
         query_lower = query.lower().strip()
         file_paths = self.get_file_paths(uploaded_files or [])
+        
+        # Scenario A: 新文件上传 - 注册到文件注册表并设置为活动文件
+        if uploaded_files and len(uploaded_files) > 0:
+            for file_info in uploaded_files:
+                if isinstance(file_info, dict):
+                    filename = file_info.get("name") or file_info.get("path") or file_info.get("file_id", "unknown")
+                    file_path = file_info.get("path") or file_info.get("file_id", filename)
+                else:
+                    filename = getattr(file_info, "name", None) or getattr(file_info, "path", None) or "unknown"
+                    file_path = getattr(file_info, "path", None) or filename
+                
+                # 找到对应的绝对路径
+                if file_paths:
+                    # 尝试匹配路径
+                    absolute_path = None
+                    for abs_path in file_paths:
+                        if file_path in abs_path or abs_path.endswith(file_path.split('/')[-1]):
+                            absolute_path = abs_path
+                            break
+                    if not absolute_path:
+                        absolute_path = file_paths[0]  # 使用第一个路径作为回退
+                else:
+                    absolute_path = file_path
+                
+                # 注册文件
+                self.register_file(filename, absolute_path, file_metadata=None)
+                # 设置为活动文件（最后一个上传的文件）
+                self.set_active_file(filename)
+        
+        # Scenario B: 没有新文件 - 使用当前活动文件
+        if not file_paths:
+            active_file_info = self.get_active_file_info()
+            if active_file_info:
+                file_paths = [active_file_info["path"]]
+                logger.info(f"📂 [FileRegistry] Using active file: {active_file_info['filename']}")
+            else:
+                logger.warning("⚠️ [FileRegistry] No files available (no uploads and no active file)")
         
         # 🔥 Task 1: LLM 驱动的意图检测（在生成工作流之前）
         # 🔒 安全包装：如果意图检测失败，回退到原始逻辑
@@ -396,10 +465,12 @@ File Path: {file_path}
                         logger.debug(f"无法构建数据预览: {e}")
                     
                     # 调用统一的诊断方法（在 planning 阶段）
+                    # 🔥 架构重构：传递领域特定的系统指令
                     diagnosis_report = await self._perform_data_diagnosis(
                         file_metadata=file_metadata,
                         omics_type="Metabolomics",
-                        dataframe=dataframe
+                        dataframe=dataframe,
+                        system_instruction=METABO_INSTRUCTION
                     )
                     
                     if diagnosis_report:
@@ -479,6 +550,17 @@ File Path: {file_path}
                 logger.error(f"❌ [CHECKPOINT] Error extracting workflow params: {e}", exc_info=True)
                 extracted_params = {}  # 使用默认值
         
+        # 🔥 修复 2: 启发式检测分组列（如果未指定）
+        if not extracted_params.get("group_column"):
+            detected_group_col = self._detect_group_column_heuristic(file_metadata)
+            if detected_group_col:
+                extracted_params["group_column"] = detected_group_col
+                logger.info(f"✅ [Heuristic] 自动检测到分组列: {detected_group_col}")
+            else:
+                # 回退到默认值（但记录警告）
+                extracted_params["group_column"] = "Group"  # 默认值
+                logger.warning(f"⚠️ 未检测到分组列，使用默认值: Group")
+        
         # 定义所有可用步骤（包含友好的中文名称）
         all_steps = [
             {
@@ -519,7 +601,7 @@ File Path: {file_path}
                 "step_name": "差异代谢物分析",  # 🔧 修复：添加 step_name 字段（兼容前端）
                 "desc": "执行差异代谢物分析（两组比较），识别显著差异的代谢物",
                 "params": {
-                    "group_column": extracted_params.get("group_column", "Muscle loss"),
+                    "group_column": extracted_params.get("group_column", "Group"),  # 🔥 修复：使用启发式检测的值
                     "method": extracted_params.get("method", "t-test"),
                     "p_value_threshold": extracted_params.get("p_value_threshold", "0.05"),
                     "fold_change_threshold": extracted_params.get("fold_change_threshold", "1.5"),
@@ -534,7 +616,7 @@ File Path: {file_path}
                 "step_name": "PCA 可视化",  # 🔧 修复：添加 step_name 字段（兼容前端）
                 "desc": "生成 PCA 可视化图，展示样本在主成分空间的分布",
                 "params": {
-                    "group_column": extracted_params.get("group_column", "Muscle loss"),
+                    "group_column": extracted_params.get("group_column", "Group"),  # 🔥 修复：使用启发式检测的值
                     "pc1": "1",
                     "pc2": "2"
                 }
@@ -609,6 +691,66 @@ File Path: {file_path}
         logger.info("=" * 80)
         
         return result
+    
+    def _detect_group_column_heuristic(self, file_metadata: Dict[str, Any]) -> Optional[str]:
+        """
+        启发式检测分组列
+        
+        🔥 修复 2: 工具健壮性 - 自动检测分组列，避免硬编码 "Group"
+        
+        Args:
+            file_metadata: FileInspector 返回的文件元数据
+        
+        Returns:
+            检测到的分组列名，如果未找到返回 None
+        """
+        # 优先级关键词列表
+        priority_keywords = ['Diet', 'diet', 'Group', 'group', 'Condition', 'condition', 
+                            'Treatment', 'treatment', 'Class', 'class', 'Category', 'category',
+                            'Type', 'type', 'Label', 'label', 'Status', 'status']
+        
+        # 从 file_metadata 获取列信息
+        columns = file_metadata.get("columns", [])
+        if not columns:
+            logger.warning("⚠️ 无法获取列信息，无法检测分组列")
+            return None
+        
+        # 方法1: 检查列名是否包含优先级关键词
+        for col in columns:
+            if any(keyword in col for keyword in priority_keywords):
+                logger.info(f"✅ [Heuristic] 检测到分组列（关键词匹配）: {col}")
+                return col
+        
+        # 方法2: 检查 potential_groups（FileInspector 可能已经检测到）
+        potential_groups = file_metadata.get("potential_groups", {})
+        if isinstance(potential_groups, dict) and len(potential_groups) > 0:
+            # 返回第一个潜在分组列
+            first_group_col = list(potential_groups.keys())[0]
+            logger.info(f"✅ [Heuristic] 检测到分组列（potential_groups）: {first_group_col}")
+            return first_group_col
+        
+        # 方法3: 查找第一个非数值的分类列（唯一值数量 < 样本数的50%）
+        try:
+            import pandas as pd
+            head_data = file_metadata.get("head", {})
+            if head_data and isinstance(head_data, dict) and "json" in head_data:
+                df_preview = pd.DataFrame(head_data["json"])
+                n_samples = len(df_preview)
+                
+                for col in columns:
+                    if col in df_preview.columns:
+                        # 检查是否为数值类型
+                        if not pd.api.types.is_numeric_dtype(df_preview[col]):
+                            # 检查唯一值数量
+                            unique_count = df_preview[col].nunique()
+                            if 2 <= unique_count <= max(2, n_samples * 0.5):
+                                logger.info(f"✅ [Heuristic] 检测到分组列（分类列）: {col} (唯一值: {unique_count})")
+                                return col
+        except Exception as e:
+            logger.warning(f"⚠️ 启发式检测失败: {e}")
+        
+        logger.warning("⚠️ 未检测到分组列")
+        return None
     
     # 🔥 已移除：_generate_diagnosis_and_recommendation 方法
     # 现在使用 BaseAgent._perform_data_diagnosis() 统一方法

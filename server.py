@@ -15,6 +15,7 @@ from datetime import datetime
 from collections import deque
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,6 +40,42 @@ logger = logging.getLogger(__name__)
 
 # 创建 FastAPI 应用
 app = FastAPI(title="GIBH-AGENT-V2 Test Server")
+
+# 🔥 Step 2: Tool-RAG 架构 - Vector Database Integration
+# 初始化工具检索器（在启动时同步工具）
+tool_retriever = None
+workflow_planner = None
+try:
+    from gibh_agent.core.tool_retriever import ToolRetriever
+    # 🔥 Step 4: 模块化工具系统 - 自动发现和加载所有工具
+    from gibh_agent.tools import load_all_tools
+    
+    # 初始化工具检索器
+    chroma_dir = os.getenv("CHROMA_PERSIST_DIR", "./data/chroma_tools")
+    embedding_model = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
+    ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    
+    logger.info(f"🔧 初始化工具检索器...")
+    logger.info(f"   ChromaDB 目录: {chroma_dir}")
+    logger.info(f"   Embedding 模型: {embedding_model}")
+    logger.info(f"   Ollama URL: {ollama_url}")
+    
+    tool_retriever = ToolRetriever(
+        persist_directory=chroma_dir,
+        embedding_model=embedding_model,
+        ollama_base_url=ollama_url
+    )
+    
+    logger.info("✅ 工具检索器初始化成功")
+except ImportError as e:
+    logger.warning(f"⚠️ 工具检索器依赖未安装: {e}")
+    logger.warning("   跳过工具检索器初始化（需要: pip install langchain-chroma langchain-ollama）")
+except Exception as e:
+    logger.error(f"❌ 工具检索器初始化失败: {e}", exc_info=True)
+    logger.warning("   继续启动，但工具检索功能将不可用")
+
+# 🔥 Step 3: 初始化工作流规划器（需要 agent 初始化后才能获取 LLM client）
+# 这将在 agent 初始化后设置
 
 # 配置 CORS（安全配置）
 # 生产环境应该限制为特定域名
@@ -194,12 +231,67 @@ try:
             logger.info(f"✅ 已设置 Scanpy 输出目录: {scanpy_output_dir}")
     
     logger.info("✅ GIBH-AGENT 初始化成功")
+    
+    # 🔥 Step 3: 初始化工作流规划器（需要 agent 和 tool_retriever）
+    if agent and tool_retriever:
+        try:
+            from gibh_agent.core.planner import WorkflowPlanner
+            # 获取 LLM client（从 agent 的某个智能体中获取）
+            llm_client = None
+            if hasattr(agent, 'agents') and agent.agents:
+                # 尝试从第一个智能体获取 LLM client
+                first_agent = list(agent.agents.values())[0]
+                if hasattr(first_agent, 'llm_client'):
+                    llm_client = first_agent.llm_client
+            
+            if llm_client:
+                workflow_planner = WorkflowPlanner(
+                    tool_retriever=tool_retriever,
+                    llm_client=llm_client
+                )
+                logger.info("✅ 工作流规划器初始化成功")
+            else:
+                logger.warning("⚠️ 无法获取 LLM client，跳过工作流规划器初始化")
+        except Exception as e:
+            logger.error(f"❌ 工作流规划器初始化失败: {e}", exc_info=True)
+            logger.warning("   继续启动，但动态规划功能将不可用")
+    
 except Exception as e:
     import traceback
     error_msg = f"❌ GIBH-AGENT 初始化失败: {e}"
     logger.error(error_msg, exc_info=True)
     logger.error(f"详细错误:\n{traceback.format_exc()}")
     agent = None
+
+# 🔥 Step 2: 启动时同步工具到 ChromaDB
+@app.on_event("startup")
+async def sync_tools_on_startup():
+    """
+    启动时同步工具到 Vector Database
+    
+    确保 ChromaDB 中的工具定义与代码中的 @register 装饰器保持一致。
+    """
+    # 🔥 Step 4: 首先加载所有工具模块（自动发现）
+    try:
+        logger.info("🔍 启动时自动发现和加载工具模块...")
+        load_result = load_all_tools()
+        logger.info(f"✅ 工具模块加载完成: {load_result['loaded']} 个成功, {load_result['failed']} 个失败")
+    except Exception as e:
+        logger.error(f"❌ 工具模块加载失败: {e}", exc_info=True)
+        logger.warning("   继续启动，但工具可能未完全加载")
+    
+    # 然后同步到 ChromaDB
+    if tool_retriever is None:
+        logger.warning("⚠️ 工具检索器未初始化，跳过工具同步")
+        return
+    
+    try:
+        logger.info("🔄 启动时同步工具到 ChromaDB...")
+        synced_count = tool_retriever.sync_tools(clear_existing=True)
+        logger.info(f"✅ 工具同步完成: {synced_count} 个工具已同步到 ChromaDB")
+    except Exception as e:
+        logger.error(f"❌ 工具同步失败: {e}", exc_info=True)
+        logger.warning("   继续启动，但工具检索功能可能不可用")
 
 
 # 请求模型
@@ -1501,6 +1593,58 @@ async def chat_endpoint(req: ChatRequest):
                     }
                 )
         
+        # 🔥 Step 3: 尝试使用动态规划器（如果可用且查询看起来是工作流规划请求）
+        if workflow_planner and not req.workflow_data:
+            # 简单的启发式检测：如果查询包含分析相关的关键词，尝试使用规划器
+            query_lower = req.message.lower()
+            workflow_keywords = [
+                "analyze", "analysis", "pca", "differential", "preprocess",
+                "分析", "处理", "降维", "差异", "预处理"
+            ]
+            
+            # 如果有上传文件或包含关键词，尝试使用规划器
+            has_files = len(req.uploaded_files) > 0
+            has_keywords = any(keyword in query_lower for keyword in workflow_keywords)
+            
+            if has_files or has_keywords:
+                try:
+                    logger.info("🧠 尝试使用动态规划器生成工作流...")
+                    
+                    # 提取文件路径（先转换 uploaded_files）
+                    file_paths = []
+                    for file_info in req.uploaded_files:
+                        file_path = file_info.get("path") or file_info.get("file_name")
+                        if file_path:
+                            # 如果是相对路径，转换为绝对路径
+                            if not Path(file_path).is_absolute():
+                                file_path = str(UPLOAD_DIR / Path(file_path).name)
+                            file_paths.append(file_path)
+                    
+                    # 检测类别（简单启发式）
+                    category_filter = None
+                    if any(keyword in query_lower for keyword in ["metabolite", "代谢", "metabolomics"]):
+                        category_filter = "Metabolomics"
+                    elif any(keyword in query_lower for keyword in ["rna", "gene", "transcript", "转录"]):
+                        category_filter = "scRNA-seq"
+                    
+                    # 调用规划器
+                    plan_result = await workflow_planner.plan(
+                        user_query=req.message,
+                        context_files=file_paths,
+                        category_filter=category_filter
+                    )
+                    
+                    # 如果规划成功，返回结果
+                    if plan_result.get("type") == "workflow_config":
+                        logger.info("✅ 动态规划器成功生成工作流")
+                        return JSONResponse(content=plan_result)
+                    else:
+                        logger.info(f"⚠️ 动态规划器返回: {plan_result.get('type')}，继续使用传统流程")
+                        # 继续使用传统流程
+                except Exception as planner_err:
+                    logger.warning(f"⚠️ 动态规划器失败，回退到传统流程: {planner_err}")
+                    # 继续使用传统流程
+        
         # 🔥 转换文件路径：支持多种前端格式
         uploaded_files = []
         logger.info(f"📥 收到 uploaded_files: {len(req.uploaded_files)} 个文件")
@@ -1874,18 +2018,85 @@ async def execute_workflow(request: dict):
                 if not target_agent:
                     raise HTTPException(status_code=500, detail="RNA Agent 未找到")
         
-        # 设置输出目录
-        output_dir = str(RESULTS_DIR / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-        os.makedirs(output_dir, exist_ok=True)
+        # 🔥 Step 4: 使用通用执行器（动态执行，不依赖硬编码逻辑）
+        try:
+            from gibh_agent.core.executor import WorkflowExecutor
+            
+            logger.info("🔧 使用通用执行器执行工作流...")
+            
+            # 设置输出目录
+            output_dir = str(RESULTS_DIR / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            
+            # 创建执行器并执行
+            executor = WorkflowExecutor(output_dir=output_dir)
+            report_data = executor.execute_workflow(
+                workflow_data=workflow_data,
+                file_paths=file_paths,
+                output_dir=output_dir
+            )
+            
+            logger.info("✅ 通用执行器执行完成")
+            
+            # 构建返回结果（符合前端格式）
+            return JSONResponse(content={
+                "type": "analysis_report",
+                "status": "success",
+                "report_data": report_data,
+                "reply": "✅ 工作流执行完成（使用动态执行引擎）",
+                "thought": "[THOUGHT] 使用 ToolRegistry 动态执行，工具无关"
+            })
         
-        # 执行工作流
-        report = await target_agent.execute_workflow(
-            workflow_config=workflow_data,
-            file_paths=file_paths,
-            output_dir=output_dir
-        )
+        except ImportError:
+            logger.warning("⚠️ 通用执行器未找到，回退到传统执行方式")
+            # 回退到传统执行方式
+            output_dir = str(RESULTS_DIR / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            os.makedirs(output_dir, exist_ok=True)
+            
+            report = await target_agent.execute_workflow(
+                workflow_config=workflow_data,
+                file_paths=file_paths,
+                output_dir=output_dir
+            )
+            
+            logger.info(f"✅ 工作流执行完成: {report.get('status')}")
+            
+            # 处理图片路径（传统方式）
+            if report.get("final_plot"):
+                plot_path = report["final_plot"]
+                if not plot_path.startswith("/results/"):
+                    if plot_path.startswith("results/"):
+                        plot_path = "/" + plot_path
+                    elif "/" in plot_path:
+                        plot_path = f"/results/{plot_path}"
+                    else:
+                        run_name = os.path.basename(output_dir)
+                        plot_path = f"/results/{run_name}/{plot_path}"
+                report["final_plot"] = plot_path
+            
+            # 处理步骤中的图片路径
+            run_name = os.path.basename(output_dir)
+            if report.get("steps_details"):
+                for step in report["steps_details"]:
+                    if step.get("plot"):
+                        plot_path = step["plot"]
+                        if not plot_path.startswith("/results/"):
+                            if plot_path.startswith("results/"):
+                                plot_path = "/" + plot_path
+                            elif "/" in plot_path:
+                                plot_path = f"/results/{plot_path}"
+                            else:
+                                plot_path = f"/results/{run_name}/{plot_path}"
+                        step["plot"] = plot_path
+            
+            # 返回传统格式的结果
+            return JSONResponse(content={
+                "type": "analysis_report",
+                "status": report.get("status", "success"),
+                "report_data": report
+            })
         
-        logger.info(f"✅ 工作流执行完成: {report.get('status')}")
+        # 处理通用执行器返回的图片路径
+        logger.info(f"✅ 工作流执行完成: {report_data.get('status')}")
         
         # 处理图片路径，转换为可访问的 URL（在返回之前）
         # 图片保存在 results/run_xxx/ 目录，需要转换为 /results/run_xxx/filename
@@ -1903,12 +2114,12 @@ async def execute_workflow(request: dict):
                     # 从 output_dir 中提取 run_xxx
                     run_name = os.path.basename(output_dir)
                     plot_path = f"/results/{run_name}/{plot_path}"
-            report["final_plot"] = plot_path
+            report_data["final_plot"] = plot_path
         
         # 处理步骤中的图片路径（steps_details）
         run_name = os.path.basename(output_dir)
-        if report.get("steps_details"):
-            for step in report["steps_details"]:
+        if report_data.get("steps_details"):
+            for step in report_data["steps_details"]:
                 if step.get("plot"):
                     plot_path = step["plot"]
                     # 确保路径以 /results/ 开头
@@ -2075,6 +2286,102 @@ async def get_logs(limit: int = 100):
         "logs": list(log_buffer)[-limit:],
         "total": len(log_buffer)
     })
+
+
+# 🔥 Step 2: Tool-RAG API - 工具检索端点
+@app.get("/api/tools/search")
+async def search_tools(
+    query: str,
+    top_k: int = 5,
+    category: Optional[str] = None
+):
+    """
+    语义搜索工具
+    
+    Args:
+        query: 查询文本（自然语言）
+        top_k: 返回前 k 个最相关的工具（默认 5）
+        category: 可选的类别过滤器
+    
+    Returns:
+        相关工具的 JSON Schema 列表
+    """
+    if tool_retriever is None:
+        raise HTTPException(
+            status_code=503,
+            detail="工具检索器未初始化。请检查 Ollama 服务和依赖是否已安装。"
+        )
+    
+    try:
+        tools = tool_retriever.retrieve(query=query, top_k=top_k, category_filter=category)
+        return {
+            "status": "success",
+            "query": query,
+            "count": len(tools),
+            "tools": tools
+        }
+    except Exception as e:
+        logger.error(f"❌ 工具搜索失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"工具搜索失败: {str(e)}")
+
+
+@app.get("/api/tools/list")
+async def list_tools():
+    """
+    列出所有已注册的工具
+    
+    Returns:
+        工具名称列表
+    """
+    if tool_retriever is None:
+        raise HTTPException(
+            status_code=503,
+            detail="工具检索器未初始化"
+        )
+    
+    try:
+        tools = tool_retriever.list_all_tools()
+        return {
+            "status": "success",
+            "count": len(tools),
+            "tools": tools
+        }
+    except Exception as e:
+        logger.error(f"❌ 列出工具失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"列出工具失败: {str(e)}")
+
+
+@app.get("/api/tools/{tool_name}")
+async def get_tool_schema(tool_name: str):
+    """
+    获取特定工具的完整 Schema
+    
+    Args:
+        tool_name: 工具名称
+    
+    Returns:
+        工具的完整 JSON Schema
+    """
+    if tool_retriever is None:
+        raise HTTPException(
+            status_code=503,
+            detail="工具检索器未初始化"
+        )
+    
+    try:
+        tool_schema = tool_retriever.get_tool_by_name(tool_name)
+        if tool_schema is None:
+            raise HTTPException(status_code=404, detail=f"工具 '{tool_name}' 不存在")
+        
+        return {
+            "status": "success",
+            "tool": tool_schema
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 获取工具 Schema 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取工具 Schema 失败: {str(e)}")
 
 
 @app.get("/api/workflow/status/{run_id}")

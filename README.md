@@ -58,12 +58,15 @@
 
 ### 架构演进
 
-**当前版本（V2）**：正在从单体架构重构为**分层多智能体系统**
+**当前版本（V2）**：已实现**动态 Tool-RAG 架构**，支持工具自动发现、语义检索、动态规划和通用执行
 
 ```
 用户查询
     ↓
-RouterAgent (路由智能体) - 识别组学类型和意图
+WorkflowPlanner (工作流规划器) - LLM 驱动的动态规划
+    ├── ToolRetriever.retrieve() → 语义检索相关工具
+    ├── 注入工具 schema 到提示词
+    └── 生成 JSON 工作流计划
     ↓
 Domain Agents (领域智能体)
     ├── RNAAgent (转录组) ✅ 已实现
@@ -74,15 +77,31 @@ Domain Agents (领域智能体)
     ├── SpatialAgent (空间组学) ⏳ 占位符
     └── ImagingAgent (影像分析) ⏳ 占位符
     ↓
-Tools (工具类) - 生成分析脚本
-    ├── CellRangerTool ✅ 已实现
-    └── ScanpyTool ✅ 已实现
+ToolRegistry (工具注册表) - 模块化插件系统
+    ├── 自动发现和注册工具
+    ├── Pydantic 参数验证
+    └── 单例模式管理
     ↓
-TaskDispatcher (任务分发器) - 提交到 HPC 集群
-    ├── 本地执行
-    ├── Slurm 提交
-    └── SSH 远程提交
+WorkflowExecutor (工作流执行器) - 通用执行引擎
+    ├── 动态工具查找
+    ├── 参数验证和执行
+    └── 数据流处理
+    ↓
+Tools (工具类) - 按领域组织
+    ├── general/file_inspector.py ✅
+    ├── metabolomics/preprocessing.py ✅
+    ├── metabolomics/statistics.py ✅
+    ├── metabolomics/plotting.py ✅
+    ├── CellRangerTool ✅
+    └── ScanpyTool ✅
 ```
+
+**核心特性**:
+- 🔍 **自动发现**: 递归遍历目录，自动发现和注册工具
+- 🔎 **语义检索**: ChromaDB + OllamaEmbeddings 实现工具语义检索
+- 🧠 **动态规划**: LLM 驱动的智能工作流生成
+- ⚙️ **通用执行**: 工具无关的执行引擎，支持任意注册工具
+- 📦 **模块化**: 按领域组织工具，易于扩展
 
 ---
 
@@ -153,7 +172,11 @@ GIBH-AGENT-V2/
 │   │   ├── prompt_manager.py      # 提示管理器（Jinja2 模板）
 │   │   ├── dispatcher.py          # 任务分发器（本地/Slurm/SSH）
 │   │   ├── file_inspector.py      # 文件检测和元数据生成
-│   │   └── celery_app.py          # Celery 异步任务配置
+│   │   ├── celery_app.py          # Celery 异步任务配置
+│   │   ├── tool_registry.py       # 🔥 工具注册系统（ToolRegistry）
+│   │   ├── tool_retriever.py       # 🔥 工具检索系统（ChromaDB + Embeddings）
+│   │   ├── planner.py             # 🔥 工作流规划器（LLM 驱动）
+│   │   └── executor.py             # 🔥 工作流执行器（通用执行引擎）
 │   │
 │   ├── agents/                     # 智能体系统
 │   │   ├── base_agent.py          # 基础智能体抽象类
@@ -167,7 +190,14 @@ GIBH-AGENT-V2/
 │   │       ├── spatial_agent.py   # 空间组学智能体 ⏳
 │   │       └── imaging_agent.py    # 影像分析智能体 ⏳
 │   │
-│   ├── tools/                      # 工具类
+│   ├── tools/                      # 🔥 模块化工具系统（自动发现）
+│   │   ├── __init__.py            # 自动发现和加载系统
+│   │   ├── general/               # 通用工具
+│   │   │   └── file_inspector.py  # 文件检查工具 ✅
+│   │   ├── metabolomics/           # 代谢组学工具
+│   │   │   ├── preprocessing.py   # 数据预处理 ✅
+│   │   │   ├── statistics.py      # 统计分析（PCA, 差异分析）✅
+│   │   │   └── plotting.py        # 可视化（火山图, 热图）✅
 │   │   ├── cellranger_tool.py     # Cell Ranger 脚本生成器 ✅
 │   │   ├── scanpy_tool.py         # Scanpy 工作流脚本生成器 ✅
 │   │   └── ...
@@ -237,11 +267,13 @@ docker compose exec api-server bash
 - ✅ **文件暂存机制**：选择文件后暂存，点击发送时统一上传
 - ✅ **10x Genomics 数据检测**：自动识别并分组 `matrix.mtx`、`barcodes.tsv`、`features.tsv`
 - ✅ **文件类型检测**：自动识别单细胞数据、FASTQ、CSV 等格式
+- ✅ **会话级文件注册表**：支持多文件上下文管理，解决上下文停滞问题
 
 ### 2. 智能对话分析
 
 - ✅ **自然语言交互**：通过对话描述分析需求
-- ✅ **工作流配置**：自动生成标准分析流程配置
+- ✅ **动态工作流规划**：🔥 LLM 驱动的智能工作流生成（无需硬编码模板）
+- ✅ **语义工具检索**：🔥 基于 ChromaDB 的工具语义检索
 - ✅ **工具选择**：智能推荐合适的分析工具（Cell Ranger、Scanpy 等）
 - ✅ **流式响应**：实时显示分析进度和结果
 
@@ -249,9 +281,25 @@ docker compose exec api-server bash
 
 - ✅ **意图识别**：自动识别用户查询的组学类型
 - ✅ **智能路由**：将查询路由到对应的领域智能体
+- ✅ **策略模式提示词**：领域特定指令隔离，消除领域幻觉
 - ✅ **扩展性**：易于添加新的组学模态支持
 
-### 4. 异步任务处理
+### 4. 模块化工具系统 🔥
+
+- ✅ **自动发现**：递归遍历目录，自动发现和注册工具
+- ✅ **装饰器注册**：使用 `@registry.register` 装饰器定义工具
+- ✅ **参数验证**：Pydantic v2 自动生成和验证参数 schema
+- ✅ **按领域组织**：工具按领域（general, metabolomics, etc.）组织
+- ✅ **可扩展性**：新增工具只需创建文件，无需修改其他代码
+
+### 5. 通用工作流执行 🔥
+
+- ✅ **动态执行**：工具无关的执行引擎，支持任意注册工具
+- ✅ **参数验证**：自动验证工具参数（Pydantic）
+- ✅ **数据流处理**：处理步骤间的数据流传递
+- ✅ **错误处理**：优雅降级，结构化错误消息
+
+### 6. 异步任务处理
 
 - ✅ **Celery 任务队列**：处理耗时的生信分析任务
 - ✅ **任务状态监控**：实时查看任务执行状态
@@ -283,6 +331,7 @@ Copyright © 2025 Omics Agent Team. All Rights Reserved.
 
 ## 🔗 相关文档
 
+- [架构重构总结](ARCHITECTURE_REFACTORING.md) - 🔥 Tool-RAG 动态工作流系统详细说明
 - [项目总结](PROJECT_SUMMARY.md) - 项目概述和架构说明
 - [重构方案](REFACTORING_PLAN.md) - 详细的重构计划
 - [快速参考](QUICK_REFERENCE.md) - 常用命令和配置

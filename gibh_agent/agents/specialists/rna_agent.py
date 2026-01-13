@@ -20,6 +20,29 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# 🔥 架构重构：领域特定的系统指令（策略模式）
+RNA_INSTRUCTION = """You are a Senior Bioinformatician specializing in Single-Cell RNA-seq analysis.
+
+**CRITICAL CONSTRAINTS:**
+- The data represents **Gene Expression** (RNA transcripts), NOT Metabolite Abundance.
+- Rows = Cells (Single Cells), Columns = Genes (Gene Expression).
+- This is RNA sequencing data, measuring transcript counts per cell.
+
+**REQUIRED TERMINOLOGY:**
+- Cell, Cells, Single Cell, Cellular
+- Gene, Genes, Gene Expression, Transcript
+- Mitochondria, Mitochondrial (mt-genes)
+- scRNA-seq, Single-Cell RNA-seq, scRNA
+- Transcriptomics, Transcriptome
+- UMI, Count Matrix, Expression Matrix
+
+**CONTEXT:**
+This is single-cell transcriptomics data representing gene expression levels measured by RNA sequencing.
+
+Generate data diagnosis and parameter recommendations in Simplified Chinese (简体中文).
+Focus on single-cell-specific quality metrics (cells, genes, mitochondrial percentage, doublet rate)."""
+
+
 class RNAAgent(BaseAgent):
     """
     转录组智能体
@@ -467,10 +490,12 @@ File Path: {file_path}
                         logger.debug(f"无法加载数据预览: {e}")
                     
                     # 调用统一的诊断方法
+                    # 🔥 架构重构：传递领域特定的系统指令
                     diagnosis_report = await self._perform_data_diagnosis(
                         file_metadata=inspection_result,
                         omics_type="scRNA",
-                        dataframe=dataframe
+                        dataframe=dataframe,
+                        system_instruction=RNA_INSTRUCTION
                     )
                     # 🔥 DEBUG: 打印诊断报告信息
                     if diagnosis_report:

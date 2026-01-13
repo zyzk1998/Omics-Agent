@@ -1074,9 +1074,13 @@ class MetabolomicsTool:
             logger.info("👉 [STEP 3] Validating group column...")
             if group_column not in self.metadata.columns:
                 logger.error(f"❌ [STEP 3] 分组列 '{group_column}' 不存在。可用列: {list(self.metadata.columns)}")
+                # 🔥 修复 2: 优雅失败 - 返回结构化错误而不是抛出异常
                 return {
                     "status": "error",
-                    "error": f"分组列 '{group_column}' 不存在。可用列: {list(self.metadata.columns)}"
+                    "error": f"分组列 '{group_column}' 不存在。可用列: {list(self.metadata.columns)}",
+                    "message": f"分组列 '{group_column}' 不存在。可用列: {list(self.metadata.columns)}",
+                    "available_columns": list(self.metadata.columns),
+                    "data": {}  # 空数据，避免后续步骤崩溃
                 }
             logger.info(f"✅ [STEP 3] Group column '{group_column}' found")
             
@@ -1527,14 +1531,18 @@ class MetabolomicsTool:
             logger.info(f"   Checking file: {diff_file}")
             if not os.path.exists(diff_file):
                 logger.error(f"❌ [STEP 2] 差异分析结果文件不存在: {diff_file}")
-                return {
-                    "status": "error",
-                    "error": f"差异分析结果文件不存在: {diff_file}"
-                }
+                # 🔥 修复 3: 生成空占位图，避免 UI 崩溃
+                return self._generate_empty_volcano_plot("差异分析结果文件不存在，无法生成火山图")
             
             logger.info(f"   File exists. Reading CSV...")
             df = pd.read_csv(diff_file)
             logger.info(f"✅ [STEP 2] Loaded differential data. Shape: {df.shape}, Columns: {list(df.columns)[:5]}...")
+            
+            # 🔥 修复 3: 检查数据是否有效（是否有 p_value 列）
+            if "p_value" not in df.columns or len(df) == 0:
+                logger.error(f"❌ [STEP 2] 差异分析数据无效：缺少 p_value 列或数据为空")
+                return self._generate_empty_volcano_plot("差异分析数据无效，无法生成火山图")
+            
             gc.collect()  # 强制垃圾回收
             
             # 计算 -log10(p_value)
@@ -1694,8 +1702,67 @@ class MetabolomicsTool:
                 pass
             gc.collect()
             
+            # 🔥 修复 3: 生成空占位图，避免 UI 崩溃
+            return self._generate_empty_volcano_plot(f"火山图生成失败: {str(e)}")
+    
+    def _generate_empty_volcano_plot(self, error_message: str) -> Dict[str, Any]:
+        """
+        生成空占位火山图（当分析失败时）
+        
+        🔥 修复 3: 工具健壮性 - 生成占位图，避免 UI 崩溃
+        
+        Args:
+            error_message: 错误消息
+        
+        Returns:
+            包含占位图的字典
+        """
+        try:
+            import matplotlib.pyplot as plt
+            import numpy as np
+            
+            logger.info("👉 [Placeholder] Generating empty volcano plot placeholder...")
+            
+            # 创建空图
+            plt.figure(figsize=(12, 8))
+            plt.text(0.5, 0.5, f"Analysis Failed - No Data\n\n{error_message}", 
+                    ha='center', va='center', fontsize=14, 
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+            plt.xlabel("Log2 Fold Change", fontsize=12)
+            plt.ylabel("-Log10 P-value", fontsize=12)
+            plt.title("Volcano Plot: Analysis Failed", fontsize=14)
+            plt.xlim(-5, 5)
+            plt.ylim(0, 5)
+            plt.grid(True, alpha=0.3)
+            
+            # 保存占位图
+            plot_path = self.output_dir / "volcano_plot.png"
+            plt.tight_layout()
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.close('all')
+            
+            relative_path = str(plot_path)
+            if os.path.isabs(relative_path):
+                relative_path = os.path.relpath(relative_path, self.output_dir)
+            relative_path = relative_path.replace("\\", "/")
+            
+            logger.info(f"✅ [Placeholder] Empty plot saved: {plot_path}")
+            
             return {
                 "status": "error",
-                "error": str(e)
+                "error": error_message,
+                "message": error_message,
+                "plot_path": str(plot_path),
+                "plot_file": str(plot_path),
+                "data": {
+                    "images": [relative_path]
+                }
+            }
+        except Exception as e:
+            logger.error(f"❌ [Placeholder] Failed to generate empty plot: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": f"无法生成占位图: {str(e)}",
+                "message": error_message
             }
 
