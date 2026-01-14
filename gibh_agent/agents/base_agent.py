@@ -502,20 +502,52 @@ Create a Markdown table with parameter recommendations.
 Use Simplified Chinese for all content."""
             
             # Step 3: 调用 LLM 生成 Markdown 报告
+            # 🔥 CRITICAL FIX: 强制注入统计数据到系统提示，防止 LLM 产生幻觉
+            stats_facts = []
+            if omics_type.lower() in ["metabolomics", "metabolomic", "metabonomics"]:
+                n_samples = stats.get("n_samples", 0)
+                n_metabolites = stats.get("n_metabolites", 0)
+                missing_rate = stats.get("missing_rate", 0)
+                stats_facts.append(f"数据集包含 {n_samples} 个样本和 {n_metabolites} 个代谢物。")
+                if missing_rate > 0:
+                    stats_facts.append(f"缺失值率为 {missing_rate:.2f}%。")
+            elif omics_type.lower() in ["scrna", "scrna-seq", "single_cell", "single-cell"]:
+                n_cells = stats.get("n_cells", 0)
+                n_genes = stats.get("n_genes", 0)
+                stats_facts.append(f"数据集包含 {n_cells} 个细胞和 {n_genes} 个基因。")
+            else:
+                n_rows = stats.get("n_rows", stats.get("n_samples", 0))
+                n_cols = stats.get("n_cols", stats.get("n_features", 0))
+                stats_facts.append(f"数据集包含 {n_rows} 行和 {n_cols} 列。")
+            
+            # 构建强制事实字符串
+            facts_str = " ".join(stats_facts) if stats_facts else "统计数据已提供在用户提示中。"
+            
             # 🔥 架构重构：使用策略模式，从 Agent 传入 system_instruction
             if system_instruction:
-                # 使用 Agent 提供的领域特定指令
-                system_prompt = system_instruction
-                logger.debug(f"✅ [DataDiagnostician] Using domain-specific system instruction (length: {len(system_instruction)})")
+                # 使用 Agent 提供的领域特定指令，并强制注入统计数据
+                system_prompt = f"""{system_instruction}
+
+**CRITICAL: 数据事实（必须严格遵循，不得产生幻觉）**
+{facts_str}
+请确保诊断报告中的数字与上述事实完全一致。不要猜测或编造不同的数字。"""
+                logger.debug(f"✅ [DataDiagnostician] Using domain-specific system instruction with facts (length: {len(system_prompt)})")
             else:
-                # 回退到通用指令（向后兼容）
-                logger.warning(f"⚠️ [DataDiagnostician] No system_instruction provided, using generic prompt")
-                system_prompt = "You are a Senior Bioinformatician. Generate data diagnosis and parameter recommendations in Simplified Chinese."
+                # 回退到通用指令（向后兼容），但也注入统计数据
+                system_prompt = f"""You are a Senior Bioinformatician. Generate data diagnosis and parameter recommendations in Simplified Chinese.
+
+**CRITICAL: 数据事实（必须严格遵循，不得产生幻觉）**
+{facts_str}
+请确保诊断报告中的数字与上述事实完全一致。不要猜测或编造不同的数字。"""
+                logger.warning(f"⚠️ [DataDiagnostician] No system_instruction provided, using generic prompt with facts")
             
             # 🔥 架构重构：将 system_instruction 前置到用户 prompt（确保上下文隔离）
             if system_instruction:
                 # 在用户 prompt 前添加系统指令，确保 LLM 理解领域约束
                 prompt = f"""{system_instruction}
+
+**数据事实（必须严格遵循）：**
+{facts_str}
 
 {prompt}"""
             
@@ -586,4 +618,245 @@ Use Simplified Chinese for all content."""
             logger.error(f"❌ [DataDiagnostician] {error_msg}")
             # 🔥 返回详细的错误信息，而不是 None，这样用户可以在 UI 中看到
             return f"⚠️ **诊断报告生成失败**\n\n错误: {str(e)}\n\n请检查服务器日志获取详细信息。"
+    
+    async def _generate_analysis_summary(
+        self,
+        steps_results: List[Dict[str, Any]],
+        omics_type: str = "Metabolomics",
+        workflow_name: str = "Analysis Pipeline"
+    ) -> Optional[str]:
+        """
+        基于工作流执行结果生成分析摘要（AI Expert Diagnosis）
+        
+        Args:
+            steps_results: 步骤执行结果列表（来自 ExecutionLayer）
+            omics_type: 组学类型（"Metabolomics", "scRNA", 等）
+            workflow_name: 工作流名称
+        
+        Returns:
+            Markdown 格式的分析摘要，如果失败返回 None
+        """
+        import json
+        
+        try:
+            logger.info(f"📝 [AnalysisSummary] 开始生成分析摘要 - 组学类型: {omics_type}")
+            
+            # 提取关键结果
+            results_summary = {
+                "workflow_name": workflow_name,
+                "steps_completed": len(steps_results),
+                "steps": []
+            }
+            
+            # 解析每个步骤的结果（只处理成功的步骤，忽略失败的步骤）
+            for step_result in steps_results:
+                step_data = step_result.get("data", {})
+                step_name = step_result.get("step_name", "Unknown Step")
+                step_status = step_result.get("status", "unknown")
+                
+                # 🔥 CRITICAL: 跳过失败的步骤，只处理成功的步骤
+                if step_status != "success":
+                    logger.debug(f"⏭️ [AnalysisSummary] 跳过失败的步骤: {step_name} (status: {step_status})")
+                    continue
+                
+                step_info = {
+                    "name": step_name,
+                    "status": step_status
+                }
+                
+                # 根据不同的工具类型提取关键指标
+                if "inspect_data" in step_name.lower() or "inspection" in step_name.lower():
+                    summary = step_data.get("summary", {})
+                    step_info["n_samples"] = summary.get("n_samples", "N/A")
+                    step_info["n_features"] = summary.get("n_features", "N/A")
+                    step_info["missing_rate"] = summary.get("missing_rate", "N/A")
+                
+                elif "differential" in step_name.lower():
+                    summary = step_data.get("summary", {})
+                    step_info["significant_count"] = summary.get("significant_count", summary.get("n_significant", "N/A"))
+                    step_info["total_count"] = summary.get("total_metabolites", summary.get("n_total", "N/A"))
+                    step_info["method"] = summary.get("method", "N/A")
+                    step_info["case_group"] = summary.get("case_group", "N/A")
+                    step_info["control_group"] = summary.get("control_group", "N/A")
+                    # 提取结果列表，用于识别关键标记物
+                    results_list = step_data.get("results", [])
+                    if results_list:
+                        # 按 |log2fc| 排序，获取top标记物
+                        sorted_results = sorted(results_list, key=lambda x: abs(x.get("log2fc", 0)), reverse=True)
+                        step_info["top_markers"] = [
+                            {
+                                "name": r.get("metabolite", "Unknown"),
+                                "log2fc": r.get("log2fc", 0),
+                                "fdr": r.get("fdr", r.get("fdr_corrected_pvalue", 1.0))
+                            }
+                            for r in sorted_results[:5]
+                        ]
+                
+                elif "plsda" in step_name.lower() or "pls-da" in step_name.lower():
+                    # PLS-DA 分析结果
+                    vip_scores = step_data.get("vip_scores", [])
+                    if vip_scores:
+                        # 提取top VIP标记物
+                        if isinstance(vip_scores, list):
+                            sorted_vip = sorted(vip_scores, key=lambda x: x.get("vip_score", 0), reverse=True)
+                            step_info["top_vip_markers"] = [
+                                {
+                                    "name": v.get("metabolite", "Unknown"),
+                                    "vip_score": v.get("vip_score", 0)
+                                }
+                                for v in sorted_vip[:5]
+                            ]
+                
+                elif "pathway" in step_name.lower() or "enrichment" in step_name.lower():
+                    # 通路富集分析结果
+                    enriched_pathways = step_data.get("enriched_pathways", [])
+                    if enriched_pathways:
+                        step_info["enriched_pathway_count"] = len(enriched_pathways)
+                        step_info["top_pathways"] = [
+                            {
+                                "name": p.get("pathway", p.get("name", "Unknown")),
+                                "p_value": p.get("p_value", p.get("pvalue", 1.0)),
+                                "enrichment_score": p.get("enrichment_score", p.get("score", 0))
+                            }
+                            for p in enriched_pathways[:5]
+                        ]
+                
+                elif "pca" in step_name.lower() and "visualize" not in step_name.lower():
+                    # PCA 分析结果
+                    explained_var = step_data.get("explained_variance", {})
+                    if explained_var:
+                        pc1_var = explained_var.get("PC1", 0) * 100 if isinstance(explained_var.get("PC1"), (int, float)) else 0
+                        pc2_var = explained_var.get("PC2", 0) * 100 if isinstance(explained_var.get("PC2"), (int, float)) else 0
+                        step_info["pc1_variance"] = f"{pc1_var:.1f}%"
+                        step_info["pc2_variance"] = f"{pc2_var:.1f}%"
+                
+                elif "preprocess" in step_name.lower():
+                    shape = step_data.get("shape", {})
+                    step_info["preprocessed_rows"] = shape.get("rows", "N/A")
+                    step_info["preprocessed_cols"] = shape.get("columns", "N/A")
+                
+                results_summary["steps"].append(step_info)
+            
+            # 格式化结果摘要
+            summary_json = json.dumps(results_summary, ensure_ascii=False, indent=2)
+            
+            # 构建提示词
+            if omics_type.lower() in ["metabolomics", "metabolomic", "metabonomics"]:
+                expert_role = "代谢组学分析专家"
+                domain_context = """
+- 代谢物数据预处理（缺失值处理、Log2转换、标准化）
+- 主成分分析（PCA）用于降维和可视化
+- 差异代谢物分析（t-test/Wilcoxon）用于发现组间差异
+- 火山图可视化展示差异分析结果
+"""
+            elif omics_type.lower() in ["scrna", "scrna-seq", "single_cell", "single-cell"]:
+                expert_role = "单细胞转录组分析专家"
+                domain_context = """
+- 质量控制（QC）过滤低质量细胞
+- 数据标准化和特征选择
+- 降维分析（PCA、UMAP）
+- 细胞聚类和标记基因识别
+"""
+            else:
+                expert_role = "生物信息学分析专家"
+                domain_context = "通用组学数据分析流程"
+            
+            prompt = f"""You are a Senior Bioinformatics Analyst specializing in {omics_type} data analysis. Your task is to generate a comprehensive "Omics Analysis Report" in Markdown format.
+
+**Execution Results (Only Successful Steps):**
+{summary_json}
+
+**Domain Context:**
+{domain_context}
+
+**CRITICAL RULES:**
+
+1. **Academic Standard**: Generate a comprehensive, detailed report following academic standards. This is NOT a brief summary - it should be thorough and professional.
+
+2. **IGNORE Technical Issues**: 
+   - DO NOT mention failed steps, errors, or technical problems
+   - DO NOT suggest checking input formats, file paths, or code issues
+   - DO NOT act like IT support
+   - Only interpret the data from successful steps
+
+3. **Output Structure (MUST FOLLOW):**
+
+### 1. 数据概况 (Data Overview)
+- Summarize sample size, groups, and detected features
+- Evaluate Data Quality (Missing values, outliers based on PCA if available)
+- Describe the overall data characteristics
+
+### 2. 统计分析结果 (Statistical Findings)
+- **PCA Analysis**: If PCA was performed, interpret the separation between groups (PC1/PC2 scores, explained variance). Describe clustering patterns and what they indicate about group differences.
+- **Differential Analysis**: If differential analysis was performed, report:
+  - Total number of features analyzed
+  - Number of Up-regulated features (Log2FC > threshold)
+  - Number of Down-regulated features (Log2FC < -threshold)
+  - Number of significant features (FDR < threshold)
+  - Statistical method used (t-test/Wilcoxon)
+- **Key Markers**: If available, list top 3-5 features with highest VIP scores (from PLS-DA) or highest |Log2FC| (from differential analysis). Include their names and fold changes.
+
+### 3. 生物学意义 (Biological Interpretation)
+- Interpret the biological meaning of the findings
+- If Pathway Enrichment data exists, interpret the enriched KEGG pathways and their biological significance
+- Relate findings to potential biological mechanisms or disease processes
+- Discuss the functional implications of differentially expressed features
+
+### 4. 结论与建议 (Conclusion)
+- Summarize the main takeaway from the analysis
+- Highlight the most important findings
+- Suggest next steps (e.g., validation experiments, targeted analysis, pathway validation)
+
+**Output Format:**
+- Use Simplified Chinese (简体中文)
+- Use Markdown format with proper headings (###)
+- Be professional, academic, and detailed
+- Minimum 500 words, aim for comprehensive coverage
+- Include specific numbers, percentages, and statistical values from the results
+
+**Tone**: Professional, Academic, Detailed. Focus on biological interpretation and scientific insights.
+
+现在生成全面的分析报告（遵循上述结构，详细且专业）："""
+            
+            messages = [
+                {
+                    "role": "system",
+                    "content": f"""You are a Senior Bioinformatics Scientist specializing in {omics_type} data analysis. You are NOT a software engineer or IT support.
+
+**Your Role:**
+- Interpret biological data and patterns
+- Provide scientific insights about the results
+- Focus on biological meaning, not technical issues
+
+**What to DO:**
+- Interpret clustering patterns, outliers, significant findings
+- Explain biological implications
+- Suggest next biological analysis steps
+
+**What NOT to DO:**
+- Do NOT mention technical errors or failed steps
+- Do NOT suggest checking file formats or code issues
+- Do NOT act like IT support
+
+Generate concise, professional, scientifically insightful analysis summaries based on successful execution results. Use Simplified Chinese and Markdown format."""
+                },
+                {"role": "user", "content": prompt}
+            ]
+            
+            # 调用 LLM 生成摘要
+            logger.info(f"📞 [AnalysisSummary] 调用 LLM 生成摘要...")
+            completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=500)
+            think_content, response = self.llm_client.extract_think_and_content(completion)
+            
+            if response:
+                logger.info(f"✅ [AnalysisSummary] 分析摘要生成成功，长度: {len(response)}")
+                logger.debug(f"📝 [DEBUG] Summary preview: {response[:200]}...")
+                return response
+            else:
+                logger.warning(f"⚠️ [AnalysisSummary] 分析摘要为空")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ [AnalysisSummary] 生成分析摘要失败: {e}", exc_info=True)
+            return None
 
