@@ -300,7 +300,10 @@ class FileInspector:
                 }
             
             # 识别潜在的分组列（唯一值较少的列）
+            # 🔥 CRITICAL FIX: 也检查数值列，如果唯一值 <= 5，当作分类变量
             potential_groups = {}
+            
+            # 方法1: 检查非数值列（metadata_cols）
             for col in metadata_cols:
                 unique_count = df[col].nunique()
                 if unique_count > 1 and unique_count <= min(20, len(df) // 2):
@@ -308,6 +311,67 @@ class FileInspector:
                         "n_unique": int(unique_count),
                         "values": df[col].unique().tolist()[:10]  # 只显示前10个
                     }
+            
+            # 方法2: 🔥 CRITICAL FIX - 检查数值列，如果唯一值 <= 5，当作分类变量
+            priority_keywords = ['Diet', 'diet', 'Group', 'group', 'Condition', 'condition', 
+                                'Treatment', 'treatment', 'Class', 'class', 'Category', 'category',
+                                'Type', 'type', 'Label', 'label', 'Status', 'status']
+            
+            for col in numeric_cols:
+                unique_count = df[col].nunique()
+                # 如果唯一值 <= 5，且列名包含分组关键词，当作分类变量
+                if unique_count >= 2 and unique_count <= 5:
+                    if any(keyword in col for keyword in priority_keywords):
+                        potential_groups[col] = {
+                            "n_unique": int(unique_count),
+                            "values": sorted(df[col].unique().tolist())[:10]  # 排序后显示
+                        }
+                        logger.info(f"✅ [FileInspector] 检测到数值型分组列: {col} (唯一值: {unique_count})")
+                # 或者如果唯一值正好是 2（典型的二元分组，如 0/1）
+                elif unique_count == 2:
+                    if any(keyword in col for keyword in priority_keywords):
+                        potential_groups[col] = {
+                            "n_unique": int(unique_count),
+                            "values": sorted(df[col].unique().tolist())[:10]
+                        }
+                        logger.info(f"✅ [FileInspector] 检测到二元数值型分组列: {col} (唯一值: {unique_count})")
+            
+            # 🔥 ARCHITECTURAL UPGRADE: Phase 1 - Build Semantic Map
+            # Identify ID Column: First column or column with "ID"/"Sample" in name
+            id_col = None
+            id_keywords = ['ID', 'Id', 'id', 'Sample', 'sample', 'SampleID', 'sample_id']
+            for col in df.columns:
+                if any(keyword in col for keyword in id_keywords):
+                    id_col = col
+                    break
+            if not id_col and len(df.columns) > 0:
+                id_col = df.columns[0]  # Default to first column
+            
+            # Identify Group Columns: Any column with 2-10 unique values (categorical)
+            # This includes both numeric and non-numeric columns
+            group_cols = []
+            for col in df.columns:
+                unique_count = df[col].nunique()
+                # Include columns with 2-10 unique values (categorical)
+                if 2 <= unique_count <= 10:
+                    group_cols.append(col)
+                    logger.info(f"✅ [Semantic Map] 检测到分组列: {col} ({unique_count} 个唯一值)")
+            
+            # Identify Feature Columns: Numeric columns excluding ID/Group
+            feature_cols = [
+                col for col in numeric_cols 
+                if col != id_col and col not in group_cols
+            ]
+            feature_count = len(feature_cols)
+            
+            # Build semantic_map
+            semantic_map = {
+                "id_col": id_col,
+                "group_cols": group_cols,  # List of column names (not dict)
+                "feature_count": feature_count
+            }
+            
+            logger.info(f"✅ [Semantic Map] ID列: {id_col}, 分组列: {group_cols}, 特征数: {feature_count}")
             
             # 🔥 Step 3: 提取前10行作为 head（markdown格式）
             head_df = df.head(10)
@@ -352,7 +416,8 @@ class FileInspector:
                 "total_feature_columns": len(numeric_cols),
                 "missing_rate": round(missing_rate, 2),
                 "data_range": data_range,
-                "potential_groups": potential_groups,
+                "potential_groups": potential_groups,  # 保留旧格式以兼容
+                "semantic_map": semantic_map,  # 🔥 NEW: Semantic mapping
                 # 前端可用的摘要数据
                 "data": {
                     "summary": {

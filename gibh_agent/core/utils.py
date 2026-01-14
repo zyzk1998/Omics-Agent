@@ -47,6 +47,10 @@ def sanitize_for_json(obj):
             return None
         return float(obj)
     
+    # 🔥 处理 Numpy 布尔类型（numpy.bool_）
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    
     # 处理 Numpy 数组
     elif isinstance(obj, np.ndarray):
         return sanitize_for_json(obj.tolist())
