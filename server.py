@@ -2027,15 +2027,47 @@ async def execute_workflow(request: dict):
             # 设置输出目录
             output_dir = str(RESULTS_DIR / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
             
-            # 创建执行器并执行
+            # 创建执行器并执行（传递 agent 实例以生成诊断）
             executor = WorkflowExecutor(output_dir=output_dir)
             report_data = executor.execute_workflow(
                 workflow_data=workflow_data,
                 file_paths=file_paths,
-                output_dir=output_dir
+                output_dir=output_dir,
+                agent=target_agent  # 🔥 传递 agent 实例以生成 AI Expert Diagnosis
             )
             
             logger.info("✅ 通用执行器执行完成")
+            
+            # 🔥 生成 AI Expert Diagnosis（如果提供了 Agent 实例）
+            if target_agent and hasattr(target_agent, '_generate_analysis_summary'):
+                try:
+                    logger.info("📝 [Server] 生成 AI Expert Diagnosis...")
+                    
+                    # 检测组学类型
+                    omics_type = "Metabolomics"  # 默认
+                    steps = workflow_data.get("steps", [])
+                    if any("rna" in step.get("id", "").lower() or "rna" in step.get("tool_id", "").lower() for step in steps):
+                        omics_type = "scRNA"
+                    elif any("metabolomics" in step.get("id", "").lower() or "metabolomics" in step.get("tool_id", "").lower() for step in steps):
+                        omics_type = "Metabolomics"
+                    
+                    # 调用异步方法生成诊断
+                    steps_results = report_data.get("steps_results", [])
+                    workflow_name = report_data.get("workflow_name", "Analysis Pipeline")
+                    diagnosis = await target_agent._generate_analysis_summary(
+                        steps_results, 
+                        omics_type, 
+                        workflow_name
+                    )
+                    
+                    if diagnosis:
+                        logger.info(f"✅ [Server] AI Expert Diagnosis 生成成功，长度: {len(diagnosis)}")
+                        report_data["diagnosis"] = diagnosis
+                    else:
+                        logger.warning("⚠️ [Server] AI Expert Diagnosis 生成失败或返回空")
+                except Exception as diag_err:
+                    logger.error(f"❌ [Server] 生成 AI Expert Diagnosis 失败: {diag_err}", exc_info=True)
+                    # 不中断工作流，继续执行
             
             # 构建返回结果（符合前端格式）
             return JSONResponse(content={
