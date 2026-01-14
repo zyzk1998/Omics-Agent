@@ -4,7 +4,14 @@ from ..base_agent import BaseAgent
 from ...core.llm_client import LLMClient
 from ...core.prompt_manager import PromptManager
 from ...core.utils import sanitize_for_json
-from ...tools.metabolomics_tool import MetabolomicsTool
+from ...core.tool_retriever import ToolRetriever
+from ...core.planner import SOPPlanner
+from ...core.tool_registry import registry
+# 导入新工具函数
+from ...tools.general.file_inspector import inspect_file
+from ...tools.metabolomics.preprocessing import preprocess_metabolite_data
+from ...tools.metabolomics.statistics import run_pca, run_differential_analysis
+from ...tools.metabolomics.plotting import plot_volcano
 import logging
 
 logger = logging.getLogger(__name__)
@@ -61,13 +68,25 @@ class MetabolomicsAgent(BaseAgent):
         self,
         llm_client: LLMClient,
         prompt_manager: PromptManager,
-        metabolomics_config: Dict[str, Any] = None
+        metabolomics_config: Dict[str, Any] = None,
+        tool_retriever: Optional[ToolRetriever] = None
     ):
         super().__init__(llm_client, prompt_manager, "metabolomics_expert")
         self.metabolomics_config = metabolomics_config or {}
-        self.metabolomics_tool = MetabolomicsTool(self.metabolomics_config)
+        # 🔥 架构升级：移除旧工具，使用新模块化工具系统
         
-        # 标准工作流步骤（代谢组学分析流程）
+        # 🔥 架构升级：初始化 SOP 驱动的动态规划器
+        self.sop_planner = None
+        if tool_retriever:
+            try:
+                self.sop_planner = SOPPlanner(tool_retriever, llm_client)
+                logger.info("✅ [MetabolomicsAgent] SOPPlanner 已初始化")
+            except Exception as e:
+                logger.warning(f"⚠️ [MetabolomicsAgent] SOPPlanner 初始化失败，将使用回退逻辑: {e}")
+        else:
+            logger.info("ℹ️ [MetabolomicsAgent] 未提供 ToolRetriever，将使用传统工作流生成逻辑")
+        
+        # 标准工作流步骤（代谢组学分析流程）- 保留作为回退
         self.workflow_steps = [
             {"name": "1. 数据检查", "step_id": "inspect_data", "tool_id": "inspect_data", "desc": "检查数据文件的基本信息（样本数、代谢物数、缺失值、分组信息等）"},
             {"name": "2. 数据预处理", "step_id": "preprocess_data", "tool_id": "preprocess_data", "desc": "数据预处理：处理缺失值、标准化、缩放"},
@@ -165,7 +184,8 @@ class MetabolomicsAgent(BaseAgent):
                     "response": self._stream_string_response("没有检测到上传的文件。请先上传文件后再询问。")
                 }
             try:
-                inspection_result = self.metabolomics_tool.inspect_data(input_path)
+                # 使用新工具系统
+                inspection_result = inspect_file(input_path)
                 if "error" in inspection_result:
                     return {
                         "type": "chat",
@@ -376,21 +396,78 @@ File Path: {file_path}
         """
         生成工作流配置
         
-        🔥 修复版本：在 planning 阶段生成诊断报告，修复变量映射问题
+        🔥 架构升级：优先使用 SOP 驱动的动态规划器，失败则回退到传统逻辑
         
         流程：
-        1. 立即检查文件（inspect_file）- 修复 N/A 问题
-        2. 映射 shape.rows/cols 到 n_samples/n_features - 修复变量不匹配
-        3. 立即生成诊断报告 - 修复 UI 缺失报告问题
-        4. 使用 LLM 提取目标步骤
-        5. 基于检查结果提取参数
-        6. 生成工作流配置
+        1. 如果 SOPPlanner 可用，使用动态规划器生成工作流
+        2. 否则，使用传统硬编码逻辑（回退）
         """
         logger.info("=" * 80)
-        logger.info("🚀 [CHECKPOINT] _generate_workflow_config START (FIXED VERSION)")
+        logger.info("🚀 [CHECKPOINT] _generate_workflow_config START")
         logger.info(f"   Query: {query}")
         logger.info(f"   File paths: {file_paths}")
+        logger.info(f"   SOPPlanner available: {self.sop_planner is not None}")
         logger.info("=" * 80)
+        
+        # 🔥 Phase 3: 优先使用 SOP 驱动的动态规划器
+        if self.sop_planner:
+            try:
+                logger.info("🧠 [SOPPlanner] 尝试使用动态规划器生成工作流...")
+                
+                # Step 1: 检查文件获取元数据
+                file_metadata = None
+                if file_paths:
+                    try:
+                        from ...core.file_inspector import FileInspector
+                        import os
+                        upload_dir = os.getenv("UPLOAD_DIR", "/app/uploads")
+                        inspector = FileInspector(upload_dir)
+                        file_metadata = inspector.inspect_file(file_paths[0])
+                        
+                        if file_metadata.get("status") != "success":
+                            logger.warning(f"⚠️ 文件检查失败: {file_metadata.get('error')}")
+                            file_metadata = None
+                    except Exception as e:
+                        logger.warning(f"⚠️ 文件检查异常: {e}")
+                
+                # Step 2: 使用 SOPPlanner 生成计划
+                if file_metadata:
+                    plan_result = await self.sop_planner.generate_plan(
+                        user_query=query,
+                        file_metadata=file_metadata,
+                        category_filter="Metabolomics"
+                    )
+                    
+                    # 检查是否成功
+                    if plan_result.get("type") != "error":
+                        logger.info("✅ [SOPPlanner] 动态规划成功")
+                        
+                        # 生成诊断报告（可选）
+                        diagnosis_report = None
+                        try:
+                            diagnosis_report = await self._perform_data_diagnosis(
+                                file_metadata=file_metadata,
+                                system_instruction=METABO_INSTRUCTION
+                            )
+                        except Exception as e:
+                            logger.warning(f"⚠️ 诊断报告生成失败: {e}")
+                        
+                        # 添加诊断报告到结果
+                        if diagnosis_report:
+                            plan_result["diagnosis_report"] = diagnosis_report
+                        
+                        return plan_result
+                    else:
+                        logger.warning(f"⚠️ [SOPPlanner] 规划失败: {plan_result.get('error')}")
+                else:
+                    logger.warning("⚠️ [SOPPlanner] 文件元数据不可用，回退到传统逻辑")
+            
+            except Exception as e:
+                logger.error(f"❌ [SOPPlanner] 动态规划异常: {e}", exc_info=True)
+                logger.info("🔄 回退到传统工作流生成逻辑...")
+        
+        # 🔄 回退：使用传统硬编码逻辑
+        logger.info("📋 [Fallback] 使用传统工作流生成逻辑...")
         
         # 🔥 Step 1: 立即检查文件（修复 N/A 问题）
         file_metadata = None
@@ -1348,7 +1425,7 @@ Return JSON only:
         """
         context = {
             "context": f"Uploaded files: {', '.join(file_paths) if file_paths else 'None'}",
-            "available_tools": list(self.metabolomics_tool.tool_map.keys()),
+            "available_tools": ["file_inspect", "metabolomics_preprocess", "metabolomics_pca", "metabolomics_differential_analysis", "metabolomics_volcano"],
             "tool_descriptions": {
                 "inspect_data": "检查代谢组学数据文件，返回数据摘要（样本数、代谢物数、缺失值、分组信息等）",
                 "preprocess_data": "预处理数据：处理缺失值、标准化、缩放",
@@ -1364,7 +1441,8 @@ Return JSON only:
         if file_paths:
             input_path = file_paths[0]
             try:
-                inspection_result = self.metabolomics_tool.inspect_data(input_path)
+                # 使用新工具系统
+                inspection_result = inspect_file(input_path)
                 if "error" not in inspection_result:
                     # 将检查结果添加到上下文中
                     inspection_summary = f"""
@@ -1475,12 +1553,8 @@ You have access to:
         else:
             logger.info(f"   Output directory already exists: {output_dir}")
         
-        # 更新代谢组工具的输出目录
-        from pathlib import Path
-        self.metabolomics_config["output_dir"] = output_dir
-        self.metabolomics_tool.output_dir = Path(output_dir)
-        self.metabolomics_tool.output_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"✅ [CHECKPOINT] Metabolomics tool output_dir set to: {self.metabolomics_tool.output_dir}")
+        # 🔥 架构升级：不再需要设置旧工具的输出目录
+        logger.info(f"✅ [CHECKPOINT] Output directory set: {output_dir}")
         
         # 执行工作流步骤
         steps = workflow_config.get("steps", [])
@@ -1522,7 +1596,8 @@ You have access to:
                         logger.error(f"   Original path: {params.get('file_path', input_path)}")
                         logger.error(f"   Upload dir: {os.getenv('UPLOAD_DIR', '/app/uploads')}")
                     
-                    result = self.metabolomics_tool.inspect_data(file_path_to_inspect)
+                    # 使用新工具系统
+                    result = inspect_file(file_path_to_inspect)
                     logger.info(f"✅ [CHECKPOINT] inspect_data completed: {result.get('status', 'unknown')}")
                     step_result = {
                         "step_name": step.get("desc", step_id),
@@ -1556,12 +1631,25 @@ You have access to:
                     logger.info(f"🔍 [CHECKPOINT] preprocess_data: Trying to read file at: {file_path_to_preprocess}")
                     logger.info(f"   File exists? {os.path.exists(file_path_to_preprocess)}")
                     logger.info(f"   Parameters: missing_threshold={params.get('missing_threshold', '0.5')}, normalization={params.get('normalization', 'log2')}, scale={params.get('scale', 'true')}")
-                    result = self.metabolomics_tool.preprocess_data(
+                    # 使用新工具系统
+                    missing_imputation = "min"  # 默认使用最小值填充
+                    if float(params.get("missing_threshold", "0.5")) > 0.5:
+                        missing_imputation = "zero"  # 如果缺失值超过50%，使用零填充
+                    
+                    result = preprocess_metabolite_data(
                         file_path=file_path_to_preprocess,
-                        missing_threshold=float(params.get("missing_threshold", "0.5")),
-                        normalization=params.get("normalization", "log2"),
-                        scale=params.get("scale", "true").lower() == "true"
+                        missing_imputation=missing_imputation,
+                        log_transform=(params.get("normalization", "log2") == "log2"),
+                        standardize=params.get("scale", "true").lower() == "true"
                     )
+                    
+                    # 适配返回格式（保存预处理后的文件）
+                    if result.get("status") == "success" and output_dir:
+                        import pandas as pd
+                        preprocessed_df = pd.DataFrame(result.get("preprocessed_data", {}))
+                        output_path = os.path.join(output_dir, "preprocessed_data.csv")
+                        preprocessed_df.to_csv(output_path)
+                        result["output_path"] = output_path
                     logger.info(f"✅ [CHECKPOINT] preprocess_data completed: {result.get('status', 'unknown')}")
                     step_result = {
                         "step_name": step.get("desc", step_id),
@@ -1587,13 +1675,16 @@ You have access to:
                             preprocessed_file = os.path.join(output_dir, "preprocessed_data.csv")
                             break
                     
-                    result = self.metabolomics_tool.pca_analysis(
+                    # 使用新工具系统
+                    result = run_pca(
+                        file_path=preprocessed_file or params.get("file_path", input_path),
                         n_components=int(params.get("n_components", "10")),
-                        file_path=preprocessed_file or params.get("file_path", input_path)
+                        scale=True,
+                        output_dir=output_dir
                     )
-                    # 🔧 修复：保存完整的 PCA 结果，以便后续提取 variance_explained
+                    # 保存 PCA 结果供后续使用
                     if result.get("status") == "success":
-                        self.metabolomics_tool._last_pca_result = result
+                        self._last_pca_result = result
                     step_result = {
                         "step_name": step.get("desc", step_id),
                         "status": result.get("status", "success"),
@@ -1616,24 +1707,34 @@ You have access to:
                     if not os.path.exists(preprocessed_file):
                         preprocessed_file = input_path
                     
-                    result = self.metabolomics_tool.differential_analysis(
-                        group_column=params.get("group_column", "Muscle loss"),
+                    # 使用新工具系统
+                    import pandas as pd
+                    df = pd.read_csv(preprocessed_file, index_col=0)
+                    group_col = params.get("group_column", "Muscle loss")
+                    
+                    # 确定分组
+                    if group_col in df.columns:
+                        groups = df[group_col].unique()
+                        case_group = params.get("group1") or (groups[0] if len(groups) > 0 else "Group1")
+                        control_group = params.get("group2") or (groups[1] if len(groups) > 1 else groups[0])
+                    else:
+                        case_group = params.get("group1", "Group1")
+                        control_group = params.get("group2", "Group2")
+                    
+                    result = run_differential_analysis(
                         file_path=preprocessed_file,
-                        method=params.get("method", "t-test"),
-                        p_value_threshold=float(params.get("p_value_threshold", "0.05")),
-                        fold_change_threshold=float(params.get("fold_change_threshold", "1.5")),
-                        group1=params.get("group1"),
-                        group2=params.get("group2")
+                        group_column=group_col,
+                        case_group=case_group,
+                        control_group=control_group,
+                        fdr_method="fdr_bh"
                     )
                     
-                    # 检查是否需要用户选择分组
-                    if result.get("status") == "need_selection":
-                        return {
-                            "status": "need_selection",
-                            "message": result.get("message", "需要选择比较的分组"),
-                            "groups": result.get("groups", []),
-                            "steps_details": steps_details
-                        }
+                    # 保存差异分析结果到文件
+                    if result.get("status") == "success" and output_dir:
+                        results_df = pd.DataFrame(result.get("results", []))
+                        diff_output_path = os.path.join(output_dir, "differential_analysis.csv")
+                        results_df.to_csv(diff_output_path, index=False)
+                        result["output_path"] = diff_output_path
                     
                     step_result = {
                         "step_name": step.get("desc", step_id),
@@ -1652,49 +1753,39 @@ You have access to:
                     })
                 
                 elif tool_id == "visualize_pca":
-                    # 使用 PCA 分析结果文件
-                    pca_file = params.get("pca_file") or os.path.join(output_dir, "pca_results.csv")
-                    if not os.path.exists(pca_file):
-                        # 如果 PCA 文件不存在，尝试从步骤详情中获取
-                        for prev_step in steps_details:
-                            if prev_step.get("tool_id") == "pca_analysis":
-                                pca_file = os.path.join(output_dir, "pca_results.csv")
-                                break
+                    # PCA 工具已经返回 plot_path，这里只需要从之前的步骤中提取
+                    plot_path = None
+                    for prev_step in steps_details:
+                        if prev_step.get("tool_id") == "pca_analysis":
+                            prev_result = prev_step.get("step_result", {}).get("_full_result", {})
+                            plot_path = prev_result.get("plot_path")
+                            break
                     
-                    result = self.metabolomics_tool.visualize_pca(
-                        group_column=params.get("group_column", "Muscle loss"),
-                        pca_file=pca_file,
-                        pc1=int(params.get("pc1", "1")),
-                        pc2=int(params.get("pc2", "2"))
-                    )
-                    plot_path = result.get("plot_path") or result.get("plot_file")
-                    relative_plot_path = None
                     if plot_path:
                         # 转换为相对路径（相对于 output_dir）
                         if os.path.isabs(plot_path):
                             relative_plot_path = os.path.relpath(plot_path, output_dir)
                         else:
                             relative_plot_path = plot_path
-                        # 确保路径使用正斜杠（Web 兼容）
                         relative_plot_path = relative_plot_path.replace("\\", "/")
                         final_plot = relative_plot_path
+                    else:
+                        relative_plot_path = None
+                        logger.warning("⚠️ PCA 可视化：未找到 PCA 图路径")
                     
                     step_result = {
                         "step_name": step.get("desc", step_id),
-                        "status": result.get("status", "success"),
-                        "logs": "PCA 可视化完成",
-                        "data": result.get("data", {})  # 包含 images 数组
+                        "status": "success" if plot_path else "warning",
+                        "logs": "PCA 可视化完成" if plot_path else "PCA 图未生成",
+                        "data": {"images": [relative_plot_path]} if relative_plot_path else {}
                     }
-                    # 如果 result.data 中没有 images，添加
-                    if "images" not in step_result["data"] and relative_plot_path:
-                        step_result["data"]["images"] = [relative_plot_path]
                     
                     steps_details.append({
                         "step_id": step_id,
                         "tool_id": tool_id,
                         "name": step.get("desc", step_id),
                         "summary": "PCA 可视化完成",
-                        "status": result.get("status", "success"),
+                        "status": step_result["status"],
                         "plot": relative_plot_path,
                         "step_result": step_result
                     })
@@ -1709,10 +1800,19 @@ You have access to:
                                 diff_file = os.path.join(output_dir, "differential_analysis.csv")
                                 break
                     
-                    result = self.metabolomics_tool.visualize_volcano(
-                        diff_file=diff_file,
-                        p_value_threshold=float(params.get("p_value_threshold", "0.05")),
-                        fold_change_threshold=float(params.get("fold_change_threshold", "1.5"))
+                    # 使用新工具系统
+                    # 读取差异分析结果
+                    import pandas as pd
+                    diff_df = pd.read_csv(diff_file)
+                    diff_results = {"results": diff_df.to_dict(orient="records")}
+                    
+                    # 生成火山图
+                    volcano_output_path = os.path.join(output_dir, "volcano_plot.png")
+                    result = plot_volcano(
+                        diff_results=diff_results,
+                        output_path=volcano_output_path,
+                        fdr_threshold=float(params.get("p_value_threshold", "0.05")),
+                        log2fc_threshold=float(params.get("fold_change_threshold", "1.5"))
                     )
                     plot_path = result.get("plot_path") or result.get("plot_file")
                     relative_plot_path = None

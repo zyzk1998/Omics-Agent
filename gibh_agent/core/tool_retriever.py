@@ -157,8 +157,12 @@ class ToolRetriever:
             ids = [f"tool_{i}" for i in range(len(documents))]
             self.vector_store.add_documents(documents=documents, ids=ids)
             
-            # 持久化
-            self.vector_store.persist()
+            # 持久化（新版本 ChromaDB 自动持久化，如果 persist 方法存在则调用）
+            if hasattr(self.vector_store, 'persist'):
+                self.vector_store.persist()
+            else:
+                # 新版本 ChromaDB 使用 persist_directory 时自动持久化
+                logger.debug("ChromaDB 自动持久化（无需手动调用 persist）")
             
             logger.info(f"✅ 成功同步 {len(documents)} 个工具到 ChromaDB")
             return len(documents)
@@ -186,14 +190,14 @@ class ToolRetriever:
         """
         try:
             # 构建搜索查询
-            search_kwargs = {"k": top_k}
+            search_kwargs = {}
             
             # 如果指定了类别过滤，添加到 metadata 过滤中
             if category_filter:
                 # ChromaDB 支持 metadata 过滤
                 search_kwargs["filter"] = {"category": category_filter}
             
-            # 执行相似度搜索
+            # 执行相似度搜索（k 参数直接传递，不放在 search_kwargs 中）
             results = self.vector_store.similarity_search_with_score(
                 query,
                 k=top_k,
