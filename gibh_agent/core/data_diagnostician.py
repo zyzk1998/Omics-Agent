@@ -75,12 +75,39 @@ class DataDiagnostician:
         """
         stats = {}
         
-        # 从 file_metadata 提取信息
-        # 注意：ScanpyTool.inspect_file 返回的格式与 FileInspector 不同
+        # 🔥 CRITICAL FIX: 从 file_metadata 提取信息，支持多种格式
+        # 优先级：n_samples/n_features > n_obs/n_vars > shape.rows/cols
+        
+        # 方法1: 尝试从通用键获取（DataDiagnostician 期望的格式）
+        n_samples = file_metadata.get("n_samples")
+        n_features = file_metadata.get("n_features")
+        
+        # 方法2: 如果通用键缺失或为零，尝试从 scRNA-seq 格式获取
+        if (n_samples is None or n_samples == 0) and "n_obs" in file_metadata:
+            n_samples = file_metadata.get("n_obs", 0)
+            logger.debug(f"DEBUG: Using n_obs -> n_samples: {n_samples}")
+        
+        if (n_features is None or n_features == 0) and "n_vars" in file_metadata:
+            n_features = file_metadata.get("n_vars", 0)
+            logger.debug(f"DEBUG: Using n_vars -> n_features: {n_features}")
+        
+        # 方法3: 如果仍然缺失，尝试从 shape 获取
+        if (n_samples is None or n_samples == 0):
+            shape = file_metadata.get("shape", {})
+            n_samples = shape.get("rows", 0)
+            logger.debug(f"DEBUG: Using shape.rows -> n_samples: {n_samples}")
+        
+        if (n_features is None or n_features == 0):
+            shape = file_metadata.get("shape", {})
+            n_features = shape.get("cols", 0)
+            logger.debug(f"DEBUG: Using shape.cols -> n_features: {n_features}")
+        
+        # 设置统计值
+        stats["n_cells"] = n_samples if n_samples else 0
+        stats["n_genes"] = n_features if n_features else 0
+        
+        # 如果存在 n_obs/n_vars（ScanpyTool 格式），提取额外信息
         if "n_obs" in file_metadata:
-            # ScanpyTool 格式
-            stats["n_cells"] = file_metadata.get("n_obs", 0)
-            stats["n_genes"] = file_metadata.get("n_vars", 0)
             stats["has_qc_metrics"] = file_metadata.get("has_qc_metrics", False)
             stats["is_normalized"] = file_metadata.get("is_normalized", False)
             stats["max_value"] = file_metadata.get("max_value", 0)
@@ -97,10 +124,8 @@ class DataDiagnostician:
                         stats["median_mt_percent"] = dataframe["pct_counts_mt"].median()
                 except Exception as e:
                     logger.warning(f"⚠️ 提取 QC 指标失败: {e}")
-        else:
-            # FileInspector 格式（如果是 h5ad 文件）
-            stats["n_cells"] = file_metadata.get("n_samples", 0)
-            stats["n_genes"] = file_metadata.get("n_features", 0)
+        
+        logger.debug(f"DEBUG: Final stats - n_cells: {stats['n_cells']}, n_genes: {stats['n_genes']}")
         
         # 数据质量评估
         stats["data_quality"] = self._assess_scRNA_quality(stats)

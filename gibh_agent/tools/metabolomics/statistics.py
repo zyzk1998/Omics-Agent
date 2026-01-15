@@ -159,12 +159,63 @@ def run_differential_analysis(
         # 读取数据
         df = pd.read_csv(file_path, index_col=0)
         
-        # 检查分组列是否存在
+        # 🔥 修复：检查分组列是否存在，如果不存在则尝试模糊匹配
         if group_column not in df.columns:
-            return {
-                "status": "error",
-                "error": f"分组列 '{group_column}' 不存在于数据中"
-            }
+            # 尝试模糊匹配：忽略大小写、空格、下划线、连字符
+            group_column_normalized = group_column.lower().replace(' ', '').replace('_', '').replace('-', '')
+            matched_column = None
+            
+            for col in df.columns:
+                col_normalized = col.lower().replace(' ', '').replace('_', '').replace('-', '')
+                if col_normalized == group_column_normalized:
+                    matched_column = col
+                    logger.info(f"🔄 [Differential Analysis] 模糊匹配分组列: '{group_column}' -> '{col}'")
+                    break
+            
+            if matched_column:
+                group_column = matched_column
+            else:
+                # 🔥 改进：区分显示元数据列（可能的分组列）和特征列（代谢物）
+                metadata_cols = [col for col in df.columns if not pd.api.types.is_numeric_dtype(df[col])]
+                numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
+                
+                # 检查是否有唯一值较少的列（可能是分组列）
+                potential_group_cols = []
+                for col in df.columns:
+                    unique_count = df[col].nunique()
+                    if 2 <= unique_count <= 10:
+                        potential_group_cols.append(f"{col} ({unique_count}个唯一值)")
+                
+                error_msg = f"分组列 '{group_column}' 不存在于数据中。\n\n"
+                
+                # 检查索引列是否可能包含分组信息
+                index_info = ""
+                if df.index.nunique() <= 10:
+                    index_values = df.index.unique().tolist()[:10]
+                    index_info = f"⚠️ 索引列（第一列）有 {df.index.nunique()} 个唯一值，可能包含分组信息: {index_values}\n"
+                    error_msg += index_info
+                    error_msg += "💡 提示：如果分组信息在索引列中，请将索引列转换为数据列。\n\n"
+                
+                if metadata_cols:
+                    error_msg += f"可能的元数据列（非数值列）: {', '.join(metadata_cols[:10])}\n"
+                else:
+                    error_msg += "❌ 未找到非数值列（所有列都是数值型）。\n"
+                    error_msg += "💡 数据格式要求：CSV文件应包含一列分组信息（如 'Group', 'Condition', 'Treatment' 等）。\n"
+                    error_msg += "   数据格式示例：\n"
+                    error_msg += "   SampleID,Group,Metabolite1,Metabolite2,...\n"
+                    error_msg += "   Sample1,Control,1.2,3.4,...\n"
+                    error_msg += "   Sample2,Treatment,2.3,4.5,...\n\n"
+                
+                if potential_group_cols:
+                    error_msg += f"可能的分组列（唯一值2-10）: {', '.join(potential_group_cols[:10])}\n"
+                
+                if numeric_cols:
+                    error_msg += f"特征列（代谢物，前5个）: {', '.join(numeric_cols[:5])}, ..."
+                
+                return {
+                    "status": "error",
+                    "error": error_msg.strip()
+                }
         
         # 🔥 自动检测分组（如果未指定）
         # 优先使用 case_group/control_group，如果没有则使用 group1/group2

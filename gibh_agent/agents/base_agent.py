@@ -523,6 +523,26 @@ Use Simplified Chinese for all content."""
             # 构建强制事实字符串
             facts_str = " ".join(stats_facts) if stats_facts else "统计数据已提供在用户提示中。"
             
+            # 🔥 CRITICAL DEBUGGING: 检查数据是否缺失，如果缺失则注入调试跟踪
+            n_samples_value = stats.get("n_samples", stats.get("n_cells", stats.get("n_rows", 0)))
+            debug_trace = file_metadata.get("debug_trace")
+            
+            # 如果数据缺失（0 samples），强制注入调试跟踪到系统提示
+            debug_section = ""
+            if n_samples_value == 0 and debug_trace:
+                debug_section = f"""
+
+**🔍 CRITICAL FAILURE: 数据检查返回 0 个样本**
+
+这是一个严重错误。数据检查器无法正确读取数据文件。请在诊断报告末尾添加一个名为 "🔍 调试日志 (Debug Log)" 的章节，并将以下执行跟踪完整复制到该章节中：
+
+```
+{debug_trace}
+```
+
+这个调试日志将帮助诊断问题所在。"""
+                logger.warning(f"⚠️ [DataDiagnostician] Detected 0 samples, injecting debug trace into prompt")
+            
             # 🔥 架构重构：使用策略模式，从 Agent 传入 system_instruction
             if system_instruction:
                 # 使用 Agent 提供的领域特定指令，并强制注入统计数据
@@ -530,7 +550,7 @@ Use Simplified Chinese for all content."""
 
 **CRITICAL: 数据事实（必须严格遵循，不得产生幻觉）**
 {facts_str}
-请确保诊断报告中的数字与上述事实完全一致。不要猜测或编造不同的数字。"""
+请确保诊断报告中的数字与上述事实完全一致。不要猜测或编造不同的数字。{debug_section}"""
                 logger.debug(f"✅ [DataDiagnostician] Using domain-specific system instruction with facts (length: {len(system_prompt)})")
             else:
                 # 回退到通用指令（向后兼容），但也注入统计数据
@@ -538,7 +558,7 @@ Use Simplified Chinese for all content."""
 
 **CRITICAL: 数据事实（必须严格遵循，不得产生幻觉）**
 {facts_str}
-请确保诊断报告中的数字与上述事实完全一致。不要猜测或编造不同的数字。"""
+请确保诊断报告中的数字与上述事实完全一致。不要猜测或编造不同的数字。{debug_section}"""
                 logger.warning(f"⚠️ [DataDiagnostician] No system_instruction provided, using generic prompt with facts")
             
             # 🔥 架构重构：将 system_instruction 前置到用户 prompt（确保上下文隔离）

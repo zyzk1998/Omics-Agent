@@ -129,10 +129,15 @@ manage_services() {
             ;;
         4)
             echo "🔨 重建并重启 (依赖/配置生效)..."
-            echo -e "${YELLOW}⚠️  这将重新构建镜像，可能需要几分钟...${NC}"
-            docker_compose_cmd up -d --build
+            echo -e "${YELLOW}⚠️  这将完全停止、重新构建并启动容器，可能需要几分钟...${NC}"
+            # 🔥 完全停止所有服务
+            echo "🛑 停止所有服务..."
+            sudo docker compose down
+            # 🔥 重新构建并启动（绝对重启）
+            echo "🔨 重新构建并启动..."
+            sudo docker compose up --build -d
             wait_for_service
-            docker_compose_cmd ps
+            sudo docker compose ps
             ;;
     esac
     read -p "按 Enter 继续..."

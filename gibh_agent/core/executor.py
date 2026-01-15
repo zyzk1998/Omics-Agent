@@ -84,9 +84,24 @@ class WorkflowExecutor:
                 "message": error_msg
             }
         
+        # 🔥 参数映射：根据工具类别映射文件路径参数
+        tool_metadata = registry.get_metadata(tool_id)
+        tool_category = tool_metadata.category if tool_metadata else None
+        
+        # 确定工具期望的文件路径参数名
+        if tool_category == "scRNA-seq":
+            # RNA 工具使用 adata_path
+            file_param_name = "adata_path"
+            # 如果提供了 file_path 但没有 adata_path，进行映射
+            if "file_path" in params and file_param_name not in params:
+                params[file_param_name] = params.pop("file_path")
+                logger.info(f"🔄 [Executor] 参数映射: file_path -> {file_param_name} (工具: {tool_id})")
+        else:
+            # 其他工具（如代谢组学）使用 file_path
+            file_param_name = "file_path"
+        
         # 验证参数（可选但推荐）
         try:
-            tool_metadata = registry.get_metadata(tool_id)
             if tool_metadata:
                 # 使用 Pydantic schema 验证参数
                 validated_params = tool_metadata.args_schema(**params)
@@ -96,8 +111,19 @@ class WorkflowExecutor:
             logger.warning(f"⚠️ 参数验证失败（继续执行）: {validation_err}")
             # 继续执行，不因验证失败而中断
         
-        # 处理数据流：替换占位符
-        processed_params = self._process_data_flow(params, step_context)
+        # 处理数据流：替换占位符（传递工具类别信息）
+        processed_params = self._process_data_flow(params, step_context, tool_category=tool_category)
+        
+        # 🔥 CRITICAL FIX: 对于 scRNA-seq 工具，确保移除 file_path 参数（如果存在）
+        if tool_category == "scRNA-seq" and "file_path" in processed_params:
+            # 如果已经有 adata_path，移除 file_path
+            if "adata_path" in processed_params:
+                del processed_params["file_path"]
+                logger.info(f"🔄 [Executor] 移除多余的 file_path 参数（工具已有 adata_path）")
+            else:
+                # 如果没有 adata_path，将 file_path 映射为 adata_path
+                processed_params["adata_path"] = processed_params.pop("file_path")
+                logger.info(f"🔄 [Executor] 参数映射: file_path -> adata_path (工具: {tool_id})")
         
         # 🔥 CRITICAL FIX: 对于 visualize_volcano，自动注入 diff_results（如果缺失）
         if tool_id == "visualize_volcano":
@@ -142,7 +168,26 @@ class WorkflowExecutor:
                     # Pre-Flight Check: 读取文件检查列是否存在
                     df = pd.read_csv(file_path, index_col=0, nrows=1)  # 只读第一行检查列名
                     
-                    if group_column not in df.columns:
+                    # 🔥 修复：先尝试精确匹配，如果失败则尝试模糊匹配（忽略大小写、空格、下划线）
+                    group_column_found = group_column in df.columns
+                    matched_column = None
+                    
+                    if not group_column_found:
+                        # 尝试模糊匹配：忽略大小写、空格、下划线
+                        group_column_normalized = group_column.lower().replace(' ', '').replace('_', '').replace('-', '')
+                        for col in df.columns:
+                            col_normalized = col.lower().replace(' ', '').replace('_', '').replace('-', '')
+                            if col_normalized == group_column_normalized:
+                                matched_column = col
+                                logger.info(f"🔄 [Executor] 模糊匹配分组列: '{group_column}' -> '{col}'")
+                                break
+                        
+                        if matched_column:
+                            group_column = matched_column
+                            group_column_found = True
+                            processed_params["group_column"] = matched_column
+                    
+                    if not group_column_found:
                         logger.warning(f"⚠️ [Executor] Pre-Flight Check: 分组列 '{group_column}' 不存在于数据中")
                         
                         # Auto-Correction: 尝试获取 semantic_map
@@ -261,7 +306,8 @@ class WorkflowExecutor:
     def _process_data_flow(
         self,
         params: Dict[str, Any],
-        step_context: Optional[Dict[str, Any]] = None
+        step_context: Optional[Dict[str, Any]] = None,
+        tool_category: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         处理数据流：替换占位符（如 <step1_output>）和自动注入文件路径
@@ -269,18 +315,30 @@ class WorkflowExecutor:
         Args:
             params: 原始参数
             step_context: 步骤上下文（包含 current_file_path）
+            tool_category: 工具类别（用于确定文件路径参数名）
         
         Returns:
             处理后的参数
         """
         processed = {}
         
-        # 🔥 如果 file_path 缺失，尝试从上下文注入
-        if "file_path" not in params and step_context:
+        # 🔥 根据工具类别确定文件路径参数名
+        if tool_category == "scRNA-seq":
+            file_param_name = "adata_path"
+        else:
+            file_param_name = "file_path"
+        
+        # 🔥 如果文件路径参数缺失，尝试从上下文注入
+        if file_param_name not in params and step_context:
             current_file_path = step_context.get("current_file_path")
             if current_file_path:
-                processed["file_path"] = current_file_path
-                logger.info(f"🔄 数据流: 自动注入 file_path = {current_file_path}")
+                processed[file_param_name] = current_file_path
+                logger.info(f"🔄 数据流: 自动注入 {file_param_name} = {current_file_path}")
+        
+        # 🔥 如果提供了 file_path 但工具需要 adata_path，进行映射
+        if tool_category == "scRNA-seq" and "file_path" in params and "adata_path" not in params:
+            processed["adata_path"] = params.pop("file_path")
+            logger.info(f"🔄 数据流: 参数映射 file_path -> adata_path")
         
         for key, value in params.items():
             if isinstance(value, str) and value.startswith("<") and value.endswith(">"):
@@ -362,17 +420,26 @@ class WorkflowExecutor:
                 # 尝试从 step_results 中获取
                 if placeholder in self.step_results:
                     step_result = self.step_results[placeholder]
-                    # 提取输出路径（如果存在）
+                    # 🔥 CRITICAL FIX: 对于 scRNA-seq 工具，优先提取 output_h5ad
                     if isinstance(step_result, dict):
-                        # 尝试多种可能的输出路径字段
-                        output_path = (
-                            step_result.get("output_file") or
-                            step_result.get("output_path") or
-                            step_result.get("file_path") or
-                            step_result.get("plot_path") or
-                            step_result.get("result_path") or
-                            step_result.get("preprocessed_file")
-                        )
+                        # 对于 scRNA-seq 工具，优先查找 output_h5ad
+                        if tool_category == "scRNA-seq":
+                            output_path = (
+                                step_result.get("output_h5ad") or  # 🔥 优先使用 output_h5ad
+                                step_result.get("output_file") or
+                                step_result.get("output_path") or
+                                step_result.get("file_path")
+                            )
+                        else:
+                            # 其他工具使用标准字段
+                            output_path = (
+                                step_result.get("output_file") or
+                                step_result.get("output_path") or
+                                step_result.get("file_path") or
+                                step_result.get("plot_path") or
+                                step_result.get("result_path") or
+                                step_result.get("preprocessed_file")
+                            )
                         if output_path:
                             processed[key] = output_path
                             logger.info(f"🔄 数据流: {key} = <{placeholder}> -> {output_path}")
@@ -434,11 +501,12 @@ class WorkflowExecutor:
             # 读取文件（采样读取，避免大文件问题）
             df = pd.read_csv(file_path, index_col=0, nrows=1000)
             
-            # 优先级关键词列表
+            # 优先级关键词列表（支持部分匹配，如"Muscle loss"会匹配包含"Muscle"或"Loss"的列）
             priority_keywords = ['Diet', 'diet', 'Group', 'group', 'Condition', 'condition', 
                                 'Treatment', 'treatment', 'Class', 'class', 'Category', 'category',
                                 'Type', 'type', 'Label', 'label', 'Status', 'status',
-                                'Muscle', 'muscle', 'Loss', 'loss']  # 添加用户数据相关的关键词
+                                'Muscle', 'muscle', 'Loss', 'loss', 'MuscleLoss', 'muscleloss',
+                                'Muscle_loss', 'muscle_loss']  # 添加用户数据相关的关键词
             
             # 识别列类型
             metadata_cols = []
@@ -451,8 +519,12 @@ class WorkflowExecutor:
                     metadata_cols.append(col)
             
             # 方法1: 检查非数值列（metadata_cols），优先关键词匹配
+            # 🔥 改进：支持部分匹配，如"Muscle loss"会匹配"MuscleLoss"或"Muscle_loss"
             for col in metadata_cols:
-                if any(keyword in col for keyword in priority_keywords):
+                col_lower = col.lower().replace(' ', '').replace('_', '').replace('-', '')
+                # 检查是否包含任何关键词（忽略大小写、空格、下划线）
+                if any(keyword.lower().replace(' ', '').replace('_', '').replace('-', '') in col_lower 
+                       for keyword in priority_keywords):
                     unique_count = df[col].nunique()
                     if 2 <= unique_count <= 20:  # 合理的分组数量
                         logger.info(f"✅ [Executor] 检测到分组列（关键词匹配）: {col} ({unique_count} 个唯一值)")
@@ -554,10 +626,27 @@ class WorkflowExecutor:
             logger.info(f"📌 步骤 {i}/{len(steps)}: {step_name} ({step_id})")
             logger.info(f"{'=' * 80}")
             
-            # 🔥 自动注入 file_path（如果缺失且我们有当前文件路径）
-            if "file_path" not in params and current_file_path:
-                params["file_path"] = current_file_path
-                logger.info(f"🔄 自动注入 file_path: {current_file_path}")
+            # 🔥 智能参数映射：根据工具类型自动映射文件路径参数
+            tool_metadata = registry.get_metadata(tool_id)
+            tool_category = tool_metadata.category if tool_metadata else None
+            
+            # 确定工具期望的文件路径参数名
+            if tool_category == "scRNA-seq":
+                # RNA 工具使用 adata_path
+                file_param_name = "adata_path"
+            else:
+                # 其他工具（如代谢组学）使用 file_path
+                file_param_name = "file_path"
+            
+            # 自动注入文件路径（如果缺失且我们有当前文件路径）
+            if file_param_name not in params and current_file_path:
+                params[file_param_name] = current_file_path
+                logger.info(f"🔄 自动注入 {file_param_name}: {current_file_path}")
+            
+            # 🔥 参数映射：如果工具期望 adata_path 但提供了 file_path，进行映射
+            if file_param_name == "adata_path" and "file_path" in params and file_param_name not in params:
+                params[file_param_name] = params.pop("file_path")
+                logger.info(f"🔄 参数映射: file_path -> {file_param_name}")
             
             # 如果工具需要 output_dir，也自动注入
             if "output_dir" not in params and self.output_dir:
@@ -577,23 +666,38 @@ class WorkflowExecutor:
             # 执行步骤
             step_result = self.execute_step(step, step_context)
             
-            # 🔥 更新 current_file_path 供下一个步骤使用
+            # 🔥 CRITICAL FIX: 更新 current_file_path 供下一个步骤使用
+            # 对于 scRNA-seq 工具，优先使用 output_h5ad
             result_data = step_result.get("result", {})
             if isinstance(result_data, dict):
-                # 尝试多种可能的输出路径字段
-                next_file_path = (
-                    result_data.get("output_file") or
-                    result_data.get("output_path") or
-                    result_data.get("file_path") or
-                    result_data.get("preprocessed_file")
-                )
+                # 🔥 对于 scRNA-seq 工具，优先查找 output_h5ad
+                tool_metadata = registry.get_metadata(step.get("tool_id", ""))
+                tool_category = tool_metadata.category if tool_metadata else None
                 
-                if next_file_path and os.path.exists(next_file_path):
+                if tool_category == "scRNA-seq":
+                    # scRNA-seq 工具优先使用 output_h5ad
+                    next_file_path = (
+                        result_data.get("output_h5ad") or  # 🔥 优先使用 output_h5ad
+                        result_data.get("output_file") or
+                        result_data.get("output_path") or
+                        result_data.get("file_path")
+                    )
+                else:
+                    # 其他工具使用标准字段
+                    next_file_path = (
+                        result_data.get("output_file") or
+                        result_data.get("output_path") or
+                        result_data.get("file_path") or
+                        result_data.get("preprocessed_file")
+                    )
+                
+                if next_file_path:
+                    # 🔥 修复：即使文件不存在也更新路径（文件可能稍后创建）
                     current_file_path = next_file_path
-                    logger.info(f"✅ 更新当前文件路径: {current_file_path}")
-                elif next_file_path:
-                    logger.warning(f"⚠️ 输出路径不存在，但会使用: {next_file_path}")
-                    current_file_path = next_file_path
+                    if os.path.exists(next_file_path):
+                        logger.info(f"✅ 更新当前文件路径: {current_file_path}")
+                    else:
+                        logger.warning(f"⚠️ 输出路径不存在，但会使用: {next_file_path} (文件可能稍后创建)")
             
             # 构建步骤详情（符合前端格式）
             step_detail = {

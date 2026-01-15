@@ -1293,7 +1293,8 @@ async def upload_file(files: List[UploadFile] = File(...)):
             file.filename = safe_filename
             
             filename_lower = safe_filename.lower()
-            if any(pattern in filename_lower for pattern in ['matrix.mtx', 'barcodes.tsv', 'features.tsv']):
+            # 🔥 修复：支持 genes.tsv（旧版10x格式）和 features.tsv（新版10x格式）
+            if any(pattern in filename_lower for pattern in ['matrix.mtx', 'barcodes.tsv', 'features.tsv', 'genes.tsv']):
                 is_10x_data = True
                 tenx_files.append(file)
             else:

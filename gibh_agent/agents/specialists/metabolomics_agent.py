@@ -115,8 +115,29 @@ class MetabolomicsAgent(BaseAgent):
         query_lower = query.lower().strip()
         file_paths = self.get_file_paths(uploaded_files or [])
         
-        # Scenario A: 新文件上传 - 注册到文件注册表并设置为活动文件
+        # 🔥 修复：当有新文件上传时，清除旧上下文，确保使用新文件
         if uploaded_files and len(uploaded_files) > 0:
+            # 检查是否有新文件（通过比较文件名）
+            current_active_file = self.context.get("active_file")
+            new_file_names = []
+            for file_info in uploaded_files:
+                if isinstance(file_info, dict):
+                    filename = file_info.get("name") or file_info.get("path") or file_info.get("file_id", "unknown")
+                else:
+                    filename = getattr(file_info, "name", None) or getattr(file_info, "path", None) or "unknown"
+                new_file_names.append(filename)
+            
+            # 如果当前活动文件不在新文件列表中，说明有新文件上传
+            has_new_file = current_active_file not in new_file_names if current_active_file else True
+            
+            if has_new_file:
+                logger.info(f"🔄 [FileRegistry] 检测到新文件上传，清除旧上下文")
+                logger.info(f"   旧活动文件: {current_active_file}")
+                logger.info(f"   新文件列表: {new_file_names}")
+                # 清除旧上下文
+                self._refresh_context_for_new_files(uploaded_files)
+            
+            # 注册所有上传的文件
             for file_info in uploaded_files:
                 if isinstance(file_info, dict):
                     filename = file_info.get("name") or file_info.get("path") or file_info.get("file_id", "unknown")
@@ -140,8 +161,16 @@ class MetabolomicsAgent(BaseAgent):
                 
                 # 注册文件
                 self.register_file(filename, absolute_path, file_metadata=None)
-                # 设置为活动文件（最后一个上传的文件）
-                self.set_active_file(filename)
+            
+            # 🔥 关键修复：优先使用最新上传的文件（列表最后一个）作为活动文件
+            if new_file_names:
+                latest_file = new_file_names[-1]
+                self.set_active_file(latest_file)
+                logger.info(f"✅ [FileRegistry] 设置最新文件为活动文件: {latest_file}")
+                # 确保 file_paths 使用最新文件
+                if file_paths:
+                    file_paths = [file_paths[-1]]  # 只使用最后一个文件
+                    logger.info(f"📂 [FileRegistry] 使用最新文件路径: {file_paths[0]}")
         
         # Scenario B: 没有新文件 - 使用当前活动文件
         if not file_paths:
@@ -407,6 +436,28 @@ File Path: {file_path}
         logger.info(f"   Query: {query}")
         logger.info(f"   File paths: {file_paths}")
         logger.info(f"   SOPPlanner available: {self.sop_planner is not None}")
+        
+        # 🔥 修复：确保使用最新文件路径，清除缓存的旧文件元数据
+        if file_paths:
+            # 使用最新文件（列表最后一个）
+            current_file = file_paths[-1]
+            logger.info(f"   Using latest file: {current_file}")
+            
+            # 清除旧的元数据缓存，强制重新检查文件
+            self.context.pop("file_metadata", None)
+            self.context.pop("diagnosis_report", None)
+            self.context.pop("diagnosis_stats", None)
+            logger.info("   ✅ Cleared cached file metadata, will re-inspect file")
+        else:
+            # 如果没有文件路径，尝试使用活动文件
+            active_file_info = self.get_active_file_info()
+            if active_file_info:
+                current_file = active_file_info["path"]
+                file_paths = [current_file]
+                logger.info(f"   Using active file: {current_file}")
+            else:
+                logger.warning("   ⚠️ No file paths provided and no active file")
+        
         logger.info("=" * 80)
         
         # 🔥 Phase 3: 优先使用 SOP 驱动的动态规划器

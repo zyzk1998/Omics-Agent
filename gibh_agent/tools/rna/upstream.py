@@ -219,15 +219,13 @@ def convert_cellranger_to_h5ad(
                 "n_vars": None
             }
         
-        # 读取 10x MTX 数据
-        adata = sc.read_10x_mtx(
+        # 🔥 使用统一的10x数据读取函数，支持压缩和未压缩格式
+        from ...core.rna_utils import read_10x_data
+        adata = read_10x_data(
             cellranger_matrix_dir,
             var_names='gene_symbols',  # 使用基因符号作为变量名
             cache=True
         )
-        
-        # 确保基因名唯一
-        adata.var_names_make_unique()
         
         # 保存为 .h5ad 格式
         logger.info(f"💾 保存为 .h5ad 格式: {output_h5ad_path}")

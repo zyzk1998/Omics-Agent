@@ -40,23 +40,55 @@ def run_normalize(
     try:
         import scanpy as sc
         
-        # 加载数据
-        adata = sc.read_h5ad(adata_path)
+        # 🔥 CRITICAL FIX: 支持目录输入（向后兼容）和文件输入
+        # 如果输入是目录，尝试读取其中的 filtered.h5ad 文件
+        if os.path.isdir(adata_path):
+            # 检查目录中是否有 filtered.h5ad（来自 rna_qc_filter 的输出）
+            filtered_h5ad = os.path.join(adata_path, "filtered.h5ad")
+            if os.path.exists(filtered_h5ad):
+                logger.info(f"📖 [Normalize] Reading filtered.h5ad from directory: {filtered_h5ad}")
+                adata = sc.read_h5ad(filtered_h5ad)
+            else:
+                # 如果是 10x 目录，尝试读取
+                from ...core.rna_utils import read_10x_data
+                logger.info(f"📖 [Normalize] Reading 10x data from directory: {adata_path}")
+                adata = read_10x_data(adata_path, var_names='gene_symbols', cache=False)
+        elif adata_path.endswith('.h5ad'):
+            # 标准 .h5ad 文件
+            adata = sc.read_h5ad(adata_path)
+        else:
+            # 其他格式
+            adata = sc.read(adata_path)
         
         # 标准化
         sc.pp.normalize_total(adata, target_sum=target_sum)
         sc.pp.log1p(adata)
         
-        # 保存结果
-        output_h5ad = None
+        # 🔥 CRITICAL FIX: 始终保存标准化后的数据
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
             output_h5ad = os.path.join(output_dir, "normalized.h5ad")
-            adata.write(output_h5ad)
+        else:
+            # 如果没有指定输出目录，使用输入文件所在目录
+            if os.path.isdir(adata_path):
+                output_h5ad = os.path.join(adata_path, "normalized.h5ad")
+            elif adata_path.endswith('.h5ad'):
+                input_dir = os.path.dirname(adata_path)
+                output_h5ad = os.path.join(input_dir, "normalized.h5ad")
+            else:
+                output_h5ad = os.path.join(os.getcwd(), "normalized.h5ad")
+        
+        # 确保输出目录存在
+        output_dir_actual = os.path.dirname(output_h5ad)
+        if output_dir_actual:
+            os.makedirs(output_dir_actual, exist_ok=True)
+        
+        adata.write(output_h5ad)
+        logger.info(f"✅ [Normalize] Saved normalized data to: {output_h5ad}")
         
         return {
             "status": "success",
-            "output_h5ad": output_h5ad,
+            "output_h5ad": output_h5ad,  # 🔥 确保返回输出文件路径
             "summary": "LogNormalize 完成"
         }
     

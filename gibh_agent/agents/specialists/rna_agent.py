@@ -95,18 +95,32 @@ class RNAAgent(BaseAgent):
         else:
             logger.info("ℹ️ [RNAAgent] 未提供 ToolRetriever，将使用传统工作流生成逻辑")
         
-        # 标准工作流步骤（十步流程）- 保留作为回退
+        # 🔥 工具ID映射表：旧ID -> 新ID（已注册的工具名称）
+        self.tool_id_mapping = {
+            "local_qc": "rna_qc_filter",
+            "local_normalize": "rna_normalize",
+            "local_hvg": "rna_hvg",
+            "local_scale": "rna_scale",
+            "local_pca": "rna_pca",
+            "local_neighbors": "rna_neighbors",
+            "local_cluster": "rna_clustering",
+            "local_umap": "rna_umap",
+            "local_tsne": "rna_tsne",
+            "local_markers": "rna_find_markers",
+        }
+        
+        # 标准工作流步骤（十步流程）- 使用新的工具ID
         self.workflow_steps = [
-            {"name": "1. Quality Control", "tool_id": "local_qc", "desc": "过滤低质量细胞和基因"},
-            {"name": "2. Normalization", "tool_id": "local_normalize", "desc": "数据标准化"},
-            {"name": "3. Find Variable Genes", "tool_id": "local_hvg", "desc": "筛选高变基因"},
-            {"name": "4. Scale Data", "tool_id": "local_scale", "desc": "数据缩放"},
-            {"name": "5. PCA", "tool_id": "local_pca", "desc": "主成分分析"},
-            {"name": "6. Compute Neighbors", "tool_id": "local_neighbors", "desc": "构建邻接图"},
-            {"name": "7. Clustering", "tool_id": "local_cluster", "desc": "Leiden 聚类"},
-            {"name": "8. UMAP Visualization", "tool_id": "local_umap", "desc": "UMAP 可视化"},
-            {"name": "9. t-SNE Visualization", "tool_id": "local_tsne", "desc": "t-SNE 可视化"},
-            {"name": "10. Find Markers", "tool_id": "local_markers", "desc": "寻找 Marker 基因"},
+            {"name": "1. Quality Control", "tool_id": "rna_qc_filter", "desc": "过滤低质量细胞和基因"},
+            {"name": "2. Normalization", "tool_id": "rna_normalize", "desc": "数据标准化"},
+            {"name": "3. Find Variable Genes", "tool_id": "rna_hvg", "desc": "筛选高变基因"},
+            {"name": "4. Scale Data", "tool_id": "rna_scale", "desc": "数据缩放"},
+            {"name": "5. PCA", "tool_id": "rna_pca", "desc": "主成分分析"},
+            {"name": "6. Compute Neighbors", "tool_id": "rna_neighbors", "desc": "构建邻接图"},
+            {"name": "7. Clustering", "tool_id": "rna_clustering", "desc": "Leiden 聚类"},
+            {"name": "8. UMAP Visualization", "tool_id": "rna_umap", "desc": "UMAP 可视化"},
+            {"name": "9. t-SNE Visualization", "tool_id": "rna_tsne", "desc": "t-SNE 可视化"},
+            {"name": "10. Find Markers", "tool_id": "rna_find_markers", "desc": "寻找 Marker 基因"},
         ]
     
     async def process_query(
@@ -621,18 +635,25 @@ File Path: {file_path}
             
             # 注入参数
             tool_id = step["tool_id"]
-            if tool_id == "local_qc":
+            # 🔥 工具ID映射：如果使用旧ID，映射到新ID
+            if tool_id in self.tool_id_mapping:
+                tool_id = self.tool_id_mapping[tool_id]
+                step["tool_id"] = tool_id
+            
+            # 根据工具ID设置参数
+            if tool_id == "rna_qc_filter":
                 step["params"] = {
-                    "min_genes": extracted_params.get("min_genes", "200"),
-                    "max_mt": extracted_params.get("max_mt", "20")
+                    "min_genes": extracted_params.get("min_genes", 200),
+                    "max_mt": extracted_params.get("max_mt", 20.0),
+                    "min_cells": extracted_params.get("min_cells", 3)
                 }
-            elif tool_id == "local_hvg":
+            elif tool_id == "rna_hvg":
                 step["params"] = {
-                    "n_top_genes": extracted_params.get("n_top_genes", "2000")
+                    "n_top_genes": extracted_params.get("n_top_genes", 2000)
                 }
-            elif tool_id == "local_cluster":
+            elif tool_id == "rna_clustering":
                 step["params"] = {
-                    "resolution": extracted_params.get("resolution", "0.5")
+                    "resolution": extracted_params.get("resolution", 0.5)
                 }
             else:
                 step["params"] = {}
@@ -1023,7 +1044,7 @@ You have access to:
             # 提取Marker基因（如果有）
             marker_genes = []
             for step in execution_results.get("steps_details", []):
-                if step.get("name") == "local_markers" and step.get("details"):
+                if step.get("tool_id") == "rna_find_markers" and step.get("details"):
                     # 尝试从details中提取marker基因信息
                     marker_genes.append(step.get("details"))
             

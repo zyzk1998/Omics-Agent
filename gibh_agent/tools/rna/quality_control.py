@@ -11,6 +11,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from ...core.tool_registry import registry
+from ...core.rna_utils import read_10x_data
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +54,8 @@ def run_qc_filter(
         
         # 加载数据
         if os.path.isdir(adata_path):
-            adata = sc.read_10x_mtx(adata_path, var_names='gene_symbols', cache=False)
-            adata.var_names_make_unique()
+            # 🔥 使用统一的10x数据读取函数，支持压缩和未压缩格式
+            adata = read_10x_data(adata_path, var_names='gene_symbols', cache=False)
         elif adata_path.endswith('.h5ad'):
             adata = sc.read_h5ad(adata_path)
         else:
@@ -99,11 +100,32 @@ def run_qc_filter(
         n_obs_after = adata.n_obs
         n_vars_after = adata.n_vars
         
-        # 保存过滤后的数据（如果指定了输出目录）
-        output_h5ad = None
+        # 🔥 CRITICAL FIX: 始终保存过滤后的数据，确保下一步可以读取
+        # 如果 output_dir 未指定，使用临时目录或输入文件所在目录
         if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
             output_h5ad = os.path.join(output_dir, "filtered.h5ad")
-            adata.write(output_h5ad)
+        else:
+            # 如果没有指定输出目录，使用输入文件所在目录
+            if os.path.isdir(adata_path):
+                # 如果输入是目录，在目录中创建 filtered.h5ad
+                output_h5ad = os.path.join(adata_path, "filtered.h5ad")
+            elif adata_path.endswith('.h5ad'):
+                # 如果输入是 .h5ad 文件，在同一目录创建 filtered.h5ad
+                input_dir = os.path.dirname(adata_path)
+                output_h5ad = os.path.join(input_dir, "filtered.h5ad")
+            else:
+                # 默认使用当前工作目录
+                output_h5ad = os.path.join(os.getcwd(), "filtered.h5ad")
+        
+        # 确保输出目录存在
+        output_dir_actual = os.path.dirname(output_h5ad)
+        if output_dir_actual:
+            os.makedirs(output_dir_actual, exist_ok=True)
+        
+        # 保存过滤后的数据
+        adata.write(output_h5ad)
+        logger.info(f"✅ [QC Filter] Saved filtered data to: {output_h5ad}")
         
         return {
             "status": "success",
@@ -112,7 +134,7 @@ def run_qc_filter(
             "n_vars_before": n_vars_before,
             "n_vars_after": n_vars_after,
             "plot_path": plot_path,
-            "output_h5ad": output_h5ad,
+            "output_h5ad": output_h5ad,  # 🔥 确保返回输出文件路径
             "summary": f"过滤后剩余 {n_obs_after} 个细胞，{n_vars_after} 个基因"
         }
     
