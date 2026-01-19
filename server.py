@@ -10,7 +10,7 @@ import asyncio
 import re
 import secrets
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Dict, Any
 from datetime import datetime
 from collections import deque
 
@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from gibh_agent import create_agent
 from gibh_agent.core.file_inspector import FileInspector
+from gibh_agent.core.orchestrator import AgentOrchestrator
 
 # 配置日志
 logging.basicConfig(
@@ -301,6 +302,9 @@ class ChatRequest(BaseModel):
     uploaded_files: List[dict] = []
     workflow_data: Optional[dict] = None
     test_dataset_id: Optional[str] = None
+    stream: Optional[bool] = False  # 🔥 SSE 流式传输开关
+    session_id: Optional[str] = None  # 🔥 BUG FIX: 添加 session_id 字段
+    user_id: Optional[str] = "guest"  # 🔥 BUG FIX: 添加 user_id 字段，默认为 guest
 
 
 # 日志缓冲区（保留用于未来扩展）
@@ -358,6 +362,23 @@ if stream_handler not in logger.handlers:
 # 测试日志
 logger.info("📋 日志系统初始化完成")
 logger.info("🔍 测试日志输出 - 这应该出现在前端")
+
+
+@app.get("/health")
+async def health_check():
+    """健康检查端点"""
+    return {"status": "ok", "service": "GIBH-AGENT-V2"}
+
+
+@app.get("/api/health")
+async def api_health_check():
+    """API 健康检查端点"""
+    return {
+        "status": "ok",
+        "service": "GIBH-AGENT-V2",
+        "agent_initialized": agent is not None,
+        "tool_retriever_initialized": tool_retriever is not None
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1256,8 +1277,19 @@ async def index():
 
 
 @app.post("/api/upload")
-async def upload_file(files: List[UploadFile] = File(...)):
-    """文件上传接口（支持多文件上传）"""
+async def upload_file(
+    files: List[UploadFile] = File(...),
+    user_id: Optional[str] = None,
+    session_id: Optional[str] = None
+):
+    """
+    文件上传接口（支持多文件上传）
+    
+    🔥 ARCHITECTURAL UPGRADE: 支持多用户隔离
+    - user_id: 用户ID（默认 "guest"）
+    - session_id: 会话ID（可选，如果未提供则自动生成）
+    - 文件保存路径: uploads/{user_id}/{session_id}/filename
+    """
     try:
         if not files or len(files) == 0:
             raise HTTPException(status_code=400, detail="No files provided")
@@ -1266,7 +1298,14 @@ async def upload_file(files: List[UploadFile] = File(...)):
         if len(files) > 20:
             raise HTTPException(status_code=400, detail="一次最多上传20个文件")
         
-        logger.info(f"📤 收到文件上传: {len(files)} 个文件")
+        # 🔥 多用户支持：设置默认值
+        if not user_id:
+            user_id = "guest"
+        if not session_id:
+            # 自动生成会话ID（基于时间戳）
+            session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        logger.info(f"📤 收到文件上传: {len(files)} 个文件 (User: {user_id}, Session: {session_id})")
         
         # 检测是否是10x Genomics文件（matrix.mtx, barcodes.tsv, features.tsv）
         is_10x_data = False
@@ -1302,10 +1341,15 @@ async def upload_file(files: List[UploadFile] = File(...)):
         
         uploaded_results = []
         
+        # 🔥 多用户支持：构建用户目录路径
+        user_dir = UPLOAD_DIR / user_id / session_id
+        user_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"📁 用户目录: {user_dir}")
+        
         # 如果是10x数据，创建子目录并保存
         if is_10x_data and len(tenx_files) >= 2:  # 至少需要2个文件（通常是matrix + barcodes/features）
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            tenx_dir = UPLOAD_DIR / f"10x_data_{timestamp}"
+            tenx_dir = user_dir / f"10x_data_{timestamp}"
             tenx_dir.mkdir(exist_ok=True)
             
             logger.info(f"📁 检测到10x数据，创建目录: {tenx_dir}")
@@ -1383,8 +1427,8 @@ async def upload_file(files: List[UploadFile] = File(...)):
             files_to_process = other_files + tenx_files
         
         for file in files_to_process:
-            # 🔒 安全：验证文件路径
-            file_path = UPLOAD_DIR / file.filename
+            # 🔥 多用户支持：文件保存到用户目录
+            file_path = user_dir / file.filename
             try:
                 file_path = validate_file_path(file_path, UPLOAD_DIR)
             except HTTPException as e:
@@ -1456,9 +1500,11 @@ async def upload_file(files: List[UploadFile] = File(...)):
         # 🔥 统一返回格式：始终返回一致的 JSON 结构
         response = {
             "status": "success",
-            "file_paths": file_paths,  # 文件路径数组（相对路径）
+            "file_paths": file_paths,  # 文件路径数组（相对路径，包含 user_id/session_id）
             "file_info": file_info,    # 文件信息数组
-            "count": len(uploaded_results)
+            "count": len(uploaded_results),
+            "user_id": user_id,        # 🔥 多用户支持：返回用户ID
+            "session_id": session_id    # 🔥 多用户支持：返回会话ID
         }
         
         # 如果只有一个文件，添加单个文件的详细信息（向后兼容）
@@ -1509,6 +1555,7 @@ async def chat_endpoint(req: ChatRequest):
     # #region debug log - entry point
     import json
     import traceback
+    import uuid
     # 🔧 修复：使用容器内的日志路径（统一使用 /app/debug.log）
     debug_log_path = Path("/app/debug.log")
     try:
@@ -1519,6 +1566,16 @@ async def chat_endpoint(req: ChatRequest):
     except Exception as log_err:
         pass  # 即使日志写入失败也不影响主流程
     # #endregion
+    
+    # 🔥 BUG FIX: 处理缺失的 session_id（向后兼容）
+    if not req.session_id:
+        req.session_id = str(uuid.uuid4())
+        logger.info(f"🔑 [ChatEndpoint] 自动生成 session_id: {req.session_id}")
+    
+    # 🔥 BUG FIX: 确保 user_id 有默认值
+    if not req.user_id:
+        req.user_id = "guest"
+        logger.debug(f"🔑 [ChatEndpoint] 使用默认 user_id: {req.user_id}")
     
     if not agent:
         error_msg = "智能体未初始化，请检查配置和日志。可能的原因：1) 配置文件路径错误 2) API Key未设置 3) 依赖包缺失"
@@ -1533,6 +1590,75 @@ async def chat_endpoint(req: ChatRequest):
             }
         )
     
+    # 🔥 SSE 流式传输模式
+    if req.stream:
+        logger.info(f"🔥 [SSE] 启用流式传输模式")
+        try:
+            # 转换文件格式
+            uploaded_files = []
+            for file_info in req.uploaded_files:
+                file_name = file_info.get("file_name") or file_info.get("name", "")
+                file_path_str = file_info.get("file_path") or file_info.get("path", "")
+                
+                if file_path_str:
+                    file_path = Path(file_path_str)
+                    if not file_path.is_absolute():
+                        file_path = UPLOAD_DIR / file_path
+                elif file_name:
+                    file_path = UPLOAD_DIR / file_name
+                else:
+                    continue
+                
+                if file_path.exists():
+                    uploaded_files.append({
+                        "name": file_name or os.path.basename(str(file_path)),
+                        "path": str(file_path)
+                    })
+            
+            # 创建编排器（传递 upload_dir）
+            orchestrator = AgentOrchestrator(agent, upload_dir=str(UPLOAD_DIR))
+            
+            # 返回 SSE 流式响应
+            async def generate_sse():
+                try:
+                    async for event in orchestrator.stream_process(
+                        query=req.message,
+                        files=uploaded_files,
+                        history=req.history or [],
+                        session_id=req.session_id or "default",  # 🔥 ARCHITECTURAL MERGE: 传递 session_id
+                        test_dataset_id=req.test_dataset_id,
+                        workflow_data=req.workflow_data,
+                        user_id=req.user_id or "guest"
+                    ):
+                        yield event
+                except Exception as e:
+                    logger.error(f"❌ SSE 流式传输错误: {e}", exc_info=True)
+                    import json
+                    error_event = f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+                    yield error_event
+            
+            return StreamingResponse(
+                generate_sse(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲
+                    "Content-Type": "text/event-stream; charset=utf-8"
+                }
+            )
+        except Exception as e:
+            logger.error(f"❌ SSE 流式传输初始化失败: {e}", exc_info=True)
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "type": "error",
+                    "error": str(e),
+                    "message": f"流式传输失败: {str(e)}"
+                }
+            )
+    
+    # 传统同步模式（保持向后兼容）
     try:
         logger.info(f"💬 收到聊天请求: {req.message}")
         logger.info(f"📁 上传文件数: {len(req.uploaded_files)}")
@@ -1715,9 +1841,12 @@ async def chat_endpoint(req: ChatRequest):
         try:
             result = await agent.process_query(
                 query=req.message,
-                history=req.history,
+                history=req.history or [],
                 uploaded_files=uploaded_files,
-                test_dataset_id=req.test_dataset_id
+                test_dataset_id=req.test_dataset_id,
+                workflow_data=req.workflow_data,
+                user_id=req.user_id,
+                session_id=req.session_id
             )
         except Exception as process_err:
             # #region debug log
@@ -2415,6 +2544,181 @@ async def get_tool_schema(tool_name: str):
     except Exception as e:
         logger.error(f"❌ 获取工具 Schema 失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取工具 Schema 失败: {str(e)}")
+
+
+# ==================== 🔥 ARCHITECTURAL UPGRADE: 新的工作流 API 端点 ====================
+
+class WorkflowPlanRequest(BaseModel):
+    """工作流规划请求"""
+    query: str
+    file_metadata: Optional[Dict[str, Any]] = None
+    user_id: Optional[str] = None
+
+
+class WorkflowSaveRequest(BaseModel):
+    """保存工作流请求"""
+    name: str
+    workflow_json: Dict[str, Any]
+    user_id: Optional[str] = None
+
+
+@app.post("/api/workflows/plan")
+async def plan_workflow(req: WorkflowPlanRequest):
+    """
+    规划工作流（plan-first：可以在没有文件的情况下生成工作流）
+    
+    🔥 ARCHITECTURAL UPGRADE:
+    - 支持 plan-first：可以在没有文件的情况下生成工作流
+    - 使用 WorkflowRegistry 进行严格的域绑定
+    - 使用 DAG 依赖解析（代码逻辑，非 LLM 幻觉）
+    """
+    try:
+        user_id = req.user_id or "guest"
+        logger.info(f"📋 [WorkflowPlan] 用户查询: '{req.query}' (User: {user_id})")
+        
+        # 初始化 SOPPlanner（如果还没有）
+        if not workflow_planner:
+            from gibh_agent.core.llm_client import LLMClient
+            from gibh_agent.core.planner import SOPPlanner
+            llm_client = LLMClient() if agent else None
+            if not llm_client:
+                raise HTTPException(status_code=500, detail="LLM 客户端未初始化")
+            
+            planner = SOPPlanner(tool_retriever, llm_client)
+        else:
+            planner = workflow_planner
+        
+        # 生成工作流计划
+        workflow_config = await planner.generate_plan(
+            user_query=req.query,
+            file_metadata=req.file_metadata
+        )
+        
+        return {
+            "status": "success",
+            "workflow": workflow_config,
+            "user_id": user_id
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ 工作流规划失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"工作流规划失败: {str(e)}")
+
+
+@app.post("/api/workflows/save")
+async def save_workflow(req: WorkflowSaveRequest):
+    """
+    保存工作流（书签）
+    
+    🔥 ARCHITECTURAL UPGRADE: 多用户支持
+    """
+    try:
+        user_id = req.user_id or "guest"
+        logger.info(f"💾 [WorkflowSave] 保存工作流: '{req.name}' (User: {user_id})")
+        
+        from gibh_agent.db import get_db
+        db = get_db()
+        workflow_id = db.save_workflow(
+            user_id=user_id,
+            name=req.name,
+            workflow_json=req.workflow_json
+        )
+        
+        return {
+            "status": "success",
+            "workflow_id": workflow_id,
+            "message": f"工作流 '{req.name}' 已保存"
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ 保存工作流失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"保存工作流失败: {str(e)}")
+
+
+@app.get("/api/workflows/list")
+async def list_workflows(user_id: Optional[str] = None):
+    """
+    列出用户的所有工作流（书签）
+    
+    🔥 ARCHITECTURAL UPGRADE: 多用户支持
+    """
+    try:
+        user_id = user_id or "guest"
+        logger.info(f"📋 [WorkflowList] 列出工作流 (User: {user_id})")
+        
+        from gibh_agent.db import get_db
+        db = get_db()
+        workflows = db.list_workflows(user_id=user_id)
+        
+        return {
+            "status": "success",
+            "workflows": workflows,
+            "count": len(workflows)
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ 列出工作流失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"列出工作流失败: {str(e)}")
+
+
+@app.delete("/api/workflows/{workflow_id}")
+async def delete_workflow(workflow_id: int, user_id: Optional[str] = None):
+    """
+    删除工作流
+    
+    🔥 ARCHITECTURAL UPGRADE: 多用户支持
+    """
+    try:
+        user_id = user_id or "guest"
+        logger.info(f"🗑️ [WorkflowDelete] 删除工作流: {workflow_id} (User: {user_id})")
+        
+        from gibh_agent.db import get_db
+        db = get_db()
+        deleted = db.delete_workflow(workflow_id=workflow_id, user_id=user_id)
+        
+        if deleted:
+            return {
+                "status": "success",
+                "message": f"工作流 {workflow_id} 已删除"
+            }
+        else:
+            raise HTTPException(status_code=404, detail="工作流不存在或无权删除")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 删除工作流失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"删除工作流失败: {str(e)}")
+
+
+@app.get("/api/jobs/history")
+async def get_job_history(
+    user_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50
+):
+    """
+    获取任务执行历史
+    
+    🔥 ARCHITECTURAL UPGRADE: 多用户支持
+    """
+    try:
+        user_id = user_id or "guest"
+        logger.info(f"📜 [JobHistory] 获取任务历史 (User: {user_id}, Status: {status or 'all'})")
+        
+        from gibh_agent.db import get_db
+        db = get_db()
+        jobs = db.list_jobs(user_id=user_id, status=status, limit=limit)
+        
+        return {
+            "status": "success",
+            "jobs": jobs,
+            "count": len(jobs)
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ 获取任务历史失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取任务历史失败: {str(e)}")
 
 
 @app.get("/api/workflow/status/{run_id}")

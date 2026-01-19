@@ -213,6 +213,81 @@
             background: #ffffff;
         }
         .thought-content.open { display: block; animation: fadeIn 0.3s; }
+        
+        /* 🔥 UI/UX OVERHAUL: 内联执行记录样式（Science One 风格） */
+        .process-log-container {
+            margin: 12px 0;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            background: #f9fafb;
+            overflow: hidden;
+            animation: fadeIn 0.3s;
+        }
+        .process-header {
+            padding: 10px 14px;
+            background: #f3f4f6;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s;
+        }
+        .process-header:hover {
+            background: #e9ecef;
+        }
+        .process-header .icon {
+            font-size: 12px;
+            color: #6b7280;
+            transition: transform 0.2s;
+        }
+        .process-header.collapsed .icon {
+            transform: rotate(-90deg);
+        }
+        .process-steps {
+            padding: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .process-steps.collapsed {
+            display: none;
+        }
+        .process-step {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 8px 0;
+            font-size: 13px;
+            color: #374151;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .process-step:last-child {
+            border-bottom: none;
+        }
+        .process-step.done {
+            color: #059669;
+        }
+        .process-step.active {
+            color: var(--primary-color);
+            font-weight: 500;
+        }
+        .process-step.pending {
+            color: #9ca3af;
+        }
+        .process-step-icon {
+            flex-shrink: 0;
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+        }
+        .process-step-text {
+            flex: 1;
+            line-height: 1.5;
+        }
 
         /* ⏱️ 底部栏与计时器 */
         .message-footer {
@@ -828,15 +903,68 @@
                 checkInput();
             }
             
+            // 🔥 BUG FIX: 创建 AI 消息并确保 DOM 结构完整
             const aiMessageDiv = appendMessage('ai', '<span class="spinner-border spinner-border-sm text-primary" role="status"></span><span style="margin-left:8px; color:#666;">思考中...</span>', null, null, true);
-            const aiContentDiv = aiMessageDiv; 
             
-            const footerDiv = aiMessageDiv.closest('.message-row').querySelector('.message-footer');
+            // 获取 message-row 和 message-container
+            const messageRow = aiMessageDiv.closest('.message-row');
+            if (!messageRow) {
+                console.error('❌ [BUG FIX] 无法找到 .message-row 元素');
+                throw new Error('DOM 结构错误：找不到 message-row');
+            }
+            
+            const messageContainer = messageRow.querySelector('.message-container');
+            if (!messageContainer) {
+                console.error('❌ [BUG FIX] 无法找到 .message-container 元素');
+                throw new Error('DOM 结构错误：找不到 message-container');
+            }
+            
+            // 🔥 BUG FIX: 创建 message-content 容器（如果不存在）
+            let messageContent = messageContainer.querySelector('.message-content');
+            if (!messageContent) {
+                messageContent = document.createElement('div');
+                messageContent.className = 'message-content';
+                // 插入到 bubble 之后，footer 之前
+                const bubble = messageContainer.querySelector('.bubble');
+                const footer = messageContainer.querySelector('.message-footer');
+                if (bubble && footer) {
+                    messageContainer.insertBefore(messageContent, footer);
+                } else if (bubble) {
+                    messageContainer.appendChild(messageContent);
+                } else {
+                    messageContainer.insertBefore(messageContent, messageContainer.firstChild);
+                }
+            }
+            
+            // 创建消息文本容器
+            let messageTextContainer = messageContent.querySelector('.message-text-container');
+            if (!messageTextContainer) {
+                messageTextContainer = document.createElement('div');
+                messageTextContainer.className = 'message-text-container bubble';
+                messageContent.appendChild(messageTextContainer);
+            }
+            
+            // 设置内容引用
+            const aiContentDiv = messageTextContainer;
+            
+            // 🔥 BUG FIX: 使用已获取的 messageRow 引用
+            const footerDiv = messageRow.querySelector('.message-footer');
+            if (!footerDiv) {
+                console.warn('⚠️ [BUG FIX] 无法找到 .message-footer 元素，将跳过计时器显示');
+            }
+            // 🔥 BUG FIX: 安全地添加计时器
             const timerSpan = document.createElement('span');
             timerSpan.className = 'generation-timer';
             timerSpan.innerHTML = '<i class="bi bi-stopwatch"></i> 0.0s';
-            if (footerDiv.firstChild) footerDiv.insertBefore(timerSpan, footerDiv.firstChild);
-            else footerDiv.appendChild(timerSpan);
+            if (footerDiv) {
+                if (footerDiv.firstChild) {
+                    footerDiv.insertBefore(timerSpan, footerDiv.firstChild);
+                } else {
+                    footerDiv.appendChild(timerSpan);
+                }
+            } else {
+                console.warn('⚠️ [BUG FIX] footerDiv 不存在，无法添加计时器');
+            }
 
             const timerInterval = setInterval(() => {
                 const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -854,7 +982,8 @@
                 uploaded_files: uploadedFiles, // 包含所有已上传的文件（包括刚上传的）
                 tool_params: toolParams,
                 workflow_data: workflowData,
-                use_history_files: useHistoryFiles
+                use_history_files: useHistoryFiles,
+                stream: true  // 🔥 启用 SSE 流式传输
             };
             console.log('📤 发送聊天请求，payload:', JSON.stringify(payload, null, 2));
             
@@ -869,6 +998,637 @@
                 if (!res.ok) throw new Error(await res.text());
 
                 const contentType = res.headers.get("content-type");
+
+                // 🔥 SSE 流式传输模式
+                if (contentType && contentType.includes("text/event-stream")) {
+                    console.log('🔥 [SSE] 检测到 SSE 流式响应');
+                    
+                    // 🔥 UI/UX OVERHAUL: 创建内联执行记录组件（Science One 风格）
+                    let processLogContainer = null;
+                    let processStepsDiv = null;
+                    let processStepCount = 0;
+                    
+                    // 创建 ProcessLog 容器
+                    processLogContainer = document.createElement('div');
+                    processLogContainer.className = 'process-log-container';
+                    processLogContainer.innerHTML = `
+                        <div class="process-header" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('collapsed');">
+                            <span>⚡ 执行记录 (<span class="step-count">0</span>)</span>
+                            <span class="icon">▼</span>
+                        </div>
+                        <div class="process-steps"></div>
+                    `;
+                    
+                    processStepsDiv = processLogContainer.querySelector('.process-steps');
+                    
+                    // 🔥 安全地追加 ProcessLog（在 aiContentDiv 之前）
+                    if (messageContent) {
+                        messageContent.insertBefore(processLogContainer, aiContentDiv);
+                    } else {
+                        console.error('❌ [SSE] messageContent 为空，无法追加 ProcessLog');
+                        throw new Error('DOM 结构错误：messageContent 为空');
+                    }
+                    
+                    // 添加初始步骤
+                    addProcessStep('正在接收请求...', 'active');
+                    
+                    // 🔥 辅助函数：添加执行步骤
+                    function addProcessStep(text, status = 'active') {
+                        if (!processStepsDiv) return;
+                        
+                        processStepCount++;
+                        const stepDiv = document.createElement('div');
+                        stepDiv.className = `process-step ${status}`;
+                        
+                        let icon = '🔄';
+                        if (status === 'done') icon = '✅';
+                        else if (status === 'pending') icon = '⏳';
+                        else if (status === 'error') icon = '❌';
+                        
+                        stepDiv.innerHTML = `
+                            <div class="process-step-icon">${icon}</div>
+                            <div class="process-step-text">${escapeHtml(text)}</div>
+                        `;
+                        
+                        processStepsDiv.appendChild(stepDiv);
+                        
+                        // 更新步骤计数
+                        const countSpan = processLogContainer.querySelector('.step-count');
+                        if (countSpan) {
+                            countSpan.textContent = processStepCount;
+                        }
+                        
+                        // 自动滚动到底部
+                        processStepsDiv.scrollTop = processStepsDiv.scrollHeight;
+                    }
+                    
+                    // 清空初始的思考中消息
+                    aiContentDiv.innerHTML = '';
+                    
+                    // 🔥 FIX TASK: 实现健壮的 SSE 解析器和事件分发器
+                    const reader = res.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = ''; // 文本缓冲区
+                    
+                    // 🔥 状态变量（在正确的作用域内）
+                    let messageBuffer = '';
+                    let thoughtBuffer = '';
+                    
+                    // 🔥 获取 DOM 元素引用（确保在正确的作用域内）
+                    const debugPanel = document.getElementById('debug-json-content');
+                    
+                    // 🔥 辅助函数：转义 HTML
+                    function escapeHtml(text) {
+                        if (!text) return '';
+                        const div = document.createElement('div');
+                        div.textContent = text;
+                        return div.innerHTML;
+                    }
+                    
+                    // 🔥 辅助函数：更新调试面板（原始数据）
+                    function updateDebugPanel(rawText) {
+                        if (debugPanel) {
+                            const currentText = debugPanel.textContent || '';
+                            debugPanel.textContent = currentText + rawText;
+                            // 自动滚动到底部
+                            const scrollContainer = debugPanel.parentElement;
+                            if (scrollContainer) {
+                                scrollContainer.scrollTop = scrollContainer.scrollHeight;
+                            }
+                        }
+                    }
+                    
+                    // 🔥 核心函数：事件分发器 - 将 SSE 事件分发到 UI 更新函数
+                    function handleServerEvent(eventType, data) {
+                        console.log(`📡 [SSE Event] ${eventType}:`, data);
+                        
+                        // 🔥 追加格式化数据到调试面板
+                        if (debugPanel) {
+                            const formatted = `\n[${eventType}] ${JSON.stringify(data, null, 2)}\n`;
+                            updateDebugPanel(formatted);
+                        }
+                        
+                        // 🔥 根据事件类型分发到对应的 UI 更新函数
+                        switch (eventType) {
+                            case 'status':
+                                updateProcessLog(data.content || '', data.state || 'running');
+                                break;
+                                
+                            case 'thought':
+                                thoughtBuffer += data.content || '';
+                                console.log('💭 思考过程:', data.content);
+                                // 可选：显示思考过程到 UI
+                                break;
+                                
+                            case 'message':
+                                messageBuffer += data.content || '';
+                                updateChatBubble(messageBuffer);
+                                break;
+                                
+                            case 'diagnosis':
+                                renderDiagnosisCard(data);
+                                break;
+                                
+                            case 'workflow':
+                                renderWorkflowCard(data);
+                                break;
+                                
+                            case 'result':
+                                // 🔥 URGENT FIX: 处理完整结果（可能包含 diagnosis 和 workflow）
+                                // 支持多种数据结构：report_data.diagnosis/workflow 或 diagnosis_report/workflow_config
+                                if (data.report_data) {
+                                    // 新格式：report_data.diagnosis 和 report_data.workflow
+                                    if (data.report_data.diagnosis) {
+                                        renderDiagnosisCard(data.report_data.diagnosis);
+                                    }
+                                    if (data.report_data.workflow) {
+                                        renderWorkflowCard(data.report_data.workflow);
+                                    }
+                                } else {
+                                    // 旧格式：diagnosis_report 和 workflow_config
+                                    if (data.diagnosis_report) {
+                                        renderDiagnosisCard(data.diagnosis_report);
+                                    }
+                                    if (data.workflow_config) {
+                                        renderWorkflowCard(data.workflow_config);
+                                    }
+                                }
+                                // 🔥 CRITICAL: 确保两者都能渲染（没有 else）
+                                break;
+                                
+                            case 'done':
+                                handleDoneEvent(data);
+                                break;
+                                
+                            case 'question':
+                                handleQuestionEvent(data);
+                                return true; // 返回 true 表示应该停止
+                                
+                            case 'error':
+                                handleErrorEvent(data);
+                                break;
+                                
+                            default:
+                                console.warn(`⚠️ [SSE] 未知事件类型: ${eventType}`, data);
+                        }
+                        
+                        return false; // 继续处理
+                    }
+                    
+                    // 🔥 UI/UX OVERHAUL: 更新内联执行记录
+                    function updateProcessLog(content, state) {
+                        // 映射技术状态到用户友好文本
+                        const userFriendlyText = mapStatusToUserFriendly(content, state);
+                        
+                        // 确定步骤状态
+                        let stepStatus = 'active';
+                        if (state === 'completed' || state === 'done') {
+                            stepStatus = 'done';
+                        } else if (state === 'error') {
+                            stepStatus = 'error';
+                        } else if (state === 'waiting') {
+                            stepStatus = 'pending';
+                        }
+                        
+                        // 添加步骤到执行记录
+                        addProcessStep(userFriendlyText, stepStatus);
+                        console.log(`✅ [ProcessLog] ${userFriendlyText} (${state})`);
+                    }
+                    
+                    // 🔥 辅助函数：映射技术状态到用户友好文本
+                    function mapStatusToUserFriendly(content, state) {
+                        const contentLower = content.toLowerCase();
+                        
+                        // 意图识别
+                        if (contentLower.includes('intent') || contentLower.includes('意图') || contentLower.includes('理解')) {
+                            return '正在理解您的需求...';
+                        }
+                        
+                        // 方案规划
+                        if (contentLower.includes('plan') || contentLower.includes('规划') || contentLower.includes('设计')) {
+                            return '正在设计分析方案...';
+                        }
+                        
+                        // 文件检查
+                        if (contentLower.includes('inspect') || contentLower.includes('检查') || contentLower.includes('体检')) {
+                            return '正在为数据做体检...';
+                        }
+                        
+                        // 数据预处理
+                        if (contentLower.includes('preprocess') || contentLower.includes('预处理')) {
+                            return '正在预处理数据...';
+                        }
+                        
+                        // 执行工具
+                        if (contentLower.includes('execut') || contentLower.includes('执行') || contentLower.includes('调用')) {
+                            // 尝试提取工具名称
+                            const toolMatch = content.match(/工具[：:]\s*([^，,。.]+)/) || content.match(/tool[：:]\s*([^，,。.]+)/i);
+                            if (toolMatch) {
+                                return `正在调用工具: ${toolMatch[1]}...`;
+                            }
+                            return '正在执行分析...';
+                        }
+                        
+                        // 等待上传
+                        if (contentLower.includes('wait') || contentLower.includes('等待') || contentLower.includes('上传')) {
+                            return '正在等待数据上传...';
+                        }
+                        
+                        // 默认：使用原始内容（已翻译）
+                        return content || '处理中...';
+                    }
+                    
+                    // 🔥 UI 更新函数：更新聊天气泡
+                    function updateChatBubble(text) {
+                        if (!aiContentDiv) {
+                            console.error('❌ [SSE] aiContentDiv 不存在，无法更新聊天气泡');
+                            return;
+                        }
+                        
+                        // 移除"思考中..."的 spinner
+                        const spinner = aiContentDiv.querySelector('.spinner-border');
+                        if (spinner) {
+                            spinner.remove();
+                        }
+                        
+                        // 更新内容
+                        try {
+                            aiContentDiv.innerHTML = marked.parse(text);
+                            // 滚动到底部
+                            aiContentDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        } catch (e) {
+                            console.error('❌ [SSE] Markdown 解析错误:', e);
+                            aiContentDiv.innerHTML = escapeHtml(text);
+                        }
+                    }
+                    
+                    // 🔥 UI/UX OVERHAUL: 渲染诊断卡片（支持结构化 Guide）
+                    function renderDiagnosisCard(diagnosisData) {
+                        if (!aiContentDiv) return;
+                        
+                        // 检查是否为结构化诊断数据
+                        let diagnosisMessage = '';
+                        if (typeof diagnosisData === 'string') {
+                            diagnosisMessage = diagnosisData;
+                        } else if (diagnosisData && diagnosisData.message) {
+                            diagnosisMessage = diagnosisData.message;
+                        } else {
+                            diagnosisMessage = JSON.stringify(diagnosisData, null, 2);
+                        }
+                        
+                        // 检查是否为模板模式
+                        const isTemplateMode = diagnosisData && (diagnosisData.template_mode || diagnosisData.status === 'template_ready');
+                        
+                        const diagnosisHtml = `
+                            <div class="alert alert-info mt-3" style="border-left: 4px solid #0dcaf0;">
+                                <h6>
+                                    <i class="bi bi-clipboard-${isTemplateMode ? 'check' : 'data'}"></i> 
+                                    ${isTemplateMode ? '📋 方案已生成' : '📊 诊断报告'}
+                                </h6>
+                                <div style="font-size: 14px; line-height: 1.6; color: #333;">
+                                    ${marked.parse(diagnosisMessage)}
+                                </div>
+                            </div>
+                        `;
+                        
+                        // 追加到现有内容
+                        const currentContent = aiContentDiv.innerHTML;
+                        aiContentDiv.innerHTML = currentContent + diagnosisHtml;
+                    }
+                    
+                    // 🔥 URGENT FIX: 强制渲染工作流卡片（Plan-First + Normal）
+                    function renderWorkflowCard(workflowData) {
+                        // 🔥 DEBUG: 添加调试日志
+                        console.log("🔍 [renderWorkflowCard] Rendering Workflow Card:", workflowData);
+                        
+                        // 🔥 CRITICAL: 只保留 aiContentDiv 检查，移除所有其他保护子句
+                        if (!aiContentDiv) {
+                            console.error("❌ [renderWorkflowCard] aiContentDiv 不存在，无法渲染");
+                            return;
+                        }
+                        
+                        // 🔥 CRITICAL: 确保 workflowData 不为空
+                        if (!workflowData) {
+                            console.error("❌ [renderWorkflowCard] workflowData 为空");
+                            aiContentDiv.innerHTML += '<div class="alert alert-warning mt-3">⚠️ 工作流数据为空</div>';
+                            return;
+                        }
+                        
+                        // 🔥 提取步骤（支持多种数据结构）
+                        // 支持：workflow_config.workflow_data.steps, workflow_data.steps, steps
+                        const workflowSteps = workflowData.workflow_config?.workflow_data?.steps || 
+                                             workflowData.workflow_data?.steps || 
+                                             workflowData.steps || [];
+                        console.log(`📋 [renderWorkflowCard] 步骤数量: ${workflowSteps.length}`, workflowSteps);
+                        
+                        // 🔥 检查是否为模板模式（Plan-First）- 支持多种占位符格式
+                        const hasPlaceholder = workflowSteps.some(step => {
+                            const params = step.params || {};
+                            return params.file_path === '<PENDING_UPLOAD>' || 
+                                   params.file_path === '<待上传数据>' ||
+                                   params.adata_path === '<PENDING_UPLOAD>' ||
+                                   params.adata_path === '<待上传数据>';
+                        });
+                        
+                        // 🔥 支持多种 template_mode 字段位置
+                        const isTemplateMode = workflowData.template_mode || 
+                                             workflowData.workflow_config?.template_mode ||
+                                             workflowData.workflow_data?.template_mode ||
+                                             hasPlaceholder ||
+                                             !workflowData.file_path; // 如果没有 file_path，也是模板模式
+                        
+                        console.log(`🔍 [renderWorkflowCard] 模板模式: ${isTemplateMode}`, {
+                            template_mode: workflowData.template_mode,
+                            workflow_data_template_mode: workflowData.workflow_data?.template_mode,
+                            hasPlaceholder: hasPlaceholder,
+                            file_path: workflowData.file_path
+                        });
+                        
+                        // 添加步骤到执行记录
+                        addProcessStep('工作流方案已生成', 'done');
+                        
+                        // 🔥 CRITICAL: 强制渲染工作流卡片（即使没有文件或步骤为空）
+                        // 构建工作流卡片 HTML
+                        let workflowHtml = `
+                            <div class="alert alert-success mt-3" style="border-left: 4px solid #28a745;">
+                                <h6>
+                                    <i class="bi bi-diagram-3"></i> 📋 工作流计划
+                                    ${isTemplateMode ? '<span class="badge bg-secondary ms-2">[模版预览 Mode]</span>' : ''}
+                                </h6>
+                        `;
+                        
+                        // 🔥 URGENT FIX: 如果是模板模式，显示警告横幅和上传按钮
+                        if (isTemplateMode) {
+                            workflowHtml += `
+                                <div class="alert alert-warning mt-2 mb-3" style="background: #fff3cd; border-left: 4px solid #ffc107;">
+                                    <i class="bi bi-exclamation-triangle"></i> <strong>⚠️ 预览模式：请上传数据以激活流程</strong>
+                                </div>
+                            `;
+                            
+                            // 保存原始查询以便上传后重新发送
+                            const originalQuery = userInput.value.trim() || '继续分析';
+                            const workflowId = `wf-${Date.now()}`;
+                            
+                            workflowHtml += `
+                                <div class="mt-3 mb-3 p-3" style="background: #f0f7ff; border-radius: 6px; border: 2px dashed #4d6bfe;">
+                                    <p class="mb-2" style="font-size: 14px; color: #1976D2;">
+                                        <i class="bi bi-upload"></i> <strong>请上传数据文件以激活工作流</strong>
+                                    </p>
+                                    <button class="btn btn-primary btn-sm" id="upload-to-activate-${workflowId}" 
+                                            onclick="handleTemplateUpload('${workflowId}', '${escapeHtml(originalQuery)}', ${JSON.stringify(workflowData).replace(/'/g, "&#39;")})">
+                                        <i class="bi bi-cloud-upload"></i> 📂 上传数据以启动分析
+                                    </button>
+                                    <input type="hidden" id="workflow-data-${workflowId}" value='${JSON.stringify(workflowData).replace(/'/g, "&#39;")}'>
+                                    <input type="hidden" id="original-query-${workflowId}" value="${escapeHtml(originalQuery)}">
+                                </div>
+                            `;
+                        }
+                        
+                        // 🔥 CRITICAL: 显示工作流步骤（即使为空也显示）
+                        if (workflowSteps.length > 0) {
+                            workflowHtml += '<div class="mt-2"><strong>步骤列表：</strong><ul style="margin-top: 8px; margin-bottom: 0;">';
+                            workflowSteps.forEach((step, index) => {
+                                const stepName = step.name || step.step_name || step.id || step.tool_id || `步骤 ${index + 1}`;
+                                workflowHtml += `<li style="margin-bottom: 4px;">${escapeHtml(stepName)}</li>`;
+                            });
+                            workflowHtml += '</ul></div>';
+                        } else {
+                            // 🔥 CRITICAL: 即使步骤为空，也显示卡片（显示JSON用于调试）
+                            console.warn("⚠️ [renderWorkflowCard] 步骤为空，显示JSON调试信息");
+                            workflowHtml += `
+                                <div class="mt-2">
+                                    <p class="text-warning"><i class="bi bi-exclamation-triangle"></i> 步骤列表为空</p>
+                                    <details>
+                                        <summary>查看原始数据（调试）</summary>
+                                        <pre style="white-space: pre-wrap; font-size: 12px; max-height: 300px; overflow-y: auto;">${escapeHtml(JSON.stringify(workflowData, null, 2))}</pre>
+                                    </details>
+                                </div>
+                            `;
+                        }
+                        
+                        // 🔥 CRITICAL: 如果不是模板模式，显示执行按钮
+                        if (!isTemplateMode && workflowSteps.length > 0) {
+                            const workflowId = `wf-exec-${Date.now()}`;
+                            workflowHtml += `
+                                <div class="mt-3">
+                                    <button class="btn btn-success btn-sm" id="execute-workflow-${workflowId}" 
+                                            onclick="executeWorkflowFromCard('${workflowId}', ${JSON.stringify(workflowData).replace(/'/g, "&#39;")})">
+                                        <i class="bi bi-play-circle"></i> 🚀 执行工作流
+                                    </button>
+                                </div>
+                            `;
+                        }
+                        
+                        workflowHtml += '</div>';
+                        
+                        // 🔥 CRITICAL: 追加到现有内容（不覆盖）
+                        const currentContent = aiContentDiv.innerHTML;
+                        aiContentDiv.innerHTML = currentContent + workflowHtml;
+                        
+                        console.log("✅ [renderWorkflowCard] 工作流卡片已渲染");
+                    }
+                    
+                    // 🔥 URGENT FIX: 从卡片执行工作流的辅助函数
+                    window.executeWorkflowFromCard = function(workflowId, workflowData) {
+                        console.log("🚀 [executeWorkflowFromCard] 执行工作流:", workflowData);
+                        
+                        // 提取文件路径
+                        const filePaths = [];
+                        // 🔥 支持多种数据结构
+                        const steps = workflowData.workflow_config?.workflow_data?.steps || 
+                                      workflowData.workflow_data?.steps || 
+                                      workflowData.steps || [];
+                        steps.forEach(step => {
+                            const params = step.params || {};
+                            const filePath = params.file_path || params.adata_path;
+                            if (filePath && filePath !== '<待上传数据>' && filePath !== '<PENDING_UPLOAD>') {
+                                filePaths.push(filePath);
+                            }
+                        });
+                        
+                        // 如果没有文件路径，使用全局 uploadedFiles
+                        if (filePaths.length === 0 && uploadedFiles.length > 0) {
+                            filePaths.push(...uploadedFiles.map(f => f.path || f.file_path || f.name).filter(p => p));
+                        }
+                        
+                        console.log("📁 [executeWorkflowFromCard] 文件路径:", filePaths);
+                        
+                        // 调用执行函数
+                        if (filePaths.length === 0) {
+                            alert("⚠️ 请先上传数据文件再执行工作流！");
+                            document.getElementById('fileInput')?.click();
+                            return;
+                        }
+                        
+                        // 调用 submitWorkflow 或直接调用执行API
+                        // 🔥 支持多种数据结构
+                        const workflowConfig = workflowData.workflow_config?.workflow_data || 
+                                               workflowData.workflow_data || 
+                                               workflowData;
+                        submitWorkflow(`wf-exec-${workflowId}`, steps.length, JSON.stringify(filePaths));
+                    };
+                    
+                    // 🔥 URGENT FIX: 处理完成事件 - 移除 Thinking spinner
+                    function handleDoneEvent(data) {
+                        clearInterval(timerInterval);
+                        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+                        
+                        // 🔥 CRITICAL: 移除 Thinking spinner
+                        if (aiContentDiv) {
+                            const spinner = aiContentDiv.querySelector('.spinner-border');
+                            if (spinner) {
+                                spinner.remove();
+                            }
+                            // 移除"思考中..."文本
+                            const thinkingText = aiContentDiv.querySelector('span[style*="思考中"]');
+                            if (thinkingText) {
+                                thinkingText.remove();
+                            }
+                            // 如果内容为空，显示完成消息
+                            if (!aiContentDiv.innerHTML.trim() || aiContentDiv.innerHTML.trim() === '') {
+                                aiContentDiv.innerHTML = '<div class="alert alert-success">✅ 处理完成</div>';
+                            }
+                        }
+                        
+                        // 添加完成步骤
+                        addProcessStep(`处理完成 (${duration}s)`, 'done');
+                        
+                        // 🔥 CRITICAL: 重置停止按钮
+                        const stopBtn = document.getElementById('stopBtn');
+                        if (stopBtn) {
+                            stopBtn.style.display = 'none';
+                        }
+                        toggleLoadingState(false);
+                    }
+                    
+                    // 🔥 UI 更新函数：处理澄清问题事件
+                    function handleQuestionEvent(data) {
+                        clearInterval(timerInterval);
+                        
+                        // 添加澄清步骤
+                        addProcessStep('需要澄清信息', 'pending');
+                        
+                        // 显示澄清问题到消息区域
+                        if (aiContentDiv) {
+                            aiContentDiv.innerHTML = `
+                                <div class="alert alert-info" role="alert" style="border-left: 4px solid #0dcaf0;">
+                                    <h5><i class="bi bi-question-circle"></i> 需要澄清</h5>
+                                    <p style="font-size: 15px; margin-bottom: 8px;">${escapeHtml(data.content || '需要更多信息才能继续处理')}</p>
+                                    <p class="mb-0"><small class="text-muted">请回答上述问题后重新发送消息。</small></p>
+                                </div>
+                            `;
+                        }
+                        
+                        // 更新输入框提示
+                        const chatInput = document.getElementById('userInput') || document.getElementById('chat-input');
+                        if (chatInput) {
+                            chatInput.placeholder = "请输入您的回答...";
+                            chatInput.focus();
+                        }
+                    }
+                    
+                    // 🔥 UI 更新函数：处理错误事件
+                    function handleErrorEvent(data) {
+                        clearInterval(timerInterval);
+                        
+                        // 添加错误步骤
+                        addProcessStep(`错误: ${data.error || data.message || '未知错误'}`, 'error');
+                        
+                        if (aiContentDiv) {
+                            aiContentDiv.innerHTML = `<div class="alert alert-danger">❌ 错误: ${escapeHtml(data.error || data.message || '未知错误')}</div>`;
+                        }
+                    }
+                    
+                    // 🔥 主循环：读取并解析 SSE 流
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        
+                        // 解码数据块
+                        const chunk = decoder.decode(value, { stream: true });
+                        buffer += chunk;
+                        
+                        // 🔥 CRITICAL: 立即追加原始数据到调试面板
+                        updateDebugPanel(chunk);
+                        
+                        // 🔥 按 SSE 标准格式分割：\n\n 是事件分隔符
+                        const parts = buffer.split('\n\n');
+                        buffer = parts.pop() || ''; // 保留最后一个不完整的事件
+                        
+                        // 处理每个完整的事件
+                        for (const part of parts) {
+                            if (!part.trim()) continue; // 跳过空事件
+                            
+                            const lines = part.split('\n');
+                            let eventType = 'message'; // 默认事件类型
+                            let dataLines = [];
+                            
+                            // 解析事件行
+                            for (const line of lines) {
+                                if (line.startsWith('event: ')) {
+                                    eventType = line.substring(7).trim();
+                                } else if (line.startsWith('data: ')) {
+                                    // 支持多行 data:（SSE 标准）
+                                    dataLines.push(line.substring(6)); // 移除 'data: ' 前缀
+                                } else if (line.trim() && dataLines.length > 0) {
+                                    // 其他行，可能是 data: 的延续（多行 JSON）
+                                    dataLines.push(line);
+                                }
+                            }
+                            
+                            // 🔥 DISPATCH: 如果有数据，分发事件
+                            if (dataLines.length > 0) {
+                                const jsonData = dataLines.join('\n'); // 合并多行 data
+                                try {
+                                    const data = JSON.parse(jsonData);
+                                    const shouldStop = handleServerEvent(eventType, data);
+                                    if (shouldStop) {
+                                        return; // 停止处理（例如澄清问题）
+                                    }
+                                } catch (e) {
+                                    console.error('❌ SSE JSON 解析错误:', e, 'Raw data:', jsonData);
+                                    if (debugPanel) {
+                                        updateDebugPanel(`\n❌ JSON 解析错误: ${e.message}\n原始数据: ${jsonData}\n`);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 🔥 处理剩余缓冲区（最后一个不完整的事件）
+                    if (buffer.trim()) {
+                        const lines = buffer.split('\n');
+                        let eventType = 'message';
+                        let dataLines = [];
+                        
+                        for (const line of lines) {
+                            if (line.startsWith('event: ')) {
+                                eventType = line.substring(7).trim();
+                            } else if (line.startsWith('data: ')) {
+                                dataLines.push(line.substring(6));
+                            } else if (line.trim() && dataLines.length > 0) {
+                                dataLines.push(line);
+                            }
+                        }
+                        
+                        if (dataLines.length > 0) {
+                            const jsonData = dataLines.join('\n');
+                            try {
+                                const data = JSON.parse(jsonData);
+                                handleServerEvent(eventType, data);
+                            } catch (e) {
+                                console.error('❌ 剩余缓冲区 JSON 解析错误:', e);
+                            }
+                        }
+                    }
+                    
+                    // 🔥 最终更新：确保消息内容已显示
+                    if (messageBuffer && aiContentDiv) {
+                        updateChatBubble(messageBuffer);
+                    }
+                    
+                    return;
+                }
 
                 if (contentType && contentType.includes("application/json")) {
                     const data = await res.json();
@@ -1447,9 +2207,21 @@
             const recommendation = data.recommendation || null;
             const diagnosisReport = data.diagnosis_report || null;
             
+            // 🔥 ARCHITECTURAL FIX: 检查是否为模板模式（支持多种占位符格式）
+            const isTemplateMode = data.template_mode || 
+                                 workflowData.template_mode ||
+                                 steps.some(step => {
+                                     const params = step.params || {};
+                                     return params.file_path === '<PENDING_UPLOAD>' || 
+                                            params.file_path === '<待上传数据>' ||
+                                            params.adata_path === '<PENDING_UPLOAD>' ||
+                                            params.adata_path === '<待上传数据>';
+                                 });
+            
             console.log('📋 [DEBUG] renderWorkflowForm:', {
                 hasRecommendation: !!recommendation,
                 hasDiagnosisReport: !!diagnosisReport,
+                isTemplateMode: isTemplateMode,
                 recommendation: recommendation,
                 diagnosisReport: diagnosisReport ? diagnosisReport.substring(0, 100) + '...' : null
             });
@@ -1461,13 +2233,37 @@
             
             const formId = `wf-${Date.now()}`;
             let formHtml = `<div class="params-form" id="${formId}">
-                <h5>📋 ${workflowName}</h5>`;
+                <h5>
+                    📋 ${workflowName}
+                    ${isTemplateMode ? '<span class="badge bg-secondary ms-2">[模版预览 Mode]</span>' : ''}
+                </h5>`;
+            
+            // 🔥 ARCHITECTURAL FIX: 如果是模板模式，显示蓝色上传按钮
+            if (isTemplateMode) {
+                // 保存原始查询以便上传后重新发送
+                const originalQuery = userInput.value.trim() || '继续分析';
+                const workflowId = formId;
+                
+                formHtml += `
+                    <div class="alert alert-info mb-3" style="background: #f0f7ff; border: 2px dashed #4d6bfe; border-radius: 6px; padding: 15px;">
+                        <p class="mb-2" style="font-size: 14px; color: #1976D2;">
+                            <i class="bi bi-upload"></i> <strong>请上传数据文件以激活工作流</strong>
+                        </p>
+                        <button class="btn btn-primary btn-sm" id="upload-to-activate-form-${workflowId}" 
+                                onclick="handleTemplateUpload('${workflowId}', '${originalQuery.replace(/'/g, "&#39;")}', ${JSON.stringify(data).replace(/'/g, "&#39;")})">
+                            <i class="bi bi-cloud-upload"></i> 📂 上传数据以启动分析
+                        </button>
+                        <input type="hidden" id="workflow-data-form-${workflowId}" value='${JSON.stringify(data).replace(/'/g, "&#39;")}'>
+                        <input type="hidden" id="original-query-form-${workflowId}" value="${originalQuery.replace(/'/g, "&#39;")}">
+                    </div>
+                `;
+            }
             
             // 🔧 修复：渲染诊断报告（如果有，优先显示）
             if (diagnosisReport) {
                 formHtml += `<div class="alert alert-success mb-3" style="background-color: #f0f7ff; border-left: 4px solid #4d6bfe; padding: 15px; border-radius: 4px;">
                     <h6 style="margin-top: 0; color: #1976D2; margin-bottom: 10px;">
-                        <i class="bi bi-clipboard-check"></i> 数据诊断与参数推荐报告
+                        <i class="bi bi-clipboard-check"></i> ${isTemplateMode ? '方案已生成' : '数据诊断与参数推荐报告'}
                     </h6>
                     <div style="font-size: 14px; line-height: 1.6; color: #333;">
                         ${marked.parse(diagnosisReport)}
@@ -1600,12 +2396,95 @@
             formHtml += `</div>
                 <!-- 🔥 Task 1: Hidden input to preserve file_paths -->
                 <input type="hidden" id="hidden-file-paths-${formId}" value="${JSON.stringify(filePaths).replace(/"/g, '&quot;')}">
-                <button class="btn btn-success btn-run mt-3" onclick="submitWorkflow('${formId}', ${steps.length}, ${JSON.stringify(filePaths).replace(/"/g, '&quot;')})">
-                    🚀 执行工作流
-                </button>
+                ${isTemplateMode ? 
+                    `<div class="alert alert-warning mt-3 mb-0">
+                        <i class="bi bi-exclamation-triangle"></i> 请先上传数据文件以激活工作流
+                    </div>` :
+                    `<button class="btn btn-success btn-run mt-3" onclick="submitWorkflow('${formId}', ${steps.length}, ${JSON.stringify(filePaths).replace(/"/g, '&quot;')})">
+                        🚀 执行工作流
+                    </button>`
+                }
             </div>`;
             
             appendMessage('ai', formHtml, null, null, true);
+        }
+        
+        // 🔥 ARCHITECTURAL FIX: 全局函数 - 处理模板模式下的文件上传（供 renderWorkflowForm 调用）
+        window.handleTemplateUpload = function(workflowId, originalQuery, workflowData) {
+            console.log('📂 [Template Upload] 触发文件上传，原始查询:', originalQuery);
+            
+            // 保存工作流数据和原始查询到全局变量
+            window.pendingWorkflowData = workflowData;
+            window.pendingOriginalQuery = originalQuery;
+            
+            // 触发文件输入框
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput) {
+                // 创建一次性事件处理器
+                const handleFileSelect = async function(event) {
+                    if (event.target.files && event.target.files.length > 0) {
+                        console.log('📂 [Template Upload] 文件已选择，准备上传并重新发送查询');
+                        // 移除事件处理器（避免重复触发）
+                        fileInput.removeEventListener('change', handleFileSelect);
+                        
+                        // 文件选择后，自动上传并重新发送查询
+                        await handleTemplateUploadComplete(event.target.files, originalQuery, workflowData);
+                    }
+                };
+                
+                fileInput.addEventListener('change', handleFileSelect, { once: true });
+                fileInput.click();
+            }
+        };
+        
+        // 🔥 ARCHITECTURAL FIX: 处理模板上传完成后的自动重新发送
+        async function handleTemplateUploadComplete(files, originalQuery, workflowData) {
+            try {
+                console.log('📤 [Template Upload] 开始上传文件...');
+                
+                // 上传文件
+                const formData = new FormData();
+                for (let file of files) {
+                    formData.append('files', file);
+                }
+                
+                const uploadRes = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!uploadRes.ok) {
+                    const errorText = await uploadRes.text();
+                    throw new Error(errorText || '文件上传失败');
+                }
+                
+                const uploadResult = await uploadRes.json();
+                console.log('✅ [Template Upload] 文件上传成功:', uploadResult);
+                
+                // 🔥 CRITICAL: 自动重新发送原始查询（带文件）
+                // 将上传的文件添加到 uploadedFiles
+                if (uploadResult.file_paths && uploadResult.file_paths.length > 0) {
+                    uploadResult.file_paths.forEach(filePath => {
+                        uploadedFiles.push({
+                            name: filePath.split('/').pop(),
+                            path: filePath
+                        });
+                    });
+                }
+                
+                // 重新发送原始查询
+                console.log('🔄 [Template Upload] 重新发送原始查询:', originalQuery);
+                userInput.value = originalQuery;
+                
+                // 触发发送消息（延迟500ms确保文件已添加）
+                setTimeout(() => {
+                    sendMessage();
+                }, 500);
+                
+            } catch (e) {
+                console.error('❌ [Template Upload] 上传失败:', e);
+                alert(`文件上传失败: ${e.message}`);
+            }
         }
 
         function submitWorkflow(formId, totalSteps, filePathsJson = '[]') {

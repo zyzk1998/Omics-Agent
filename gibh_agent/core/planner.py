@@ -6,7 +6,7 @@
 
 包含两个规划器：
 1. WorkflowPlanner: 通用工作流规划器
-2. SOPPlanner: 基于 SOP（标准操作程序）的领域特定规划器
+2. SOPPlanner: 基于 SOP（标准操作程序）的领域特定规划器（已升级为使用 WorkflowRegistry）
 """
 import json
 import logging
@@ -16,6 +16,7 @@ from pathlib import Path
 from .tool_retriever import ToolRetriever
 from .tool_registry import registry
 from .llm_client import LLMClient
+from .workflows import WorkflowRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,12 @@ class WorkflowPlanner:
             
             # Step 4: 解析 LLM 响应
             logger.info("🔧 Step 4: 解析 LLM 响应...")
-            workflow_plan = self._parse_llm_response(response)
+            # 🔥 FIX: 提取 ChatCompletion 对象的内容
+            if hasattr(response, 'choices') and response.choices:
+                response_text = response.choices[0].message.content or ""
+            else:
+                response_text = str(response)
+            workflow_plan = self._parse_llm_response(response_text)
             
             # Step 5: 验证工具存在性
             logger.info("✅ Step 5: 验证工具...")
@@ -439,10 +445,14 @@ Remember: Output ONLY the JSON object, no markdown, no code blocks, no explanati
 
 class SOPPlanner:
     """
-    SOP 驱动的动态规划器
+    SOP 驱动的动态规划器（已升级）
     
     基于标准操作程序（SOP）规则，使用 LLM 生成符合专业流程的工作流计划。
-    专门为代谢组学分析设计，严格遵循 SOP 规则，确保输出符合前端 UI 格式。
+    
+    🔥 ARCHITECTURAL UPGRADE:
+    - 使用 WorkflowRegistry 进行严格的域绑定（只支持 Metabolomics 和 RNA）
+    - 使用 DAG 依赖解析（代码逻辑，非 LLM 幻觉）
+    - 支持计划优先（plan-first）：可以在没有文件的情况下生成工作流
     """
     
     def __init__(
@@ -459,20 +469,27 @@ class SOPPlanner:
         """
         self.tool_retriever = tool_retriever
         self.llm_client = llm_client
+        self.workflow_registry = WorkflowRegistry()
     
     async def generate_plan(
         self,
         user_query: str,
-        file_metadata: Dict[str, Any],
-        category_filter: str = "Metabolomics"
+        file_metadata: Optional[Dict[str, Any]] = None,
+        category_filter: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        生成基于 SOP 规则的工作流计划
+        生成基于 SOP 规则的工作流计划（升级版 - 动态 Plan-First）
+        
+        🔥 ARCHITECTURAL REFACTOR: Dynamic "Plan-First" with Intent Filtering
+        1. Analyze Intent (LLM): 从可用工具集中选择目标步骤
+        2. Resolve Dependencies (Code): 使用硬编码 DAG 解析依赖
+        3. Generate Template: 生成工作流模板（支持占位符）
+        4. Handle Metadata: 如果有文件，填充真实参数；如果没有文件，使用占位符
         
         Args:
             user_query: 用户查询文本
-            file_metadata: FileInspector 返回的文件元数据
-            category_filter: 工具类别过滤器（默认 "Metabolomics"）
+            file_metadata: FileInspector 返回的文件元数据（可选，支持 plan-first）
+            category_filter: 工具类别过滤器（可选，如果为 None 则自动推断）
         
         Returns:
             符合前端格式的工作流配置字典
@@ -480,62 +497,102 @@ class SOPPlanner:
         try:
             logger.info(f"🧠 [SOPPlanner] 开始生成计划: '{user_query}'")
             
-            # 🔥 CRITICAL: 使用 LLM 生成工作流计划（保持智能性）
-            # 对于所有类型（包括代谢组学），都使用 LLM 规划
-            # Step 1: 检索相关工具
-            logger.info("🔍 [SOPPlanner] Step 1: 检索相关工具...")
-            retrieved_tools = self.tool_retriever.retrieve(
-                query=user_query,
-                top_k=15,  # 获取更多工具以支持 SOP 规则
-                category_filter=category_filter
-            )
+            # Step 1: Intent Classification (LLM) - 识别域名
+            logger.info("🔍 [SOPPlanner] Step 1: 意图分类（识别域名）...")
+            intent_result = await self._classify_intent(user_query, file_metadata)
+            domain_name = intent_result.get("domain_name")
             
-            if not retrieved_tools:
-                logger.warning("⚠️ [SOPPlanner] 未检索到相关工具")
+            # Step 2: 严格域绑定检查
+            if not self.workflow_registry.is_supported(domain_name):
+                logger.warning(f"⚠️ [SOPPlanner] 不支持的域名: {domain_name}")
+                return self.workflow_registry.get_unsupported_error(domain_name)
+            
+            # Step 3: 获取工作流实例
+            workflow = self.workflow_registry.get_workflow(domain_name)
+            if not workflow:
                 return {
                     "type": "error",
-                    "error": "未找到相关工具，请检查查询或工具注册",
-                    "message": "无法生成工作流计划"
+                    "error": f"无法获取工作流: {domain_name}",
+                    "message": "工作流注册表错误"
                 }
             
-            logger.info(f"✅ [SOPPlanner] 检索到 {len(retrieved_tools)} 个相关工具")
+            # 🔥 ARCHITECTURAL FIX: 优先运行意图分析（Plan-First）
+            # Step 4: Analyze User Intent (LLM) - 从可用工具集中选择目标步骤
+            logger.info("🔍 [SOPPlanner] Step 2: 分析用户意图（选择目标步骤）...")
+            target_steps = await self._analyze_user_intent(user_query, workflow)
             
-            # Step 2: 构建 SOP 驱动的系统提示词
-            logger.info("📝 [SOPPlanner] Step 2: 构建 SOP 提示词...")
-            system_prompt = self._build_sop_system_prompt()
-            user_prompt = self._build_sop_user_prompt(
-                user_query=user_query,
-                file_metadata=file_metadata,
-                retrieved_tools=retrieved_tools
+            # 🔥 CRITICAL: 不默认完整 SOP，只有明确请求完整分析时才使用
+            # 如果查询模糊（如"Analyze this", "Full analysis", "完整分析"），使用完整 SOP
+            # 否则，使用用户明确请求的步骤（即使只有一个）
+            if not target_steps:
+                query_lower = user_query.lower()
+                vague_keywords = ["analyze this", "full analysis", "完整分析", "全部", "all", "complete"]
+                if any(kw in query_lower for kw in vague_keywords):
+                    logger.info("ℹ️ [SOPPlanner] 查询明确要求完整分析，使用完整 SOP")
+                    target_steps = list(workflow.steps_dag.keys())
+                else:
+                    # 如果意图分析失败，尝试回退关键词匹配
+                    logger.info("ℹ️ [SOPPlanner] 意图分析未返回步骤，尝试关键词匹配...")
+                    target_steps = self._fallback_intent_analysis(user_query, list(workflow.steps_dag.keys()))
+                    if not target_steps:
+                        logger.info("ℹ️ [SOPPlanner] 关键词匹配也失败，使用完整 SOP")
+                        target_steps = list(workflow.steps_dag.keys())
+            
+            logger.info(f"✅ [SOPPlanner] 目标步骤: {target_steps}")
+            
+            # Step 5: Resolve Dependencies (Code) - 使用硬编码 DAG 解析依赖
+            logger.info("🔍 [SOPPlanner] Step 3: 解析依赖关系...")
+            resolved_steps = self._resolve_dependencies(target_steps, workflow)
+            logger.info(f"✅ [SOPPlanner] 依赖解析完成: {target_steps} -> {resolved_steps}")
+            
+            # Step 6: Generate Template - 生成工作流模板（支持占位符）
+            logger.info("🔍 [SOPPlanner] Step 4: 生成工作流模板...")
+            workflow_config = workflow.generate_template(
+                target_steps=resolved_steps,
+                file_metadata=file_metadata
             )
             
-            # Step 3: 调用 LLM 生成计划
-            logger.info("🤖 [SOPPlanner] Step 3: 调用 LLM 生成计划...")
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
+            # 🔥 URGENT FIX: 验证生成的模板包含步骤
+            steps_count = len(workflow_config.get('workflow_data', {}).get('steps', []))
+            if steps_count == 0:
+                logger.error(f"❌ [SOPPlanner] generate_template 返回空步骤！resolved_steps: {resolved_steps}")
+                logger.error(f"❌ [SOPPlanner] workflow_config: {workflow_config}")
+                # 尝试修复：如果 resolved_steps 不为空但模板为空，可能是 generate_template 实现有问题
+                if resolved_steps:
+                    logger.warning(f"⚠️ [SOPPlanner] resolved_steps 不为空但模板为空，尝试手动构建步骤...")
+                    # 这里不应该手动构建，应该修复 generate_template
+                    # 但为了不破坏流程，我们返回错误
+                    return {
+                        "type": "error",
+                        "error": "工作流模板生成失败",
+                        "message": f"无法生成工作流模板：步骤列表为空。resolved_steps: {resolved_steps}",
+                        "workflow_data": workflow_config.get("workflow_data", {})
+                    }
             
-            response = await self.llm_client.achat(
-                messages=messages,
-                temperature=0.1,  # 低温度确保遵循 SOP 规则
-                max_tokens=2048
-            )
+            logger.info(f"✅ [SOPPlanner] 模板生成成功: {steps_count} 个步骤")
             
-            # Step 4: 解析 LLM 响应
-            logger.info("🔧 [SOPPlanner] Step 4: 解析 LLM 响应...")
-            workflow_plan = self._parse_llm_response(response)
+            # Step 7: Handle Metadata - 填充参数或使用占位符
+            logger.info("🔍 [SOPPlanner] Step 5: 处理元数据...")
+            if file_metadata:
+                # 如果有文件，填充真实参数
+                workflow_config = self._fill_parameters(workflow_config, file_metadata, workflow)
+            else:
+                # 如果没有文件，使用占位符
+                workflow_config = self._fill_placeholders(workflow_config, user_query)
             
-            # Step 5: 验证和适配为前端格式
-            logger.info("✅ [SOPPlanner] Step 5: 验证和适配...")
-            validated_plan = self._validate_and_adapt_sop_plan(
-                workflow_plan,
-                file_metadata,
-                retrieved_tools
-            )
+            # 🔥 URGENT FIX: 再次验证步骤数量
+            final_steps_count = len(workflow_config.get('workflow_data', {}).get('steps', []))
+            logger.info(f"✅ [SOPPlanner] 工作流规划完成: {final_steps_count} 个步骤")
             
-            logger.info(f"✅ [SOPPlanner] 工作流规划完成: {len(validated_plan.get('steps', []))} 个步骤")
-            return validated_plan
+            if final_steps_count == 0:
+                logger.error(f"❌ [SOPPlanner] 最终工作流配置步骤为空！")
+                return {
+                    "type": "error",
+                    "error": "工作流步骤为空",
+                    "message": "工作流规划失败：最终步骤列表为空。",
+                    "workflow_data": workflow_config.get("workflow_data", {})
+                }
+            return workflow_config
         
         except Exception as e:
             logger.error(f"❌ [SOPPlanner] 工作流规划失败: {e}", exc_info=True)
@@ -544,6 +601,419 @@ class SOPPlanner:
                 "error": str(e),
                 "message": f"工作流规划失败: {str(e)}"
             }
+    
+    async def _analyze_user_intent(
+        self,
+        user_query: str,
+        workflow: "BaseWorkflow"
+    ) -> List[str]:
+        """
+        分析用户意图，从可用工具集中选择目标步骤
+        
+        🔥 ARCHITECTURAL REFACTOR: Dynamic Intent Filtering
+        
+        使用 LLM 从工作流的可用步骤中选择用户明确请求的步骤。
+        
+        Args:
+            user_query: 用户查询文本
+            workflow: 工作流实例（包含 steps_dag）
+        
+        Returns:
+            目标步骤ID列表（例如：["pca_analysis"]）
+            如果查询模糊（如"Analyze this"），返回空列表（表示完整工作流）
+        """
+        # 获取可用步骤列表
+        available_steps = list(workflow.steps_dag.keys())
+        
+        # 构建提示词
+        system_prompt = """You are an Intent Analyzer for Bioinformatics Workflows.
+
+Your task is to select the *Target Steps* the user explicitly asked for from the available toolset.
+
+**Rules:**
+1. If the user asks for a specific step (e.g., "Do PCA only", "Just do PCA"), return ONLY that step.
+2. If the user asks for multiple specific steps (e.g., "Do PCA and differential analysis"), return those steps.
+3. If the user's query is vague (e.g., "Analyze this", "Full analysis", "完整分析"), return an empty list [] (which means full workflow).
+4. Return ONLY a JSON array of tool_ids, no explanations.
+
+**Output Format:**
+Return ONLY a JSON array:
+["step1", "step2", ...]  // Empty array [] means full workflow
+
+**Example:**
+- User: "Do PCA only." -> ["pca_analysis"]
+- User: "I want PCA." -> ["pca_analysis"]
+- User: "Just do PCA." -> ["pca_analysis"]
+- User: "Do PCA and differential analysis." -> ["pca_analysis", "differential_analysis"]
+- User: "Analyze this." -> []
+- User: "Full analysis." -> []
+- User: "完整分析" -> []"""
+
+        user_prompt = f"""**User Query:**
+{user_query}
+
+**Available Steps:**
+{json.dumps(available_steps, ensure_ascii=False, indent=2)}
+
+**Task:**
+Select the target steps the user explicitly asked for. Return ONLY a JSON array of step IDs.
+
+**Output:**
+Return ONLY a JSON array (e.g., ["pca_analysis"] or [] for full workflow)."""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        response = await self.llm_client.achat(
+            messages=messages,
+            temperature=0.1,
+            max_tokens=256
+        )
+        
+        # 🔥 FIX: 提取 ChatCompletion 对象的内容
+        if hasattr(response, 'choices') and response.choices:
+            response_text = response.choices[0].message.content or ""
+        else:
+            response_text = str(response)
+        
+        # 解析响应
+        try:
+            target_steps = json.loads(response_text.strip())
+            if not isinstance(target_steps, list):
+                logger.warning(f"⚠️ LLM 返回了非列表类型: {type(target_steps)}，使用空列表")
+                return []
+            
+            # 验证步骤是否存在于工作流中
+            valid_steps = [s for s in target_steps if s in available_steps]
+            invalid_steps = set(target_steps) - set(available_steps)
+            if invalid_steps:
+                logger.warning(f"⚠️ LLM 返回了无效的步骤ID: {invalid_steps}，已过滤")
+            
+            logger.info(f"✅ [SOPPlanner] 意图分析完成: {valid_steps}")
+            return valid_steps
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ 意图分析 JSON 解析失败: {e}")
+            logger.error(f"响应内容: {response_text[:200] if 'response_text' in locals() else str(response)[:200]}")
+            # 回退：尝试从查询中推断
+            return self._fallback_intent_analysis(user_query, available_steps)
+    
+    def _fallback_intent_analysis(self, user_query: str, available_steps: List[str]) -> List[str]:
+        """
+        回退的意图分析（基于关键词）
+        
+        Args:
+            user_query: 用户查询
+            available_steps: 可用步骤列表
+        
+        Returns:
+            目标步骤列表
+        """
+        query_lower = user_query.lower()
+        
+        # 检查是否包含特定步骤的关键词
+        step_keywords = {
+            "pca_analysis": ["pca", "主成分", "principal component"],
+            "differential_analysis": ["differential", "差异", "diff"],
+            "metabolomics_plsda": ["plsda", "pls-da", "pls da"],
+            "visualize_volcano": ["volcano", "火山图"],
+            "metabolomics_pathway_enrichment": ["pathway", "通路", "enrichment", "富集"],
+            "preprocess_data": ["preprocess", "预处理"],
+            "inspect_data": ["inspect", "检查"]
+        }
+        
+        matched_steps = []
+        for step_id, keywords in step_keywords.items():
+            if step_id in available_steps:
+                if any(kw in query_lower for kw in keywords):
+                    matched_steps.append(step_id)
+        
+        # 如果匹配到步骤，返回匹配的步骤；否则返回空列表（完整工作流）
+        return matched_steps if matched_steps else []
+    
+    def _resolve_dependencies(
+        self,
+        target_steps: List[str],
+        workflow: "BaseWorkflow"
+    ) -> List[str]:
+        """
+        解析依赖关系（使用硬编码 DAG）
+        
+        🔥 ARCHITECTURAL REFACTOR: Hardcoded DAG Logic
+        
+        使用工作流的 DAG 递归解析依赖，确保所有前置步骤都被包含。
+        
+        Args:
+            target_steps: 用户请求的目标步骤列表
+            workflow: 工作流实例（包含 steps_dag）
+        
+        Returns:
+            完整的步骤列表（按依赖顺序排序）
+        """
+        # 使用 BaseWorkflow 的 resolve_dependencies 方法
+        resolved_steps = workflow.resolve_dependencies(target_steps)
+        return resolved_steps
+    
+    def _fill_placeholders(
+        self,
+        workflow_config: Dict[str, Any],
+        user_query: str
+    ) -> Dict[str, Any]:
+        """
+        填充占位符（当没有文件时）
+        
+        🔥 ARCHITECTURAL FIX: Plan-First Interactive Workflow
+        
+        如果没有文件元数据，使用占位符填充参数，并生成结构化的诊断内容。
+        
+        Args:
+            workflow_config: 工作流配置
+            user_query: 用户查询（用于生成诊断信息）
+        
+        Returns:
+            填充占位符后的工作流配置
+        """
+        steps = workflow_config.get("workflow_data", {}).get("steps", [])
+        
+        # 🔥 URGENT FIX: 确保 steps 不为空
+        if not steps or len(steps) == 0:
+            logger.error(f"❌ [SOPPlanner] _fill_placeholders: steps 为空！workflow_config: {workflow_config}")
+            # 尝试从 workflow_data 的其他位置获取
+            workflow_data = workflow_config.get("workflow_data", {})
+            if isinstance(workflow_data, dict):
+                # 检查是否有其他字段包含步骤信息
+                for key in ["steps", "workflow_steps", "pipeline_steps"]:
+                    if key in workflow_data and workflow_data[key]:
+                        steps = workflow_data[key]
+                        logger.warning(f"⚠️ [SOPPlanner] 从 {key} 获取步骤: {len(steps)} 个")
+                        break
+            
+            # 如果仍然为空，返回错误
+            if not steps or len(steps) == 0:
+                logger.error(f"❌ [SOPPlanner] _fill_placeholders: 无法获取步骤，返回错误配置")
+                return {
+                    "type": "error",
+                    "error": "工作流步骤为空",
+                    "message": "无法生成工作流：步骤列表为空。请检查工作流配置。",
+                    "workflow_data": workflow_config.get("workflow_data", {})
+                }
+        
+        logger.info(f"✅ [SOPPlanner] _fill_placeholders: 处理 {len(steps)} 个步骤")
+        
+        # 🔥 使用中文占位符
+        placeholder_text = "<待上传数据>"
+        
+        for step in steps:
+            params = step.get("params", {})
+            
+            # 填充 file_path 占位符（使用中文）
+            if "file_path" in params or "adata_path" in params:
+                param_name = "adata_path" if "adata_path" in params else "file_path"
+                params[param_name] = placeholder_text
+            
+            # 填充 group_column 占位符（如果步骤需要）
+            step_id = step.get("id") or step.get("tool_id")
+            if step_id in ["metabolomics_plsda", "differential_analysis", "metabolomics_pathway_enrichment"]:
+                if "group_column" in params:
+                    params["group_column"] = "自动检测"
+        
+        # 🔥 ARCHITECTURAL FIX: 生成结构化的诊断内容（而不是错误）
+        # 构建步骤列表文本
+        step_names = []
+        for step in steps:
+            step_name = step.get("name") or step.get("step_name") or step.get("id", "未知步骤")
+            step_names.append(step_name)
+        
+        step_list_text = "\n".join([f"{i+1}. {name}" for i, name in enumerate(step_names)])
+        
+        guide_message = f"""### 📋 分析方案已生成
+
+根据您的需求 **'{user_query}'**，我为您规划了以下流程：
+
+{step_list_text}
+
+**当前状态**：等待数据。
+**下一步**：请点击下方按钮上传文件。"""
+        
+        workflow_config["diagnosis"] = {
+            "status": "template_ready",
+            "message": guide_message,
+            "steps_count": len(steps),
+            "template_mode": True
+        }
+        
+        # 确保 workflow_data 中包含模板标记
+        if "workflow_data" in workflow_config:
+            workflow_config["workflow_data"]["template_mode"] = True
+        
+        # 🔥 CRITICAL: 设置顶层 template_mode 标记
+        workflow_config["template_mode"] = True
+        
+        return workflow_config
+    
+    async def _classify_intent(
+        self,
+        user_query: str,
+        file_metadata: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        使用 LLM 进行意图分类
+        
+        识别：
+        1. 域名（domain_name）："Metabolomics" 或 "RNA"
+        2. 目标步骤（target_steps）：用户请求的具体步骤列表
+        
+        Args:
+            user_query: 用户查询
+            file_metadata: 文件元数据（可选）
+            
+        Returns:
+            {
+                "domain_name": "Metabolomics" | "RNA",
+                "target_steps": ["step1", "step2", ...]  # 如果为空，表示完整工作流
+            }
+        """
+        # 构建意图分类提示词
+        system_prompt = """You are an Intent Classifier for Bioinformatics Workflows.
+
+Your task is to classify user queries into:
+1. Domain Name: "Metabolomics" or "RNA" (strictly one of these two)
+2. Target Steps: List of specific steps the user wants (e.g., ["pca_analysis", "differential_analysis"])
+
+**Available Domains:**
+- Metabolomics: For metabolite data analysis (CSV files with metabolite measurements)
+- RNA: For single-cell RNA-seq analysis (H5AD files, FASTQ files)
+
+**Available Steps (Metabolomics):**
+- inspect_data, preprocess_data, pca_analysis, metabolomics_plsda, differential_analysis, visualize_volcano, metabolomics_pathway_enrichment
+
+**Available Steps (RNA):**
+- rna_qc_filter, rna_normalize, rna_pca, rna_clustering, rna_find_markers, etc.
+
+**Output Format:**
+Return ONLY a JSON object:
+{
+  "domain_name": "Metabolomics" | "RNA",
+  "target_steps": ["step1", "step2", ...]  // Empty array [] means full workflow
+}
+
+**Rules:**
+- If user asks for "PCA" or "主成分分析", target_steps should include "pca_analysis" (Metabolomics) or "rna_pca" (RNA)
+- If user asks for "full analysis" or "完整分析", use empty array []
+- Domain name MUST be exactly "Metabolomics" or "RNA" (case-sensitive)"""
+
+        user_prompt = f"""**User Query:**
+{user_query}
+
+**File Metadata (if available):**
+{json.dumps(file_metadata, ensure_ascii=False, indent=2) if file_metadata else "No file metadata available"}
+
+**Task:**
+Classify the intent and return JSON only."""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        response = await self.llm_client.achat(
+            messages=messages,
+            temperature=0.1,
+            max_tokens=512
+        )
+        
+        # 🔥 FIX: 提取 ChatCompletion 对象的内容
+        if hasattr(response, 'choices') and response.choices:
+            response_text = response.choices[0].message.content or ""
+        else:
+            response_text = str(response)
+        
+        # 解析响应
+        try:
+            intent_result = json.loads(response_text.strip())
+            domain_name = intent_result.get("domain_name", "Metabolomics")
+            target_steps = intent_result.get("target_steps", [])
+            
+            # 验证域名
+            if domain_name not in ["Metabolomics", "RNA"]:
+                logger.warning(f"⚠️ LLM 返回了无效的域名: {domain_name}，使用默认值 Metabolomics")
+                domain_name = "Metabolomics"
+            
+            return {
+                "domain_name": domain_name,
+                "target_steps": target_steps if isinstance(target_steps, list) else []
+            }
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ 意图分类 JSON 解析失败: {e}")
+            logger.error(f"响应内容: {response_text[:200] if 'response_text' in locals() else str(response)[:200]}")
+            # 回退：尝试从查询中推断
+            return self._fallback_intent_classification(user_query)
+    
+    def _fallback_intent_classification(self, user_query: str) -> Dict[str, Any]:
+        """
+        回退的意图分类（基于关键词）
+        
+        Args:
+            user_query: 用户查询
+            
+        Returns:
+            意图分类结果
+        """
+        query_lower = user_query.lower()
+        
+        # 检查 RNA 关键词
+        rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "h5ad"]
+        if any(kw in query_lower for kw in rna_keywords):
+            return {"domain_name": "RNA", "target_steps": []}
+        
+        # 默认代谢组学
+        return {"domain_name": "Metabolomics", "target_steps": []}
+    
+    def _fill_parameters(
+        self,
+        workflow_config: Dict[str, Any],
+        file_metadata: Dict[str, Any],
+        workflow: "BaseWorkflow"
+    ) -> Dict[str, Any]:
+        """
+        填充工作流参数（基于文件元数据）
+        
+        Args:
+            workflow_config: 工作流配置
+            file_metadata: 文件元数据
+            workflow: 工作流实例
+            
+        Returns:
+            填充参数后的工作流配置
+        """
+        steps = workflow_config.get("workflow_data", {}).get("steps", [])
+        file_path = file_metadata.get("file_path")
+        
+        # 检测分组列（用于代谢组学）
+        semantic_map = file_metadata.get("semantic_map", {})
+        group_cols = semantic_map.get("group_cols", [])
+        
+        for step in steps:
+            params = step.get("params", {})
+            step_id = step.get("id")
+            
+            # 填充 file_path 或 adata_path
+            if "file_path" in params or "adata_path" in params:
+                param_name = "adata_path" if "adata_path" in params else "file_path"
+                if file_path:
+                    params[param_name] = file_path
+            
+            # 填充 group_column（如果有分组列）
+            if "group_column" in params and group_cols:
+                params["group_column"] = group_cols[0]
+            elif step_id in ["metabolomics_plsda", "differential_analysis", "metabolomics_pathway_enrichment"]:
+                # 如果步骤需要分组列但没有，标记为等待上传
+                if not group_cols:
+                    step["status"] = "waiting_for_upload"
+                    step["description"] += " ⚠️ 需要分组信息"
+        
+        return workflow_config
     
     def _detect_group_column_heuristic(self, file_metadata: Dict[str, Any]) -> Optional[str]:
         """
