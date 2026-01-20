@@ -58,7 +58,27 @@ services:
     command: gunicorn server:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8028 --timeout 300
 
   # =========================================
-  # 3. 异步任务处理 - Celery Worker（可选）
+  # 3. Nginx 反向代理服务器（可选，推荐生产环境）
+  # =========================================
+  nginx:
+    image: nginx:alpine
+    container_name: gibh_v2_nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"  # 如果需要 HTTPS
+    volumes:
+      - ./services/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./services/nginx/html:/usr/share/nginx/html:ro
+      - ./data/uploads:/app/uploads:ro  # 上传文件目录（只读）
+      - ./results:/app/results:ro        # 分析结果目录（只读）
+    depends_on:
+      - api-server
+    networks:
+      - gibh-network
+
+  # =========================================
+  # 4. 异步任务处理 - Celery Worker（可选）
   # =========================================
   worker:
     build:

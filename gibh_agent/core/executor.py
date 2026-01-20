@@ -28,15 +28,88 @@ class WorkflowExecutor:
     5. 生成符合前端格式的执行报告
     """
     
-    def __init__(self, output_dir: Optional[str] = None):
+    def __init__(self, output_dir: Optional[str] = None, upload_dir: Optional[str] = None):
         """
         初始化工作流执行器
         
         Args:
             output_dir: 输出目录（如果为 None，将在执行时创建）
+            upload_dir: 上传目录（用于解析相对路径）
         """
         self.output_dir = output_dir
+        self.upload_dir = upload_dir or os.getenv("UPLOAD_DIR", "/app/uploads")
         self.step_results: Dict[str, Any] = {}  # 存储步骤结果，用于数据流传递
+    
+    def _resolve_file_path(self, file_path: str) -> str:
+        """
+        🔥 CRITICAL REGRESSION FIX: 解析文件路径为绝对路径
+        
+        检查顺序：
+        1. 如果已经是绝对路径且存在 -> 直接使用
+        2. 如果是相对路径 -> 前置 UPLOAD_DIR
+        3. 如果只是文件名 -> 在 UPLOAD_DIR 中搜索
+        
+        Args:
+            file_path: 原始文件路径（可能是绝对路径、相对路径或文件名）
+            
+        Returns:
+            解析后的绝对路径
+        """
+        if not file_path or file_path in ["<待上传数据>", "<PENDING_UPLOAD>", ""]:
+            return file_path
+        
+        original_path = file_path
+        upload_dir_path = Path(self.upload_dir)
+        
+        # Check 1: Is it already absolute and existing?
+        if os.path.isabs(file_path):
+            path_obj = Path(file_path)
+            if path_obj.exists():
+                logger.info(f"✅ [Executor] 路径已为绝对路径且存在: {file_path}")
+                return str(path_obj.resolve())
+            else:
+                logger.warning(f"⚠️ [Executor] 绝对路径不存在: {file_path}，尝试在 UPLOAD_DIR 中查找")
+        
+        # Check 2: Is it relative? (e.g., "guest/.../cow_diet.csv")
+        # Try prepending UPLOAD_DIR
+        if not os.path.isabs(file_path):
+            # Remove leading slash if present (e.g., "/guest/..." -> "guest/...")
+            file_path_clean = file_path.lstrip('/')
+            potential_path = upload_dir_path / file_path_clean
+            
+            if potential_path.exists():
+                resolved = str(potential_path.resolve())
+                logger.info(f"✅ [Executor] 解析相对路径: {original_path} -> {resolved}")
+                return resolved
+            
+            # Try with original relative path
+            potential_path2 = upload_dir_path / file_path
+            if potential_path2.exists():
+                resolved = str(potential_path2.resolve())
+                logger.info(f"✅ [Executor] 解析相对路径（原始）: {original_path} -> {resolved}")
+                return resolved
+        
+        # Check 3: Is it just a filename? (e.g., "cow_diet.csv")
+        # Search in UPLOAD_DIR recursively
+        filename = Path(file_path).name
+        if filename == file_path or '/' not in file_path.replace('\\', '/'):
+            logger.info(f"🔍 [Executor] 搜索文件名: {filename} 在 {self.upload_dir}")
+            for found_path in upload_dir_path.rglob(filename):
+                if found_path.is_file():
+                    resolved = str(found_path.resolve())
+                    logger.info(f"✅ [Executor] 找到文件: {original_path} -> {resolved}")
+                    return resolved
+        
+        # If all checks fail, try to construct absolute path anyway
+        if not os.path.isabs(file_path):
+            final_path = upload_dir_path / file_path.lstrip('/')
+            resolved = str(final_path.resolve())
+            logger.warning(f"⚠️ [Executor] 无法验证路径存在，但构造绝对路径: {original_path} -> {resolved}")
+            return resolved
+        
+        # Return original if already absolute (even if doesn't exist)
+        logger.warning(f"⚠️ [Executor] 无法解析路径，返回原始值: {original_path}")
+        return original_path
     
     def execute_step(
         self,
@@ -154,6 +227,19 @@ class WorkflowExecutor:
                 removed = set(processed_params.keys()) - allowed_params
                 logger.warning(f"⚠️ [Executor] 移除 {tool_id} 不接受的参数: {removed}")
             processed_params = filtered_params
+        
+        # 🔥 CRITICAL REGRESSION FIX: Normalize all path-like parameters before tool execution
+        path_params = ["file_path", "adata_path", "output_path", "output_file", "fastq_path", "reference_path", "output_h5ad"]
+        for param_name in path_params:
+            if param_name in processed_params:
+                original_path = processed_params[param_name]
+                if original_path and isinstance(original_path, str):
+                    # Skip placeholder values
+                    if original_path not in ["<待上传数据>", "<PENDING_UPLOAD>", ""]:
+                        resolved_path = self._resolve_file_path(original_path)
+                        if resolved_path != original_path:
+                            logger.info(f"🔄 [Executor] 解析路径参数 {param_name}: {original_path} -> {resolved_path}")
+                        processed_params[param_name] = resolved_path
         
         # 🔥 ARCHITECTURAL UPGRADE: Phase 3 - Pre-Flight Check & Auto-Correction
         # 对于需要 group_column 的工具，验证列是否存在，如果不存在则使用 semantic_map 自动修正
@@ -608,7 +694,16 @@ class WorkflowExecutor:
         steps_results = []
         
         # 🔥 上下文链：跟踪当前文件路径，用于自动传递给下一个步骤
-        current_file_path = file_paths[0] if file_paths else None
+        # 🔥 CRITICAL REGRESSION FIX: Resolve file paths to absolute paths
+        resolved_file_paths = []
+        if file_paths:
+            for fp in file_paths:
+                if fp and isinstance(fp, str):
+                    resolved = self._resolve_file_path(fp)
+                    resolved_file_paths.append(resolved)
+                    if resolved != fp:
+                        logger.info(f"🔄 [Executor] 解析输入文件路径: {fp} -> {resolved}")
+        current_file_path = resolved_file_paths[0] if resolved_file_paths else None
         
         # 执行每个步骤
         for i, step in enumerate(steps, 1):
@@ -736,6 +831,15 @@ class WorkflowExecutor:
             
             steps_details.append(step_detail)
             steps_results.append(step_detail["step_result"])
+            
+            # 🔥 CRITICAL REGRESSION FIX: If async job started, stop execution
+            if step_result.get("status") == "async_job_started":
+                logger.info(f"🚀 [Executor] 检测到异步作业已启动: {step_id}, job_id: {step_result.get('job_id', 'N/A')}")
+                logger.info(f"🚀 [Executor] 停止执行后续步骤，等待异步作业完成")
+                # Add job_id to step_detail if present
+                if "job_id" in step_result:
+                    step_detail["job_id"] = step_result["job_id"]
+                break  # STOP HERE - Do not execute next steps
             
             # 如果步骤失败，停止执行
             if step_result.get("status") == "error":

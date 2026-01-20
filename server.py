@@ -1552,6 +1552,10 @@ async def upload_file(
 @app.post("/api/chat")
 async def chat_endpoint(req: ChatRequest):
     """聊天接口"""
+    # 🔥 CRITICAL DEBUG: 打印接收到的文件列表
+    print(f"🔍 API RECEIVED FILES: {req.uploaded_files}")
+    logger.info(f"🔍 [ChatEndpoint] 接收到的文件列表: {req.uploaded_files}")
+    
     # #region debug log - entry point
     import json
     import traceback
@@ -1562,7 +1566,7 @@ async def chat_endpoint(req: ChatRequest):
         # 确保目录存在
         debug_log_path.parent.mkdir(parents=True, exist_ok=True)
         with open(debug_log_path, 'a') as f:
-            f.write(json.dumps({"location":"server.py:1112","message":"chat_endpoint entry","data":{"agent_is_none":agent is None,"req_message":req.message[:100] if req.message else None},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"ENTRY"})+"\n")
+            f.write(json.dumps({"location":"server.py:1112","message":"chat_endpoint entry","data":{"agent_is_none":agent is None,"req_message":req.message[:100] if req.message else None,"uploaded_files":req.uploaded_files},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"ENTRY"})+"\n")
     except Exception as log_err:
         pass  # 即使日志写入失败也不影响主流程
     # #endregion
@@ -1594,26 +1598,69 @@ async def chat_endpoint(req: ChatRequest):
     if req.stream:
         logger.info(f"🔥 [SSE] 启用流式传输模式")
         try:
-            # 转换文件格式
+            # 🔥 CRITICAL FIX: 转换文件格式（健壮处理）
             uploaded_files = []
-            for file_info in req.uploaded_files:
-                file_name = file_info.get("file_name") or file_info.get("name", "")
-                file_path_str = file_info.get("file_path") or file_info.get("path", "")
+            logger.info(f"🔍 [ChatEndpoint] 原始 uploaded_files: {req.uploaded_files}")
+            logger.info(f"🔍 [ChatEndpoint] uploaded_files 类型: {type(req.uploaded_files)}, 长度: {len(req.uploaded_files) if req.uploaded_files else 0}")
+            
+            for i, file_info in enumerate(req.uploaded_files):
+                logger.info(f"🔍 [ChatEndpoint] 处理文件 [{i}]: {file_info}, 类型: {type(file_info)}")
                 
+                # 🔥 CRITICAL: 支持多种格式（dict, Pydantic model, string）
+                file_name = ""
+                file_path_str = ""
+                
+                if isinstance(file_info, dict):
+                    file_name = file_info.get("file_name") or file_info.get("name", "")
+                    file_path_str = file_info.get("file_path") or file_info.get("path", "")
+                elif hasattr(file_info, "path"):
+                    # Pydantic model
+                    file_path_str = file_info.path
+                    file_name = getattr(file_info, "name", "") or getattr(file_info, "file_name", "")
+                elif isinstance(file_info, str):
+                    # 直接是路径字符串
+                    file_path_str = file_info
+                    file_name = os.path.basename(file_path_str)
+                else:
+                    logger.warning(f"⚠️ [ChatEndpoint] 未知的文件格式: {type(file_info)}")
+                    continue
+                
+                logger.info(f"🔍 [ChatEndpoint] 提取的文件名: {file_name}, 路径: {file_path_str}")
+                
+                # 🔥 CRITICAL: 构建文件路径（支持绝对路径和相对路径）
                 if file_path_str:
                     file_path = Path(file_path_str)
                     if not file_path.is_absolute():
+                        # 相对路径：相对于 UPLOAD_DIR
                         file_path = UPLOAD_DIR / file_path
+                    # 如果路径不存在，尝试使用文件名查找
+                    if not file_path.exists() and file_name:
+                        # 尝试在 UPLOAD_DIR 中查找文件名
+                        potential_path = UPLOAD_DIR / file_name
+                        if potential_path.exists():
+                            file_path = potential_path
+                            logger.info(f"✅ [ChatEndpoint] 在 UPLOAD_DIR 中找到文件: {file_path}")
+                        else:
+                            logger.warning(f"⚠️ [ChatEndpoint] 文件不存在: {file_path}, 尝试: {potential_path}")
                 elif file_name:
                     file_path = UPLOAD_DIR / file_name
                 else:
+                    logger.warning(f"⚠️ [ChatEndpoint] 无法确定文件路径，跳过")
                     continue
                 
+                # 🔥 CRITICAL: 验证文件存在
                 if file_path.exists():
-                    uploaded_files.append({
+                    file_dict = {
                         "name": file_name or os.path.basename(str(file_path)),
                         "path": str(file_path)
-                    })
+                    }
+                    uploaded_files.append(file_dict)
+                    logger.info(f"✅ [ChatEndpoint] 添加文件: {file_dict}")
+                else:
+                    logger.warning(f"⚠️ [ChatEndpoint] 文件不存在，跳过: {file_path}")
+            
+            logger.info(f"✅ [ChatEndpoint] 转换后的 uploaded_files: {uploaded_files}")
+            logger.info(f"✅ [ChatEndpoint] uploaded_files 数量: {len(uploaded_files)}")
             
             # 创建编排器（传递 upload_dir）
             orchestrator = AgentOrchestrator(agent, upload_dir=str(UPLOAD_DIR))

@@ -475,21 +475,25 @@ class SOPPlanner:
         self,
         user_query: str,
         file_metadata: Optional[Dict[str, Any]] = None,
-        category_filter: Optional[str] = None
+        category_filter: Optional[str] = None,
+        domain_name: Optional[str] = None,
+        target_steps: Optional[List[str]] = None,
+        is_template: bool = False  # 🔥 ARCHITECTURAL RESET: Explicit template flag
     ) -> Dict[str, Any]:
         """
-        生成基于 SOP 规则的工作流计划（升级版 - 动态 Plan-First）
+        生成基于 SOP 规则的工作流计划（架构重置版 - 严格分离执行和预览）
         
-        🔥 ARCHITECTURAL REFACTOR: Dynamic "Plan-First" with Intent Filtering
-        1. Analyze Intent (LLM): 从可用工具集中选择目标步骤
-        2. Resolve Dependencies (Code): 使用硬编码 DAG 解析依赖
-        3. Generate Template: 生成工作流模板（支持占位符）
-        4. Handle Metadata: 如果有文件，填充真实参数；如果没有文件，使用占位符
+        🔥 ARCHITECTURAL RESET: Strict Separation of Execution and Preview
+        - If is_template=False: MUST use _fill_parameters, MUST return template_mode=False
+        - If is_template=True: MUST use _fill_placeholders, MUST return template_mode=True
         
         Args:
             user_query: 用户查询文本
-            file_metadata: FileInspector 返回的文件元数据（可选，支持 plan-first）
-            category_filter: 工具类别过滤器（可选，如果为 None 则自动推断）
+            file_metadata: FileInspector 返回的文件元数据（可选）
+            category_filter: 工具类别过滤器（可选）
+            domain_name: 可选的域名（如果提供，跳过意图分类）
+            target_steps: 可选的目标步骤列表（如果提供，跳过意图分析）
+            is_template: 是否为模板模式（True=预览，False=执行）
         
         Returns:
             符合前端格式的工作流配置字典
@@ -497,10 +501,39 @@ class SOPPlanner:
         try:
             logger.info(f"🧠 [SOPPlanner] 开始生成计划: '{user_query}'")
             
-            # Step 1: Intent Classification (LLM) - 识别域名
-            logger.info("🔍 [SOPPlanner] Step 1: 意图分类（识别域名）...")
-            intent_result = await self._classify_intent(user_query, file_metadata)
-            domain_name = intent_result.get("domain_name")
+            # Step 1: Intent Classification (LLM) - 识别域名和模式（如果未提供）
+            execution_mode = None  # 🔥 NEW: Track execution mode from intent classification
+            
+            # 🔥 CRITICAL FIX: 如果有 file_metadata，默认应该是 EXECUTION 模式（除非用户明确要求预览）
+            has_file_metadata = file_metadata is not None
+            
+            if not domain_name:
+                logger.info("🔍 [SOPPlanner] Step 1: 意图分类（识别域名和模式）...")
+                logger.info(f"🔍 [SOPPlanner] file_metadata 存在: {has_file_metadata}")
+                intent_result = await self._classify_intent(user_query, file_metadata)
+                domain_name = intent_result.get("domain_name")
+                execution_mode = intent_result.get("mode", "PLANNING")  # 🔥 NEW: Extract mode
+                
+                # 🔥 CRITICAL FIX: 如果 file_metadata 存在但模式是 PLANNING，检查是否是明确的预览请求
+                if has_file_metadata and execution_mode == "PLANNING":
+                    query_lower = user_query.lower()
+                    preview_keywords = ["preview", "预览", "show", "显示", "查看", "plan", "规划", "what", "什么"]
+                    if not any(kw in query_lower for kw in preview_keywords):
+                        # 没有明确的预览关键词，但有文件 -> 强制 EXECUTION
+                        logger.warning(f"⚠️ [SOPPlanner] 有文件但模式是 PLANNING，且无预览关键词，强制设置为 EXECUTION")
+                        execution_mode = "EXECUTION"
+                
+                logger.info(f"✅ [SOPPlanner] 意图分类结果: domain={domain_name}, mode={execution_mode}")
+            else:
+                logger.info(f"✅ [SOPPlanner] 使用提供的域名: {domain_name}")
+                # 🔥 CRITICAL: If domain_name provided but no mode, infer from file_metadata
+                if has_file_metadata:
+                    # Default to EXECUTION if file exists and domain provided
+                    execution_mode = "EXECUTION"
+                    logger.info(f"✅ [SOPPlanner] 有 file_metadata，默认设置为 EXECUTION 模式")
+                else:
+                    execution_mode = "PLANNING"
+                    logger.info(f"✅ [SOPPlanner] 无 file_metadata，设置为 PLANNING 模式")
             
             # Step 2: 严格域绑定检查
             if not self.workflow_registry.is_supported(domain_name):
@@ -517,33 +550,56 @@ class SOPPlanner:
                 }
             
             # 🔥 ARCHITECTURAL FIX: 优先运行意图分析（Plan-First）
-            # Step 4: Analyze User Intent (LLM) - 从可用工具集中选择目标步骤
-            logger.info("🔍 [SOPPlanner] Step 2: 分析用户意图（选择目标步骤）...")
-            target_steps = await self._analyze_user_intent(user_query, workflow)
+            # Step 4: Analyze User Intent (LLM) - 从可用工具集中选择目标步骤（如果未提供）
+            if target_steps is None:
+                logger.info("🔍 [SOPPlanner] Step 2: 分析用户意图（选择目标步骤）...")
+                target_steps = await self._analyze_user_intent(user_query, workflow)
+            else:
+                logger.info(f"✅ [SOPPlanner] 使用提供的目标步骤: {target_steps}")
             
-            # 🔥 CRITICAL: 不默认完整 SOP，只有明确请求完整分析时才使用
+            # 🔥 CRITICAL FIX: 确保 target_steps 不为空（Plan-First 必须返回完整标准流程）
             # 如果查询模糊（如"Analyze this", "Full analysis", "完整分析"），使用完整 SOP
             # 否则，使用用户明确请求的步骤（即使只有一个）
+            # 🔥 URGENT: 如果没有文件且查询是规划类（"Plan", "预览", "show me"），默认使用完整 SOP
             if not target_steps:
                 query_lower = user_query.lower()
                 vague_keywords = ["analyze this", "full analysis", "完整分析", "全部", "all", "complete"]
+                planning_keywords = ["plan", "预览", "show me", "显示", "生成", "规划", "workflow", "流程"]
+                
                 if any(kw in query_lower for kw in vague_keywords):
                     logger.info("ℹ️ [SOPPlanner] 查询明确要求完整分析，使用完整 SOP")
+                    target_steps = list(workflow.steps_dag.keys())
+                elif not file_metadata and any(kw in query_lower for kw in planning_keywords):
+                    # 🔥 CRITICAL FIX: Plan-First 模式（无文件），默认返回完整标准流程
+                    logger.info("ℹ️ [SOPPlanner] Plan-First 模式（无文件），使用完整标准流程")
                     target_steps = list(workflow.steps_dag.keys())
                 else:
                     # 如果意图分析失败，尝试回退关键词匹配
                     logger.info("ℹ️ [SOPPlanner] 意图分析未返回步骤，尝试关键词匹配...")
                     target_steps = self._fallback_intent_analysis(user_query, list(workflow.steps_dag.keys()))
                     if not target_steps:
-                        logger.info("ℹ️ [SOPPlanner] 关键词匹配也失败，使用完整 SOP")
+                        # 🔥 CRITICAL FIX: 如果所有回退都失败，使用完整 SOP（确保不为空）
+                        logger.info("ℹ️ [SOPPlanner] 关键词匹配也失败，使用完整 SOP（确保 Plan-First 返回完整流程）")
                         target_steps = list(workflow.steps_dag.keys())
             
-            logger.info(f"✅ [SOPPlanner] 目标步骤: {target_steps}")
+            # 🔥 CRITICAL FIX: 再次确保 target_steps 不为空
+            if not target_steps:
+                logger.warning("⚠️ [SOPPlanner] target_steps 仍然为空，强制使用完整 SOP")
+                target_steps = list(workflow.steps_dag.keys())
+            
+            logger.info(f"✅ [SOPPlanner] 目标步骤: {target_steps} (共 {len(target_steps)} 个)")
             
             # Step 5: Resolve Dependencies (Code) - 使用硬编码 DAG 解析依赖
             logger.info("🔍 [SOPPlanner] Step 3: 解析依赖关系...")
             resolved_steps = self._resolve_dependencies(target_steps, workflow)
-            logger.info(f"✅ [SOPPlanner] 依赖解析完成: {target_steps} -> {resolved_steps}")
+            
+            # 🔥 CRITICAL FIX: 确保 resolved_steps 不为空
+            if not resolved_steps:
+                logger.error(f"❌ [SOPPlanner] resolve_dependencies 返回空列表！target_steps: {target_steps}")
+                logger.warning("⚠️ [SOPPlanner] 强制使用完整 SOP")
+                resolved_steps = list(workflow.steps_dag.keys())
+            
+            logger.info(f"✅ [SOPPlanner] 依赖解析完成: {target_steps} -> {resolved_steps} (共 {len(resolved_steps)} 个)")
             
             # Step 6: Generate Template - 生成工作流模板（支持占位符）
             logger.info("🔍 [SOPPlanner] Step 4: 生成工作流模板...")
@@ -571,18 +627,79 @@ class SOPPlanner:
             
             logger.info(f"✅ [SOPPlanner] 模板生成成功: {steps_count} 个步骤")
             
-            # Step 7: Handle Metadata - 填充参数或使用占位符
+            # 🔥 ARCHITECTURAL RESET: Step 7 - Strict Separation Based on is_template Flag
             logger.info("🔍 [SOPPlanner] Step 5: 处理元数据...")
-            if file_metadata:
-                # 如果有文件，填充真实参数
-                workflow_config = self._fill_parameters(workflow_config, file_metadata, workflow)
-            else:
-                # 如果没有文件，使用占位符
-                workflow_config = self._fill_placeholders(workflow_config, user_query)
+            logger.info(f"🔍 [SOPPlanner] is_template={is_template}, file_metadata存在={file_metadata is not None}")
             
-            # 🔥 URGENT FIX: 再次验证步骤数量
+            # 🔥 CRITICAL: Remove ambiguity - Use is_template flag explicitly
+            if is_template:
+                # TEMPLATE MODE: Use placeholders, set template_mode = True
+                workflow_config = self._fill_placeholders(workflow_config, user_query)
+                logger.info("✅ [SOPPlanner] TEMPLATE 模式：已使用占位符，template_mode = True")
+            else:
+                # EXECUTION MODE: MUST use _fill_parameters, MUST return template_mode = False
+                if not file_metadata:
+                    logger.error("❌ [SOPPlanner] EXECUTION 模式但 file_metadata 不存在！这是逻辑错误。")
+                    # Fallback: Use placeholders but log error
+                    workflow_config = self._fill_placeholders(workflow_config, user_query)
+                    logger.warning("⚠️ [SOPPlanner] 回退到占位符模式（但这是错误的）")
+                else:
+                    workflow_config = self._fill_parameters(workflow_config, file_metadata, workflow, template_mode=False)
+                    logger.info("✅ [SOPPlanner] EXECUTION 模式：已填充真实参数，template_mode = False")
+                    
+                    # 🔥 CRITICAL: Validate that file_path in params is NOT <PENDING_UPLOAD>
+                    steps = workflow_config.get("workflow_data", {}).get("steps", [])
+                    for step in steps:
+                        params = step.get("params", {})
+                        for param_name in ["file_path", "adata_path"]:
+                            if param_name in params:
+                                param_value = params[param_name]
+                                if param_value in ["<待上传数据>", "<PENDING_UPLOAD>", ""]:
+                                    logger.error(f"❌ [SOPPlanner] EXECUTION 模式但步骤 {step.get('id')} 的参数 {param_name} 仍是占位符: {param_value}")
+                                    # Try to fix: use file_path from metadata
+                                    if file_metadata.get("file_path"):
+                                        params[param_name] = file_metadata.get("file_path")
+                                        logger.warning(f"⚠️ [SOPPlanner] 已修复：将 {param_name} 设置为 {file_metadata.get('file_path')}")
+            
+            # 🔥 ARCHITECTURAL RESET: Final Validation - Enforce is_template flag
             final_steps_count = len(workflow_config.get('workflow_data', {}).get('steps', []))
-            logger.info(f"✅ [SOPPlanner] 工作流规划完成: {final_steps_count} 个步骤")
+            template_mode = workflow_config.get("template_mode", False)
+            
+            # 🔥 CRITICAL: Force validation based on is_template flag
+            if is_template:
+                # TEMPLATE MODE: MUST be True
+                if not template_mode:
+                    logger.warning(f"⚠️ [SOPPlanner] is_template=True 但 template_mode=False，强制设置为 True")
+                    template_mode = True
+                    workflow_config["template_mode"] = True
+                    if "workflow_data" in workflow_config:
+                        workflow_config["workflow_data"]["template_mode"] = True
+            else:
+                # EXECUTION MODE: MUST be False
+                if template_mode:
+                    logger.error(f"❌ [SOPPlanner] is_template=False 但 template_mode=True，这是逻辑错误！强制设置为 False")
+                    template_mode = False
+                    workflow_config["template_mode"] = False
+                    if "workflow_data" in workflow_config:
+                        workflow_config["workflow_data"]["template_mode"] = False
+                
+                # 🔥 CRITICAL: Validate file paths are NOT placeholders
+                if file_metadata:
+                    steps = workflow_config.get("workflow_data", {}).get("steps", [])
+                    for step in steps:
+                        params = step.get("params", {})
+                        for param_name in ["file_path", "adata_path"]:
+                            if param_name in params:
+                                param_value = params[param_name]
+                                if param_value in ["<待上传数据>", "<PENDING_UPLOAD>", ""]:
+                                    logger.error(f"❌ [SOPPlanner] EXECUTION 模式但步骤 {step.get('id')} 的参数 {param_name} 仍是占位符")
+                                    # Try to fix
+                                    if file_metadata.get("file_path"):
+                                        params[param_name] = file_metadata.get("file_path")
+                                        logger.warning(f"⚠️ [SOPPlanner] 已修复：将 {param_name} 设置为 {file_metadata.get('file_path')}")
+            
+            logger.info(f"✅ [SOPPlanner] 工作流规划完成: {final_steps_count} 个步骤, template_mode = {template_mode}")
+            logger.info(f"✅ [SOPPlanner] file_metadata 存在: {file_metadata is not None}")
             
             if final_steps_count == 0:
                 logger.error(f"❌ [SOPPlanner] 最终工作流配置步骤为空！")
@@ -592,7 +709,20 @@ class SOPPlanner:
                     "message": "工作流规划失败：最终步骤列表为空。",
                     "workflow_data": workflow_config.get("workflow_data", {})
                 }
-            return workflow_config
+            
+            # 🔥 CRITICAL FIX: 构建返回结果，清理冗余字段
+            result = {
+                "type": "workflow_config",
+                "workflow_data": workflow_config.get("workflow_data"),
+                "template_mode": template_mode
+            }
+            
+            # 🔥 CRITICAL: 只在模板模式时包含诊断消息
+            # 如果有文件，不包含诊断（让 Orchestrator 从 file_metadata 生成真实诊断）
+            if template_mode and "diagnosis" in workflow_config:
+                result["diagnosis"] = workflow_config["diagnosis"]
+            
+            return result
         
         except Exception as e:
             logger.error(f"❌ [SOPPlanner] 工作流规划失败: {e}", exc_info=True)
@@ -874,12 +1004,16 @@ Return ONLY a JSON array (e.g., ["pca_analysis"] or [] for full workflow)."""
                 "target_steps": ["step1", "step2", ...]  # 如果为空，表示完整工作流
             }
         """
+        # 🔥 CONTEXT-AWARE INTENT CLASSIFICATION: Determine execution mode based on query + file context
+        has_file = file_metadata is not None
+        
         # 构建意图分类提示词
         system_prompt = """You are an Intent Classifier for Bioinformatics Workflows.
 
 Your task is to classify user queries into:
 1. Domain Name: "Metabolomics" or "RNA" (strictly one of these two)
-2. Target Steps: List of specific steps the user wants (e.g., ["pca_analysis", "differential_analysis"])
+2. Mode: "EXECUTION" or "PLANNING" (determines if user wants to run or preview)
+3. Target Steps: List of specific steps the user wants (e.g., ["pca_analysis", "differential_analysis"])
 
 **Available Domains:**
 - Metabolomics: For metabolite data analysis (CSV files with metabolite measurements)
@@ -891,26 +1025,42 @@ Your task is to classify user queries into:
 **Available Steps (RNA):**
 - rna_qc_filter, rna_normalize, rna_pca, rna_clustering, rna_find_markers, etc.
 
+**Mode Classification Rules (CRITICAL):**
+1. IF File is **False** (no file uploaded): ALWAYS return "PLANNING".
+2. IF File is **True** (file uploaded):
+   - Query implies ACTION ("analyze", "run", "do", "start", "执行", "分析", "运行", "开始"): -> Return "EXECUTION"
+   - Query implies INQUIRY ("show me the plan", "what steps?", "preview", "预览", "显示", "查看"): -> Return "PLANNING"
+   - Query is VAGUE ("metabolomics", "RNA", "代谢组", "转录组"): -> Default to "EXECUTION" (Assume user wants to run the file they just uploaded)
+
 **Output Format:**
 Return ONLY a JSON object:
 {
   "domain_name": "Metabolomics" | "RNA",
+  "mode": "EXECUTION" | "PLANNING",
   "target_steps": ["step1", "step2", ...]  // Empty array [] means full workflow
 }
 
 **Rules:**
 - If user asks for "PCA" or "主成分分析", target_steps should include "pca_analysis" (Metabolomics) or "rna_pca" (RNA)
 - If user asks for "full analysis" or "完整分析", use empty array []
-- Domain name MUST be exactly "Metabolomics" or "RNA" (case-sensitive)"""
+- Domain name MUST be exactly "Metabolomics" or "RNA" (case-sensitive)
+- Mode MUST be exactly "EXECUTION" or "PLANNING" (case-sensitive)"""
 
         user_prompt = f"""**User Query:**
 {user_query}
+
+**File Context:**
+File Uploaded: {has_file} ({'True' if has_file else 'False'})
 
 **File Metadata (if available):**
 {json.dumps(file_metadata, ensure_ascii=False, indent=2) if file_metadata else "No file metadata available"}
 
 **Task:**
-Classify the intent and return JSON only."""
+Classify the intent and return JSON only. Remember:
+- If File=False: mode MUST be "PLANNING"
+- If File=True + Action words: mode = "EXECUTION"
+- If File=True + Inquiry words: mode = "PLANNING"
+- If File=True + Vague: mode = "EXECUTION" (default)"""
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -933,6 +1083,7 @@ Classify the intent and return JSON only."""
         try:
             intent_result = json.loads(response_text.strip())
             domain_name = intent_result.get("domain_name", "Metabolomics")
+            mode = intent_result.get("mode", "PLANNING")  # 🔥 NEW: Extract mode
             target_steps = intent_result.get("target_steps", [])
             
             # 验证域名
@@ -940,41 +1091,88 @@ Classify the intent and return JSON only."""
                 logger.warning(f"⚠️ LLM 返回了无效的域名: {domain_name}，使用默认值 Metabolomics")
                 domain_name = "Metabolomics"
             
+            # 🔥 CRITICAL: Validate and enforce mode rules
+            if not has_file and mode == "EXECUTION":
+                logger.warning(f"⚠️ LLM 返回了不一致的模式: 无文件但 mode=EXECUTION，强制设置为 PLANNING")
+                mode = "PLANNING"
+            
+            # 验证模式
+            if mode not in ["EXECUTION", "PLANNING"]:
+                logger.warning(f"⚠️ LLM 返回了无效的模式: {mode}，使用默认值 PLANNING")
+                mode = "PLANNING"
+            
+            logger.info(f"✅ [SOPPlanner] 意图分类结果: domain={domain_name}, mode={mode}, target_steps={len(target_steps)}")
+            
             return {
                 "domain_name": domain_name,
+                "mode": mode,  # 🔥 NEW: Include mode in result
                 "target_steps": target_steps if isinstance(target_steps, list) else []
             }
         except json.JSONDecodeError as e:
             logger.error(f"❌ 意图分类 JSON 解析失败: {e}")
             logger.error(f"响应内容: {response_text[:200] if 'response_text' in locals() else str(response)[:200]}")
             # 回退：尝试从查询中推断
-            return self._fallback_intent_classification(user_query)
+            return self._fallback_intent_classification(user_query, has_file)
     
-    def _fallback_intent_classification(self, user_query: str) -> Dict[str, Any]:
+    def _fallback_intent_classification(self, user_query: str, has_file: bool = False) -> Dict[str, Any]:
         """
         回退的意图分类（基于关键词）
         
         Args:
             user_query: 用户查询
+            has_file: 是否有文件（用于决定模式）
             
         Returns:
-            意图分类结果
+            意图分类结果（包含 mode）
         """
         query_lower = user_query.lower()
         
-        # 检查 RNA 关键词
-        rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "h5ad"]
-        if any(kw in query_lower for kw in rna_keywords):
-            return {"domain_name": "RNA", "target_steps": []}
+        # 🔥 CRITICAL REGRESSION FIX: Safety Net - Check file extension first
+        # If file is .csv, default to Metabolomics regardless of query
+        if file_metadata and file_metadata.get("file_path"):
+            file_path = file_metadata.get("file_path", "")
+            if file_path.lower().endswith('.csv'):
+                logger.info("✅ [SOPPlanner] 检测到 CSV 文件，默认使用 Metabolomics 域名（安全网）")
+                domain_name = "Metabolomics"
+            elif file_path.lower().endswith(('.h5ad', '.h5', '.loom')):
+                logger.info("✅ [SOPPlanner] 检测到 RNA 文件，使用 RNA 域名")
+                domain_name = "RNA"
+            else:
+                # Check RNA keywords
+                rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "h5ad"]
+                domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
+        else:
+            # No file metadata - check RNA keywords
+            rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "h5ad"]
+            domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
         
-        # 默认代谢组学
-        return {"domain_name": "Metabolomics", "target_steps": []}
+        # 🔥 CRITICAL: Determine mode based on query and file presence
+        # Action keywords
+        action_keywords = ["analyze", "run", "do", "start", "执行", "分析", "运行", "开始"]
+        # Inquiry keywords
+        inquiry_keywords = ["show", "preview", "plan", "what", "预览", "显示", "查看", "规划"]
+        
+        if not has_file:
+            mode = "PLANNING"  # No file -> always planning
+        elif any(kw in query_lower for kw in action_keywords):
+            mode = "EXECUTION"  # Action words + file -> execution
+        elif any(kw in query_lower for kw in inquiry_keywords):
+            mode = "PLANNING"  # Inquiry words + file -> planning
+        else:
+            mode = "EXECUTION"  # Vague query + file -> default to execution
+        
+        return {
+            "domain_name": domain_name,
+            "mode": mode,
+            "target_steps": []
+        }
     
     def _fill_parameters(
         self,
         workflow_config: Dict[str, Any],
         file_metadata: Dict[str, Any],
-        workflow: "BaseWorkflow"
+        workflow: "BaseWorkflow",
+        template_mode: bool = False  # 🔥 NEW: Allow PLANNING mode with file paths filled
     ) -> Dict[str, Any]:
         """
         填充工作流参数（基于文件元数据）
@@ -987,7 +1185,23 @@ Classify the intent and return JSON only."""
         Returns:
             填充参数后的工作流配置
         """
+        # 🔥 CRITICAL FIX: Ensure we work on a copy to avoid modifying the original
+        workflow_config = workflow_config.copy() if isinstance(workflow_config, dict) else workflow_config
+        
+        # 🔥 CRITICAL FIX: Ensure workflow_data exists and is a dict
+        if "workflow_data" not in workflow_config:
+            workflow_config["workflow_data"] = {}
+        elif not isinstance(workflow_config["workflow_data"], dict):
+            workflow_config["workflow_data"] = {}
+        
         steps = workflow_config.get("workflow_data", {}).get("steps", [])
+        
+        # 🔥 CRITICAL FIX: Ensure steps is a list (not None)
+        if not isinstance(steps, list):
+            logger.warning(f"⚠️ [SOPPlanner] steps 不是列表类型: {type(steps)}，初始化为空列表")
+            steps = []
+            workflow_config["workflow_data"]["steps"] = steps
+        
         file_path = file_metadata.get("file_path")
         
         # 检测分组列（用于代谢组学）
@@ -998,11 +1212,18 @@ Classify the intent and return JSON only."""
             params = step.get("params", {})
             step_id = step.get("id")
             
-            # 填充 file_path 或 adata_path
+            # 🔥 CRITICAL FIX: 填充 file_path 或 adata_path（覆盖占位符）
             if "file_path" in params or "adata_path" in params:
                 param_name = "adata_path" if "adata_path" in params else "file_path"
                 if file_path:
+                    # 🔥 CRITICAL: 覆盖占位符（如 "<待上传数据>"）
+                    old_value = params.get(param_name, "")
                     params[param_name] = file_path
+                    if old_value and old_value != file_path:
+                        logger.info(f"✅ [SOPPlanner] 覆盖占位符: {old_value} -> {file_path}")
+                elif params.get(param_name) in ["<待上传数据>", "<PENDING_UPLOAD>", ""]:
+                    # 如果没有文件路径但参数是占位符，记录警告
+                    logger.warning(f"⚠️ [SOPPlanner] 步骤 {step_id} 的参数 {param_name} 仍然是占位符，但 file_metadata 存在")
             
             # 填充 group_column（如果有分组列）
             if "group_column" in params and group_cols:
@@ -1012,6 +1233,22 @@ Classify the intent and return JSON only."""
                 if not group_cols:
                     step["status"] = "waiting_for_upload"
                     step["description"] += " ⚠️ 需要分组信息"
+        
+        # 🔥 CONTEXT-AWARE FIX: Set template_mode based on parameter (allows PLANNING mode with file)
+        workflow_config["template_mode"] = template_mode
+        
+        # 🔥 CRITICAL FIX: 清除模板诊断消息（仅在 EXECUTION 模式）
+        # 如果 diagnosis 存在且是模板消息，且是 EXECUTION 模式，则清除它
+        if not template_mode and "diagnosis" in workflow_config:
+            diagnosis = workflow_config.get("diagnosis")
+            if isinstance(diagnosis, dict) and diagnosis.get("status") == "template_ready":
+                # 清除模板诊断，让 Orchestrator 生成真实诊断（仅 EXECUTION 模式）
+                workflow_config.pop("diagnosis", None)
+                logger.info("✅ [SOPPlanner] EXECUTION 模式：已清除模板诊断消息，等待 Orchestrator 生成真实诊断")
+        
+        # 确保 workflow_data 中包含模式标记
+        if "workflow_data" in workflow_config:
+            workflow_config["workflow_data"]["template_mode"] = template_mode
         
         return workflow_config
     
@@ -1099,7 +1336,7 @@ Classify the intent and return JSON only."""
         logger.info("⚠️ [Heuristic] 未检测到分组列")
         return None
     
-    def _generate_metabolomics_plan(self, file_metadata: Dict[str, Any]) -> Dict[str, Any]:
+    def _generate_metabolomics_plan(self, file_metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """
         生成确定性的代谢组学 SOP 流程
         
@@ -1115,21 +1352,26 @@ Classify the intent and return JSON only."""
         5. 如果没有分组列：停止
         
         Args:
-            file_metadata: FileInspector 返回的文件元数据
+            file_metadata: FileInspector 返回的文件元数据（None表示模板模式）
         
         Returns:
             符合前端格式的工作流配置字典
         """
         logger.info("📋 [SOPPlanner] 生成确定性代谢组学 SOP 流程")
         
-        # 获取文件路径
-        file_path = file_metadata.get("file_path", "")
-        if not file_path:
-            raise ValueError("文件元数据中缺少 file_path")
+        # 🔥 CRITICAL FIX: 移除文件缺失检查逻辑
+        # Planner应该只接受file_metadata作为输入（None或Dict）并相应地输出计划
+        # Orchestrator已经处理了分支逻辑，这里不需要再次检查
         
-        # 检测分组列
-        group_column = self._detect_group_column_heuristic(file_metadata)
-        has_groups = group_column is not None
+        # 获取文件路径（如果有）
+        file_path = file_metadata.get("file_path", "") if file_metadata else ""
+        
+        # 检测分组列（如果有文件元数据）
+        group_column = None
+        has_groups = False
+        if file_metadata:
+            group_column = self._detect_group_column_heuristic(file_metadata)
+            has_groups = group_column is not None
         
         logger.info(f"🔍 [SOPPlanner] 分组检测结果: {group_column if has_groups else '无分组列'}")
         
@@ -1143,7 +1385,7 @@ Classify the intent and return JSON only."""
             "description": "SOP规则：必须首先进行数据质量评估，检查缺失值、数据范围等",
             "selected": True,
             "params": {
-                "file_path": file_path
+                "file_path": file_path if file_path else "<PENDING_UPLOAD>"
             }
         })
         
@@ -1154,7 +1396,7 @@ Classify the intent and return JSON only."""
             "description": "SOP规则：必须进行Log2转换和标准化，缺失值处理",
             "selected": True,
             "params": {
-                "file_path": file_path,  # 将自动更新为预处理后的文件
+                "file_path": file_path if file_path else "<PENDING_UPLOAD>",  # 将自动更新为预处理后的文件
                 "log_transform": True,
                 "standardize": True,
                 "missing_imputation": "min"
@@ -1224,7 +1466,7 @@ Classify the intent and return JSON only."""
             # Step 7: Functional Analysis - Pathway Enrichment
             # 注意：metabolomics_pathway_enrichment 需要 file_path, group_column, case_group, control_group
             # 需要从数据中自动检测分组值
-            potential_groups = file_metadata.get("potential_groups", {})
+            potential_groups = file_metadata.get("potential_groups", {}) if file_metadata else {}
             case_group = None
             control_group = None
             

@@ -197,6 +197,16 @@ class BaseWorkflow(ABC):
         # 解析依赖
         resolved_steps = self.resolve_dependencies(target_steps)
         
+        # 🔥 CRITICAL FIX: 确保 resolved_steps 不为空
+        if not resolved_steps:
+            logger.warning(f"⚠️ [BaseWorkflow] resolve_dependencies 返回空列表，使用完整工作流")
+            resolved_steps = list(self.steps_dag.keys())
+        
+        # 🔥 CRITICAL FIX: 再次确保不为空（如果 DAG 为空，至少返回一个占位步骤）
+        if not resolved_steps:
+            logger.error(f"❌ [BaseWorkflow] steps_dag 为空，无法生成模板")
+            raise ValueError("工作流 DAG 为空，无法生成模板")
+        
         # 生成步骤配置
         steps = []
         for step_id in resolved_steps:
