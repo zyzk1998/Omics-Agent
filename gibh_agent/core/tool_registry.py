@@ -94,6 +94,11 @@ class ToolRegistry:
                 if param_name == 'self' or param_name == 'cls':
                     continue
                 
+                # 🔥 CRITICAL FIX: 跳过 **kwargs 参数（VAR_KEYWORD）
+                # **kwargs 不应该包含在 Pydantic 模型中，因为它接受任意额外参数
+                if param.kind == inspect.Parameter.VAR_KEYWORD:
+                    continue
+                
                 # 获取类型提示
                 param_type = type_hints.get(param_name, Any)
                 

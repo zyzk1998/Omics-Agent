@@ -56,6 +56,22 @@ def run_pca(
         numeric_cols = df.select_dtypes(include=[np.number]).columns
         data = df[numeric_cols]
         
+        # 🔥 CRITICAL FIX: 检查并处理 NaN 值
+        if data.isnull().any().any():
+            logger.warning(f"⚠️ [PCA] 数据包含 NaN 值，尝试处理...")
+            # 检查 NaN 的比例
+            nan_ratio = data.isnull().sum().sum() / (data.shape[0] * data.shape[1])
+            if nan_ratio > 0.5:
+                logger.error(f"❌ [PCA] NaN 值比例过高 ({nan_ratio:.2%})，无法处理")
+                return {
+                    "status": "error",
+                    "error": f"数据包含过多 NaN 值 ({nan_ratio:.2%})，请先进行数据预处理"
+                }
+            else:
+                # 使用中位数填充
+                data = data.fillna(data.median())
+                logger.info(f"✅ [PCA] 使用中位数填充 NaN 值")
+        
         # 🔥 检查数据维度
         n_samples, n_features = data.shape
         if n_features < 2:
@@ -78,6 +94,13 @@ def run_pca(
             data_scaled = scaler.fit_transform(data)
         else:
             data_scaled = data.values
+        
+        # 🔥 CRITICAL FIX: 最终检查 NaN（防止标准化后出现）
+        if np.isnan(data_scaled).any():
+            logger.warning(f"⚠️ [PCA] 标准化后的数据仍包含 NaN，使用中位数填充...")
+            from sklearn.impute import SimpleImputer
+            imputer = SimpleImputer(strategy='median')
+            data_scaled = imputer.fit_transform(data_scaled)
         
         # 执行 PCA
         pca = PCA(n_components=actual_n_components)

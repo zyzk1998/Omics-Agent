@@ -1223,7 +1223,7 @@
                                 break;
                                 
                             case 'diagnosis':
-                                renderDiagnosisCard(data);
+                                renderDiagnosisCard(data, data);
                                 break;
                                 
                             case 'workflow':
@@ -1236,15 +1236,20 @@
                                 // 支持多种数据结构：report_data.diagnosis/workflow 或 diagnosis_report/workflow_config
                                 if (data.report_data) {
                                     // 新格式：report_data.diagnosis 和 report_data.workflow
+                                    // 🔥 TASK 3: 传递完整的 data 对象以访问 steps_details
                                     if (data.report_data.diagnosis) {
-                                        renderDiagnosisCard(data.report_data.diagnosis);
+                                        renderDiagnosisCard(data.report_data.diagnosis, data);
+                                    }
+                                    // 🔥 PART 2: ALWAYS render execution steps, even on error
+                                    if (data.report_data.steps_details && data.report_data.steps_details.length > 0) {
+                                        renderExecutionSteps(data.report_data.steps_details);
                                     }
                                     // 🔥 CRITICAL FIX: 不在 result 事件中渲染 workflow，避免重复
                                     // workflow 应该在 'workflow' 事件中渲染
                                 } else {
                                     // 旧格式：diagnosis_report 和 workflow_config
                                     if (data.diagnosis_report) {
-                                        renderDiagnosisCard(data.diagnosis_report);
+                                        renderDiagnosisCard(data.diagnosis_report, data);
                                     }
                                     // 🔥 CRITICAL FIX: 只在没有单独的 'workflow' 事件时才渲染
                                     // 如果后端已经发送了 'workflow' 事件，这里不应该再渲染
@@ -1365,13 +1370,37 @@
                     }
                     
                     // 🔥 CRITICAL REFACTOR: 渲染诊断卡片 - 只更新 cardZone，不覆盖 textZone
-                    function renderDiagnosisCard(diagnosisData) {
+                    function renderDiagnosisCard(diagnosisData, fullData = null) {
                         // 🔥 CRITICAL: 使用 cardZone（如果存在），否则回退到 aiContentDiv
                         const cardZoneRef = window.currentMessageZones?.cardZone || aiContentDiv;
                         
                         if (!cardZoneRef) {
                             console.error('❌ [renderDiagnosisCard] cardZone 不存在，无法渲染诊断卡片');
                             return;
+                        }
+                        
+                        // 🔥 TASK 3: 检查是否有步骤错误（优先从 fullData 获取，否则从全局状态）
+                        let stepErrors = [];
+                        if (fullData && fullData.report_data && fullData.report_data.steps_details) {
+                            fullData.report_data.steps_details.forEach(step => {
+                                if (step.status === 'error' || step.error) {
+                                    const stepName = step.step_name || step.name || step.step_id || '未知步骤';
+                                    const errorMsg = step.error || step.message || '执行失败';
+                                    stepErrors.push({ step: stepName, error: errorMsg });
+                                }
+                            });
+                        } else {
+                            // 回退到全局状态
+                            const currentMessage = window.currentMessageZones?.currentMessage;
+                            if (currentMessage && currentMessage.report_data && currentMessage.report_data.steps_details) {
+                                currentMessage.report_data.steps_details.forEach(step => {
+                                    if (step.status === 'error' || step.error) {
+                                        const stepName = step.step_name || step.name || step.step_id || '未知步骤';
+                                        const errorMsg = step.error || step.message || '执行失败';
+                                        stepErrors.push({ step: stepName, error: errorMsg });
+                                    }
+                                });
+                            }
                         }
                         
                         // 🔥 CRITICAL: 检查是否为真实数据统计（有 n_samples 或 n_features）
@@ -1387,6 +1416,22 @@
                             diagnosisData.template_mode || 
                             diagnosisData.status === 'template_ready'
                         ) && !hasRealStats;  // 🔥 CRITICAL: 如果有真实统计，不是模板模式
+                        
+                        // 🔥 TASK 3: 如果有步骤错误，显示错误警告
+                        if (stepErrors.length > 0) {
+                            const errorHtml = `
+                                <div class="alert alert-danger mt-3" style="border-left: 4px solid #dc3545;">
+                                    <h6>
+                                        <i class="bi bi-exclamation-triangle-fill"></i> 
+                                        ⚠️ 分析过程中出现错误
+                                    </h6>
+                                    <div style="font-size: 14px; line-height: 1.8; color: #333;">
+                                        ${stepErrors.map(e => `<div><strong>${e.step}:</strong> ${e.error}</div>`).join('')}
+                                    </div>
+                                </div>
+                            `;
+                            cardZoneRef.insertAdjacentHTML('beforeend', errorHtml);
+                        }
                         
                         // 检查是否为结构化诊断数据
                         let diagnosisMessage = '';
@@ -1418,7 +1463,230 @@
                         
                         // 🔥 CRITICAL: 追加到 cardZone（不覆盖 textZone）
                         cardZoneRef.insertAdjacentHTML('beforeend', diagnosisHtml);
-                        console.log(`✅ [renderDiagnosisCard] 诊断卡片已渲染到 cardZone (模板模式: ${isTemplateMode}, 有真实统计: ${hasRealStats})`);
+                        console.log(`✅ [renderDiagnosisCard] 诊断卡片已渲染到 cardZone (模板模式: ${isTemplateMode}, 有真实统计: ${hasRealStats}, 错误数: ${stepErrors.length})`);
+                    }
+                    
+                    // 🔥 PART 2: 渲染执行步骤列表（即使失败也显示）
+                    function renderExecutionSteps(stepsDetails) {
+                        const cardZoneRef = window.currentMessageZones?.cardZone || aiContentDiv;
+                        
+                        if (!cardZoneRef) {
+                            console.error('❌ [renderExecutionSteps] cardZone 不存在，无法渲染步骤列表');
+                            return;
+                        }
+                        
+                        // 检查是否已经渲染过步骤列表
+                        const existingSteps = cardZoneRef.querySelector('.execution-steps-list');
+                        if (existingSteps) {
+                            existingSteps.remove(); // 移除旧的，重新渲染
+                        }
+                        
+                        let stepsHtml = `
+                            <div class="execution-steps-list mt-3">
+                                <div class="card border-0 shadow-sm">
+                                    <div class="card-header bg-light">
+                                        <h6 class="mb-0">
+                                            <i class="bi bi-list-check"></i> 执行步骤状态
+                                        </h6>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="list-group list-group-flush">
+                        `;
+                        
+                        stepsDetails.forEach((step, index) => {
+                            const stepName = step.step_name || step.name || step.step_id || `步骤 ${index + 1}`;
+                            const stepStatus = step.status || 'pending';
+                            const stepError = step.error || step.message || '';
+                            
+                            // 状态图标和颜色
+                            let statusIcon = '⚪'; // 默认：待执行
+                            let statusClass = 'text-secondary';
+                            let bgClass = 'bg-light';
+                            
+                            if (stepStatus === 'success') {
+                                statusIcon = '✅';
+                                statusClass = 'text-success';
+                                bgClass = 'bg-success bg-opacity-10';
+                            } else if (stepStatus === 'error') {
+                                statusIcon = '❌';
+                                statusClass = 'text-danger';
+                                bgClass = 'bg-danger bg-opacity-10';
+                            } else if (stepStatus === 'running') {
+                                statusIcon = '🟡';
+                                statusClass = 'text-warning';
+                                bgClass = 'bg-warning bg-opacity-10';
+                            }
+                            
+                            // 🔥 PHASE 1: Enhanced result data extraction
+                            const stepResult = step.step_result || {};
+                            const stepData = stepResult.data || step.data || {};
+                            
+                            // Extract plot paths (multiple sources)
+                            const plotPath = step.plot || stepData.plot_path || stepData.image_path || stepData.plot;
+                            const images = stepData.images || stepResult.images || [];
+                            const tables = stepData.tables || stepData.preview || stepResult.tables || [];
+                            const summary = step.summary || stepData.summary || stepResult.summary || '';
+                            const metrics = stepData.metrics || stepResult.metrics || {};
+                            
+                            // Build result content HTML
+                            let resultContentHtml = '';
+                            
+                            // 🔥 PHASE 1: Always show content if available (even for warnings)
+                            if (stepStatus === 'success' || stepStatus === 'warning') {
+                                
+                                // Render summary/metrics as badges
+                                if (summary) {
+                                    resultContentHtml += `
+                                        <div class="mt-2">
+                                            <span class="badge bg-info text-dark">${escapeHtml(summary)}</span>
+                                        </div>
+                                    `;
+                                }
+                                
+                                // Render metrics as badges
+                                if (Object.keys(metrics).length > 0) {
+                                    const metricsHtml = Object.entries(metrics).map(([key, val]) => 
+                                        `<span class="badge bg-secondary me-1">${escapeHtml(key)}: ${escapeHtml(String(val))}</span>`
+                                    ).join('');
+                                    resultContentHtml += `
+                                        <div class="mt-2">
+                                            ${metricsHtml}
+                                        </div>
+                                    `;
+                                }
+                                
+                                // Render plot image
+                                if (plotPath) {
+                                    // Normalize image path
+                                    let imageUrl = plotPath;
+                                    if (!imageUrl.startsWith('/')) {
+                                        // Remove /app/results prefix if present
+                                        imageUrl = imageUrl.replace(/^\/app\/results\//, '').replace(/^\/app\//, '');
+                                        imageUrl = imageUrl.replace(/^results\//, '');
+                                        imageUrl = imageUrl.startsWith('/') ? imageUrl : `/results/${imageUrl}`;
+                                    }
+                                    
+                                    resultContentHtml += `
+                                        <div class="mt-2">
+                                            <img src="${imageUrl}" 
+                                                 class="img-fluid rounded shadow-sm" 
+                                                 alt="${stepName} 结果图" 
+                                                 style="max-width: 100%; height: auto; cursor: pointer;"
+                                                 onclick="openLightbox(this.src)"
+                                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                                            <p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${imageUrl}</p>
+                                        </div>
+                                    `;
+                                }
+                                
+                                // Render images array
+                                if (images && images.length > 0) {
+                                    images.forEach((imgPath, idx) => {
+                                        // Normalize image path
+                                        let imageUrl = imgPath;
+                                        if (!imageUrl.startsWith('/')) {
+                                            imageUrl = imageUrl.replace(/^\/app\/results\//, '').replace(/^\/app\//, '');
+                                            imageUrl = imageUrl.replace(/^results\//, '');
+                                            imageUrl = imageUrl.startsWith('/') ? imageUrl : `/results/${imageUrl}`;
+                                        }
+                                        
+                                        resultContentHtml += `
+                                            <div class="mt-2">
+                                                <img src="${imageUrl}" 
+                                                     class="img-fluid rounded shadow-sm" 
+                                                     alt="${stepName} 结果图 ${idx + 1}" 
+                                                     style="max-width: 100%; height: auto; cursor: pointer;"
+                                                     onclick="openLightbox(this.src)"
+                                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                                                <p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${imageUrl}</p>
+                                            </div>
+                                        `;
+                                    });
+                                }
+                                
+                                // Render tables (enhanced)
+                                if (tables && tables.length > 0) {
+                                    // Handle different table formats
+                                    let tableData = tables;
+                                    if (typeof tables === 'string') {
+                                        // If it's a markdown string, try to parse or display as pre
+                                        resultContentHtml += `
+                                            <div class="mt-2">
+                                                <h6 class="small">数据预览</h6>
+                                                <pre class="bg-light p-2 rounded small" style="max-height: 300px; overflow-y: auto;">${escapeHtml(tables)}</pre>
+                                            </div>
+                                        `;
+                                    } else if (Array.isArray(tables) && tables.length > 0) {
+                                        // Array of objects (rows)
+                                        const firstRow = tables[0];
+                                        if (typeof firstRow === 'object' && firstRow !== null) {
+                                            const headers = Object.keys(firstRow);
+                                            const displayRows = tables.slice(0, 10); // Show first 10 rows
+                                            
+                                            resultContentHtml += `
+                                                <div class="mt-2">
+                                                    <h6 class="small text-muted">结果表格（显示前 ${displayRows.length} 行，共 ${tables.length} 行）</h6>
+                                                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                                                        <table class="table table-sm table-bordered table-striped table-hover mt-1">
+                                                            <thead class="table-light sticky-top">
+                                                                <tr>
+                                                                    ${headers.map(key => `<th class="small">${escapeHtml(String(key))}</th>`).join('')}
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                ${displayRows.map(row => `
+                                                                    <tr>
+                                                                        ${headers.map(key => `<td class="small">${escapeHtml(String(row[key] || ''))}</td>`).join('')}
+                                                                    </tr>
+                                                                `).join('')}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            `;
+                                        }
+                                    }
+                                }
+                                
+                                // Render preview markdown if available
+                                if (stepData.preview && stepData.preview.markdown) {
+                                    resultContentHtml += `
+                                        <div class="mt-2">
+                                            <h6 class="small">数据预览</h6>
+                                            <pre class="bg-light p-2 rounded small" style="max-height: 300px; overflow-y: auto;">${escapeHtml(stepData.preview.markdown)}</pre>
+                                        </div>
+                                    `;
+                                }
+                            }
+                            
+                            stepsHtml += `
+                                <div class="list-group-item ${bgClass}">
+                                    <div class="d-flex align-items-start">
+                                        <span class="me-2" style="font-size: 1.2em;">${statusIcon}</span>
+                                        <div class="flex-grow-1">
+                                            <strong class="${statusClass}">${stepName}</strong>
+                                            ${step.summary ? `<div class="small text-muted mt-1">${step.summary}</div>` : ''}
+                                            ${stepError && stepStatus === 'error' ? `
+                                                <div class="alert alert-danger alert-sm mt-2 mb-0" style="font-size: 0.875rem; padding: 0.5rem;">
+                                                    <strong>错误：</strong>${stepError}
+                                                </div>
+                                            ` : ''}
+                                            ${resultContentHtml}
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        
+                        stepsHtml += `
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        
+                        cardZoneRef.insertAdjacentHTML('beforeend', stepsHtml);
+                        console.log(`✅ [renderExecutionSteps] 已渲染 ${stepsDetails.length} 个步骤`);
                     }
                     
                     // 🔥 CRITICAL REFACTOR: 渲染工作流卡片 - 只更新 cardZone，不覆盖 textZone

@@ -38,78 +38,130 @@ class WorkflowExecutor:
         """
         self.output_dir = output_dir
         self.upload_dir = upload_dir or os.getenv("UPLOAD_DIR", "/app/uploads")
+        self.results_dir = os.getenv("RESULTS_DIR", "/app/results")
         self.step_results: Dict[str, Any] = {}  # 存储步骤结果，用于数据流传递
     
     def _resolve_file_path(self, file_path: str) -> str:
         """
-        🔥 CRITICAL REGRESSION FIX: 解析文件路径为绝对路径
+        🔥 SYSTEM-WIDE REFACTOR: Smart Path Resolver
         
-        检查顺序：
-        1. 如果已经是绝对路径且存在 -> 直接使用
-        2. 如果是相对路径 -> 前置 UPLOAD_DIR
-        3. 如果只是文件名 -> 在 UPLOAD_DIR 中搜索
+        按照严格的逻辑顺序解析文件路径，确保不会错误地修改已存在的绝对路径。
+        
+        检查顺序（严格按照此顺序，不要改变）：
+        1. 绝对路径且存在 -> 直接返回（不修改）
+        2. Results 目录 -> 尝试在 RESULTS_DIR 中查找
+        3. Uploads 目录 -> 尝试在 UPLOAD_DIR 中查找
+        4. 当前工作目录 -> 尝试相对路径
+        5. 失败 -> 抛出 FileNotFoundError
         
         Args:
             file_path: 原始文件路径（可能是绝对路径、相对路径或文件名）
             
         Returns:
             解析后的绝对路径
+            
+        Raises:
+            FileNotFoundError: 如果所有检查都失败
         """
         if not file_path or file_path in ["<待上传数据>", "<PENDING_UPLOAD>", ""]:
             return file_path
         
         original_path = file_path
-        upload_dir_path = Path(self.upload_dir)
+        attempted_paths = []
         
-        # Check 1: Is it already absolute and existing?
-        if os.path.isabs(file_path):
+        # Check 1: Absolute & Exists
+        # 🔥 CRITICAL: If absolute and exists, RETURN IMMEDIATELY (Do not touch it!)
+        if Path(file_path).is_absolute():
             path_obj = Path(file_path)
             if path_obj.exists():
-                logger.info(f"✅ [Executor] 路径已为绝对路径且存在: {file_path}")
-                return str(path_obj.resolve())
+                resolved = str(path_obj.resolve())
+                logger.info(f"✅ [Path Resolver] 绝对路径已存在，直接返回: {original_path} -> {resolved}")
+                return resolved
             else:
-                logger.warning(f"⚠️ [Executor] 绝对路径不存在: {file_path}，尝试在 UPLOAD_DIR 中查找")
+                attempted_paths.append(str(path_obj.resolve()))
+                logger.debug(f"🔍 [Path Resolver] 绝对路径不存在: {file_path}")
         
-        # Check 2: Is it relative? (e.g., "guest/.../cow_diet.csv")
-        # Try prepending UPLOAD_DIR
-        if not os.path.isabs(file_path):
-            # Remove leading slash if present (e.g., "/guest/..." -> "guest/...")
-            file_path_clean = file_path.lstrip('/')
-            potential_path = upload_dir_path / file_path_clean
-            
-            if potential_path.exists():
-                resolved = str(potential_path.resolve())
-                logger.info(f"✅ [Executor] 解析相对路径: {original_path} -> {resolved}")
-                return resolved
-            
-            # Try with original relative path
-            potential_path2 = upload_dir_path / file_path
-            if potential_path2.exists():
-                resolved = str(potential_path2.resolve())
-                logger.info(f"✅ [Executor] 解析相对路径（原始）: {original_path} -> {resolved}")
-                return resolved
+        # Check 2: Results Directory
+        # Construct path = RESULTS_DIR / file_path
+        results_dir_path = Path(self.results_dir)
+        # Remove leading slash if present
+        file_path_clean = file_path.lstrip('/')
+        potential_results_path = results_dir_path / file_path_clean
         
-        # Check 3: Is it just a filename? (e.g., "cow_diet.csv")
-        # Search in UPLOAD_DIR recursively
+        if potential_results_path.exists():
+            resolved = str(potential_results_path.resolve())
+            logger.info(f"✅ [Path Resolver] 在 Results 目录找到: {original_path} -> {resolved}")
+            return resolved
+        attempted_paths.append(str(potential_results_path.resolve()))
+        
+        # Also try with original path (in case it's already relative to results)
+        if not Path(file_path).is_absolute():
+            potential_results_path2 = results_dir_path / file_path
+            if potential_results_path2.exists():
+                resolved = str(potential_results_path2.resolve())
+                logger.info(f"✅ [Path Resolver] 在 Results 目录找到（原始路径）: {original_path} -> {resolved}")
+                return resolved
+            attempted_paths.append(str(potential_results_path2.resolve()))
+        
+        # Check 3: Uploads Directory
+        # Construct path = UPLOAD_DIR / file_path
+        upload_dir_path = Path(self.upload_dir)
+        potential_upload_path = upload_dir_path / file_path_clean
+        
+        if potential_upload_path.exists():
+            resolved = str(potential_upload_path.resolve())
+            logger.info(f"✅ [Path Resolver] 在 Uploads 目录找到: {original_path} -> {resolved}")
+            return resolved
+        attempted_paths.append(str(potential_upload_path.resolve()))
+        
+        # Try with original relative path
+        if not Path(file_path).is_absolute():
+            potential_upload_path2 = upload_dir_path / file_path
+            if potential_upload_path2.exists():
+                resolved = str(potential_upload_path2.resolve())
+                logger.info(f"✅ [Path Resolver] 在 Uploads 目录找到（原始路径）: {original_path} -> {resolved}")
+                return resolved
+            attempted_paths.append(str(potential_upload_path2.resolve()))
+        
+        # Check 4: Relative to Current Work Dir
+        # Try as relative path from current working directory
+        if not Path(file_path).is_absolute():
+            try:
+                cwd_path = Path.cwd() / file_path
+                if cwd_path.exists():
+                    resolved = str(cwd_path.resolve())
+                    logger.info(f"✅ [Path Resolver] 在当前工作目录找到: {original_path} -> {resolved}")
+                    return resolved
+                attempted_paths.append(str(cwd_path.resolve()))
+            except Exception as e:
+                logger.debug(f"⚠️ [Path Resolver] 检查当前工作目录失败: {e}")
+        
+        # Check 5: Filename search (only if it's just a filename)
         filename = Path(file_path).name
         if filename == file_path or '/' not in file_path.replace('\\', '/'):
-            logger.info(f"🔍 [Executor] 搜索文件名: {filename} 在 {self.upload_dir}")
+            # Search in results directory recursively
+            logger.debug(f"🔍 [Path Resolver] 搜索文件名: {filename} 在 {self.results_dir}")
+            for found_path in results_dir_path.rglob(filename):
+                if found_path.is_file():
+                    resolved = str(found_path.resolve())
+                    logger.info(f"✅ [Path Resolver] 在 Results 目录递归找到: {original_path} -> {resolved}")
+                    return resolved
+            
+            # Search in uploads directory recursively
+            logger.debug(f"🔍 [Path Resolver] 搜索文件名: {filename} 在 {self.upload_dir}")
             for found_path in upload_dir_path.rglob(filename):
                 if found_path.is_file():
                     resolved = str(found_path.resolve())
-                    logger.info(f"✅ [Executor] 找到文件: {original_path} -> {resolved}")
+                    logger.info(f"✅ [Path Resolver] 在 Uploads 目录递归找到: {original_path} -> {resolved}")
                     return resolved
         
-        # If all checks fail, try to construct absolute path anyway
-        if not os.path.isabs(file_path):
-            final_path = upload_dir_path / file_path.lstrip('/')
-            resolved = str(final_path.resolve())
-            logger.warning(f"⚠️ [Executor] 无法验证路径存在，但构造绝对路径: {original_path} -> {resolved}")
-            return resolved
-        
-        # Return original if already absolute (even if doesn't exist)
-        logger.warning(f"⚠️ [Executor] 无法解析路径，返回原始值: {original_path}")
-        return original_path
+        # Failure: All checks failed
+        error_msg = (
+            f"Could not resolve path: {original_path}. "
+            f"Checked: {attempted_paths[:5]}"  # Limit to first 5 for readability
+        )
+        logger.error(f"❌ [Path Resolver] {error_msg}")
+        raise FileNotFoundError(error_msg)
     
     def execute_step(
         self,
@@ -174,18 +226,65 @@ class WorkflowExecutor:
             file_param_name = "file_path"
         
         # 验证参数（可选但推荐）
+        # 🔥 CRITICAL FIX: 参数验证失败时不应该清空 params，应该保留原始参数
+        # 🔥 CRITICAL FIX: 保存关键参数（如 group_column）以防验证后丢失
+        critical_params_backup = {}
+        tools_requiring_group_column = ["differential_analysis", "metabolomics_plsda", "metabolomics_pathway_enrichment"]
+        if tool_id in tools_requiring_group_column and "group_column" in params:
+            critical_params_backup["group_column"] = params["group_column"]
+        
         try:
             if tool_metadata:
-                # 使用 Pydantic schema 验证参数
-                validated_params = tool_metadata.args_schema(**params)
-                params = validated_params.model_dump()
-                logger.debug(f"✅ 参数验证通过: {step_id}")
+                # 使用 Pydantic schema 验证参数（允许额外字段）
+                # 🔥 CRITICAL FIX: 使用 model_validate 并设置 extra='ignore' 来忽略额外字段
+                try:
+                    validated_params = tool_metadata.args_schema.model_validate(params, strict=False)
+                    params = validated_params.model_dump(exclude_unset=False)
+                    logger.debug(f"✅ 参数验证通过: {step_id}")
+                except Exception as e:
+                    # 如果 model_validate 失败，尝试使用 __init__ 但捕获额外字段
+                    try:
+                        # 只提取模型定义的字段
+                        schema_fields = tool_metadata.args_schema.model_fields.keys()
+                        filtered_params = {k: v for k, v in params.items() if k in schema_fields}
+                        validated_params = tool_metadata.args_schema(**filtered_params)
+                        params = validated_params.model_dump(exclude_unset=False)
+                        # 保留不在 schema 中的额外参数（如 kwargs）
+                        extra_params = {k: v for k, v in params.items() if k not in schema_fields}
+                        params.update(extra_params)
+                        logger.debug(f"✅ 参数验证通过（保留额外参数）: {step_id}")
+                    except Exception as e2:
+                        logger.warning(f"⚠️ 参数验证失败（继续执行，保留原始参数）: {e2}")
+                        # 保留原始 params
+                
+                # 🔥 CRITICAL FIX: 恢复关键参数（如果验证后丢失）
+                for key, value in critical_params_backup.items():
+                    if key not in params:
+                        params[key] = value
+                        logger.warning(f"⚠️ [Executor] 验证后恢复关键参数 {key}: {value}")
         except Exception as validation_err:
-            logger.warning(f"⚠️ 参数验证失败（继续执行）: {validation_err}")
-            # 继续执行，不因验证失败而中断
+            logger.warning(f"⚠️ 参数验证失败（继续执行，保留原始参数）: {validation_err}")
+            # 🔥 CRITICAL: 验证失败时保留原始 params，不因验证失败而中断或清空参数
+            # params 保持不变，继续执行
+        
+        # 🔥 CRITICAL DEBUG: 记录原始参数
+        if tool_id in ["metabolomics_plsda", "differential_analysis", "metabolomics_pathway_enrichment"]:
+            logger.info(f"🔍 [Executor] {tool_id} 原始参数: {list(params.keys())}")
+            if "group_column" in params:
+                logger.info(f"✅ [Executor] 原始参数中包含 group_column: {params['group_column']}")
+            else:
+                logger.warning(f"⚠️ [Executor] 原始参数中缺少 group_column")
         
         # 处理数据流：替换占位符（传递工具类别信息）
         processed_params = self._process_data_flow(params, step_context, tool_category=tool_category)
+        
+        # 🔥 CRITICAL DEBUG: 记录处理后的参数
+        if tool_id in ["metabolomics_plsda", "differential_analysis", "metabolomics_pathway_enrichment"]:
+            logger.info(f"🔍 [Executor] {tool_id} 处理后参数: {list(processed_params.keys())}")
+            if "group_column" in processed_params:
+                logger.info(f"✅ [Executor] 处理后参数中包含 group_column: {processed_params['group_column']}")
+            else:
+                logger.error(f"❌ [Executor] 处理后参数中缺少 group_column！")
         
         # 🔥 CRITICAL FIX: 对于 scRNA-seq 工具，确保移除 file_path 参数（如果存在）
         if tool_category == "scRNA-seq" and "file_path" in processed_params:
@@ -229,6 +328,7 @@ class WorkflowExecutor:
             processed_params = filtered_params
         
         # 🔥 CRITICAL REGRESSION FIX: Normalize all path-like parameters before tool execution
+        # 🔥 TASK 2: Only resolve paths that are NOT already absolute and existing
         path_params = ["file_path", "adata_path", "output_path", "output_file", "fastq_path", "reference_path", "output_h5ad"]
         for param_name in path_params:
             if param_name in processed_params:
@@ -236,10 +336,21 @@ class WorkflowExecutor:
                 if original_path and isinstance(original_path, str):
                     # Skip placeholder values
                     if original_path not in ["<待上传数据>", "<PENDING_UPLOAD>", ""]:
-                        resolved_path = self._resolve_file_path(original_path)
-                        if resolved_path != original_path:
-                            logger.info(f"🔄 [Executor] 解析路径参数 {param_name}: {original_path} -> {resolved_path}")
-                        processed_params[param_name] = resolved_path
+                        # 🔥 CRITICAL: If already absolute and exists, do NOT modify it
+                        if Path(original_path).is_absolute() and Path(original_path).exists():
+                            logger.debug(f"✅ [Executor] 路径参数 {param_name} 已是绝对路径且存在，不修改: {original_path}")
+                            # Keep it as is - do not call _resolve_file_path
+                        else:
+                            # Only resolve if not absolute or doesn't exist
+                            try:
+                                resolved_path = self._resolve_file_path(original_path)
+                                if resolved_path != original_path:
+                                    logger.info(f"🔄 [Executor] 解析路径参数 {param_name}: {original_path} -> {resolved_path}")
+                                processed_params[param_name] = resolved_path
+                            except FileNotFoundError as e:
+                                # If resolution fails, keep original and let tool handle the error
+                                logger.warning(f"⚠️ [Executor] 路径解析失败，保留原始路径: {original_path} (错误: {e})")
+                                # Keep original_path - tool will handle the error
         
         # 🔥 ARCHITECTURAL UPGRADE: Phase 3 - Pre-Flight Check & Auto-Correction
         # 对于需要 group_column 的工具，验证列是否存在，如果不存在则使用 semantic_map 自动修正
@@ -330,9 +441,56 @@ class WorkflowExecutor:
                 except Exception as e:
                     logger.warning(f"⚠️ [Executor] Pre-Flight Check 失败: {e}，继续执行")
         
+        # 🔥 CRITICAL FIX: 对于需要 group_column 的工具，强制确保参数存在
+        # 这是执行前的最后一道防线，确保参数绝对不会丢失
+        tools_requiring_group_column = ["differential_analysis", "metabolomics_plsda", "metabolomics_pathway_enrichment"]
+        if tool_id in tools_requiring_group_column:
+            # 多重检查：从多个来源尝试获取 group_column
+            group_column_value = None
+            
+            # 检查1: processed_params 中是否有
+            if "group_column" in processed_params:
+                group_column_value = processed_params["group_column"]
+                logger.info(f"✅ [Executor] {tool_id} group_column 已存在: {group_column_value}")
+            
+            # 检查2: 原始 step_data 中是否有
+            elif "group_column" in step_data.get("params", {}):
+                group_column_value = step_data["params"]["group_column"]
+                processed_params["group_column"] = group_column_value
+                logger.warning(f"⚠️ [Executor] {tool_id} 从原始步骤数据恢复 group_column: {group_column_value}")
+            
+            # 检查3: step_context 中的 file_metadata
+            elif step_context and step_context.get("file_metadata"):
+                semantic_map = step_context["file_metadata"].get("semantic_map", {})
+                group_cols = semantic_map.get("group_cols", [])
+                if group_cols:
+                    group_column_value = group_cols[0]
+                    processed_params["group_column"] = group_column_value
+                    logger.warning(f"⚠️ [Executor] {tool_id} 从 file_metadata 自动注入 group_column: {group_column_value}")
+            
+            # 如果所有检查都失败，返回明确错误
+            if not group_column_value:
+                logger.error(f"❌ [Executor] CRITICAL: {tool_id} 需要 group_column 参数，但所有来源都未找到！")
+                logger.error(f"   processed_params: {list(processed_params.keys())}")
+                logger.error(f"   原始步骤参数: {list(step_data.get('params', {}).keys())}")
+                logger.error(f"   step_context keys: {list(step_context.keys()) if step_context else 'None'}")
+                return {
+                    "status": "error",
+                    "step_id": step_id,
+                    "step_name": step_name,
+                    "error": f"工具 {tool_id} 需要 group_column 参数，但参数缺失且无法自动获取。请检查 Planner 是否正确生成了 group_column 参数。",
+                    "message": f"步骤 {step_name} 执行失败：缺少必需参数 group_column"
+                }
+        
         # 执行工具
         try:
+            # 🔥 CRITICAL DEBUG: 记录所有参数（包括 group_column）
             logger.info(f"🚀 调用工具: {tool_id} with params: {list(processed_params.keys())}")
+            if "group_column" in processed_params:
+                logger.info(f"✅ [Executor] group_column 参数存在: {processed_params['group_column']}")
+            else:
+                if tool_id in tools_requiring_group_column:
+                    logger.warning(f"⚠️ [Executor] group_column 参数缺失（但已尝试修复）！可用参数: {list(processed_params.keys())}")
             result = tool_func(**processed_params)
             
             # 确保结果是字典格式
@@ -408,6 +566,23 @@ class WorkflowExecutor:
         """
         processed = {}
         
+        # 🔥 CRITICAL FIX: 先备份关键参数，防止在处理过程中丢失
+        critical_params_backup = {}
+        if "group_column" in params:
+            critical_params_backup["group_column"] = params["group_column"]
+            logger.debug(f"🔍 [数据流处理] 备份 group_column: {params['group_column']}")
+        
+        # 🔥 CRITICAL FIX: 先复制所有非占位符参数（包括 group_column），确保不会丢失
+        # 这样可以保证即使占位符处理失败，关键参数也不会丢失
+        for key, value in params.items():
+            # 跳过占位符，稍后处理
+            if isinstance(value, str) and value.startswith("<") and value.endswith(">"):
+                continue
+            # 立即复制非占位符参数（包括 group_column）
+            processed[key] = value
+            if key == "group_column":
+                logger.debug(f"✅ [数据流处理] 已复制 group_column: {value}")
+        
         # 🔥 根据工具类别确定文件路径参数名
         if tool_category == "scRNA-seq":
             file_param_name = "adata_path"
@@ -426,10 +601,54 @@ class WorkflowExecutor:
             processed["adata_path"] = params.pop("file_path")
             logger.info(f"🔄 数据流: 参数映射 file_path -> adata_path")
         
+        # 现在处理占位符（可能会覆盖已复制的值）
         for key, value in params.items():
             if isinstance(value, str) and value.startswith("<") and value.endswith(">"):
                 # 占位符，尝试从上下文或步骤结果中获取
                 placeholder = value[1:-1]  # 移除 < >
+                
+                # 🔥 CRITICAL FIX: 特殊处理 preprocess_data_output 占位符
+                # 用于 PCA、PLS-DA、差异分析等步骤，需要从 preprocess_data 步骤获取输出文件路径
+                if placeholder == "preprocess_data_output" or "preprocess" in placeholder.lower():
+                    # 查找 preprocess_data 步骤的结果
+                    preprocess_result = None
+                    for step_id, step_result in self.step_results.items():
+                        if step_id == "preprocess_data" or "preprocess" in step_id.lower():
+                            # step_results 存储的是工具返回的原始结果
+                            if isinstance(step_result, dict):
+                                preprocess_result = step_result
+                                break
+                    
+                    if isinstance(preprocess_result, dict):
+                        # 提取输出文件路径（优先顺序：output_file, output_path, file_path）
+                        output_path = (
+                            preprocess_result.get("output_file") or
+                            preprocess_result.get("output_path") or
+                            preprocess_result.get("file_path")
+                        )
+                        if output_path:
+                            # 🔥 TASK 2: The previous step MUST return an Absolute Path
+                            # If it's already absolute and exists, use it directly (Check 1 in _resolve_file_path will handle it)
+                            # Only resolve if it's not absolute or doesn't exist
+                            if Path(output_path).is_absolute() and Path(output_path).exists():
+                                # Already absolute and exists, use directly (no modification)
+                                processed[key] = output_path
+                                logger.info(f"🔄 数据流: {key} = <{placeholder}> -> {output_path} (绝对路径，直接使用)")
+                            else:
+                                # Try to resolve (may be relative or non-existent absolute)
+                                try:
+                                    resolved_path = self._resolve_file_path(output_path)
+                                    processed[key] = resolved_path
+                                    logger.info(f"🔄 数据流: {key} = <{placeholder}> -> {resolved_path} (已解析)")
+                                except FileNotFoundError:
+                                    # If resolution fails, use original (let tool handle the error)
+                                    processed[key] = output_path
+                                    logger.warning(f"⚠️ 数据流: {key} = <{placeholder}> -> {output_path} (解析失败，使用原始路径)")
+                            continue
+                        else:
+                            logger.warning(f"⚠️ preprocess_data 结果中没有找到输出文件路径。可用字段: {list(preprocess_result.keys())}")
+                    else:
+                        logger.warning(f"⚠️ 未找到 preprocess_data 步骤结果，无法解析 <{placeholder}>。可用步骤: {list(self.step_results.keys())}")
                 
                 # 🔥 CRITICAL FIX: 特殊处理 differential_analysis_output 占位符
                 # 用于 visualize_volcano，需要传递完整的 diff_results 字典
@@ -541,7 +760,24 @@ class WorkflowExecutor:
                     logger.warning(f"⚠️ 无法解析占位符: {value}")
                     processed[key] = value
             else:
+                # 非占位符参数已经在循环开始前复制，这里不需要再次复制
+                # 但如果这个 key 不在 processed 中（不应该发生），还是复制一下
+                if key not in processed:
+                    processed[key] = value
+        
+        # 🔥 CRITICAL FIX: 强制确保 group_column 等关键参数没有被意外移除
+        # 这是最后的保护措施，确保即使前面的逻辑有问题，group_column 也不会丢失
+        for key, value in critical_params_backup.items():
+            if key not in processed:
                 processed[key] = value
+                logger.error(f"❌ [数据流处理] CRITICAL: {key} 丢失，已强制恢复: {value}")
+            else:
+                logger.debug(f"✅ [数据流处理] {key} 已保留: {processed[key]}")
+        
+        # 双重检查：如果原始 params 中有 group_column，但 processed 中没有，再次恢复
+        if "group_column" in params and "group_column" not in processed:
+            processed["group_column"] = params["group_column"]
+            logger.error(f"❌ [数据流处理] CRITICAL: group_column 在双重检查中丢失，已强制恢复: {params['group_column']}")
         
         return processed
     
@@ -733,10 +969,33 @@ class WorkflowExecutor:
                 # 其他工具（如代谢组学）使用 file_path
                 file_param_name = "file_path"
             
-            # 自动注入文件路径（如果缺失且我们有当前文件路径）
-            if file_param_name not in params and current_file_path:
-                params[file_param_name] = current_file_path
-                logger.info(f"🔄 自动注入 {file_param_name}: {current_file_path}")
+            # 🔥 CRITICAL FIX: 检查是否有占位符需要处理
+            # 占位符（如 <preprocess_data_output>）必须优先于自动注入的 current_file_path
+            has_placeholder = any(
+                isinstance(v, str) and v.startswith("<") and v.endswith(">")
+                for v in params.values()
+            )
+            
+            # 🔥 CRITICAL FIX: 如果存在占位符，DO NOT 自动注入文件路径
+            # 占位符会在 execute_step 内部的 _process_data_flow 中解析
+            # 只有在没有占位符且参数缺失时，才自动注入
+            if not has_placeholder:
+                # 自动注入文件路径（如果缺失且我们有当前文件路径）
+                if file_param_name not in params and current_file_path:
+                    params[file_param_name] = current_file_path
+                    logger.info(f"🔄 自动注入 {file_param_name}: {current_file_path}")
+            else:
+                # 有占位符，记录日志但不自动注入
+                placeholder_keys = [k for k, v in params.items() if isinstance(v, str) and v.startswith("<") and v.endswith(">")]
+                logger.info(f"🔄 检测到占位符 {placeholder_keys}，跳过自动注入，等待占位符解析")
+            
+            # 构建步骤上下文（包含文件路径等）
+            step_context = {
+                "file_paths": file_paths or [],
+                "output_dir": self.output_dir,
+                "workflow_name": workflow_name,
+                "current_file_path": current_file_path  # 传递当前文件路径
+            }
             
             # 🔥 参数映射：如果工具期望 adata_path 但提供了 file_path，进行映射
             if file_param_name == "adata_path" and "file_path" in params and file_param_name not in params:
@@ -750,49 +1009,52 @@ class WorkflowExecutor:
             # 更新步骤的 params
             step["params"] = params
             
-            # 构建步骤上下文（包含文件路径等）
-            step_context = {
-                "file_paths": file_paths or [],
-                "output_dir": self.output_dir,
-                "workflow_name": workflow_name,
-                "current_file_path": current_file_path  # 传递当前文件路径
-            }
-            
-            # 执行步骤
+            # 执行步骤（内部会调用 _process_data_flow 处理占位符）
             step_result = self.execute_step(step, step_context)
             
             # 🔥 CRITICAL FIX: 更新 current_file_path 供下一个步骤使用
-            # 对于 scRNA-seq 工具，优先使用 output_h5ad
+            # 但是：只有 preprocess_data 步骤的输出才应该更新 current_file_path
+            # 其他步骤（如 differential_analysis）的输出不应该影响后续步骤的文件路径
+            # 因为后续步骤（如 PLS-DA、PCA）应该使用 <preprocess_data_output> 占位符
             result_data = step_result.get("result", {})
             if isinstance(result_data, dict):
-                # 🔥 对于 scRNA-seq 工具，优先查找 output_h5ad
-                tool_metadata = registry.get_metadata(step.get("tool_id", ""))
-                tool_category = tool_metadata.category if tool_metadata else None
+                tool_id = step.get("tool_id", "")
                 
-                if tool_category == "scRNA-seq":
-                    # scRNA-seq 工具优先使用 output_h5ad
-                    next_file_path = (
-                        result_data.get("output_h5ad") or  # 🔥 优先使用 output_h5ad
-                        result_data.get("output_file") or
-                        result_data.get("output_path") or
-                        result_data.get("file_path")
-                    )
-                else:
-                    # 其他工具使用标准字段
-                    next_file_path = (
-                        result_data.get("output_file") or
-                        result_data.get("output_path") or
-                        result_data.get("file_path") or
-                        result_data.get("preprocessed_file")
-                    )
-                
-                if next_file_path:
-                    # 🔥 修复：即使文件不存在也更新路径（文件可能稍后创建）
-                    current_file_path = next_file_path
-                    if os.path.exists(next_file_path):
-                        logger.info(f"✅ 更新当前文件路径: {current_file_path}")
+                # 🔥 CRITICAL FIX: 只有 preprocess_data 步骤的输出才更新 current_file_path
+                # 其他步骤的输出不应该影响后续步骤的文件路径
+                if tool_id == "preprocess_data" or "preprocess" in tool_id.lower():
+                    # 对于 scRNA-seq 工具，优先查找 output_h5ad
+                    tool_metadata = registry.get_metadata(tool_id)
+                    tool_category = tool_metadata.category if tool_metadata else None
+                    
+                    if tool_category == "scRNA-seq":
+                        # scRNA-seq 工具优先使用 output_h5ad
+                        next_file_path = (
+                            result_data.get("output_h5ad") or
+                            result_data.get("output_file") or
+                            result_data.get("output_path") or
+                            result_data.get("file_path")
+                        )
                     else:
-                        logger.warning(f"⚠️ 输出路径不存在，但会使用: {next_file_path} (文件可能稍后创建)")
+                        # 其他工具使用标准字段
+                        next_file_path = (
+                            result_data.get("output_file") or
+                            result_data.get("output_path") or
+                            result_data.get("file_path") or
+                            result_data.get("preprocessed_file")
+                        )
+                    
+                    if next_file_path:
+                        # 🔥 修复：即使文件不存在也更新路径（文件可能稍后创建）
+                        current_file_path = next_file_path
+                        if os.path.exists(next_file_path):
+                            logger.info(f"✅ [Executor] 更新当前文件路径（来自 preprocess_data）: {current_file_path}")
+                        else:
+                            logger.warning(f"⚠️ [Executor] 输出路径不存在，但会使用: {next_file_path} (文件可能稍后创建)")
+                else:
+                    # 其他步骤的输出不更新 current_file_path
+                    # 后续步骤应该使用占位符（如 <preprocess_data_output>）而不是 current_file_path
+                    logger.debug(f"🔍 [Executor] 步骤 {tool_id} 的输出不更新 current_file_path（后续步骤应使用占位符）")
             
             # 构建步骤详情（符合前端格式）
             step_detail = {
@@ -841,10 +1103,14 @@ class WorkflowExecutor:
                     step_detail["job_id"] = step_result["job_id"]
                 break  # STOP HERE - Do not execute next steps
             
-            # 如果步骤失败，停止执行
+            # 🔥 CRITICAL FIX: 即使步骤失败，也继续执行后续步骤
+            # 这样可以确保前面的步骤结果正常显示，不会因为后续步骤失败而影响前面的显示
             if step_result.get("status") == "error":
-                logger.error(f"❌ 步骤 {step_id} 失败，停止工作流执行")
-                break
+                error_msg = step_result.get("error") or step_result.get("message") or "未知错误"
+                logger.error(f"❌ 步骤 {step_id} 失败: {error_msg}")
+                logger.warning(f"⚠️ 继续执行后续步骤，确保前面的步骤结果正常返回")
+                # 不 break，继续执行后续步骤
+                # 注意：如果后续步骤依赖于当前失败的步骤，它们可能会失败，但至少会尝试执行
         
         # 确定最终状态
         all_success = all(

@@ -26,7 +26,8 @@ def run_plsda(
     group_column: str,
     n_components: int = 2,
     scale: bool = True,
-    output_dir: Optional[str] = None
+    output_dir: Optional[str] = None,
+    **kwargs  # 🔥 CRITICAL FIX: 安全网，接受其他意外参数
 ) -> Dict[str, Any]:
     """
     执行 PLS-DA 分析
@@ -125,6 +126,13 @@ def run_plsda(
         X = df[metabolite_cols].values
         y = df[group_column].values
         
+        # 🔥 CRITICAL FIX: 再次检查 NaN（防止在提取后出现）
+        if np.isnan(X).any():
+            logger.warning(f"⚠️ [PLS-DA] 提取后的数据仍包含 NaN，使用中位数填充...")
+            from sklearn.impute import SimpleImputer
+            imputer = SimpleImputer(strategy='median')
+            X = imputer.fit_transform(X)
+        
         # 编码分类变量
         le = LabelEncoder()
         y_encoded = le.fit_transform(y)
@@ -136,6 +144,14 @@ def run_plsda(
         else:
             X_scaled = X
         
+        # 🔥 CRITICAL FIX: 最终检查 NaN
+        if np.isnan(X_scaled).any():
+            logger.error(f"❌ [PLS-DA] 标准化后的数据仍包含 NaN")
+            return {
+                "status": "error",
+                "error": "数据预处理失败：标准化后的数据包含 NaN 值。请检查输入数据质量。"
+            }
+        
         # 执行 PLS-DA
         pls = PLSRegression(n_components=n_components, scale=False)
         pls.fit(X_scaled, y_encoded)
@@ -146,15 +162,37 @@ def run_plsda(
         # 计算 VIP 分数
         # VIP = sqrt(p * (w^2 * SSY) / SSY_total)
         # 其中 p 是变量数，w 是权重，SSY 是 Y 的方差解释
-        T = pls.x_scores_  # 得分矩阵
-        W = pls.x_weights_  # 权重矩阵
-        Q = pls.y_loadings_  # Y 的载荷
+        T = pls.x_scores_  # 得分矩阵 (n_samples, n_components)
+        W = pls.x_weights_  # 权重矩阵 (n_features, n_components)
+        Q = pls.y_loadings_  # Y 的载荷 (n_components,) for single output
+        
+        # 🔥 CRITICAL FIX: 处理 y_loadings_ 的形状
+        # 对于单输出 PLS，Q 是 1D 数组 (n_components,)
+        # 对于多输出 PLS，Q 是 2D 数组 (n_components, n_targets)
+        if Q.ndim == 1:
+            # 单输出：Q[i] 是标量
+            Q_flat = Q
+        else:
+            # 多输出：取第一列（或平均）
+            Q_flat = Q[:, 0] if Q.shape[1] > 0 else Q.flatten()
+        
+        # 🔥 CRITICAL FIX: 确保 Q_flat 的长度足够
+        # 如果 Q_flat 的长度小于 n_components，使用实际长度
+        actual_n_components = min(n_components, len(Q_flat), T.shape[1])
+        logger.debug(f"🔍 [PLS-DA] n_components={n_components}, Q_flat.shape={Q_flat.shape}, T.shape={T.shape}, actual_n_components={actual_n_components}")
         
         # 计算每个成分的方差解释
         explained_variance = []
-        for i in range(n_components):
-            ssy = np.sum((T[:, i] @ Q[i]) ** 2)
-            explained_variance.append(ssy)
+        for i in range(actual_n_components):
+            # 🔥 CRITICAL FIX: Q_flat[i] 是标量，使用元素乘法
+            # SSY = sum((T[:, i] * Q_flat[i])^2) = Q_flat[i]^2 * sum(T[:, i]^2)
+            if i < len(Q_flat) and i < T.shape[1]:
+                ssy = Q_flat[i] ** 2 * np.sum(T[:, i] ** 2)
+                explained_variance.append(ssy)
+            else:
+                # 如果索引越界，使用默认值
+                logger.warning(f"⚠️ [PLS-DA] 索引 {i} 越界，跳过该成分")
+                explained_variance.append(0.0)
         
         total_ssy = sum(explained_variance)
         
@@ -162,10 +200,10 @@ def run_plsda(
         vip_scores = []
         for j in range(len(metabolite_cols)):
             vip = 0
-            for i in range(n_components):
-                if total_ssy > 0:
+            for i in range(actual_n_components):
+                if total_ssy > 0 and i < len(explained_variance) and i < W.shape[1]:
                     vip += (W[j, i] ** 2) * (explained_variance[i] / total_ssy)
-            vip = np.sqrt(len(metabolite_cols) * vip)
+            vip = np.sqrt(len(metabolite_cols) * vip) if vip > 0 else 0.0
             vip_scores.append(vip)
         
         # 创建 VIP 分数 DataFrame
@@ -186,19 +224,71 @@ def run_plsda(
             colors = plt.cm.Set3(np.linspace(0, 1, len(unique_groups)))
             
             plt.figure(figsize=(10, 8))
-            for i, group in enumerate(unique_groups):
-                mask = y == group
-                plt.scatter(
-                    X_scores[mask, 0], 
-                    X_scores[mask, 1],
-                    label=group,
-                    color=colors[i],
-                    alpha=0.6,
-                    s=50
-                )
             
-            plt.xlabel(f"PLS Component 1 ({explained_variance[0]/total_ssy*100:.1f}%)")
-            plt.ylabel(f"PLS Component 2 ({explained_variance[1]/total_ssy*100:.1f}%)")
+            # 🔥 CRITICAL FIX: 处理不同数量的成分
+            if actual_n_components >= 2 and X_scores.shape[1] >= 2:
+                # 2D 散点图（Component 1 vs Component 2）
+                for i, group in enumerate(unique_groups):
+                    mask = y == group
+                    plt.scatter(
+                        X_scores[mask, 0], 
+                        X_scores[mask, 1],
+                        label=group,
+                        color=colors[i],
+                        alpha=0.6,
+                        s=50
+                    )
+                
+                comp1_var = explained_variance[0]/total_ssy*100 if len(explained_variance) > 0 and total_ssy > 0 else 0.0
+                comp2_var = explained_variance[1]/total_ssy*100 if len(explained_variance) > 1 and total_ssy > 0 else 0.0
+                plt.xlabel(f"PLS Component 1 ({comp1_var:.1f}%)")
+                plt.ylabel(f"PLS Component 2 ({comp2_var:.1f}%)")
+            elif actual_n_components == 1 and X_scores.shape[1] >= 1:
+                # 1D 散点图（Component 1 only）
+                for i, group in enumerate(unique_groups):
+                    mask = y == group
+                    plt.scatter(
+                        X_scores[mask, 0], 
+                        np.zeros(np.sum(mask)),
+                        label=group,
+                        color=colors[i],
+                        alpha=0.6,
+                        s=50
+                    )
+                
+                comp1_var = explained_variance[0]/total_ssy*100 if len(explained_variance) > 0 and total_ssy > 0 else 0.0
+                plt.xlabel(f"PLS Component 1 ({comp1_var:.1f}%)")
+                plt.ylabel("")
+            else:
+                # 降级：使用前两个特征（如果可用）
+                logger.warning(f"⚠️ [PLS-DA] 无法绘制标准 PLS-DA 图，使用降级方案")
+                if X_scores.shape[1] >= 2:
+                    for i, group in enumerate(unique_groups):
+                        mask = y == group
+                        plt.scatter(
+                            X_scores[mask, 0], 
+                            X_scores[mask, 1],
+                            label=group,
+                            color=colors[i],
+                            alpha=0.6,
+                            s=50
+                        )
+                    plt.xlabel("PLS Component 1")
+                    plt.ylabel("PLS Component 2")
+                elif X_scores.shape[1] >= 1:
+                    for i, group in enumerate(unique_groups):
+                        mask = y == group
+                        plt.scatter(
+                            X_scores[mask, 0], 
+                            np.zeros(np.sum(mask)),
+                            label=group,
+                            color=colors[i],
+                            alpha=0.6,
+                            s=50
+                        )
+                    plt.xlabel("PLS Component 1")
+                    plt.ylabel("")
+            
             plt.title("PLS-DA Score Plot")
             plt.legend()
             plt.grid(True, alpha=0.3)
@@ -239,11 +329,12 @@ def run_plsda(
 def run_pathway_enrichment(
     file_path: str,
     group_column: str,
-    case_group: str,
-    control_group: str,
+    case_group: Optional[str] = None,
+    control_group: Optional[str] = None,
     organism: str = "hsa",
     p_value_threshold: float = 0.05,
-    output_dir: Optional[str] = None
+    output_dir: Optional[str] = None,
+    **kwargs  # 🔥 CRITICAL FIX: 安全网，接受其他意外参数
 ) -> Dict[str, Any]:
     """
     执行通路富集分析
@@ -251,8 +342,8 @@ def run_pathway_enrichment(
     Args:
         file_path: 输入数据文件路径（CSV，包含分组信息）
         group_column: 分组列名
-        case_group: 实验组名称
-        control_group: 对照组名称
+        case_group: 实验组名称（可选，如果为 None 或占位符，将自动检测）
+        control_group: 对照组名称（可选，如果为 None 或占位符，将自动检测）
         organism: 物种代码（默认 "hsa" 人类，可选 "mmu" 小鼠等）
         p_value_threshold: P 值阈值（默认 0.05）
         output_dir: 输出目录（可选）
@@ -267,8 +358,59 @@ def run_pathway_enrichment(
     try:
         import gseapy as gp
         
+        # 🔥 CRITICAL FIX: Map organism codes to gseapy format
+        # gseapy expects full names like "human", "mouse", not codes like "hsa", "mmu"
+        organism_mapping = {
+            "hsa": "human",
+            "mmu": "mouse",
+            "rno": "rat",
+            "bta": "cow",  # 牛
+            "gga": "chicken",  # 鸡
+            "dre": "zebrafish",  # 斑马鱼
+            "cel": "worm",  # 线虫
+            "dme": "fly",  # 果蝇
+        }
+        
+        # Convert organism code to full name if needed
+        gseapy_organism = organism_mapping.get(organism.lower(), organism.lower())
+        
+        # Check if organism is supported
+        supported_organisms = ["human", "mouse", "rat"]
+        if gseapy_organism not in supported_organisms:
+            logger.warning(f"⚠️ [Pathway Enrichment] Organism '{organism}' (mapped to '{gseapy_organism}') is not supported by gseapy database")
+            return {
+                "status": "warning",
+                "message": f"Organism '{organism}' is not supported by the pathway enrichment database. Step skipped.",
+                "enriched_pathways": [],
+                "skipped_reason": f"Unsupported organism: {organism}"
+            }
+        
         # 读取数据
         df = pd.read_csv(file_path, index_col=0)
+        
+        # 🔥 CRITICAL FIX: 自动检测分组值（如果 case_group 或 control_group 是 None 或占位符）
+        if not case_group or not control_group or case_group.startswith("<") or control_group.startswith("<"):
+            logger.info(f"🔄 [Pathway Enrichment] 自动检测分组值...")
+            if group_column not in df.columns:
+                return {
+                    "status": "error",
+                    "error": f"分组列 '{group_column}' 不存在于数据中"
+                }
+            
+            unique_groups = sorted(df[group_column].unique().tolist())
+            if len(unique_groups) < 2:
+                return {
+                    "status": "error",
+                    "error": f"分组列 '{group_column}' 中只有 {len(unique_groups)} 个唯一值，需要至少 2 个组"
+                }
+            
+            # 使用前两个唯一值
+            if not case_group or case_group.startswith("<"):
+                case_group = unique_groups[0]
+            if not control_group or control_group.startswith("<"):
+                control_group = unique_groups[1]
+            
+            logger.info(f"✅ [Pathway Enrichment] 自动检测分组: case_group={case_group}, control_group={control_group}")
         
         # 🔥 修复：检查分组列是否存在，如果不存在则尝试模糊匹配
         if group_column not in df.columns:
@@ -368,11 +510,19 @@ def run_pathway_enrichment(
         # 执行通路富集分析
         # 注意：gseapy 需要代谢物 ID 映射到 KEGG，这里使用简化版本
         try:
+            # 🔥 CRITICAL FIX: Use mapped organism name and appropriate gene sets
+            gene_sets_map = {
+                "human": ['KEGG_2021_Human'],
+                "mouse": ['KEGG_2021_Mouse'],
+                "rat": ['KEGG_2021_Rat']
+            }
+            gene_sets = gene_sets_map.get(gseapy_organism, ['KEGG_2021_Human'])  # Default to human
+            
             # 尝试使用 KEGG 数据库
             enr = gp.enrichr(
                 gene_list=metabolite_list[:100],  # 限制前100个
-                gene_sets=['KEGG_2021_Human'],  # KEGG 通路数据库
-                organism=organism,
+                gene_sets=gene_sets,
+                organism=gseapy_organism,  # 🔥 CRITICAL FIX: Use mapped organism name
                 outdir=None,  # 不保存文件
                 verbose=False
             )
@@ -410,25 +560,44 @@ def run_pathway_enrichment(
                 }
         
         except Exception as e:
-            # 如果 gseapy 失败，返回一个占位符结果
-            logger.warning(f"⚠️ GSEApy 执行失败，使用简化版本: {e}")
+            # 🔥 CRITICAL FIX: If gseapy fails, return warning (not error) so pipeline continues
+            error_msg = str(e)
+            logger.warning(f"⚠️ [Pathway Enrichment] GSEApy 执行失败: {error_msg}")
+            
+            # Check if it's an organism-related error
+            if "organism" in error_msg.lower() or "not supported" in error_msg.lower():
+                return {
+                    "status": "warning",
+                    "message": f"Organism '{organism}' is not supported by the pathway enrichment database. Step skipped.",
+                    "enriched_pathways": [],
+                    "skipped_reason": f"Unsupported organism: {organism}"
+                }
+            
+            # Other errors: return warning (not error) to allow pipeline to continue
             return {
                 "status": "warning",
-                "message": f"通路富集分析部分完成（GSEApy 错误: {str(e)}）",
+                "message": f"Pathway enrichment could not be performed due to database limitations. Step skipped.",
                 "enriched_pathways": [],
-                "error": str(e)
+                "skipped_reason": error_msg
             }
     
-    except ImportError:
+    except ImportError as e:
+        # 🔥 CRITICAL FIX: ImportError should return warning, not error, so pipeline continues
+        logger.warning(f"⚠️ [Pathway Enrichment] gseapy 未安装: {e}")
         return {
-            "status": "error",
-            "error": "gseapy not installed. Please install: pip install gseapy"
+            "status": "warning",
+            "message": "Pathway enrichment could not be performed because gseapy library is not installed. Step skipped.",
+            "enriched_pathways": [],
+            "skipped_reason": "gseapy not installed"
         }
     except Exception as e:
-        logger.error(f"❌ 通路富集分析失败: {e}", exc_info=True)
+        # 🔥 CRITICAL FIX: All other exceptions should return warning, not error
+        logger.warning(f"⚠️ [Pathway Enrichment] 执行失败: {e}", exc_info=True)
         return {
-            "status": "error",
-            "error": str(e)
+            "status": "warning",
+            "message": f"Pathway enrichment could not be performed due to an error. Step skipped.",
+            "enriched_pathways": [],
+            "skipped_reason": str(e)
         }
 
 

@@ -220,6 +220,8 @@ class AgentOrchestrator:
                     return  # STOP HERE - Do not continue to next steps
                 
                 # 4. Generate Summary (if agent available and no async job)
+                # 🔥 CRITICAL FIX: ALWAYS generate summary, regardless of workflow status
+                # Even if some steps failed, we should summarize what succeeded
                 if self.agent and hasattr(self.agent, '_generate_analysis_summary'):
                     yield self._format_sse("status", {
                         "content": "正在生成专家解读...",
@@ -233,13 +235,72 @@ class AgentOrchestrator:
                     if "RNA" in workflow_name or "rna" in workflow_name.lower():
                         domain_name = "RNA"
                     
-                    try:
-                        summary = await self.agent._generate_analysis_summary(results, domain_name)
-                    except Exception as e:
-                        logger.warning(f"⚠️ [Orchestrator] 生成摘要失败: {e}")
-                        summary = "分析完成"
+                    # 🔥 CRITICAL FIX: Check if there are failed/warning steps
+                    failed_steps = [s for s in steps_details if s.get("status") == "error"]
+                    warning_steps = [s for s in steps_details if s.get("status") == "warning"]
+                    successful_steps = [s for s in steps_details if s.get("status") == "success"]
+                    
+                    # 🔥 CRITICAL FIX: Generate summary as long as we have ANY steps (success, warning, or error)
+                    # This ensures diagnosis is always generated, even if some steps failed
+                    if len(steps_details) > 0:
+                        # Build context for summary generation
+                        summary_context = {
+                            "has_failures": len(failed_steps) > 0,
+                            "has_warnings": len(warning_steps) > 0,
+                            "failed_steps": failed_steps,
+                            "warning_steps": warning_steps,
+                            "successful_steps": successful_steps,
+                            "workflow_status": results.get("status", "unknown")
+                        }
+                        
+                        try:
+                            # 🔥 CRITICAL FIX: Pass summary_context to indicate partial success
+                            summary = await self.agent._generate_analysis_summary(
+                                results, 
+                                domain_name,
+                                summary_context=summary_context
+                            )
+                            
+                            # 🔥 PHASE 2: Generate quality evaluation
+                            evaluation = None
+                            if summary and hasattr(self.agent, '_evaluate_analysis_quality'):
+                                try:
+                                    steps_results = results.get("steps_results", [])
+                                    if not steps_results:
+                                        # Extract from steps_details
+                                        steps_results = []
+                                        for step_detail in steps_details:
+                                            if "step_result" in step_detail:
+                                                steps_results.append(step_detail["step_result"])
+                                    
+                                    evaluation = await self.agent._evaluate_analysis_quality(
+                                        steps_results,
+                                        summary,
+                                        workflow_config.get("workflow_name", "工作流")
+                                    )
+                                    logger.info(f"✅ [Orchestrator] 质量评估完成，得分: {evaluation.get('score', 'N/A')}")
+                                except Exception as e:
+                                    logger.warning(f"⚠️ [Orchestrator] 质量评估失败: {e}")
+                            
+                        except Exception as e:
+                            logger.warning(f"⚠️ [Orchestrator] 生成摘要失败: {e}")
+                            # 🔥 CRITICAL FIX: Generate fallback summary even on error
+                            summary = self._generate_fallback_summary(successful_steps, warning_steps, failed_steps, steps_details)
+                            evaluation = None
+                    else:
+                        summary = "分析完成（无步骤执行）"
+                        evaluation = None
                 else:
-                    summary = "分析完成"
+                    # 🔥 CRITICAL FIX: Generate basic summary even without agent
+                    failed_steps = [s for s in steps_details if s.get("status") == "error"]
+                    warning_steps = [s for s in steps_details if s.get("status") == "warning"]
+                    successful_steps = [s for s in steps_details if s.get("status") == "success"]
+                    
+                    if len(steps_details) > 0:
+                        summary = self._generate_fallback_summary(successful_steps, warning_steps, failed_steps, steps_details)
+                    else:
+                        summary = "分析完成（无步骤执行）"
+                    evaluation = None
                 
                 # 5. Yield Final Result
                 final_response = {
@@ -249,6 +310,10 @@ class AgentOrchestrator:
                         "workflow_name": workflow_config.get("workflow_name", "工作流")
                     }
                 }
+                
+                # 🔥 PHASE 2: Add evaluation to response
+                if evaluation:
+                    final_response["report_data"]["evaluation"] = evaluation
                 
                 yield self._format_sse("result", final_response)
                 yield self._format_sse("status", {
@@ -432,53 +497,89 @@ class AgentOrchestrator:
                 # 🔥 CRITICAL REFACTOR: Step 3 - ALWAYS Analyze Intent First (Dynamic Scoping)
                 # Step 3.1: Analyze Intent (ALWAYS FIRST) - Determine modality and target_steps
                 yield self._format_sse("status", {
-                    "content": "正在分析您的需求...",
-                    "state": "running"
-                })
-                await asyncio.sleep(0.01)
+                "content": "正在分析您的需求...",
+                "state": "running"
+            })
+            await asyncio.sleep(0.01)
+            
+            # Initialize planner for intent analysis
+            from .planner import SOPPlanner
+            from .tool_retriever import ToolRetriever
+            
+            llm_client = self._get_llm_client()
+            if not llm_client:
+                raise ValueError("LLM 客户端不可用")
+            
+            tool_retriever = ToolRetriever()
+            planner = SOPPlanner(tool_retriever, llm_client)
+            
+            # 🔥 CRITICAL FIX: Pass file_metadata to intent classification for file-type-based routing
+            # If files exist, inspect first file to get metadata for intent classification
+            file_metadata_for_intent = None
+            if files and len(files) > 0:
+                first_file = files[0]
+                logger.info(f"🔍 [Orchestrator] 准备检查文件用于意图分类: {first_file}, type={type(first_file)}")
+                if isinstance(first_file, dict):
+                    file_path = first_file.get("path") or first_file.get("file_path") or first_file.get("name")
+                elif isinstance(first_file, str):
+                    file_path = first_file
+                else:
+                    file_path = str(first_file)
                 
-                # Initialize planner for intent analysis
-                from .planner import SOPPlanner
-                from .tool_retriever import ToolRetriever
+                logger.info(f"🔍 [Orchestrator] 提取的文件路径: {file_path}")
                 
-                llm_client = self._get_llm_client()
-                if not llm_client:
-                    raise ValueError("LLM 客户端不可用")
-                
-                tool_retriever = ToolRetriever()
-                planner = SOPPlanner(tool_retriever, llm_client)
-                
-                # Analyze intent: classify domain and determine target_steps
-                intent_result = await planner._classify_intent(refined_query, None)
-                domain_name = intent_result.get("domain_name")
-                
-                # Validate domain
-                if not domain_name or not self.workflow_registry.is_supported(domain_name):
-                    logger.warning(f"⚠️ [Orchestrator] 无法识别域名: {domain_name}")
-                    domain_name = "Metabolomics"  # 默认值
-                
-                # Get workflow instance for intent analysis
-                workflow = self.workflow_registry.get_workflow(domain_name)
-                if not workflow:
-                    raise ValueError(f"无法获取工作流: {domain_name}")
-                
-                # Analyze user intent to determine target_steps
-                target_steps = await planner._analyze_user_intent(refined_query, workflow)
-                
-                # Ensure target_steps is not empty (fallback to full workflow)
-                if not target_steps:
-                    query_lower = refined_query.lower()
-                    vague_keywords = ["analyze this", "full analysis", "完整分析", "全部", "all", "complete"]
-                    if any(kw in query_lower for kw in vague_keywords):
+                if file_path:
+                    # Ensure absolute path
+                    path_obj = Path(file_path)
+                    if not path_obj.is_absolute():
+                        path_obj = Path(self.upload_dir) / path_obj
+                    file_path = str(path_obj.resolve())
+                    
+                    logger.info(f"🔍 [Orchestrator] 解析后的绝对路径: {file_path}")
+                    
+                    try:
+                        # Inspect file to get metadata for intent classification
+                        file_metadata_for_intent = self.file_inspector.inspect_file(file_path)
+                        logger.info(f"✅ [Orchestrator] 文件检查成功，文件类型: {file_metadata_for_intent.get('file_type', 'unknown')}")
+                        logger.info(f"✅ [Orchestrator] 文件元数据键: {list(file_metadata_for_intent.keys())[:10]}")
+                    except Exception as e:
+                        logger.error(f"❌ [Orchestrator] 文件检查失败，无法用于意图分类: {e}", exc_info=True)
+                else:
+                    logger.warning(f"⚠️ [Orchestrator] 无法从文件对象中提取路径")
+            else:
+                logger.info(f"ℹ️ [Orchestrator] 没有文件，跳过文件检查")
+            
+            # Analyze intent: classify domain and determine target_steps
+            intent_result = await planner._classify_intent(refined_query, file_metadata_for_intent)
+            domain_name = intent_result.get("domain_name")
+            
+            # Validate domain
+            if not domain_name or not self.workflow_registry.is_supported(domain_name):
+                logger.warning(f"⚠️ [Orchestrator] 无法识别域名: {domain_name}")
+                domain_name = "Metabolomics"  # 默认值
+            
+            # Get workflow instance for intent analysis
+            workflow = self.workflow_registry.get_workflow(domain_name)
+            if not workflow:
+                raise ValueError(f"无法获取工作流: {domain_name}")
+            
+            # Analyze user intent to determine target_steps
+            target_steps = await planner._analyze_user_intent(refined_query, workflow)
+            
+            # Ensure target_steps is not empty (fallback to full workflow)
+            if not target_steps:
+                query_lower = refined_query.lower()
+                vague_keywords = ["analyze this", "full analysis", "完整分析", "全部", "all", "complete"]
+                if any(kw in query_lower for kw in vague_keywords):
+                    target_steps = list(workflow.steps_dag.keys())
+                else:
+                    # Fallback to keyword matching
+                    from .planner import SOPPlanner
+                    target_steps = planner._fallback_intent_analysis(refined_query, list(workflow.steps_dag.keys()))
+                    if not target_steps:
                         target_steps = list(workflow.steps_dag.keys())
-                    else:
-                        # Fallback to keyword matching
-                        from .planner import SOPPlanner
-                        target_steps = planner._fallback_intent_analysis(refined_query, list(workflow.steps_dag.keys()))
-                        if not target_steps:
-                            target_steps = list(workflow.steps_dag.keys())
-                
-                logger.info(f"✅ [Orchestrator] 意图分析完成: domain={domain_name}, target_steps={target_steps}")
+            
+            logger.info(f"✅ [Orchestrator] 意图分析完成: domain={domain_name}, target_steps={target_steps}")
             
             # 🔥 SYSTEM REFACTOR: Step 3.2: Check Files (The Branching Point)
             # Priority: Files check determines execution mode
@@ -746,26 +847,59 @@ class AgentOrchestrator:
                     
                     # Yield workflow event
                     workflow_data = result.get("workflow_data") or result
+                    
+                    # 🔥 CRITICAL: Extract steps BEFORE yielding workflow event
+                    steps = workflow_data.get("steps", []) if workflow_data else []
+                    has_valid_plan = bool(workflow_data and steps and len(steps) > 0)
+                    # 🔥 CRITICAL: In Path A, files are guaranteed to exist (we're in the else branch)
+                    has_files = True  # Path A means files were detected
+                    
+                    # Debug logging BEFORE execution decision
+                    logger.info(f"🔍 [Orchestrator] DEBUG: Query='{refined_query}', Files={len(files) if files else 0}, Plan Generated={has_valid_plan}, Steps={len(steps) if steps else 0}")
+                    logger.info(f"🔍 [Orchestrator] DEBUG: workflow_data keys={list(workflow_data.keys()) if workflow_data else 'None'}")
+                    if workflow_data:
+                        logger.info(f"🔍 [Orchestrator] DEBUG: workflow_data.steps exists={('steps' in workflow_data)}, steps type={type(steps)}, steps length={len(steps) if steps else 0}")
+                    
                     if workflow_data:
                         yield self._format_sse("workflow", {
                             "workflow_config": workflow_data,
                             "template_mode": False  # 🔥 CRITICAL: Always False in Path A
                         })
                         await asyncio.sleep(0.01)
-                    
-                    yield self._format_sse("result", {
-                        "workflow_config": workflow_data,
-                        "template_mode": False
-                    })
+                        
+                        # Yield result event with workflow config
+                        yield self._format_sse("result", {
+                            "workflow_config": workflow_data,
+                            "template_mode": False
+                        })
+                        await asyncio.sleep(0.01)
+                        
+                        yield self._format_sse("status", {
+                            "content": "工作流规划完成，请确认执行。",
+                            "state": "completed"
+                        })
+                        await asyncio.sleep(0.01)
+                        
+                        yield self._format_sse("done", {"status": "success"})
+                        return  # 🔥 CRITICAL: STOP HERE - Do NOT auto-execute
                 
-                yield self._format_sse("status", {
-                    "content": "准备就绪，请确认执行。",
-                    "state": "completed"
-                })
-                await asyncio.sleep(0.01)
-                
-                yield self._format_sse("done", {"status": "success"})
-                return  # 🔥 CRITICAL: Stop here for Path A
+                    # 🔥 REMOVED: Auto-execution logic
+                    # The workflow should stop at planning stage and wait for explicit execution request
+                    # Execution will be triggered by a second request with workflow_data parameter
+                else:
+                    # 🔥 CRITICAL: If result is not a dict, log error but still try to execute if workflow_data exists
+                    logger.error(f"❌ [Orchestrator] Path A: result 不是字典类型: {type(result)}")
+                    if workflow_data:
+                        logger.info(f"🚀 [Orchestrator] Path A: result 不是字典，但 workflow_data 存在，尝试执行")
+                        # Try to execute with workflow_data
+                        should_auto_execute = True
+                        # ... (same execution logic as above) ...
+                        # For now, just log and return error
+                        yield self._format_sse("error", {
+                            "error": "工作流规划结果格式错误",
+                            "message": f"规划结果不是字典类型: {type(result)}"
+                        })
+                        return
             
         except Exception as e:
             logger.error(f"❌ 流式处理失败: {e}", exc_info=True)
@@ -777,6 +911,52 @@ class AgentOrchestrator:
                 "error": str(e),
                 "message": f"处理失败: {str(e)}"
             })
+    
+    def _generate_fallback_summary(
+        self, 
+        successful_steps: List[Dict[str, Any]], 
+        warning_steps: List[Dict[str, Any]], 
+        failed_steps: List[Dict[str, Any]], 
+        all_steps: List[Dict[str, Any]]
+    ) -> str:
+        """
+        生成后备摘要（当 AI 生成失败时使用）
+        
+        Args:
+            successful_steps: 成功步骤列表
+            warning_steps: 警告步骤列表
+            failed_steps: 失败步骤列表
+            all_steps: 所有步骤列表
+        
+        Returns:
+            Markdown 格式的摘要
+        """
+        summary_parts = []
+        
+        if successful_steps:
+            summary_parts.append(f"✅ **成功步骤** ({len(successful_steps)}/{len(all_steps)}):")
+            for step in successful_steps:
+                step_name = step.get('name', step.get('step_id', 'Unknown'))
+                summary_parts.append(f"- {step_name}")
+        
+        if warning_steps:
+            summary_parts.append(f"\n⚠️ **跳过步骤** ({len(warning_steps)}/{len(all_steps)}):")
+            for step in warning_steps:
+                step_name = step.get('name', step.get('step_id', 'Unknown'))
+                reason = step.get('message') or step.get('skipped_reason') or '步骤被跳过'
+                summary_parts.append(f"- {step_name}: {reason}")
+        
+        if failed_steps:
+            summary_parts.append(f"\n❌ **失败步骤** ({len(failed_steps)}/{len(all_steps)}):")
+            for step in failed_steps:
+                step_name = step.get('name', step.get('step_id', 'Unknown'))
+                error_msg = step.get("error") or step.get("summary", "未知错误")
+                summary_parts.append(f"- {step_name}: {error_msg}")
+        
+        if not summary_parts:
+            return "分析完成"
+        
+        return "\n".join(summary_parts)
     
     def _format_sse(self, event_type: str, data: Dict[str, Any]) -> str:
         """

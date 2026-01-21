@@ -98,12 +98,18 @@ def preprocess_metabolite_data(
             data.to_csv(output_path)
             logger.info(f"💾 预处理后的数据已保存: {output_path}")
         
+        # 🔥 TASK 3: Ensure absolute path is returned
+        # Convert to absolute path to ensure data flow works correctly
+        output_path_absolute = os.path.abspath(output_path)
+        if output_path_absolute != output_path:
+            logger.info(f"🔄 [Preprocess] 转换为绝对路径: {output_path} -> {output_path_absolute}")
+        
         return {
             "status": "success",
             "preprocessed_data": data.to_dict(orient='index'),
-            "output_path": output_path,
-            "output_file": output_path,  # 别名，用于数据流传递
-            "file_path": output_path,  # 另一个别名，确保兼容性
+            "output_path": output_path_absolute,  # 🔥 CRITICAL: Return absolute path
+            "output_file": output_path_absolute,  # 别名，用于数据流传递
+            "file_path": output_path_absolute,  # 另一个别名，确保兼容性
             "shape": {
                 "rows": len(data),
                 "columns": len(data.columns)

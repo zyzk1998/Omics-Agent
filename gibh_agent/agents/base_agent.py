@@ -643,7 +643,8 @@ Use Simplified Chinese for all content."""
         self,
         steps_results: List[Dict[str, Any]],
         omics_type: str = "Metabolomics",
-        workflow_name: str = "Analysis Pipeline"
+        workflow_name: str = "Analysis Pipeline",
+        summary_context: Optional[Dict[str, Any]] = None
     ) -> Optional[str]:
         """
         基于工作流执行结果生成分析摘要（AI Expert Diagnosis）
@@ -652,6 +653,7 @@ Use Simplified Chinese for all content."""
             steps_results: 步骤执行结果列表（来自 ExecutionLayer）
             omics_type: 组学类型（"Metabolomics", "scRNA", 等）
             workflow_name: 工作流名称
+            summary_context: 可选的上下文信息（包含失败步骤等）
         
         Returns:
             Markdown 格式的分析摘要，如果失败返回 None
@@ -661,23 +663,46 @@ Use Simplified Chinese for all content."""
         try:
             logger.info(f"📝 [AnalysisSummary] 开始生成分析摘要 - 组学类型: {omics_type}")
             
+            # 🔥 CRITICAL FIX: Extract failure information from context
+            has_failures = False
+            failed_steps_info = []
+            if summary_context:
+                has_failures = summary_context.get("has_failures", False)
+                failed_steps_info = summary_context.get("failed_steps", [])
+            
             # 提取关键结果
             results_summary = {
                 "workflow_name": workflow_name,
                 "steps_completed": len(steps_results),
-                "steps": []
+                "steps": [],
+                "has_failures": has_failures,
+                "failed_steps": failed_steps_info
             }
             
-            # 解析每个步骤的结果（只处理成功的步骤，忽略失败的步骤）
+            # 🔥 CRITICAL FIX: Process both successful and failed steps
+            successful_steps = []
+            failed_steps = []
+            
             for step_result in steps_results:
                 step_data = step_result.get("data", {})
                 step_name = step_result.get("step_name", "Unknown Step")
                 step_status = step_result.get("status", "unknown")
                 
-                # 🔥 CRITICAL: 跳过失败的步骤，只处理成功的步骤
-                if step_status != "success":
-                    logger.debug(f"⏭️ [AnalysisSummary] 跳过失败的步骤: {step_name} (status: {step_status})")
-                    continue
+                if step_status == "success":
+                    successful_steps.append(step_result)
+                else:
+                    failed_steps.append({
+                        "name": step_name,
+                        "status": step_status,
+                        "error": step_result.get("error") or step_result.get("message", "未知错误")
+                    })
+                    logger.debug(f"⚠️ [AnalysisSummary] 记录失败的步骤: {step_name} (status: {step_status})")
+            
+            # 解析成功的步骤结果
+            for step_result in successful_steps:
+                step_data = step_result.get("data", {})
+                step_name = step_result.get("step_name", "Unknown Step")
+                step_status = step_result.get("status", "unknown")
                 
                 step_info = {
                     "name": step_name,
@@ -781,25 +806,58 @@ Use Simplified Chinese for all content."""
                 expert_role = "生物信息学分析专家"
                 domain_context = "通用组学数据分析流程"
             
-            prompt = f"""You are a Senior Bioinformatics Analyst specializing in {omics_type} data analysis. Your task is to generate a comprehensive "Omics Analysis Report" in Markdown format.
+            # 🔥 CRITICAL FIX: Build failure information for prompt
+            failure_info = ""
+            if has_failures and failed_steps:
+                failure_info = f"\n\n**⚠️ Failed Steps ({len(failed_steps)}/{len(steps_results)}):**\n"
+                for failed_step in failed_steps:
+                    failure_info += f"- **{failed_step.get('name', 'Unknown')}**: {failed_step.get('error', 'Unknown error')}\n"
+                failure_info += "\n**IMPORTANT**: Some steps failed, but you should still summarize the successful steps. Explain what was accomplished and note the failures."
+            
+            # 🔥 CRITICAL FIX: Build rule 2 text separately to avoid f-string backslash issue
+            rule2_text = ""
+            if has_failures:
+                rule2_text = "2. **Partial Success Handling**: ⚠️ **IMPORTANT**: Some steps failed during execution. You MUST still summarize the successful steps (e.g., PCA, PLS-DA, Volcano plots) and explain what insights can be drawn from them. For failed steps, briefly note what went wrong and why it might have failed."
+            else:
+                rule2_text = "2. **Complete Success**: All steps completed successfully. Provide a comprehensive analysis of all results."
+            
+            # 🔥 CRITICAL FIX: Build rule 3 text separately to avoid f-string backslash issue
+            rule3_text = ""
+            if has_failures:
+                rule3_text = "- ⚠️ Some steps failed during execution. You MUST still summarize the successful steps (e.g., PCA, PLS-DA, Volcano plots) and explain what insights can be drawn from them.\n- For failed steps, briefly note what went wrong (e.g., 'Pathway enrichment failed due to missing gseapy library') but focus on interpreting the successful results."
+            
+            prompt = f"""You are a Senior Bioinformatics Scientist writing a publication-quality results section for a scientific paper. Your role is to interpret biological data and provide scientific insights, NOT to debug technical issues.
 
-**Execution Results (Only Successful Steps):**
+**Execution Results (Successful Steps):**
 {summary_json}
+{failure_info}
 
 **Domain Context:**
 {domain_context}
 
 **CRITICAL RULES:**
 
-1. **Academic Standard**: Generate a comprehensive, detailed report following academic standards. This is NOT a brief summary - it should be thorough and professional.
+1. **Scientific Persona**: You are a bioinformatics expert writing for a scientific audience. Write as if you are describing results in a Methods/Results section of a research paper.
 
-2. **IGNORE Technical Issues**: 
-   - DO NOT mention failed steps, errors, or technical problems
-   - DO NOT suggest checking input formats, file paths, or code issues
-   - DO NOT act like IT support
-   - Only interpret the data from successful steps
+2. **NO Technical Debugging**: 
+   - DO NOT mention step names, tool names, file paths, or technical errors
+   - DO NOT say "Step X failed" or "Tool Y encountered an error"
+   - DO NOT mention Python errors, missing libraries, or code issues
+   - If a step failed, simply state the biological limitation (e.g., "Pathway enrichment analysis could not be performed due to insufficient significant features" or "Functional annotation was not available for this dataset")
 
-3. **Output Structure (MUST FOLLOW):**
+3. **Biological Focus**:
+   - Focus on BIOLOGICAL INSIGHTS and SCIENTIFIC INTERPRETATION
+   - Describe what the data reveals about the samples/groups
+   - Interpret statistical findings in biological context
+   - Discuss functional implications and biological mechanisms
+
+4. **Professional Language**:
+   - Use scientific terminology appropriate for the field
+   - Write in Simplified Chinese (简体中文)
+   - Be precise, detailed, and academically rigorous
+   - Minimum 500 words, aim for comprehensive coverage
+
+5. **Output Structure (MUST FOLLOW):**
 
 ### 1. 数据概况 (Data Overview)
 - Summarize sample size, groups, and detected features
@@ -841,31 +899,39 @@ Use Simplified Chinese for all content."""
             messages = [
                 {
                     "role": "system",
-                    "content": f"""You are a Senior Bioinformatics Scientist specializing in {omics_type} data analysis. You are NOT a software engineer or IT support.
+                    "content": f"""You are a Senior Bioinformatics Scientist writing a publication-quality results section for a {omics_type} research paper. You are NOT a software engineer, IT support, or debugger.
 
-**Your Role:**
-- Interpret biological data and patterns
-- Provide scientific insights about the results
-- Focus on biological meaning, not technical issues
+**Your Scientific Persona:**
+- You interpret biological data and provide scientific insights
+- You write as if describing results in a Methods/Results section of a research paper
+- You focus on biological meaning, statistical significance, and scientific interpretation
 
-**What to DO:**
-- Interpret clustering patterns, outliers, significant findings
-- Explain biological implications
-- Suggest next biological analysis steps
+**What You MUST DO:**
+- Describe sample characteristics, group comparisons, and statistical findings
+- Interpret clustering patterns, separation between groups, and biological significance
+- Explain what the data reveals about the biological system under study
+- Discuss functional implications and potential biological mechanisms
+- Use scientific terminology appropriate for {omics_type} research
 
-**What NOT to DO:**
-- Do NOT mention technical errors or failed steps
-- Do NOT suggest checking file formats or code issues
-- Do NOT act like IT support
+**What You MUST NOT DO:**
+- Do NOT mention step names, tool names, file paths, or technical implementation details
+- Do NOT say "Step X failed" or "Tool Y encountered an error"
+- Do NOT mention Python errors, missing libraries, code issues, or debugging information
+- Do NOT act like IT support or a software engineer
+- If a step failed, state it as a biological limitation (e.g., "Pathway enrichment could not be performed due to insufficient significant features")
 
-Generate concise, professional, scientifically insightful analysis summaries based on successful execution results. Use Simplified Chinese and Markdown format."""
+**Output Style:**
+- Write in Simplified Chinese (简体中文)
+- Use Markdown format with proper headings
+- Be precise, detailed, and academically rigorous
+- Focus on biological interpretation and scientific insights"""
                 },
                 {"role": "user", "content": prompt}
             ]
             
             # 调用 LLM 生成摘要
             logger.info(f"📞 [AnalysisSummary] 调用 LLM 生成摘要...")
-            completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=500)
+            completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=2000)  # 🔥 PHASE 2: Increase tokens for detailed report
             think_content, response = self.llm_client.extract_think_and_content(completion)
             
             if response:
@@ -879,4 +945,142 @@ Generate concise, professional, scientifically insightful analysis summaries bas
         except Exception as e:
             logger.error(f"❌ [AnalysisSummary] 生成分析摘要失败: {e}", exc_info=True)
             return None
+    
+    async def _evaluate_analysis_quality(
+        self,
+        steps_results: List[Dict[str, Any]],
+        diagnosis: str,
+        workflow_name: str = "Unknown"
+    ) -> Dict[str, Any]:
+        """
+        🔥 PHASE 2: Evaluate analysis quality using LLM
+        
+        Args:
+            steps_results: List of step execution results
+            diagnosis: Generated diagnosis report
+            workflow_name: Name of the workflow
+        
+        Returns:
+            Dictionary with score (0-100) and critique
+        """
+        try:
+            # Count successful/failed/warning steps
+            successful_steps = [s for s in steps_results if s.get("status") == "success"]
+            failed_steps = [s for s in steps_results if s.get("status") == "error"]
+            warning_steps = [s for s in steps_results if s.get("status") == "warning"]
+            
+            # Extract key metrics
+            metrics = {
+                "total_steps": len(steps_results),
+                "successful_steps": len(successful_steps),
+                "failed_steps": len(failed_steps),
+                "warning_steps": len(warning_steps),
+                "completion_rate": len(successful_steps) / len(steps_results) * 100 if steps_results else 0
+            }
+            
+            # Check for key analysis outputs
+            has_pca = any("pca" in str(s.get("step_name", "")).lower() for s in successful_steps)
+            has_diff = any("differential" in str(s.get("step_name", "")).lower() for s in successful_steps)
+            has_visualization = any("visualize" in str(s.get("step_name", "")).lower() or "plot" in str(s.get("data", {})).lower() for s in successful_steps)
+            has_pathway = any("pathway" in str(s.get("step_name", "")).lower() or "enrichment" in str(s.get("step_name", "")).lower() for s in successful_steps)
+            
+            # Build evaluation prompt
+            evaluation_prompt = f"""You are a Senior Bioinformatics Quality Assurance Expert. Evaluate the quality of this {workflow_name} analysis.
+
+**Execution Metrics:**
+- Total Steps: {metrics['total_steps']}
+- Successful: {metrics['successful_steps']}
+- Failed: {metrics['failed_steps']}
+- Warnings: {metrics['warning_steps']}
+- Completion Rate: {metrics['completion_rate']:.1f}%
+
+**Analysis Components:**
+- PCA Analysis: {'✅ Present' if has_pca else '❌ Missing'}
+- Differential Analysis: {'✅ Present' if has_diff else '❌ Missing'}
+- Visualization: {'✅ Present' if has_visualization else '❌ Missing'}
+- Pathway Enrichment: {'✅ Present' if has_pathway else '❌ Missing'}
+
+**Generated Diagnosis Report:**
+{diagnosis[:1000]}...
+
+**Evaluation Criteria:**
+1. **Completeness (0-30 points)**: Did all critical steps complete? Are key analyses present?
+2. **Data Quality (0-25 points)**: Were data quality issues handled? Missing values? Outliers?
+3. **Statistical Rigor (0-25 points)**: Were appropriate statistical methods used? Are results significant?
+4. **Biological Interpretation (0-20 points)**: Is the diagnosis report scientifically sound? Does it provide biological insights?
+
+**Output Format (JSON only, no markdown):**
+{{
+    "score": <integer 0-100>,
+    "critique": "<brief critique in Simplified Chinese, 2-3 sentences>",
+    "strengths": ["<strength 1>", "<strength 2>"],
+    "weaknesses": ["<weakness 1>", "<weakness 2>"],
+    "recommendations": ["<recommendation 1>", "<recommendation 2>"]
+}}
+
+Evaluate and return ONLY the JSON object:"""
+            
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a Senior Bioinformatics Quality Assurance Expert. Evaluate analysis quality and provide constructive feedback. Output ONLY valid JSON, no markdown, no explanations."
+                },
+                {"role": "user", "content": evaluation_prompt}
+            ]
+            
+            logger.info(f"📞 [QualityEvaluation] 调用 LLM 评估分析质量...")
+            completion = await self.llm_client.achat(messages, temperature=0.2, max_tokens=500)
+            think_content, response = self.llm_client.extract_think_and_content(completion)
+            
+            if response:
+                # Try to parse JSON from response
+                import json
+                import re
+                
+                # Extract JSON from response (handle markdown code blocks)
+                json_match = re.search(r'\{[^{}]*"score"[^{}]*\}', response, re.DOTALL)
+                if json_match:
+                    try:
+                        evaluation = json.loads(json_match.group())
+                        logger.info(f"✅ [QualityEvaluation] 质量评估完成，得分: {evaluation.get('score', 'N/A')}")
+                        return evaluation
+                    except json.JSONDecodeError:
+                        logger.warning(f"⚠️ [QualityEvaluation] JSON 解析失败，使用默认评估")
+                
+                # Fallback: generate basic evaluation
+                base_score = int(metrics['completion_rate'])
+                if has_pca and has_diff:
+                    base_score += 10
+                if has_visualization:
+                    base_score += 5
+                if has_pathway:
+                    base_score += 5
+                
+                return {
+                    "score": min(100, base_score),
+                    "critique": f"分析完成率 {metrics['completion_rate']:.1f}%，{'包含关键分析步骤' if has_pca and has_diff else '缺少部分关键分析'}。",
+                    "strengths": ["执行了主要分析步骤"] if has_pca or has_diff else [],
+                    "weaknesses": ["部分步骤未完成"] if metrics['failed_steps'] > 0 else [],
+                    "recommendations": ["建议检查失败步骤"] if metrics['failed_steps'] > 0 else []
+                }
+            else:
+                logger.warning(f"⚠️ [QualityEvaluation] LLM 响应为空，使用默认评估")
+                return {
+                    "score": int(metrics['completion_rate']),
+                    "critique": "无法生成详细评估",
+                    "strengths": [],
+                    "weaknesses": [],
+                    "recommendations": []
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ [QualityEvaluation] 质量评估失败: {e}", exc_info=True)
+            # Return default evaluation
+            return {
+                "score": 50,
+                "critique": f"评估过程出错: {str(e)}",
+                "strengths": [],
+                "weaknesses": [],
+                "recommendations": []
+            }
 

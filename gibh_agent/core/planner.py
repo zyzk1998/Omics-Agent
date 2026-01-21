@@ -1086,6 +1086,49 @@ Classify the intent and return JSON only. Remember:
             mode = intent_result.get("mode", "PLANNING")  # 🔥 NEW: Extract mode
             target_steps = intent_result.get("target_steps", [])
             
+            # 🔥 CRITICAL: File-type-based fallback for domain classification
+            # If file metadata exists, use file extension to override LLM decision if needed
+            logger.info(f"🔍 [SOPPlanner] 意图分类后检查: domain_name={domain_name}, file_metadata exists={file_metadata is not None}")
+            if file_metadata:
+                file_path = file_metadata.get("file_path", "")
+                file_type = file_metadata.get("file_type", "")
+                logger.info(f"🔍 [SOPPlanner] 文件元数据: file_path={file_path}, file_type={file_type}")
+                
+                # Check file extension
+                if file_path:
+                    file_ext = file_path.lower().split('.')[-1] if '.' in file_path else ""
+                    logger.info(f"🔍 [SOPPlanner] 文件扩展名: {file_ext}")
+                    
+                    # CSV files are strongly associated with Metabolomics
+                    if file_ext == "csv":
+                        if domain_name == "RNA":
+                            logger.warning(f"⚠️ LLM 将 CSV 文件分类为 RNA，强制覆盖为 Metabolomics")
+                            domain_name = "Metabolomics"
+                        else:
+                            logger.info(f"✅ CSV 文件已正确分类为 {domain_name}")
+                    
+                    # H5AD files are strongly associated with RNA
+                    if file_ext == "h5ad" and domain_name == "Metabolomics":
+                        logger.warning(f"⚠️ LLM 将 H5AD 文件分类为 Metabolomics，强制覆盖为 RNA")
+                        domain_name = "RNA"
+                    
+                    # FASTQ files are strongly associated with RNA
+                    if file_ext in ["fastq", "fq"] and domain_name == "Metabolomics":
+                        logger.warning(f"⚠️ LLM 将 FASTQ 文件分类为 Metabolomics，强制覆盖为 RNA")
+                        domain_name = "RNA"
+                else:
+                    logger.warning(f"⚠️ [SOPPlanner] 文件元数据中没有 file_path")
+                
+                # Check file_type from metadata
+                if file_type == "tabular":
+                    if domain_name == "RNA":
+                        logger.warning(f"⚠️ LLM 将 tabular 文件分类为 RNA，强制覆盖为 Metabolomics")
+                        domain_name = "Metabolomics"
+                    else:
+                        logger.info(f"✅ tabular 文件已正确分类为 {domain_name}")
+            else:
+                logger.warning(f"⚠️ [SOPPlanner] 没有文件元数据，无法进行文件类型检查")
+            
             # 验证域名
             if domain_name not in ["Metabolomics", "RNA"]:
                 logger.warning(f"⚠️ LLM 返回了无效的域名: {domain_name}，使用默认值 Metabolomics")
@@ -1111,34 +1154,89 @@ Classify the intent and return JSON only. Remember:
         except json.JSONDecodeError as e:
             logger.error(f"❌ 意图分类 JSON 解析失败: {e}")
             logger.error(f"响应内容: {response_text[:200] if 'response_text' in locals() else str(response)[:200]}")
-            # 回退：尝试从查询中推断
-            return self._fallback_intent_classification(user_query, has_file)
+            # 回退：尝试从查询和文件元数据中推断
+            return self._fallback_intent_classification(user_query, has_file, file_metadata)
     
-    def _fallback_intent_classification(self, user_query: str, has_file: bool = False) -> Dict[str, Any]:
+    def _fallback_intent_classification(self, user_query: str, has_file: bool = False, file_metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        回退的意图分类（基于关键词）
+        回退的意图分类（基于文件内容和关键词）
+        
+        🔥 STRATEGIC FIX: Content-Aware Routing
+        - 优先使用 FileInspector 元数据（列名、数据类型）进行智能路由
+        - 回退到文件扩展名
+        - 最后使用关键词匹配
         
         Args:
             user_query: 用户查询
             has_file: 是否有文件（用于决定模式）
+            file_metadata: 文件元数据（可选）
             
         Returns:
             意图分类结果（包含 mode）
         """
         query_lower = user_query.lower()
+        domain_name = "Metabolomics"  # 默认值
         
-        # 🔥 CRITICAL REGRESSION FIX: Safety Net - Check file extension first
-        # If file is .csv, default to Metabolomics regardless of query
-        if file_metadata and file_metadata.get("file_path"):
+        # 🔥 STRATEGIC FIX: Content-Aware Routing - 基于文件内容
+        if file_metadata:
             file_path = file_metadata.get("file_path", "")
-            if file_path.lower().endswith('.csv'):
-                logger.info("✅ [SOPPlanner] 检测到 CSV 文件，默认使用 Metabolomics 域名（安全网）")
-                domain_name = "Metabolomics"
-            elif file_path.lower().endswith(('.h5ad', '.h5', '.loom')):
-                logger.info("✅ [SOPPlanner] 检测到 RNA 文件，使用 RNA 域名")
+            file_type = file_metadata.get("file_type", "")
+            columns = file_metadata.get("columns", [])
+            feature_columns = file_metadata.get("feature_columns", [])
+            metadata_columns = file_metadata.get("metadata_columns", [])
+            
+            # 策略1: 检查文件类型（最可靠）
+            if file_type == "anndata" or file_path.lower().endswith(('.h5ad', '.h5', '.loom')):
+                logger.info("✅ [SOPPlanner] 检测到 RNA 文件类型（anndata/h5ad），使用 RNA 域名")
                 domain_name = "RNA"
+            elif file_type == "tabular" or file_path.lower().endswith('.csv'):
+                # 策略2: 检查列名模式（内容感知）
+                # RNA 特征：包含 "gene", "barcode", "cell", "UMAP", "tSNE", "cluster" 等
+                # Metabolomics 特征：包含 "Metabolite", "Compound", "m/z", "RT" 等，或数值列很多
+                rna_column_keywords = ["gene", "barcode", "cell", "umap", "tsne", "cluster", "leiden", "pca"]
+                metabolomics_column_keywords = ["metabolite", "compound", "m/z", "rt", "retention", "mass"]
+                
+                column_names_lower = [col.lower() for col in columns] if columns else []
+                
+                # 检查是否有 RNA 特征列名
+                has_rna_keywords = any(kw in ' '.join(column_names_lower) for kw in rna_column_keywords)
+                # 检查是否有 Metabolomics 特征列名
+                has_metabolomics_keywords = any(kw in ' '.join(column_names_lower) for kw in metabolomics_column_keywords)
+                
+                # 策略3: 检查数据结构
+                # RNA: 通常有大量特征列（基因），少量元数据列
+                # Metabolomics: 通常有中等数量的特征列（代谢物），可能有分组列
+                is_likely_rna = False
+                is_likely_metabolomics = False
+                
+                if feature_columns and metadata_columns:
+                    # 如果特征列数量 > 1000，很可能是 RNA
+                    if len(feature_columns) > 1000:
+                        is_likely_rna = True
+                        logger.info(f"✅ [SOPPlanner] 检测到大量特征列 ({len(feature_columns)})，推断为 RNA")
+                    # 如果特征列数量在 10-500 之间，且没有 RNA 关键词，很可能是 Metabolomics
+                    elif 10 <= len(feature_columns) <= 500 and not has_rna_keywords:
+                        is_likely_metabolomics = True
+                        logger.info(f"✅ [SOPPlanner] 检测到中等数量特征列 ({len(feature_columns)})，推断为 Metabolomics")
+                
+                # 决策逻辑
+                if has_rna_keywords or is_likely_rna:
+                    domain_name = "RNA"
+                    logger.info("✅ [SOPPlanner] 基于列名/数据结构，使用 RNA 域名")
+                elif has_metabolomics_keywords or is_likely_metabolomics:
+                    domain_name = "Metabolomics"
+                    logger.info("✅ [SOPPlanner] 基于列名/数据结构，使用 Metabolomics 域名")
+                else:
+                    # 回退到文件扩展名
+                    if file_path.lower().endswith('.csv'):
+                        logger.info("✅ [SOPPlanner] 检测到 CSV 文件，默认使用 Metabolomics 域名（回退）")
+                        domain_name = "Metabolomics"
+                    else:
+                        # 最后使用关键词匹配
+                        rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger"]
+                        domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
             else:
-                # Check RNA keywords
+                # 未知文件类型，使用关键词匹配
                 rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "h5ad"]
                 domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
         else:
@@ -1204,9 +1302,21 @@ Classify the intent and return JSON only. Remember:
         
         file_path = file_metadata.get("file_path")
         
-        # 检测分组列（用于代谢组学）
+        # 🔥 CRITICAL FIX: 检测分组列（用于代谢组学）
+        # 首先尝试从 semantic_map 获取
         semantic_map = file_metadata.get("semantic_map", {})
         group_cols = semantic_map.get("group_cols", [])
+        
+        # 如果没有，使用启发式方法检测
+        if not group_cols:
+            detected_group_col = self._detect_group_column_heuristic(file_metadata)
+            if detected_group_col:
+                group_cols = [detected_group_col]
+                logger.info(f"✅ [SOPPlanner] 启发式检测到分组列: {detected_group_col}")
+                # 更新 semantic_map
+                if "semantic_map" not in file_metadata:
+                    file_metadata["semantic_map"] = {}
+                file_metadata["semantic_map"]["group_cols"] = group_cols
         
         for step in steps:
             params = step.get("params", {})
@@ -1225,14 +1335,25 @@ Classify the intent and return JSON only. Remember:
                     # 如果没有文件路径但参数是占位符，记录警告
                     logger.warning(f"⚠️ [SOPPlanner] 步骤 {step_id} 的参数 {param_name} 仍然是占位符，但 file_metadata 存在")
             
-            # 填充 group_column（如果有分组列）
-            if "group_column" in params and group_cols:
-                params["group_column"] = group_cols[0]
-            elif step_id in ["metabolomics_plsda", "differential_analysis", "metabolomics_pathway_enrichment"]:
-                # 如果步骤需要分组列但没有，标记为等待上传
-                if not group_cols:
+            # 🔥 CRITICAL FIX: 强制填充 group_column（对于需要分组列的步骤）
+            if step_id in ["metabolomics_plsda", "differential_analysis", "metabolomics_pathway_enrichment"]:
+                if group_cols:
+                    # 强制设置 group_column 参数
+                    if "group_column" not in params:
+                        params["group_column"] = group_cols[0]
+                        logger.info(f"✅ [SOPPlanner] 强制填充 group_column: {group_cols[0]} -> {step_id}")
+                    elif params.get("group_column") != group_cols[0]:
+                        # 如果已存在但值不同，更新它
+                        params["group_column"] = group_cols[0]
+                        logger.info(f"✅ [SOPPlanner] 更新 group_column: {params.get('group_column')} -> {group_cols[0]} ({step_id})")
+                else:
+                    # 如果没有检测到分组列，标记为需要用户输入
+                    logger.warning(f"⚠️ [SOPPlanner] 步骤 {step_id} 需要分组列，但未检测到")
                     step["status"] = "waiting_for_upload"
                     step["description"] += " ⚠️ 需要分组信息"
+            elif "group_column" in params and group_cols:
+                # 对于其他步骤，如果有 group_column 参数且有分组列，填充它
+                params["group_column"] = group_cols[0]
         
         # 🔥 CONTEXT-AWARE FIX: Set template_mode based on parameter (allows PLANNING mode with file)
         workflow_config["template_mode"] = template_mode
