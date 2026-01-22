@@ -646,7 +646,7 @@ class SOPPlanner:
                 else:
                     workflow_config = self._fill_parameters(workflow_config, file_metadata, workflow, template_mode=False)
                     logger.info("✅ [SOPPlanner] EXECUTION 模式：已填充真实参数，template_mode = False")
-                    
+            
                     # 🔥 CRITICAL: Validate that file_path in params is NOT <PENDING_UPLOAD>
                     steps = workflow_config.get("workflow_data", {}).get("steps", [])
                     for step in steps:

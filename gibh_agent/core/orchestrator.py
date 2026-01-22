@@ -82,6 +82,77 @@ class AgentOrchestrator:
             logger.warning(f"⚠️ 获取 LLM 客户端失败: {e}")
             return None
     
+    async def _classify_global_intent(self, query: str, files: List[Dict[str, str]] = None) -> str:
+        """
+        🔥 PHASE 1: Classify global intent (Chat vs Task)
+        
+        Returns:
+            "chat" for general conversation
+            "task" for bioinformatics analysis tasks
+        """
+        # Quick heuristic: If files are present, it's likely a task
+        if files and len(files) > 0:
+            return "task"
+        
+        # Quick keyword check for obvious tasks
+        task_keywords = [
+            "analyze", "analysis", "analyze", "分析", "处理", "计算", "统计",
+            "pca", "differential", "pathway", "enrichment", "visualize", "可视化",
+            "metabolomics", "transcriptomics", "rna", "代谢组", "转录组",
+            "workflow", "pipeline", "工作流", "流程"
+        ]
+        query_lower = query.lower()
+        if any(kw in query_lower for kw in task_keywords):
+            return "task"
+        
+        # Use LLM for ambiguous cases
+        try:
+            llm_client = self._get_llm_client()
+            if not llm_client:
+                # Fallback: if no LLM, treat as chat for safety
+                return "chat"
+            
+            prompt = f"""用户输入: "{query}"
+
+请判断这是：
+1. 一般聊天对话（问候、询问、闲聊等）
+2. 生物信息学分析任务（数据分析、工作流执行等）
+
+只返回JSON格式: {{"type": "chat"}} 或 {{"type": "task"}}
+不要返回其他内容。"""
+            
+            messages = [
+                {"role": "system", "content": "你是一个意图分类助手。只返回JSON格式的意图类型。"},
+                {"role": "user", "content": prompt}
+            ]
+            
+            completion = await llm_client.achat(messages, temperature=0.1, max_tokens=50)
+            response = completion.choices[0].message.content.strip()
+            
+            # Parse JSON response
+            import json
+            try:
+                # Remove markdown code blocks if present
+                if "```" in response:
+                    response = response.split("```")[1]
+                    if response.startswith("json"):
+                        response = response[4:]
+                response = response.strip()
+                
+                result = json.loads(response)
+                intent_type = result.get("type", "chat")
+                return intent_type if intent_type in ["chat", "task"] else "chat"
+            except json.JSONDecodeError:
+                # If JSON parsing fails, check response text
+                if "task" in response.lower():
+                    return "task"
+                return "chat"
+                
+        except Exception as e:
+            logger.error(f"❌ [Orchestrator] LLM意图分类失败: {e}", exc_info=True)
+            # Fallback: treat as chat for safety
+            return "chat"
+    
     async def stream_process(
         self,
         query: str,
@@ -111,6 +182,78 @@ class AgentOrchestrator:
         """
         files = files or []
         history = history or []
+        
+        # 🔥 PHASE 1: Layer 0 - Global Intent Routing (Chat vs Task)
+        # Check if this is general chat or a bioinformatics task BEFORE any file inspection or planning
+        try:
+            yield self._format_sse("status", {
+                "content": "正在理解您的意图...",
+                "state": "analyzing"
+            })
+            await asyncio.sleep(0.01)
+            
+            intent_type = await self._classify_global_intent(query, files)
+            logger.info(f"🔍 [Orchestrator] 全局意图分类: {intent_type}")
+            
+            if intent_type == "chat":
+                # 🔥 CHAT MODE: Stream LLM response directly, skip all file/planning logic
+                logger.info("💬 [Orchestrator] 进入聊天模式，跳过文件检查和规划")
+                yield self._format_sse("status", {
+                    "content": "正在思考...",
+                    "state": "thinking"
+                })
+                await asyncio.sleep(0.01)
+                
+                # Stream LLM response
+                llm_client = self._get_llm_client()
+                if llm_client:
+                    messages = [
+                        {"role": "system", "content": "你是一个友好的AI助手，帮助用户解答问题。使用中文回答。"},
+                        {"role": "user", "content": query}
+                    ]
+                    
+                    # Add history context if available
+                    if history:
+                        for h in history[-5:]:  # Last 5 messages
+                            if isinstance(h, dict):
+                                role = h.get("role", "user")
+                                content = h.get("content", h.get("message", ""))
+                                if content:
+                                    messages.append({"role": role, "content": content})
+                    
+                    message_buffer = ""
+                    async for chunk in llm_client.astream(messages, temperature=0.7, max_tokens=1000):
+                        if chunk.choices and len(chunk.choices) > 0:
+                            delta = chunk.choices[0].delta
+                            if delta and delta.content:
+                                message_buffer += delta.content
+                                yield self._format_sse("message", {
+                                    "content": message_buffer
+                                })
+                                await asyncio.sleep(0.01)
+                    
+                    yield self._format_sse("status", {
+                        "content": "回答完成",
+                        "state": "completed"
+                    })
+                    await asyncio.sleep(0.01)
+                    yield self._format_sse("done", {"status": "success"})
+                    return
+                else:
+                    # Fallback if LLM not available
+                    yield self._format_sse("message", {
+                        "content": "抱歉，LLM服务暂时不可用。"
+                    })
+                    yield self._format_sse("done", {"status": "success"})
+                    return
+            
+            # 🔥 TASK MODE: Continue with existing logic (file check -> plan -> execute)
+            logger.info("🔬 [Orchestrator] 进入任务模式，继续文件检查和规划流程")
+            
+        except Exception as e:
+            logger.error(f"❌ [Orchestrator] 全局意图分类失败: {e}", exc_info=True)
+            # Continue with task mode as fallback
+            logger.warning("⚠️ [Orchestrator] 意图分类失败，默认进入任务模式")
         
         # 🔥 CRITICAL REGRESSION FIX: Direct Execution Path
         # If the request contains a confirmed workflow_data, EXECUTE it immediately.
@@ -162,14 +305,35 @@ class AgentOrchestrator:
                 
                 logger.info(f"📁 [Orchestrator] 文件路径: {file_paths}")
                 
-                # 3. Execute Steps
-                yield self._format_sse("status", {
-                    "content": "正在执行分析工具...",
-                    "state": "running"
-                })
-                await asyncio.sleep(0.01)
+                # 🔥 TASK 1: Execute Steps with specific step names in logs
+                steps = workflow_config.get("steps", [])
                 
-                # Execute workflow
+                # Yield status for each step before execution
+                for i, step in enumerate(steps, 1):
+                    # 🔥 TASK 1: Debug - Log step data to see why name might be missing
+                    logger.info(f"🔍 [Orchestrator] Step Data: {step}")
+                    
+                    # 🔥 TASK 1: Fix - Try multiple fields to get step name
+                    step_name = (
+                        step.get("name") or 
+                        step.get("step_name") or 
+                        step.get("id") or 
+                        step.get("step_id") or 
+                        f"步骤 {i}"
+                    )
+                    tool_id = step.get("tool_id", "")
+                    
+                    # Skip visualize_pca (it's merged into pca_analysis)
+                    if tool_id == "visualize_pca" or step.get("step_id") == "visualize_pca":
+                        continue
+                    
+                    yield self._format_sse("status", {
+                        "content": f"正在执行步骤: {step_name}...",
+                        "state": "running"
+                    })
+                    await asyncio.sleep(0.01)
+                
+                # Execute workflow (this will actually execute all steps)
                 results = executor.execute_workflow(
                     workflow_data=workflow_config,
                     file_paths=file_paths,
@@ -254,12 +418,23 @@ class AgentOrchestrator:
                         }
                         
                         try:
-                            # 🔥 CRITICAL FIX: Pass summary_context to indicate partial success
+                            # 🔥 TASK 2: Force LLM call - _generate_analysis_summary now always returns structured content
                             summary = await self.agent._generate_analysis_summary(
                                 results, 
                                 domain_name,
                                 summary_context=summary_context
                             )
+                            
+                            # 🔥 TASK 2: Ensure summary is not None or empty (should always have structured fallback)
+                            if not summary or len(summary.strip()) < 50:
+                                logger.warning(f"⚠️ [Orchestrator] 摘要过短，使用结构化后备")
+                                summary = f"""## 分析结果摘要
+
+本次分析完成了 {len(successful_steps)} 个步骤。请查看上方的详细图表和统计结果以获取更深入的生物学解释。
+
+### 关键发现
+- 成功步骤: {len(successful_steps)}/{len(steps_details)}
+- 请查看执行结果中的图表和数据表格获取详细分析。"""
                             
                             # 🔥 PHASE 2: Generate quality evaluation
                             evaluation = None
@@ -283,9 +458,15 @@ class AgentOrchestrator:
                                     logger.warning(f"⚠️ [Orchestrator] 质量评估失败: {e}")
                             
                         except Exception as e:
-                            logger.warning(f"⚠️ [Orchestrator] 生成摘要失败: {e}")
-                            # 🔥 CRITICAL FIX: Generate fallback summary even on error
-                            summary = self._generate_fallback_summary(successful_steps, warning_steps, failed_steps, steps_details)
+                            logger.error(f"❌ [Orchestrator] 生成摘要异常: {e}", exc_info=True)
+                            # 🔥 TASK 2: Use structured fallback instead of simple list
+                            summary = f"""## 分析结果摘要
+
+本次分析完成了 {len(successful_steps)} 个步骤。请查看上方的详细图表和统计结果以获取更深入的生物学解释。
+
+### 关键发现
+- 成功步骤: {len(successful_steps)}/{len(steps_details)}
+- 请查看执行结果中的图表和数据表格获取详细分析。"""
                             evaluation = None
                     else:
                         summary = "分析完成（无步骤执行）"
@@ -302,7 +483,49 @@ class AgentOrchestrator:
                         summary = "分析完成（无步骤执行）"
                     evaluation = None
                 
-                # 5. Yield Final Result
+                # 🔥 TASK 3: Yield Execution Results FIRST (step_result events)
+                # This allows frontend to render the Accordion with step results
+                if steps_details and len(steps_details) > 0:
+                    yield self._format_sse("status", {
+                        "content": "正在渲染执行结果...",
+                        "state": "rendering"
+                    })
+                    await asyncio.sleep(0.01)
+                    
+                    # Yield step_result event with execution steps
+                    step_result_response = {
+                        "report_data": {
+                            "steps_details": steps_details,
+                            "workflow_name": workflow_config.get("workflow_name", "工作流")
+                        }
+                    }
+                    yield self._format_sse("step_result", step_result_response)
+                    await asyncio.sleep(0.01)
+                
+                # 🔥 TASK 3: THEN Yield Diagnosis Report LAST (diagnosis event)
+                # This ensures the Expert Report appears after the execution results
+                if summary:
+                    yield self._format_sse("status", {
+                        "content": "正在生成专家解读报告...",
+                        "state": "generating_report"
+                    })
+                    await asyncio.sleep(0.01)
+                    
+                    diagnosis_response = {
+                        "report_data": {
+                            "diagnosis": summary,
+                            "workflow_name": workflow_config.get("workflow_name", "工作流")
+                        }
+                    }
+                    
+                    # 🔥 PHASE 2: Add evaluation to diagnosis response
+                    if evaluation:
+                        diagnosis_response["report_data"]["evaluation"] = evaluation
+                    
+                    yield self._format_sse("diagnosis", diagnosis_response)
+                    await asyncio.sleep(0.01)
+                
+                # 🔥 TASK 3: Also yield combined result event for backward compatibility
                 final_response = {
                     "report_data": {
                         "steps_details": steps_details,
@@ -497,10 +720,10 @@ class AgentOrchestrator:
                 # 🔥 CRITICAL REFACTOR: Step 3 - ALWAYS Analyze Intent First (Dynamic Scoping)
                 # Step 3.1: Analyze Intent (ALWAYS FIRST) - Determine modality and target_steps
                 yield self._format_sse("status", {
-                "content": "正在分析您的需求...",
-                "state": "running"
-            })
-            await asyncio.sleep(0.01)
+                    "content": "正在分析您的需求...",
+                    "state": "running"
+                })
+                await asyncio.sleep(0.01)
             
             # Initialize planner for intent analysis
             from .planner import SOPPlanner
@@ -512,6 +735,7 @@ class AgentOrchestrator:
             
             tool_retriever = ToolRetriever()
             planner = SOPPlanner(tool_retriever, llm_client)
+            
             
             # 🔥 CRITICAL FIX: Pass file_metadata to intent classification for file-type-based routing
             # If files exist, inspect first file to get metadata for intent classification
@@ -525,18 +749,18 @@ class AgentOrchestrator:
                     file_path = first_file
                 else:
                     file_path = str(first_file)
-                
+                    
                 logger.info(f"🔍 [Orchestrator] 提取的文件路径: {file_path}")
-                
+                    
                 if file_path:
                     # Ensure absolute path
                     path_obj = Path(file_path)
                     if not path_obj.is_absolute():
                         path_obj = Path(self.upload_dir) / path_obj
                     file_path = str(path_obj.resolve())
-                    
+                        
                     logger.info(f"🔍 [Orchestrator] 解析后的绝对路径: {file_path}")
-                    
+                        
                     try:
                         # Inspect file to get metadata for intent classification
                         file_metadata_for_intent = self.file_inspector.inspect_file(file_path)
@@ -548,7 +772,7 @@ class AgentOrchestrator:
                     logger.warning(f"⚠️ [Orchestrator] 无法从文件对象中提取路径")
             else:
                 logger.info(f"ℹ️ [Orchestrator] 没有文件，跳过文件检查")
-            
+                
             # Analyze intent: classify domain and determine target_steps
             intent_result = await planner._classify_intent(refined_query, file_metadata_for_intent)
             domain_name = intent_result.get("domain_name")
@@ -726,7 +950,7 @@ class AgentOrchestrator:
                         
                         # Build diagnosis message
                         if domain_name == "Metabolomics":
-                            diagnosis_message = f"""### 📊 数据体检报告
+                                    diagnosis_message = f"""### 📊 数据体检报告
 
 **数据规模**:
 - **样本数**: {n_samples} 个
@@ -755,15 +979,15 @@ class AgentOrchestrator:
 **数据质量**: 数据已就绪，可以开始分析。
 
 **下一步**: 已为您规划分析流程，请确认执行。"""
-                        
-                        yield self._format_sse("diagnosis", {
-                            "message": diagnosis_message,
-                            "n_samples": n_samples,
-                            "n_features": n_features,
-                            "file_type": file_metadata.get('file_type'),
-                            "status": "data_ready"
-                        })
-                        await asyncio.sleep(0.01)
+                            
+                            yield self._format_sse("diagnosis", {
+                                "message": diagnosis_message,
+                                "n_samples": n_samples,
+                                "n_features": n_features,
+                                "file_type": file_metadata.get('file_type'),
+                                "status": "data_ready"
+                            })
+                            await asyncio.sleep(0.01)
                 except Exception as e:
                     logger.error(f"❌ [Orchestrator] Path A: 文件检查失败: {e}", exc_info=True)
                     yield self._format_sse("error", {
@@ -806,7 +1030,7 @@ class AgentOrchestrator:
                 
                 logger.info(f"✅ [Orchestrator] Path A: 工作流规划完成")
                 logger.info(f"✅ [Orchestrator] Path A: 返回结果 template_mode: {result.get('template_mode', 'N/A')}")
-                
+                    
                 # A3. Force Validation
                 if isinstance(result, dict):
                     # FORCE OVERRIDE: Explicitly set template_mode = False
@@ -882,10 +1106,10 @@ class AgentOrchestrator:
                         
                         yield self._format_sse("done", {"status": "success"})
                         return  # 🔥 CRITICAL: STOP HERE - Do NOT auto-execute
-                
-                    # 🔥 REMOVED: Auto-execution logic
-                    # The workflow should stop at planning stage and wait for explicit execution request
-                    # Execution will be triggered by a second request with workflow_data parameter
+                        
+                        # 🔥 REMOVED: Auto-execution logic
+                        # The workflow should stop at planning stage and wait for explicit execution request
+                        # Execution will be triggered by a second request with workflow_data parameter
                 else:
                     # 🔥 CRITICAL: If result is not a dict, log error but still try to execute if workflow_data exists
                     logger.error(f"❌ [Orchestrator] Path A: result 不是字典类型: {type(result)}")

@@ -419,34 +419,98 @@
         .report-section h6 { font-weight: 600; color: #555; margin-bottom: 10px; }
         .llm-diagnosis { background: #f0f7ff; border-left: 4px solid #4d6bfe; padding: 15px; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333; }
 
-        /* 打印样式 */
+        /* 🔥 FEATURE: DeepSeek-R1 Reasoning Box Styles */
+        .thought-box {
+            background-color: #f8f9fa;
+            border-left: 3px solid #6c757d;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            color: #555;
+            font-family: 'Courier New', monospace;
+        }
+        .thought-box summary {
+            cursor: pointer;
+            font-weight: bold;
+            color: #0d6efd;
+            user-select: none;
+            padding: 8px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+        .thought-box summary:hover {
+            background-color: #e7f1ff;
+        }
+        .thought-content {
+            font-size: 13px;
+            line-height: 1.6;
+            color: #555;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            margin-top: 8px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .thought-summary {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* 🔥 TASK 1: Table Responsive & Image Overflow Fix */
+        .table-responsive { 
+            overflow-x: auto; 
+            max-width: 100%; 
+            -webkit-overflow-scrolling: touch;
+        }
+        .table-responsive table {
+            margin-bottom: 0;
+        }
+        .execution-results img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        /* 🔥 TASK 4: Print CSS - Only print report card */
         @media print {
             @page { margin: 1cm; size: auto; }
-            body { background: white; -webkit-print-color-adjust: exact; }
             
-            /* 隐藏无关元素 */
-            .navbar, .input-wrapper, .message-row.user, .avatar, .message-footer, .user-actions, #stopBtnContainer { 
-                display: none !important; 
+            /* Hide everything by default */
+            body * { 
+                visibility: hidden; 
             }
             
-            /* 确保报告可见 */
-            .chat-scroll-area { overflow: visible !important; height: auto !important; }
-            .chat-content { max-width: 100% !important; margin: 0 !important; }
-            
-            /* 报告样式微调 */
-            .analysis-report { 
-                box-shadow: none !important; 
-                border: none !important; 
-                margin-top: 0 !important;
+            /* Show only unified report container */
+            .unified-report-container, 
+            .unified-report-container * { 
+                visibility: visible; 
             }
-            .report-header button { display: none !important; }
             
-            /* 🔥 关键：强制展开所有折叠面板，确保打印时能看到里面的图和字 */
+            /* Position report at top-left */
+            .unified-report-container { 
+                position: absolute; 
+                left: 0; 
+                top: 0; 
+                width: 100%; 
+            }
+            
+            /* Ensure accordion items are expanded */
             .accordion-collapse { 
                 display: block !important; 
                 height: auto !important; 
                 opacity: 1 !important; 
                 visibility: visible !important;
+            }
+            
+            /* Hide print button in print */
+            .unified-report-container .btn { 
+                display: none !important; 
             }
             .accordion-button::after { display: none !important; } /* 隐藏折叠箭头 */
             .accordion-button { pointer-events: none; padding-left: 0; font-weight: bold; color: #000 !important; background: none !important; }
@@ -903,25 +967,25 @@
                     return;
                 }
             
-                // 🔥 Step 1: 如果有待上传文件，先上传
-                let newlyUploadedFiles = [];
-                if (pendingFiles.length > 0) {
+            // 🔥 Step 1: 如果有待上传文件，先上传
+            let newlyUploadedFiles = [];
+            if (pendingFiles.length > 0) {
                     console.log('📤 [sendMessage] 检测到待上传文件，开始上传...');
-                    try {
-                        newlyUploadedFiles = await uploadPendingFiles();
+                try {
+                    newlyUploadedFiles = await uploadPendingFiles();
                         console.log('✅ [sendMessage] 文件上传完成，新上传文件数:', newlyUploadedFiles.length);
-                        // 将新上传的文件添加到 uploadedFiles 数组
-                        uploadedFiles.push(...newlyUploadedFiles);
+                    // 将新上传的文件添加到 uploadedFiles 数组
+                    uploadedFiles.push(...newlyUploadedFiles);
                         console.log('📋 [sendMessage] 当前 uploadedFiles 总数:', uploadedFiles.length);
-                    } catch (e) {
+                } catch (e) {
                         console.error('❌ [sendMessage] 文件上传失败:', e);
-                        toggleLoadingState(false);
-                        const errorMsg = e.message || String(e);
-                        alert(`文件上传失败: ${errorMsg}`);
-                        appendMessage('assistant', `❌ 错误: ${errorMsg}`);
-                        return; // 上传失败，停止后续处理
-                    }
-                } else {
+                    toggleLoadingState(false);
+                    const errorMsg = e.message || String(e);
+                    alert(`文件上传失败: ${errorMsg}`);
+                    appendMessage('assistant', `❌ 错误: ${errorMsg}`);
+                    return; // 上传失败，停止后续处理
+                }
+            } else {
                     console.log('ℹ️ [sendMessage] 没有待上传文件，使用已上传的文件:', uploadedFiles.length);
                 }
                 
@@ -953,7 +1017,11 @@
             }
             
             // 🔥 BUG FIX: 创建 AI 消息并确保 DOM 结构完整
-            const aiMessageDiv = appendMessage('ai', '<span class="spinner-border spinner-border-sm text-primary" role="status"></span><span style="margin-left:8px; color:#666;">思考中...</span>', null, null, true);
+            // 🔥 PHASE 3: Fix spinner crash - Use unique ID instead of querySelector
+            const spinnerId = `spinner-${Date.now()}`;
+            const aiMessageDiv = appendMessage('ai', `<span id="${spinnerId}" class="spinner-border spinner-border-sm text-primary" role="status"></span><span style="margin-left:8px; color:#666;">思考中...</span>`, null, null, true);
+            // Store spinner ID for later removal
+            window.currentSpinnerId = spinnerId;
             
             // 获取 message-row 和 message-container
             const messageRow = aiMessageDiv.closest('.message-row');
@@ -1219,11 +1287,25 @@
                                 
                             case 'message':
                                 messageBuffer += data.content || '';
-                                updateChatBubble(messageBuffer);
+                                // 🔥 FEATURE: Stream parsing for <think> tags
+                                updateChatBubbleWithReasoning(messageBuffer);
                                 break;
                                 
                             case 'diagnosis':
-                                renderDiagnosisCard(data, data);
+                                // 🔥 TASK 3: Render diagnosis report LAST (after execution results)
+                                // 🔥 FEATURE: Support streaming reasoning tags
+                                if (data.report_data && data.report_data.diagnosis) {
+                                    renderDiagnosisCardWithStreaming(data.report_data.diagnosis, data);
+                                } else {
+                                    renderDiagnosisCardWithStreaming(data, data);
+                                }
+                                break;
+                                
+                            case 'step_result':
+                                // 🔥 TASK 3: Render execution steps FIRST (Accordion)
+                                if (data.report_data && data.report_data.steps_details) {
+                                    renderExecutionSteps(data.report_data.steps_details);
+                                }
                                 break;
                                 
                             case 'workflow':
@@ -1231,23 +1313,27 @@
                                 break;
                                 
                             case 'result':
-                                // 🔥 CRITICAL FIX: 处理完整结果，但避免重复渲染工作流卡片
-                                // 工作流卡片应该在 'workflow' 事件中渲染，这里只处理诊断
+                                // 🔥 TASK 3: Reorder output - Render Execution Results FIRST, then Diagnosis Report LAST
                                 // 支持多种数据结构：report_data.diagnosis/workflow 或 diagnosis_report/workflow_config
                                 if (data.report_data) {
                                     // 新格式：report_data.diagnosis 和 report_data.workflow
-                                    // 🔥 TASK 3: 传递完整的 data 对象以访问 steps_details
-                                    if (data.report_data.diagnosis) {
-                                        renderDiagnosisCard(data.report_data.diagnosis, data);
-                                    }
-                                    // 🔥 PART 2: ALWAYS render execution steps, even on error
+                                    // 🔥 TASK 3: FIRST render execution steps (Accordion)
                                     if (data.report_data.steps_details && data.report_data.steps_details.length > 0) {
                                         renderExecutionSteps(data.report_data.steps_details);
+                                    }
+                                    // 🔥 TASK 3: THEN render diagnosis report (Blue Box) LAST
+                                    if (data.report_data.diagnosis) {
+                                        renderDiagnosisCard(data.report_data.diagnosis, data);
                                     }
                                     // 🔥 CRITICAL FIX: 不在 result 事件中渲染 workflow，避免重复
                                     // workflow 应该在 'workflow' 事件中渲染
                                 } else {
                                     // 旧格式：diagnosis_report 和 workflow_config
+                                    // 🔥 TASK 3: FIRST render execution steps if available
+                                    if (data.steps_details && data.steps_details.length > 0) {
+                                        renderExecutionSteps(data.steps_details);
+                                    }
+                                    // 🔥 TASK 3: THEN render diagnosis report LAST
                                     if (data.diagnosis_report) {
                                         renderDiagnosisCard(data.diagnosis_report, data);
                                     }
@@ -1283,6 +1369,27 @@
                     function updateProcessLog(content, state) {
                         // 映射技术状态到用户友好文本
                         const userFriendlyText = mapStatusToUserFriendly(content, state);
+                        
+                        // 🔥 TASK 2: Log de-duplication - Update instead of append if identical
+                        const processStepsDiv = document.querySelector('.process-steps');
+                        if (processStepsDiv) {
+                            const lastStep = processStepsDiv.lastElementChild;
+                            if (lastStep) {
+                                const lastText = lastStep.querySelector('.process-step-text')?.textContent || '';
+                                // If the new message is identical to the last one, update timestamp/spinner instead
+                                if (lastText === userFriendlyText) {
+                                    console.log(`🔄 [ProcessLog] 重复消息，更新最后一步: ${userFriendlyText}`);
+                                    // Update the spinner/icon for active state
+                                    if (state === 'running') {
+                                        const icon = lastStep.querySelector('.process-step-icon');
+                                        if (icon) {
+                                            icon.innerHTML = '<i class="bi bi-arrow-repeat spin"></i>';
+                                        }
+                                    }
+                                    return; // Don't append duplicate
+                                }
+                            }
+                        }
                         
                         // 确定步骤状态
                         let stepStatus = 'active';
@@ -1342,6 +1449,145 @@
                         return content || '处理中...';
                     }
                     
+                    // 🔥 FEATURE: State management for reasoning tags
+                    let isInReasoningMode = false;
+                    let reasoningContentBuffer = '';
+                    let finalAnswerBuffer = '';
+                    let thoughtBoxElement = null;
+                    let thoughtContentElement = null;
+                    let finalAnswerElement = null;
+                    
+                    // 🔥 FEATURE: Stream parser for <think> tags
+                    function parseReasoningTags(text) {
+                        const result = {
+                            thinking: '',
+                            answer: '',
+                            isComplete: false
+                        };
+                        
+                        // Pattern 1: Complete tags <think>...</think>
+                        const completePattern = /<think>(.*?)<\/redacted_reasoning>/gs;
+                        const completeMatches = [...text.matchAll(completePattern)];
+                        
+                        if (completeMatches.length > 0) {
+                            result.thinking = completeMatches.map(m => m[1]).join('\n\n');
+                            result.answer = text.replace(completePattern, '').trim();
+                            result.isComplete = true;
+                            return result;
+                        }
+                        
+                        // Pattern 2: Opening tag detected (streaming)
+                        const openingTagIndex = text.indexOf('<think>');
+                        const closingTagIndex = text.indexOf('</think>');
+                        
+                        if (openingTagIndex !== -1 && closingTagIndex === -1) {
+                            // We're inside reasoning tags, but haven't closed yet
+                            const beforeTag = text.substring(0, openingTagIndex);
+                            const afterTag = text.substring(openingTagIndex + '<think>'.length);
+                            result.thinking = afterTag;
+                            result.answer = beforeTag;
+                            result.isComplete = false;
+                            return result;
+                        }
+                        
+                        if (openingTagIndex !== -1 && closingTagIndex !== -1) {
+                            // Complete reasoning block found
+                            result.thinking = text.substring(openingTagIndex + '<think>'.length, closingTagIndex);
+                            result.answer = text.substring(0, openingTagIndex) + text.substring(closingTagIndex + '</think>'.length);
+                            result.isComplete = true;
+                            return result;
+                        }
+                        
+                        // Pattern 3: Already closed, just answer content
+                        if (openingTagIndex === -1 && closingTagIndex !== -1) {
+                            result.answer = text.replace(/<\/redacted_reasoning>/g, '').trim();
+                            result.isComplete = true;
+                            return result;
+                        }
+                        
+                        // Pattern 4: No tags found
+                        result.answer = text;
+                        result.isComplete = true;
+                        return result;
+                    }
+                    
+                    // 🔥 FEATURE: Update chat bubble with reasoning support
+                    function updateChatBubbleWithReasoning(text) {
+                        const textZoneRef = window.currentMessageZones?.textZone || aiContentDiv;
+                        
+                        if (!textZoneRef) {
+                            console.error('❌ [SSE] textZone 不存在，无法更新聊天气泡');
+                            return;
+                        }
+                        
+                        // 移除"思考中..."的 spinner
+                        const spinner = textZoneRef.querySelector('.spinner-border');
+                        if (spinner) {
+                            spinner.remove();
+                        }
+                        
+                        // Parse reasoning tags
+                        const parsed = parseReasoningTags(text);
+                        
+                        // Initialize thought box if needed
+                        if (!thoughtBoxElement && parsed.thinking) {
+                            thoughtBoxElement = document.createElement('details');
+                            thoughtBoxElement.className = 'thought-box';
+                            thoughtBoxElement.open = true; // Open by default
+                            
+                            const summary = document.createElement('summary');
+                            summary.className = 'thought-summary';
+                            summary.innerHTML = '<i class="bi bi-lightbulb"></i> 💡 深度思考中...';
+                            
+                            thoughtContentElement = document.createElement('div');
+                            thoughtContentElement.className = 'thought-content';
+                            
+                            thoughtBoxElement.appendChild(summary);
+                            thoughtBoxElement.appendChild(thoughtContentElement);
+                            
+                            // Insert before final answer
+                            if (textZoneRef.firstChild) {
+                                textZoneRef.insertBefore(thoughtBoxElement, textZoneRef.firstChild);
+                            } else {
+                                textZoneRef.appendChild(thoughtBoxElement);
+                            }
+                        }
+                        
+                        // Update thinking content
+                        if (parsed.thinking && thoughtContentElement) {
+                            reasoningContentBuffer = parsed.thinking;
+                            thoughtContentElement.textContent = reasoningContentBuffer;
+                            
+                            // Update summary text if reasoning is complete
+                            if (parsed.isComplete && thoughtBoxElement) {
+                                const summary = thoughtBoxElement.querySelector('summary');
+                                if (summary) {
+                                    summary.innerHTML = '<i class="bi bi-lightbulb-fill"></i> 💭 思考过程 (已完成)';
+                                }
+                            }
+                        }
+                        
+                        // Update final answer
+                        if (parsed.answer) {
+                            finalAnswerBuffer = parsed.answer;
+                            if (!finalAnswerElement) {
+                                finalAnswerElement = document.createElement('div');
+                                finalAnswerElement.className = 'final-answer';
+                                textZoneRef.appendChild(finalAnswerElement);
+                            }
+                            
+                            try {
+                                finalAnswerElement.innerHTML = marked.parse(finalAnswerBuffer);
+                            } catch (e) {
+                                console.error('❌ [SSE] Markdown 解析错误:', e);
+                                finalAnswerElement.innerHTML = escapeHtml(finalAnswerBuffer);
+                            }
+                        }
+                        
+                        // Scroll to bottom
+                        textZoneRef.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                    
                     // 🔥 CRITICAL REFACTOR: 更新聊天气泡 - 只更新 textZone，不覆盖 cardZone
                     function updateChatBubble(text) {
                         // 🔥 CRITICAL: 使用 textZone（如果存在），否则回退到 aiContentDiv
@@ -1369,9 +1615,8 @@
                         }
                     }
                     
-                    // 🔥 CRITICAL REFACTOR: 渲染诊断卡片 - 只更新 cardZone，不覆盖 textZone
+                    // 🔥 TASK 3: Unified Report - Render diagnosis in expert insight section
                     function renderDiagnosisCard(diagnosisData, fullData = null) {
-                        // 🔥 CRITICAL: 使用 cardZone（如果存在），否则回退到 aiContentDiv
                         const cardZoneRef = window.currentMessageZones?.cardZone || aiContentDiv;
                         
                         if (!cardZoneRef) {
@@ -1379,31 +1624,7 @@
                             return;
                         }
                         
-                        // 🔥 TASK 3: 检查是否有步骤错误（优先从 fullData 获取，否则从全局状态）
-                        let stepErrors = [];
-                        if (fullData && fullData.report_data && fullData.report_data.steps_details) {
-                            fullData.report_data.steps_details.forEach(step => {
-                                if (step.status === 'error' || step.error) {
-                                    const stepName = step.step_name || step.name || step.step_id || '未知步骤';
-                                    const errorMsg = step.error || step.message || '执行失败';
-                                    stepErrors.push({ step: stepName, error: errorMsg });
-                                }
-                            });
-                        } else {
-                            // 回退到全局状态
-                            const currentMessage = window.currentMessageZones?.currentMessage;
-                            if (currentMessage && currentMessage.report_data && currentMessage.report_data.steps_details) {
-                                currentMessage.report_data.steps_details.forEach(step => {
-                                    if (step.status === 'error' || step.error) {
-                                        const stepName = step.step_name || step.name || step.step_id || '未知步骤';
-                                        const errorMsg = step.error || step.message || '执行失败';
-                                        stepErrors.push({ step: stepName, error: errorMsg });
-                                    }
-                                });
-                            }
-                        }
-                        
-                        // 🔥 CRITICAL: 检查是否为真实数据统计（有 n_samples 或 n_features）
+                        // 🔥 TASK 4: Check if template mode - hide diagnosis during execution phase
                         const hasRealStats = diagnosisData && (
                             diagnosisData.n_samples !== undefined || 
                             diagnosisData.n_features !== undefined ||
@@ -1411,26 +1632,53 @@
                             diagnosisData.n_genes !== undefined
                         );
                         
-                        // 🔥 CRITICAL: 检查是否为模板模式
                         const isTemplateMode = diagnosisData && (
                             diagnosisData.template_mode || 
                             diagnosisData.status === 'template_ready'
-                        ) && !hasRealStats;  // 🔥 CRITICAL: 如果有真实统计，不是模板模式
+                        ) && !hasRealStats;
                         
-                        // 🔥 TASK 3: 如果有步骤错误，显示错误警告
-                        if (stepErrors.length > 0) {
-                            const errorHtml = `
-                                <div class="alert alert-danger mt-3" style="border-left: 4px solid #dc3545;">
-                                    <h6>
-                                        <i class="bi bi-exclamation-triangle-fill"></i> 
-                                        ⚠️ 分析过程中出现错误
-                                    </h6>
-                                    <div style="font-size: 14px; line-height: 1.8; color: #333;">
-                                        ${stepErrors.map(e => `<div><strong>${e.step}:</strong> ${e.error}</div>`).join('')}
+                        // 🔥 TASK 4: Hide template mode diagnosis during execution
+                        if (isTemplateMode) {
+                            console.log('ℹ️ [renderDiagnosisCard] 模板模式诊断，跳过渲染');
+                            return;
+                        }
+                        
+                        // 🔥 REQUIREMENT 1: Find or create unified report container (prevent duplicates)
+                        let reportContainer = cardZoneRef.querySelector('.unified-report-container');
+                        if (!reportContainer) {
+                            // Create unified report container if it doesn't exist
+                            reportContainer = document.createElement('div');
+                            reportContainer.className = 'unified-report-container mt-3';
+                            reportContainer.innerHTML = `
+                                <div class="card border-0 shadow-sm">
+                                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0">
+                                            <i class="bi bi-file-earmark-text"></i> 📊 数据诊断报告
+                                        </h5>
+                                        <button class="btn btn-sm btn-light" onclick="window.print()">
+                                            <i class="bi bi-printer"></i> 🖨️ 打印报告
+                                        </button>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="execution-results-section"></div>
+                                        <div class="expert-insight-section mt-4"></div>
                                     </div>
                                 </div>
                             `;
-                            cardZoneRef.insertAdjacentHTML('beforeend', errorHtml);
+                            cardZoneRef.appendChild(reportContainer);
+                        }
+                        
+                        const expertSection = reportContainer.querySelector('.expert-insight-section');
+                        if (!expertSection) {
+                            console.error('❌ [renderDiagnosisCard] 专家洞察区域不存在');
+                            return;
+                        }
+                        
+                        // 🔥 REQUIREMENT 1: Check if already rendered to prevent duplicates
+                        const existingTitle = expertSection.querySelector('h6');
+                        if (existingTitle && existingTitle.textContent.includes('AI 专家分析报告')) {
+                            console.log('ℹ️ [renderDiagnosisCard] 专家报告已存在，跳过重复渲染');
+                            return;
                         }
                         
                         // 检查是否为结构化诊断数据
@@ -1443,30 +1691,76 @@
                             diagnosisMessage = JSON.stringify(diagnosisData, null, 2);
                         }
                         
-                        // 🔥 CRITICAL: 根据模式选择不同的样式和图标
-                        const alertClass = isTemplateMode ? 'alert-warning' : 'alert-info';
-                        const borderColor = isTemplateMode ? '#ffc107' : '#0dcaf0';
-                        const icon = isTemplateMode ? 'bi-clipboard-check' : 'bi-clipboard-data';
-                        const title = isTemplateMode ? '📋 方案已生成' : '📊 诊断报告';
+                        // 🔥 Phase 4: Extract reasoning content from <think> tags (DeepSeek-R1 format)
+                        let thinkingContent = '';
+                        let reportContent = diagnosisMessage;
                         
-                        const diagnosisHtml = `
-                            <div class="alert ${alertClass} mt-3" style="border-left: 4px solid ${borderColor};">
-                                <h6>
-                                    <i class="bi ${icon}"></i> 
-                                    ${title}
-                                </h6>
-                                <div style="font-size: 14px; line-height: 1.6; color: #333;">
-                                    ${marked.parse(diagnosisMessage)}
+                        // Match various thinking tag formats (DeepSeek-R1 uses <think>...</think>)
+                        const thinkPatterns = [
+                            /<think>(.*?)<\/think>/gs,  // DeepSeek-R1 standard format
+                            /<think>(.*?)<\/redacted_reasoning>/gs,  // Alternative format
+                            /<reasoning>(.*?)<\/reasoning>/gs  // Generic format
+                        ];
+                        
+                        for (const pattern of thinkPatterns) {
+                            const matches = [...diagnosisMessage.matchAll(pattern)];
+                            if (matches && matches.length > 0) {
+                                // Extract all thinking content
+                                thinkingContent = matches.map(m => m[1]).join('\n\n');
+                                // Remove thinking tags from report content
+                                reportContent = diagnosisMessage.replace(pattern, '').trim();
+                                break;
+                            }
+                        }
+                        
+                        // 🔥 REQUIREMENT 1: Dynamic Titles based on status (prevent confusion)
+                        let reportTitle = "💡 AI 专家分析报告";
+                        let reportIcon = "bi-lightbulb";
+                        
+                        // Check if this is pre-analysis (data diagnosis) or post-analysis
+                        if (fullData) {
+                            const status = fullData.status || fullData.report_data?.status || '';
+                            // 计划阶段（数据诊断）显示"数据诊断报告"
+                            if (status === 'data_ready' || status === 'template_ready' || diagnosisMessage.includes('数据体检') || diagnosisMessage.includes('数据概况') || diagnosisMessage.includes('数据诊断')) {
+                                reportTitle = "📊 数据诊断报告";
+                                reportIcon = "bi-clipboard-check";
+                            }
+                        }
+                        
+                        // 🔥 Phase 4: Build HTML with collapsible thinking section
+                        let thinkingHtml = '';
+                        if (thinkingContent) {
+                            const thinkingId = `thinking-${Date.now()}`;
+                            thinkingHtml = `
+                                <div class="mb-3">
+                                    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#${thinkingId}" aria-expanded="false" aria-controls="${thinkingId}">
+                                        <i class="bi bi-lightbulb"></i> 💭 查看思考过程
+                                    </button>
+                                    <div class="collapse mt-2" id="${thinkingId}">
+                                        <div class="card card-body bg-light" style="font-size: 13px; line-height: 1.6; color: #555; max-height: 400px; overflow-y: auto;">
+                                            <pre style="white-space: pre-wrap; font-family: 'Courier New', monospace; margin: 0;">${escapeHtml(thinkingContent)}</pre>
+                                        </div>
+                                    </div>
                                 </div>
+                            `;
+                        }
+                        
+                        // 🔥 REQUIREMENT 1: Render in expert insight section (replace, don't append)
+                        const diagnosisHtml = `
+                            <h6 class="mb-3">
+                                <i class="bi ${reportIcon}"></i> ${reportTitle}
+                                </h6>
+                            ${thinkingHtml}
+                            <div class="expert-report-content" style="font-size: 14px; line-height: 1.8; color: #333; background: #f0f7ff; padding: 20px; border-radius: 8px; border-left: 4px solid #4d6bfe;">
+                                ${marked.parse(reportContent)}
                             </div>
                         `;
                         
-                        // 🔥 CRITICAL: 追加到 cardZone（不覆盖 textZone）
-                        cardZoneRef.insertAdjacentHTML('beforeend', diagnosisHtml);
-                        console.log(`✅ [renderDiagnosisCard] 诊断卡片已渲染到 cardZone (模板模式: ${isTemplateMode}, 有真实统计: ${hasRealStats}, 错误数: ${stepErrors.length})`);
+                        expertSection.innerHTML = diagnosisHtml;
+                        console.log(`✅ [renderDiagnosisCard] ${reportTitle}已渲染到统一报告容器${thinkingContent ? ' (包含思考过程)' : ''}`);
                     }
                     
-                    // 🔥 PART 2: 渲染执行步骤列表（即使失败也显示）
+                    // 🔥 TASK 3: Unified Report Container - Create or update single report card
                     function renderExecutionSteps(stepsDetails) {
                         const cardZoneRef = window.currentMessageZones?.cardZone || aiContentDiv;
                         
@@ -1475,47 +1769,75 @@
                             return;
                         }
                         
-                        // 检查是否已经渲染过步骤列表
-                        const existingSteps = cardZoneRef.querySelector('.execution-steps-list');
-                        if (existingSteps) {
-                            existingSteps.remove(); // 移除旧的，重新渲染
-                        }
-                        
-                        let stepsHtml = `
-                            <div class="execution-steps-list mt-3">
+                        // 🔥 TASK 3: Check for existing unified report container
+                        let reportContainer = cardZoneRef.querySelector('.unified-report-container');
+                        if (!reportContainer) {
+                            // Create unified report container
+                            reportContainer = document.createElement('div');
+                            reportContainer.className = 'unified-report-container mt-3';
+                            reportContainer.innerHTML = `
                                 <div class="card border-0 shadow-sm">
-                                    <div class="card-header bg-light">
-                                        <h6 class="mb-0">
-                                            <i class="bi bi-list-check"></i> 执行步骤状态
-                                        </h6>
+                                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0">
+                                            <i class="bi bi-file-earmark-text"></i> 📊 数据诊断报告
+                                        </h5>
+                                        <button class="btn btn-sm btn-light" onclick="window.print()">
+                                            <i class="bi bi-printer"></i> 🖨️ 打印报告
+                                        </button>
                                     </div>
                                     <div class="card-body">
-                                        <div class="list-group list-group-flush">
+                                        <div class="execution-results-section"></div>
+                                        <div class="expert-insight-section mt-4"></div>
+                                </div>
+                            </div>
+                        `;
+                            cardZoneRef.appendChild(reportContainer);
+                        }
+                        
+                        const executionSection = reportContainer.querySelector('.execution-results-section');
+                        if (!executionSection) {
+                            console.error('❌ [renderExecutionSteps] 执行结果区域不存在');
+                            return;
+                        }
+                        
+                        const accordionId = `exec-results-${Date.now()}`;
+                        const totalSteps = stepsDetails.length;
+                        const lastIndex = totalSteps - 1;
+                        
+                        let stepsHtml = `
+                            <h6 class="mb-3">
+                                <i class="bi bi-list-check"></i> 执行结果详情
+                            </h6>
+                            <div class="accordion" id="${accordionId}">
                         `;
                         
                         stepsDetails.forEach((step, index) => {
                             const stepName = step.step_name || step.name || step.step_id || `步骤 ${index + 1}`;
                             const stepStatus = step.status || 'pending';
                             const stepError = step.error || step.message || '';
+                            const stepId = `step-${index}-${accordionId}`;
                             
                             // 状态图标和颜色
                             let statusIcon = '⚪'; // 默认：待执行
                             let statusClass = 'text-secondary';
-                            let bgClass = 'bg-light';
                             
                             if (stepStatus === 'success') {
                                 statusIcon = '✅';
                                 statusClass = 'text-success';
-                                bgClass = 'bg-success bg-opacity-10';
                             } else if (stepStatus === 'error') {
                                 statusIcon = '❌';
                                 statusClass = 'text-danger';
-                                bgClass = 'bg-danger bg-opacity-10';
+                            } else if (stepStatus === 'warning') {
+                                statusIcon = '⚠️';
+                                statusClass = 'text-warning';
                             } else if (stepStatus === 'running') {
                                 statusIcon = '🟡';
                                 statusClass = 'text-warning';
-                                bgClass = 'bg-warning bg-opacity-10';
                             }
+                            
+                            // 🔥 TASK 2: Default expand first and last step (if they have results)
+                            const hasResults = stepStatus === 'success' || stepStatus === 'warning';
+                            const shouldExpand = (index === 0 || index === lastIndex) && hasResults;
                             
                             // 🔥 PHASE 1: Enhanced result data extraction
                             const stepResult = step.step_result || {};
@@ -1604,7 +1926,7 @@
                                     });
                                 }
                                 
-                                // Render tables (enhanced)
+                                // 🔥 TASK 1: Render tables with table-responsive wrapper
                                 if (tables && tables.length > 0) {
                                     // Handle different table formats
                                     let tableData = tables;
@@ -1621,14 +1943,14 @@
                                         const firstRow = tables[0];
                                         if (typeof firstRow === 'object' && firstRow !== null) {
                                             const headers = Object.keys(firstRow);
-                                            const displayRows = tables.slice(0, 10); // Show first 10 rows
+                                            const displayRows = tables.slice(0, 5); // Show first 5 rows
                                             
                                             resultContentHtml += `
                                                 <div class="mt-2">
                                                     <h6 class="small text-muted">结果表格（显示前 ${displayRows.length} 行，共 ${tables.length} 行）</h6>
-                                                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                                                    <div class="table-responsive">
                                                         <table class="table table-sm table-bordered table-striped table-hover mt-1">
-                                                            <thead class="table-light sticky-top">
+                                                            <thead class="table-light">
                                                                 <tr>
                                                                     ${headers.map(key => `<th class="small">${escapeHtml(String(key))}</th>`).join('')}
                                                                 </tr>
@@ -1659,34 +1981,39 @@
                                 }
                             }
                             
+                            // 🔥 TASK 3: Use Accordion structure WITHOUT data-bs-parent (allows independent expansion)
                             stepsHtml += `
-                                <div class="list-group-item ${bgClass}">
-                                    <div class="d-flex align-items-start">
-                                        <span class="me-2" style="font-size: 1.2em;">${statusIcon}</span>
-                                        <div class="flex-grow-1">
-                                            <strong class="${statusClass}">${stepName}</strong>
-                                            ${step.summary ? `<div class="small text-muted mt-1">${step.summary}</div>` : ''}
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button ${shouldExpand ? '' : 'collapsed'}" 
+                                                type="button" 
+                                                data-bs-toggle="collapse" 
+                                                data-bs-target="#${stepId}"
+                                                aria-expanded="${shouldExpand}">
+                                            <span class="me-2" style="font-size: 1.1em;">${statusIcon}</span>
+                                            <strong class="${statusClass}">${escapeHtml(stepName)}</strong>
+                                        </button>
+                                    </h2>
+                                    <div id="${stepId}" 
+                                         class="accordion-collapse collapse ${shouldExpand ? 'show' : ''}">
+                                        <div class="accordion-body">
+                                            ${step.summary ? `<div class="small text-muted mb-2">${escapeHtml(step.summary)}</div>` : ''}
                                             ${stepError && stepStatus === 'error' ? `
-                                                <div class="alert alert-danger alert-sm mt-2 mb-0" style="font-size: 0.875rem; padding: 0.5rem;">
-                                                    <strong>错误：</strong>${stepError}
+                                                <div class="alert alert-danger alert-sm mb-2" style="font-size: 0.875rem; padding: 0.5rem;">
+                                                    <strong>错误：</strong>${escapeHtml(stepError)}
                                                 </div>
                                             ` : ''}
-                                            ${resultContentHtml}
+                                            ${resultContentHtml || '<p class="text-muted small">暂无结果数据</p>'}
                                         </div>
                                     </div>
                                 </div>
                             `;
                         });
                         
-                        stepsHtml += `
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        `;
+                        stepsHtml += `</div>`;
                         
-                        cardZoneRef.insertAdjacentHTML('beforeend', stepsHtml);
-                        console.log(`✅ [renderExecutionSteps] 已渲染 ${stepsDetails.length} 个步骤`);
+                        executionSection.innerHTML = stepsHtml;
+                        console.log(`✅ [renderExecutionSteps] 已渲染 ${stepsDetails.length} 个步骤到统一报告容器`);
                     }
                     
                     // 🔥 CRITICAL REFACTOR: 渲染工作流卡片 - 只更新 cardZone，不覆盖 textZone
@@ -1784,7 +2111,7 @@
                         let formHtml = `<div class="alert alert-success mt-3 params-form" id="${formId}" style="border-left: 4px solid #28a745;">
                             <h5>
                                 <i class="bi bi-diagram-3"></i> 📋 ${workflowName}
-                                ${isTemplateMode ? '<span class="badge bg-secondary ms-2">[模版预览 Mode]</span>' : ''}
+                                    ${isTemplateMode ? '<span class="badge bg-secondary ms-2">[模版预览 Mode]</span>' : ''}
                             </h5>`;
                         
                         // 🔥 Task 1: Template Mode - Upload Button
@@ -2073,30 +2400,40 @@
                         submitWorkflow(`wf-exec-${workflowId}`, steps.length, JSON.stringify(filePaths));
                     };
                     
-                    // 🔥 URGENT FIX: 处理完成事件 - 移除 Thinking spinner
+                    // 🔥 REQUIREMENT 1: 处理完成事件 - 彻底移除 Thinking spinner
                     function handleDoneEvent(data) {
                         clearInterval(timerInterval);
                         const duration = ((Date.now() - startTime) / 1000).toFixed(1);
                         
-                        // 🔥 CRITICAL: 移除 Thinking spinner
-                        if (aiContentDiv) {
-                            const spinner = aiContentDiv.querySelector('.spinner-border');
-                            if (spinner) {
-                                spinner.remove();
-                            }
-                            // 移除"思考中..."文本
-                            const thinkingText = aiContentDiv.querySelector('span[style*="思考中"]');
-                            if (thinkingText) {
-                                thinkingText.remove();
-                            }
-                            // 如果内容为空，显示完成消息
-                            if (!aiContentDiv.innerHTML.trim() || aiContentDiv.innerHTML.trim() === '') {
-                                aiContentDiv.innerHTML = '<div class="alert alert-success">✅ 处理完成</div>';
-                            }
+                        // 🔥 REQUIREMENT 1: CRITICAL - 彻底移除所有 Thinking spinner
+                        // Remove from textZone
+                        const textZoneRef = window.currentMessageZones?.textZone;
+                        if (textZoneRef) {
+                            const spinner = textZoneRef.querySelector('.spinner-border');
+                            if (spinner) spinner.remove();
+                            const thinkingText = textZoneRef.querySelector('span[style*="思考中"], span:contains("思考中")');
+                            if (thinkingText) thinkingText.remove();
                         }
                         
-                        // 添加完成步骤
-                        addProcessStep(`处理完成 (${duration}s)`, 'done');
+                        // Remove from aiContentDiv
+                        if (aiContentDiv) {
+                            const spinner = aiContentDiv.querySelector('.spinner-border');
+                            if (spinner) spinner.remove();
+                            const thinkingText = aiContentDiv.querySelector('span[style*="思考中"]');
+                            if (thinkingText) thinkingText.remove();
+                            // Remove all elements containing "思考中"
+                            const allElements = aiContentDiv.querySelectorAll('*');
+                            allElements.forEach(el => {
+                                if (el.textContent && el.textContent.includes('思考中')) {
+                                    if (el.tagName === 'SPAN' || el.tagName === 'DIV') {
+                                        el.remove();
+                            }
+                                }
+                            });
+                        }
+                        
+                        // 🔥 REQUIREMENT 1: Update status log only, no separate bubble
+                        addProcessStep(`完成 (${duration}s)`, 'done');
                         
                         // 🔥 CRITICAL: 重置停止按钮
                         const stopBtn = document.getElementById('stopBtn');
@@ -3114,10 +3451,10 @@
                 
                 // 🔥 CRITICAL FIX: 强制更新全局状态（清除旧状态，避免重复或过期状态）
                 const fileName = serverPath.split('/').pop() || serverPath.split('\\').pop() || 'uploaded_data.csv';
-                const fileInfo = {
-                    name: fileName,
+                        const fileInfo = {
+                            name: fileName,
                     path: serverPath  // 🔥 CRITICAL: 使用服务器返回的完整路径
-                };
+                        };
                 
                 // 强制替换全局状态（而不是追加）
                 uploadedFiles = [fileInfo];
@@ -3268,7 +3605,7 @@
             // 🔥 CRITICAL REGRESSION FIX: Construct workflow_data payload correctly
             const workflowPayload = {
                 workflow_data: {
-                    workflow_name: formContainer.querySelector('h5')?.textContent?.replace('📋 ', '') || '工作流',
+                workflow_name: formContainer.querySelector('h5')?.textContent?.replace('📋 ', '') || '工作流',
                     steps: stepsData
                 },
                 file_paths: finalFilePaths  // 🔧 修复：确保传递有效的文件路径数组

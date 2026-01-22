@@ -717,12 +717,26 @@ Use Simplified Chinese for all content."""
                     step_info["missing_rate"] = summary.get("missing_rate", "N/A")
                 
                 elif "differential" in step_name.lower():
+                    # 🔥 Phase 3: Extract differential analysis summary from tool output
                     summary = step_data.get("summary", {})
-                    step_info["significant_count"] = summary.get("significant_count", summary.get("n_significant", "N/A"))
-                    step_info["total_count"] = summary.get("total_metabolites", summary.get("n_total", "N/A"))
-                    step_info["method"] = summary.get("method", "N/A")
-                    step_info["case_group"] = summary.get("case_group", "N/A")
-                    step_info["control_group"] = summary.get("control_group", "N/A")
+                    if summary:
+                        # Use summary dict if available (from Phase 2 enhancement)
+                        step_info["significant_count"] = summary.get("significant_count", summary.get("sig_count", "N/A"))
+                        step_info["total_count"] = summary.get("total_metabolites", "N/A")
+                        step_info["method"] = summary.get("method", "N/A")
+                        step_info["case_group"] = summary.get("case_group", "N/A")
+                        step_info["control_group"] = summary.get("control_group", "N/A")
+                        # Extract top_up and top_down from summary
+                        step_info["top_up"] = summary.get("top_up", [])
+                        step_info["top_down"] = summary.get("top_down", [])
+                    else:
+                        # Fallback: Extract from results list (old format)
+                        step_info["significant_count"] = "N/A"
+                        step_info["total_count"] = "N/A"
+                        step_info["method"] = "N/A"
+                        step_info["case_group"] = "N/A"
+                        step_info["control_group"] = "N/A"
+                    
                     # 提取结果列表，用于识别关键标记物
                     results_list = step_data.get("results", [])
                     if results_list:
@@ -738,42 +752,102 @@ Use Simplified Chinese for all content."""
                         ]
                 
                 elif "plsda" in step_name.lower() or "pls-da" in step_name.lower():
-                    # PLS-DA 分析结果
-                    vip_scores = step_data.get("vip_scores", [])
-                    if vip_scores:
-                        # 提取top VIP标记物
-                        if isinstance(vip_scores, list):
-                            sorted_vip = sorted(vip_scores, key=lambda x: x.get("vip_score", 0), reverse=True)
+                    # 🔥 Phase 3: Extract PLS-DA summary from tool output
+                    summary = step_data.get("summary", {})
+                    if summary and isinstance(summary, dict):
+                        # Use summary dict if available (from Phase 2 enhancement)
+                        top_vip_markers = summary.get("top_vip_markers", [])
+                        if top_vip_markers:
                             step_info["top_vip_markers"] = [
                                 {
-                                    "name": v.get("metabolite", "Unknown"),
-                                    "vip_score": v.get("vip_score", 0)
+                                    "name": v.get("name", "Unknown"),
+                                    "vip_score": v.get("vip", 0)
                                 }
-                                for v in sorted_vip[:5]
+                                for v in top_vip_markers[:5]
                             ]
+                        else:
+                            step_info["top_vip_markers"] = []
+                        step_info["n_components"] = summary.get("n_components", "N/A")
+                        step_info["comp1_variance"] = f"{summary.get('comp1_variance', 0):.1f}%"
+                        step_info["comp2_variance"] = f"{summary.get('comp2_variance', 0):.1f}%"
+                    else:
+                        # Fallback: Extract from vip_scores (old format)
+                        vip_scores = step_data.get("vip_scores", [])
+                        if vip_scores:
+                            # 提取top VIP标记物
+                            if isinstance(vip_scores, list):
+                                sorted_vip = sorted(vip_scores, key=lambda x: x.get("vip_score", 0), reverse=True)
+                                step_info["top_vip_markers"] = [
+                                    {
+                                        "name": v.get("metabolite", "Unknown"),
+                                        "vip_score": v.get("vip_score", 0)
+                                    }
+                                    for v in sorted_vip[:5]
+                                ]
+                        else:
+                            step_info["top_vip_markers"] = []
                 
                 elif "pathway" in step_name.lower() or "enrichment" in step_name.lower():
-                    # 通路富集分析结果
+                    # 🔥 Phase 3: Extract pathway enrichment summary from tool output
+                    summary = step_data.get("summary", {})
                     enriched_pathways = step_data.get("enriched_pathways", [])
-                    if enriched_pathways:
+                    
+                    if summary and isinstance(summary, dict):
+                        # Use summary dict if available (from Phase 2 enhancement)
+                        step_info["enriched_pathway_count"] = summary.get("n_significant", len(enriched_pathways) if enriched_pathways else 0)
+                        top_pathways_list = summary.get("top_pathways", [])
+                        if top_pathways_list:
+                            step_info["top_pathways"] = [
+                                {"name": p, "p_value": "N/A"} if isinstance(p, str) else p
+                                for p in top_pathways_list[:5]
+                            ]
+                        else:
+                            step_info["top_pathways"] = []
+                    elif enriched_pathways:
+                        # Fallback: Extract from enriched_pathways list (old format)
                         step_info["enriched_pathway_count"] = len(enriched_pathways)
                         step_info["top_pathways"] = [
                             {
-                                "name": p.get("pathway", p.get("name", "Unknown")),
-                                "p_value": p.get("p_value", p.get("pvalue", 1.0)),
+                                "name": p.get("pathway", p.get("name", p.get("Term", "Unknown"))),
+                                "p_value": p.get("p_value", p.get("pvalue", p.get("Adjusted P-value", 1.0))),
                                 "enrichment_score": p.get("enrichment_score", p.get("score", 0))
                             }
                             for p in enriched_pathways[:5]
                         ]
+                    else:
+                        step_info["enriched_pathway_count"] = 0
+                        step_info["top_pathways"] = []
                 
                 elif "pca" in step_name.lower() and "visualize" not in step_name.lower():
-                    # PCA 分析结果
-                    explained_var = step_data.get("explained_variance", {})
-                    if explained_var:
-                        pc1_var = explained_var.get("PC1", 0) * 100 if isinstance(explained_var.get("PC1"), (int, float)) else 0
-                        pc2_var = explained_var.get("PC2", 0) * 100 if isinstance(explained_var.get("PC2"), (int, float)) else 0
-                        step_info["pc1_variance"] = f"{pc1_var:.1f}%"
-                        step_info["pc2_variance"] = f"{pc2_var:.1f}%"
+                    # 🔥 Phase 3: Extract PCA summary from tool output
+                    summary = step_data.get("summary", {})
+                    if summary:
+                        # Use summary dict if available (from Phase 2 enhancement)
+                        step_info["pc1_var"] = summary.get("pc1_var", 0)
+                        step_info["pc2_var"] = summary.get("pc2_var", 0)
+                        step_info["separation"] = summary.get("separation", "unknown")
+                        step_info["pc1_variance"] = f"{summary.get('pc1_var', 0) * 100:.1f}%"
+                        step_info["pc2_variance"] = f"{summary.get('pc2_var', 0) * 100:.1f}%"
+                        step_info["total_variance"] = f"{summary.get('total_variance_explained', 0) * 100:.1f}%"
+                        step_info["separation_quality"] = summary.get("separation", "unknown")
+                    else:
+                        # Fallback: Extract from explained_variance (old format)
+                        explained_var = step_data.get("explained_variance", {})
+                        if explained_var:
+                            pc1_var = explained_var.get("PC1", 0) * 100 if isinstance(explained_var.get("PC1"), (int, float)) else 0
+                            pc2_var = explained_var.get("PC2", 0) * 100 if isinstance(explained_var.get("PC2"), (int, float)) else 0
+                            step_info["pc1_var"] = explained_var.get("PC1", 0)
+                            step_info["pc2_var"] = explained_var.get("PC2", 0)
+                            step_info["pc1_variance"] = f"{pc1_var:.1f}%"
+                            step_info["pc2_variance"] = f"{pc2_var:.1f}%"
+                            step_info["total_variance"] = f"{(pc1_var + pc2_var):.1f}%"
+                            # Extract separation info if available
+                            if pc1_var + pc2_var > 50:
+                                step_info["separation_quality"] = "clear"
+                                step_info["separation"] = "observed"
+                            else:
+                                step_info["separation_quality"] = "moderate"
+                                step_info["separation"] = "unclear"
                 
                 elif "preprocess" in step_name.lower():
                     shape = step_data.get("shape", {})
@@ -826,10 +900,74 @@ Use Simplified Chinese for all content."""
             if has_failures:
                 rule3_text = "- ⚠️ Some steps failed during execution. You MUST still summarize the successful steps (e.g., PCA, PLS-DA, Volcano plots) and explain what insights can be drawn from them.\n- For failed steps, briefly note what went wrong (e.g., 'Pathway enrichment failed due to missing gseapy library') but focus on interpreting the successful results."
             
-            prompt = f"""You are a Senior Bioinformatics Scientist writing a publication-quality results section for a scientific paper. Your role is to interpret biological data and provide scientific insights, NOT to debug technical issues.
+            # 🔥 TASK 2: Extract Key Findings for enhanced prompt
+            key_findings = {
+                "pca_separation": "N/A",
+                "differential_count": "N/A",
+                "top_pathways": [],
+                "top_vip_metabolites": [],
+                "top_differential_metabolites": []
+            }
+            
+            for step_info in results_summary.get("steps", []):
+                step_name = step_info.get("name", "").lower()
+                
+                # Extract PCA separation
+                if "pca" in step_name and "visualize" not in step_name:
+                    separation = step_info.get("separation_quality", "unknown")
+                    pc1_var = step_info.get("pc1_variance", "N/A")
+                    pc2_var = step_info.get("pc2_variance", "N/A")
+                    if separation == "clear":
+                        key_findings["pca_separation"] = f"清晰分离 (PC1: {pc1_var}, PC2: {pc2_var})"
+                    else:
+                        key_findings["pca_separation"] = f"中等分离 (PC1: {pc1_var}, PC2: {pc2_var})"
+                
+                # Extract differential analysis count
+                if "differential" in step_name:
+                    sig_count = step_info.get("significant_count", "N/A")
+                    total_count = step_info.get("total_count", "N/A")
+                    key_findings["differential_count"] = f"发现 {sig_count} 个显著差异代谢物（共 {total_count} 个）"
+                    # Extract top markers
+                    top_markers = step_info.get("top_markers", [])
+                    if top_markers:
+                        key_findings["top_differential_metabolites"] = [
+                            f"{m.get('name', 'Unknown')} (Log2FC: {m.get('log2fc', 0):.2f}, FDR: {m.get('fdr', 1.0):.4f})"
+                            for m in top_markers[:5]
+                        ]
+                
+                # Extract PLS-DA VIP metabolites
+                if "plsda" in step_name or "pls-da" in step_name:
+                    top_vip = step_info.get("top_vip_markers", [])
+                    if top_vip:
+                        key_findings["top_vip_metabolites"] = [
+                            f"{v.get('name', 'Unknown')} (VIP: {v.get('vip_score', v.get('vip', 0)):.2f})"
+                            for v in top_vip[:5]
+                        ]
+                
+                # Extract pathway enrichment
+                if "pathway" in step_name or "enrichment" in step_name:
+                    top_pathways = step_info.get("top_pathways", [])
+                    if top_pathways:
+                        key_findings["top_pathways"] = []
+                        for p in top_pathways[:3]:
+                            p_name = p.get('name', 'Unknown')
+                            p_val = p.get('p_value', 1.0)
+                            # Handle both string and numeric p-values
+                            if isinstance(p_val, str):
+                                p_val_str = p_val
+                            else:
+                                p_val_str = f"{p_val:.4f}"
+                            key_findings["top_pathways"].append(f"{p_name} (p-value: {p_val_str})")
+            
+            key_findings_json = json.dumps(key_findings, ensure_ascii=False, indent=2)
+            
+            prompt = f"""You are a Senior Bioinformatics Scientist publishing in Nature Medicine. Your role is to interpret biological data and provide deep scientific insights, connecting findings to biological mechanisms and literature knowledge.
 
 **Execution Results (Successful Steps):**
 {summary_json}
+
+**Key Findings Extracted:**
+{key_findings_json}
 {failure_info}
 
 **Domain Context:**
@@ -837,64 +975,74 @@ Use Simplified Chinese for all content."""
 
 **CRITICAL RULES:**
 
-1. **Scientific Persona**: You are a bioinformatics expert writing for a scientific audience. Write as if you are describing results in a Methods/Results section of a research paper.
+1. **Reasoning Process (DeepSeek-R1)**: 
+   - Use the `<think>` tag to show your reasoning process before generating the final report
+   - Inside `<think>`, analyze the data metrics, connect metabolites to pathways, and reason about biological mechanisms
+   - After reasoning, output the final report outside the `<think>` tags
 
-2. **NO Technical Debugging**: 
+2. **Scientific Persona**: You are a Senior Bioinformatics Scientist writing a publication-quality results section for Nature Medicine. Write as if you are describing results in a Methods/Results section of a high-impact research paper.
+
+3. **NO Technical Debugging**: 
    - DO NOT mention step names, tool names, file paths, or technical errors
    - DO NOT say "Step X failed" or "Tool Y encountered an error"
    - DO NOT mention Python errors, missing libraries, or code issues
    - If a step failed, simply state the biological limitation (e.g., "Pathway enrichment analysis could not be performed due to insufficient significant features" or "Functional annotation was not available for this dataset")
 
-3. **Biological Focus**:
-   - Focus on BIOLOGICAL INSIGHTS and SCIENTIFIC INTERPRETATION
-   - Describe what the data reveals about the samples/groups
-   - Interpret statistical findings in biological context
-   - Discuss functional implications and biological mechanisms
+4. **Deep Biological Interpretation**:
+   - Connect metabolites/pathways to biological functions using your internal knowledge base (PubMed/Literature)
+   - Explain the MECHANISM, not just the numbers
+   - Discuss how the identified metabolites/pathways relate to biological processes, disease mechanisms, or physiological states
+   - Interpret findings in the context of known metabolic pathways and their roles
 
-4. **Professional Language**:
-   - Use scientific terminology appropriate for the field
+5. **Professional Language**:
+   - Use scientific terminology appropriate for Nature Medicine
    - Write in Simplified Chinese (简体中文)
    - Be precise, detailed, and academically rigorous
-   - Minimum 500 words, aim for comprehensive coverage
+   - Minimum 800 words, aim for comprehensive coverage
 
-5. **Output Structure (MUST FOLLOW):**
+6. **Output Structure (MUST FOLLOW):**
 
-### 1. 数据概况 (Data Overview)
-- Summarize sample size, groups, and detected features
-- Evaluate Data Quality (Missing values, outliers based on PCA if available)
-- Describe the overall data characteristics
+### 1. 结果摘要 (Results Summary)
+- Quantitative summary: sample size, groups, detected features
+- Data quality assessment (missing values, outliers based on PCA)
+- Overall data characteristics and key statistics
 
 ### 2. 统计分析结果 (Statistical Findings)
-- **PCA Analysis**: If PCA was performed, interpret the separation between groups (PC1/PC2 scores, explained variance). Describe clustering patterns and what they indicate about group differences.
-- **Differential Analysis**: If differential analysis was performed, report:
-  - Total number of features analyzed
-  - Number of Up-regulated features (Log2FC > threshold)
-  - Number of Down-regulated features (Log2FC < -threshold)
-  - Number of significant features (FDR < threshold)
-  - Statistical method used (t-test/Wilcoxon)
-- **Key Markers**: If available, list top 3-5 features with highest VIP scores (from PLS-DA) or highest |Log2FC| (from differential analysis). Include their names and fold changes.
+- **PCA Analysis**: Interpret group separation (clear/unclear), PC1/PC2 variance explained, clustering patterns, and what they indicate about group differences
+- **Differential Analysis**: Report total features analyzed, up-regulated/down-regulated counts, significant features (FDR threshold), statistical method used
+- **Key Markers**: List top 3-5 metabolites with highest VIP scores (PLS-DA) or highest |Log2FC| (differential analysis), including their names and fold changes
 
-### 3. 生物学意义 (Biological Interpretation)
-- Interpret the biological meaning of the findings
-- If Pathway Enrichment data exists, interpret the enriched KEGG pathways and their biological significance
-- Relate findings to potential biological mechanisms or disease processes
-- Discuss the functional implications of differentially expressed features
+### 3. 生物学机制解读 (Biological Mechanism Interpretation)
+- **Deep Dive**: Connect the top metabolites/pathways to biological functions
+- **Pathway Analysis**: If enrichment data exists, interpret the enriched KEGG pathways and their biological significance. Explain how these pathways relate to the biological question
+- **Mechanism Discussion**: Relate findings to potential biological mechanisms, disease processes, or physiological states
+- **Functional Implications**: Discuss what the differentially expressed metabolites mean in terms of biological function
 
-### 4. 结论与建议 (Conclusion)
-- Summarize the main takeaway from the analysis
-- Highlight the most important findings
-- Suggest next steps (e.g., validation experiments, targeted analysis, pathway validation)
+### 4. 潜在标志物 (Potential Biomarkers)
+- Discuss the VIP molecules from PLS-DA analysis
+- Explain their biological relevance and potential as biomarkers
+- Connect to known literature and metabolic pathways
+
+### 5. 下一步建议 (Next Steps & Recommendations)
+- Suggest validation experiments (e.g., targeted metabolomics, qPCR validation)
+- Recommend targeted analysis (e.g., specific pathway validation)
+- Propose follow-up studies based on the findings
 
 **Output Format:**
 - Use Simplified Chinese (简体中文)
 - Use Markdown format with proper headings (###)
 - Be professional, academic, and detailed
-- Minimum 500 words, aim for comprehensive coverage
+- Minimum 800 words, aim for comprehensive coverage
 - Include specific numbers, percentages, and statistical values from the results
+- Reference biological mechanisms and pathways explicitly
 
-**Tone**: Professional, Academic, Detailed. Focus on biological interpretation and scientific insights.
+**Tone**: Professional, Academic, Detailed, Nature Medicine style. Focus on deep biological interpretation and scientific insights, connecting findings to mechanisms.
 
-现在生成全面的分析报告（遵循上述结构，详细且专业）："""
+**CRITICAL**: You MUST provide a detailed Biological Interpretation and Mechanism Analysis. Do NOT just list steps or metrics. Explain the biological meaning, connect findings to known pathways, and discuss mechanisms.
+
+**IMPORTANT**: Use `<think>` tags to show your reasoning process. Analyze the data deeply, then output the final report.
+
+现在生成全面的分析报告（遵循上述结构，详细且专业，包含深度生物学机制解读）："""
             
             messages = [
                 {
@@ -929,18 +1077,77 @@ Use Simplified Chinese for all content."""
                 {"role": "user", "content": prompt}
             ]
             
-            # 调用 LLM 生成摘要
-            logger.info(f"📞 [AnalysisSummary] 调用 LLM 生成摘要...")
-            completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=2000)  # 🔥 PHASE 2: Increase tokens for detailed report
-            think_content, response = self.llm_client.extract_think_and_content(completion)
+            # 🔥 TASK 2: Force LLM call - ALWAYS call LLM, never return simple list
+            logger.info(f"📞 [AnalysisSummary] 调用 LLM 生成深度生物学解释...")
+            logger.info(f"📊 [AnalysisSummary] 提取的关键指标: {key_findings_json}")
             
-            if response:
-                logger.info(f"✅ [AnalysisSummary] 分析摘要生成成功，长度: {len(response)}")
-                logger.debug(f"📝 [DEBUG] Summary preview: {response[:200]}...")
-                return response
-            else:
-                logger.warning(f"⚠️ [AnalysisSummary] 分析摘要为空")
-                return None
+            try:
+                completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=2500)  # 🔥 TASK 2: Increase tokens for comprehensive report
+                think_content, response = self.llm_client.extract_think_and_content(completion)
+                
+                # 🔥 FEATURE: Return original content with tags for frontend parsing
+                # Frontend will parse <think> tags to show thinking process
+                original_content = completion.choices[0].message.content or ""
+                
+                if response and len(response.strip()) > 100:  # Ensure meaningful response
+                    logger.info(f"✅ [AnalysisSummary] 深度生物学解释生成成功，长度: {len(response)}")
+                    logger.debug(f"📝 [DEBUG] Summary preview: {response[:200]}...")
+                    # Return original content with tags so frontend can parse and display reasoning
+                    return original_content if '<think>' in original_content or '<think>' in original_content else response
+                else:
+                    logger.warning(f"⚠️ [AnalysisSummary] LLM 返回内容过短，尝试重新生成...")
+                    # Retry with simpler prompt if first attempt failed
+                    retry_prompt = f"""Based on these analysis metrics: {key_findings_json}
+
+Write a comprehensive biological interpretation report in Simplified Chinese. Include:
+1. 结果摘要 (quantitative findings)
+2. 生物学机制解读 (connect metabolites/pathways to biological functions)
+3. 潜在标志物 (discuss VIP molecules)
+4. 下一步建议 (validation experiments)
+
+Minimum 500 words. Be scientific and detailed."""
+                    
+                    retry_messages = [
+                        {"role": "system", "content": "You are a Senior Bioinformatics Scientist. Write detailed biological interpretations."},
+                        {"role": "user", "content": retry_prompt}
+                    ]
+                    
+                    retry_completion = await self.llm_client.achat(retry_messages, temperature=0.3, max_tokens=2000)
+                    retry_think, retry_response = self.llm_client.extract_think_and_content(retry_completion)
+                    
+                    # 🔥 FEATURE: Return original content with tags for frontend parsing
+                    retry_original_content = retry_completion.choices[0].message.content or ""
+                    
+                    if retry_response and len(retry_response.strip()) > 100:
+                        logger.info(f"✅ [AnalysisSummary] 重试成功，生成深度解释，长度: {len(retry_response)}")
+                        # Return original content with tags so frontend can parse and display reasoning
+                        return retry_original_content if '<think>' in retry_original_content or '<think>' in retry_original_content else retry_response
+                    else:
+                        logger.error(f"❌ [AnalysisSummary] 重试后仍无法生成有效内容")
+                        # 🔥 TASK 2: Do NOT hide LLM failure - return error message
+                        return f"""## ⚠️ LLM 生成失败
+
+**错误信息**: LLM 返回内容过短或无效
+
+**分析指标**:
+{key_findings_json}
+
+**已完成的步骤**: {len(successful_steps)}/{len(steps_results)}
+
+**说明**: 无法生成深度生物学解释报告。请检查 LLM 服务状态或联系技术支持。"""
+            except Exception as llm_error:
+                logger.error(f"❌ [AnalysisSummary] LLM 调用失败: {llm_error}", exc_info=True)
+                # 🔥 TASK 2: Do NOT hide LLM failure - return explicit error
+                return f"""## ❌ LLM 生成失败
+
+**错误信息**: {str(llm_error)}
+
+**分析指标**:
+{key_findings_json}
+
+**已完成的步骤**: {len(successful_steps)}/{len(steps_results)}
+
+**说明**: LLM 服务调用失败。请检查网络连接或 LLM 服务状态。"""
                 
         except Exception as e:
             logger.error(f"❌ [AnalysisSummary] 生成分析摘要失败: {e}", exc_info=True)

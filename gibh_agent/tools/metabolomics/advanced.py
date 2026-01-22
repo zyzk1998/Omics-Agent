@@ -295,6 +295,16 @@ def run_plsda(
             plt.savefig(plot_path, dpi=150, bbox_inches='tight')
             plt.close()
         
+        # 🔥 Phase 2: Extract top VIP markers for AI report
+        top_vip_markers = vip_df.head(10).to_dict(orient='records')
+        top_vip_markers_formatted = [
+            {
+                "name": m.get("metabolite", "Unknown"),
+                "vip": float(m.get("vip_score", 0.0))
+            }
+            for m in top_vip_markers
+        ]
+        
         return {
             "status": "success",
             "vip_scores": vip_df.to_dict(orient='records'),
@@ -304,7 +314,14 @@ def run_plsda(
                 for i, var in enumerate(explained_variance)
             },
             "plot_path": plot_path,
-            "n_components": n_components
+            "n_components": n_components,
+            "summary": {
+                "top_vip_markers": top_vip_markers_formatted,
+                "n_components": n_components,
+                "total_metabolites": len(metabolite_cols),
+                "comp1_variance": float(explained_variance[0] / total_ssy * 100) if len(explained_variance) > 0 and total_ssy > 0 else 0.0,
+                "comp2_variance": float(explained_variance[1] / total_ssy * 100) if len(explained_variance) > 1 and total_ssy > 0 else 0.0
+            }
         }
     
     except ImportError as e:
@@ -536,6 +553,18 @@ def run_pathway_enrichment(
                     results_df['Adjusted P-value'] < p_value_threshold
                 ].copy()
                 
+                # 🔥 Phase 2: Extract top pathways for AI report
+                top_pathways = []
+                if len(significant_pathways) > 0:
+                    # Sort by Adjusted P-value (ascending) and take top 5
+                    top_pathways_df = significant_pathways.nsmallest(5, 'Adjusted P-value')
+                    top_pathways = top_pathways_df['Term'].tolist() if 'Term' in top_pathways_df.columns else []
+                    # Fallback: use 'Gene_set' or 'Pathway' column if 'Term' doesn't exist
+                    if not top_pathways and 'Gene_set' in top_pathways_df.columns:
+                        top_pathways = top_pathways_df['Gene_set'].tolist()[:5]
+                    elif not top_pathways and 'Pathway' in top_pathways_df.columns:
+                        top_pathways = top_pathways_df['Pathway'].tolist()[:5]
+                
                 # 保存结果（如果指定了输出目录）
                 output_csv = None
                 if output_dir:
@@ -550,7 +579,12 @@ def run_pathway_enrichment(
                     "n_significant": len(significant_pathways),
                     "n_total": len(results_df),
                     "output_csv": output_csv,
-                    "summary": f"发现 {len(significant_pathways)} 个显著富集通路（p < {p_value_threshold}）"
+                    "summary": {
+                        "n_significant": len(significant_pathways),
+                        "n_total": len(results_df),
+                        "top_pathways": top_pathways,
+                        "p_value_threshold": p_value_threshold
+                    }
                 }
             else:
                 return {

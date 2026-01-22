@@ -13,6 +13,17 @@ from datetime import datetime
 from .tool_registry import registry
 from .utils import sanitize_for_json
 
+# 🔥 CRITICAL: 确保工具模块被加载（触发工具注册）
+try:
+    from ..tools import load_all_tools
+    # 如果工具还未加载，立即加载
+    if len(registry._tools) == 0:
+        logger.info("🔍 [Executor] 工具注册表为空，正在加载工具...")
+        load_all_tools()
+        logger.info(f"✅ [Executor] 工具加载完成，已注册 {len(registry._tools)} 个工具")
+except Exception as e:
+    logger.warning(f"⚠️ [Executor] 工具加载失败: {e}")
+
 logger = logging.getLogger(__name__)
 
 
@@ -240,7 +251,7 @@ class WorkflowExecutor:
                 try:
                     validated_params = tool_metadata.args_schema.model_validate(params, strict=False)
                     params = validated_params.model_dump(exclude_unset=False)
-                    logger.debug(f"✅ 参数验证通过: {step_id}")
+                logger.debug(f"✅ 参数验证通过: {step_id}")
                 except Exception as e:
                     # 如果 model_validate 失败，尝试使用 __init__ 但捕获额外字段
                     try:
@@ -763,7 +774,7 @@ class WorkflowExecutor:
                 # 非占位符参数已经在循环开始前复制，这里不需要再次复制
                 # 但如果这个 key 不在 processed 中（不应该发生），还是复制一下
                 if key not in processed:
-                    processed[key] = value
+                processed[key] = value
         
         # 🔥 CRITICAL FIX: 强制确保 group_column 等关键参数没有被意外移除
         # 这是最后的保护措施，确保即使前面的逻辑有问题，group_column 也不会丢失
@@ -980,10 +991,10 @@ class WorkflowExecutor:
             # 占位符会在 execute_step 内部的 _process_data_flow 中解析
             # 只有在没有占位符且参数缺失时，才自动注入
             if not has_placeholder:
-                # 自动注入文件路径（如果缺失且我们有当前文件路径）
-                if file_param_name not in params and current_file_path:
-                    params[file_param_name] = current_file_path
-                    logger.info(f"🔄 自动注入 {file_param_name}: {current_file_path}")
+            # 自动注入文件路径（如果缺失且我们有当前文件路径）
+            if file_param_name not in params and current_file_path:
+                params[file_param_name] = current_file_path
+                logger.info(f"🔄 自动注入 {file_param_name}: {current_file_path}")
             else:
                 # 有占位符，记录日志但不自动注入
                 placeholder_keys = [k for k, v in params.items() if isinstance(v, str) and v.startswith("<") and v.endswith(">")]
@@ -1025,31 +1036,31 @@ class WorkflowExecutor:
                 if tool_id == "preprocess_data" or "preprocess" in tool_id.lower():
                     # 对于 scRNA-seq 工具，优先查找 output_h5ad
                     tool_metadata = registry.get_metadata(tool_id)
-                    tool_category = tool_metadata.category if tool_metadata else None
-                    
-                    if tool_category == "scRNA-seq":
-                        # scRNA-seq 工具优先使用 output_h5ad
-                        next_file_path = (
+                tool_category = tool_metadata.category if tool_metadata else None
+                
+                if tool_category == "scRNA-seq":
+                    # scRNA-seq 工具优先使用 output_h5ad
+                    next_file_path = (
                             result_data.get("output_h5ad") or
-                            result_data.get("output_file") or
-                            result_data.get("output_path") or
-                            result_data.get("file_path")
-                        )
-                    else:
-                        # 其他工具使用标准字段
-                        next_file_path = (
-                            result_data.get("output_file") or
-                            result_data.get("output_path") or
-                            result_data.get("file_path") or
-                            result_data.get("preprocessed_file")
-                        )
-                    
-                    if next_file_path:
-                        # 🔥 修复：即使文件不存在也更新路径（文件可能稍后创建）
-                        current_file_path = next_file_path
-                        if os.path.exists(next_file_path):
+                        result_data.get("output_file") or
+                        result_data.get("output_path") or
+                        result_data.get("file_path")
+                    )
+                else:
+                    # 其他工具使用标准字段
+                    next_file_path = (
+                        result_data.get("output_file") or
+                        result_data.get("output_path") or
+                        result_data.get("file_path") or
+                        result_data.get("preprocessed_file")
+                    )
+                
+                if next_file_path:
+                    # 🔥 修复：即使文件不存在也更新路径（文件可能稍后创建）
+                    current_file_path = next_file_path
+                    if os.path.exists(next_file_path):
                             logger.info(f"✅ [Executor] 更新当前文件路径（来自 preprocess_data）: {current_file_path}")
-                        else:
+                    else:
                             logger.warning(f"⚠️ [Executor] 输出路径不存在，但会使用: {next_file_path} (文件可能稍后创建)")
                 else:
                     # 其他步骤的输出不更新 current_file_path

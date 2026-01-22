@@ -129,6 +129,13 @@ def run_pca(
             plt.savefig(plot_path, dpi=150, bbox_inches='tight')
             plt.close()
         
+        # 🔥 Phase 2: Extract summary metrics for AI report
+        pc1_var = float(pca.explained_variance_ratio_[0]) if len(pca.explained_variance_ratio_) > 0 else 0.0
+        pc2_var = float(pca.explained_variance_ratio_[1]) if len(pca.explained_variance_ratio_) > 1 else 0.0
+        
+        # Determine separation quality (simple heuristic: if PC1 explains > 30%, consider it "observed")
+        separation = "observed" if pc1_var > 0.3 else "unclear"
+        
         return {
             "status": "success",
             "pca_coordinates": coords_df.to_dict(orient='index'),
@@ -139,7 +146,13 @@ def run_pca(
             "plot_path": plot_path,
             "n_components": actual_n_components,
             "requested_n_components": n_components,
-            "data_shape": {"rows": n_samples, "columns": n_features}
+            "data_shape": {"rows": n_samples, "columns": n_features},
+            "summary": {
+                "pc1_var": pc1_var,
+                "pc2_var": pc2_var,
+                "separation": separation,
+                "total_variance_explained": float(sum(pca.explained_variance_ratio_[:2])) if len(pca.explained_variance_ratio_) >= 2 else pc1_var
+            }
         }
     
     except Exception as e:
@@ -407,6 +420,14 @@ def run_differential_analysis(
         
         # 统计摘要
         significant_count = sum(1 for r in results if r.get("significant", False))
+        significant_results = [r for r in results if r.get("significant", False)]
+        
+        # 🔥 Phase 2: Extract top up/down regulated metabolites
+        top_up = sorted(significant_results, key=lambda x: x.get("log2fc", 0), reverse=True)[:5]
+        top_down = sorted(significant_results, key=lambda x: x.get("log2fc", 0))[:5]
+        
+        top_up_names = [r["metabolite"] for r in top_up]
+        top_down_names = [r["metabolite"] for r in top_down]
         
         return {
             "status": "success",
@@ -417,11 +438,14 @@ def run_differential_analysis(
             "summary": {
                 "total_metabolites": len(results),
                 "significant_count": significant_count,
+                "sig_count": significant_count,  # 别名，用于AI报告
                 "method": method,
                 "case_group": case_group,
                 "control_group": control_group,
                 "p_value_threshold": p_value_threshold,
-                "fold_change_threshold": fold_change_threshold
+                "fold_change_threshold": fold_change_threshold,
+                "top_up": top_up_names,
+                "top_down": top_down_names
             }
         }
     
