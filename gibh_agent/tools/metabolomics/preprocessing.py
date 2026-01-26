@@ -49,9 +49,24 @@ def preprocess_metabolite_data(
         # 读取数据
         df = pd.read_csv(file_path, index_col=0)
         
-        # 提取数值列
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
-        data = df[numeric_cols].copy()
+        # 🔥 CRITICAL FIX: 保留分组列（非数值列，但排除索引列）
+        # 检测可能的分组列（非数值列，唯一值数量在2-100之间）
+        non_numeric_cols = df.select_dtypes(exclude=[np.number]).columns.tolist()
+        group_cols = []
+        for col in non_numeric_cols:
+            unique_count = df[col].nunique()
+            if 2 <= unique_count <= 100:  # 合理的分组列应该有2-100个唯一值
+                group_cols.append(col)
+        
+        # 提取数值列（代谢物列）
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        
+        # 🔥 CRITICAL FIX: 保留分组列和数值列
+        columns_to_keep = group_cols + numeric_cols
+        data = df[columns_to_keep].copy()
+        
+        logger.info(f"📊 [Preprocess] 保留分组列: {group_cols}")
+        logger.info(f"📊 [Preprocess] 处理数值列: {len(numeric_cols)} 个代谢物")
         
         # 1. 缺失值填充
         if missing_imputation == "min":
@@ -63,19 +78,32 @@ def preprocess_metabolite_data(
         else:  # "zero"
             data = data.fillna(0)
         
-        # 2. Log2 转换
-        if log_transform:
-            data = data.apply(lambda x: np.log2(x + 1))
+        # 🔥 CRITICAL FIX: 只对数值列进行转换和标准化
+        # 分离分组列和数值列
+        numeric_data = data[numeric_cols].copy()
+        group_data = data[group_cols].copy() if group_cols else pd.DataFrame()
         
-        # 3. 标准化
+        # 2. Log2 转换（仅对数值列）
+        if log_transform:
+            numeric_data = numeric_data.apply(lambda x: np.log2(x + 1))
+        
+        # 3. 标准化（仅对数值列）
         if standardize:
             scaler = StandardScaler()
-            data_scaled = scaler.fit_transform(data)
-            data = pd.DataFrame(
-                data_scaled,
-                index=data.index,
-                columns=data.columns
+            numeric_scaled = scaler.fit_transform(numeric_data)
+            numeric_data = pd.DataFrame(
+                numeric_scaled,
+                index=numeric_data.index,
+                columns=numeric_data.columns
             )
+        
+        # 🔥 CRITICAL FIX: 合并分组列和数值列
+        if group_cols:
+            data = pd.concat([group_data, numeric_data], axis=1)
+            # 确保列顺序：分组列在前，数值列在后
+            data = data[group_cols + numeric_cols]
+        else:
+            data = numeric_data
         
         # 4. 保存预处理后的数据到文件（用于数据流传递）
         output_path = None

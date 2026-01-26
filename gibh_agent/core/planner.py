@@ -1358,14 +1358,14 @@ Classify the intent and return JSON only. Remember:
         # 🔥 CONTEXT-AWARE FIX: Set template_mode based on parameter (allows PLANNING mode with file)
         workflow_config["template_mode"] = template_mode
         
-        # 🔥 CRITICAL FIX: 清除模板诊断消息（仅在 EXECUTION 模式）
-        # 如果 diagnosis 存在且是模板消息，且是 EXECUTION 模式，则清除它
+        # 🔥 TASK 2: 清除诊断字段（仅在 EXECUTION 模式）
+        # 如果 diagnosis 存在，且是 EXECUTION 模式，则完全移除它
+        # Reason: Orchestrator 已经发送了真实的 diagnosis 事件（从 FileInspector）
+        # 如果 Planner 返回 diagnosis: null，可能会覆盖 UI
         if not template_mode and "diagnosis" in workflow_config:
-            diagnosis = workflow_config.get("diagnosis")
-            if isinstance(diagnosis, dict) and diagnosis.get("status") == "template_ready":
-                # 清除模板诊断，让 Orchestrator 生成真实诊断（仅 EXECUTION 模式）
-                workflow_config.pop("diagnosis", None)
-                logger.info("✅ [SOPPlanner] EXECUTION 模式：已清除模板诊断消息，等待 Orchestrator 生成真实诊断")
+            # 🔥 TASK 2: Remove diagnosis key entirely in execution mode
+            workflow_config.pop("diagnosis", None)
+            logger.info("✅ [SOPPlanner] EXECUTION 模式：已移除 diagnosis 字段，避免覆盖 Orchestrator 的真实诊断")
         
         # 确保 workflow_data 中包含模式标记
         if "workflow_data" in workflow_config:
@@ -1913,9 +1913,14 @@ Remember: Output ONLY the JSON object, no markdown, no code blocks, no explanati
         feature_cols = file_metadata.get("feature_columns", [])
         file_path = file_metadata.get("file_path", "N/A")
         
+        # 🔥 TASK 2: Ensure ALL column names are included for LLM context
+        all_columns = file_metadata.get("columns", [])
+        columns_text = ', '.join(all_columns) if all_columns else 'None'
+        
         text = f"""File Path: {file_path}
 Shape: {shape.get('rows', 'N/A')} rows × {shape.get('cols', 'N/A')} columns
 Missing Rate: {missing_rate}%
+**ALL COLUMNS (CRITICAL - Use these exact names):** {columns_text}
 Metadata Columns: {', '.join(metadata_cols) if metadata_cols else 'None'}
 Feature Columns (first 10): {', '.join(feature_cols[:10]) if feature_cols else 'None'}
 Total Features: {file_metadata.get('total_feature_columns', 'N/A')}

@@ -1267,8 +1267,10 @@
                     function handleServerEvent(eventType, data) {
                         console.log(`📡 [SSE Event] ${eventType}:`, data);
                         
-                        // 🔥 追加格式化数据到调试面板
-                        if (debugPanel) {
+                        // 🔥 TASK 2: Only append structured LLM outputs to Debug Panel
+                        // Only show: workflow (plan JSON), diagnosis (report), thought (reasoning), error (backend errors)
+                        const structuredEvents = ['workflow', 'diagnosis', 'thought', 'error'];
+                        if (debugPanel && structuredEvents.includes(eventType)) {
                             const formatted = `\n[${eventType}] ${JSON.stringify(data, null, 2)}\n`;
                             updateDebugPanel(formatted);
                         }
@@ -1295,9 +1297,9 @@
                                 // 🔥 TASK 3: Render diagnosis report LAST (after execution results)
                                 // 🔥 FEATURE: Support streaming reasoning tags
                                 if (data.report_data && data.report_data.diagnosis) {
-                                    renderDiagnosisCardWithStreaming(data.report_data.diagnosis, data);
+                                    renderDiagnosisCard(data.report_data.diagnosis, data);
                                 } else {
-                                    renderDiagnosisCardWithStreaming(data, data);
+                                    renderDiagnosisCard(data, data);
                                 }
                                 break;
                                 
@@ -1309,7 +1311,11 @@
                                 break;
                                 
                             case 'workflow':
-                                renderWorkflowCard(data);
+                                const returnedFormId = renderWorkflowCard(data);
+                                if (returnedFormId) {
+                                    // Store the returned form ID for later use
+                                    data._workflow_form_id = returnedFormId;
+                                }
                                 break;
                                 
                             case 'result':
@@ -1779,9 +1785,9 @@
                                 <div class="card border-0 shadow-sm">
                                     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
                                         <h5 class="mb-0">
-                                            <i class="bi bi-file-earmark-text"></i> 📊 数据诊断报告
+                                            <i class="bi bi-file-earmark-text"></i> 📊 分析结题报告
                                         </h5>
-                                        <button class="btn btn-sm btn-light" onclick="window.print()">
+                                        <button class="btn btn-sm btn-light" onclick="window.printReport()">
                                             <i class="bi bi-printer"></i> 🖨️ 打印报告
                                         </button>
                                     </div>
@@ -1835,9 +1841,15 @@
                                 statusClass = 'text-warning';
                             }
                             
-                            // 🔥 TASK 2: Default expand first and last step (if they have results)
+                            // 🔥 TASK 1: Default expand PCA and Volcano Plot steps (independent expansion)
                             const hasResults = stepStatus === 'success' || stepStatus === 'warning';
-                            const shouldExpand = (index === 0 || index === lastIndex) && hasResults;
+                            const stepNameLower = stepName.toLowerCase();
+                            // Default expand: PCA, Volcano Plot, or first step with results
+                            const shouldExpand = hasResults && (
+                                stepNameLower.includes('pca') || 
+                                stepNameLower.includes('volcano') ||
+                                (index === 0 && hasResults)
+                            );
                             
                             // 🔥 PHASE 1: Enhanced result data extraction
                             const stepResult = step.step_result || {};
@@ -2026,7 +2038,7 @@
                         
                         if (!cardZoneRef) {
                             console.error("❌ [renderWorkflowCard] cardZone 不存在，无法渲染");
-                            return;
+                            return null;  // Return null to indicate failure
                         }
                         
                         // 🔥 CRITICAL FIX: 防止重复渲染 - 但允许从预览模式升级到执行模式
@@ -2054,23 +2066,74 @@
                                 console.log("✅ [renderWorkflowCard] 允许从预览模式升级到执行模式，移除旧卡片");
                                 existingCard.remove();
                             } else {
-                                // Skip duplicate (same mode)
-                                console.warn("⚠️ [renderWorkflowCard] 工作流卡片已存在（相同模式），跳过重复渲染");
-                                return;
+                                // Skip duplicate (same mode) - but return existing ID
+                                const existingForm = existingCard.querySelector('form');
+                                const existingFormId = existingForm ? existingForm.id : null;
+                                const existingDataFormId = existingCard.getAttribute('data-form-id');
+                                const existingId = existingFormId || existingDataFormId;
+                                
+                                if (existingId) {
+                                    console.warn(`⚠️ [renderWorkflowCard] 工作流卡片已存在（相同模式），返回现有ID: ${existingId}`);
+                                    return existingId;  // Return existing ID
+                                } else {
+                                    console.warn("⚠️ [renderWorkflowCard] 工作流卡片已存在但无法提取ID，跳过重复渲染");
+                                    return null;
+                                }
                             }
                         }
                         
                         // 🔥 CRITICAL: 确保 workflowData 不为空
                         if (!workflowData) {
                             console.error("❌ [renderWorkflowCard] workflowData 为空");
-                            aiContentDiv.innerHTML += '<div class="alert alert-warning mt-3">⚠️ 工作流数据为空</div>';
-                            return;
+                            const cardZoneRef = window.currentMessageZones?.cardZone || aiContentDiv;
+                            if (cardZoneRef) {
+                                cardZoneRef.innerHTML += '<div class="alert alert-warning mt-3">⚠️ 工作流数据为空</div>';
+                            }
+                            return null;  // Return null to indicate failure
                         }
                         
-                        // 🔥 提取步骤（支持多种数据结构）
+                        // 🔥 TASK 1: Idempotency Check - Prevent double rendering, but return existing ID
+                        const workflowCardId = 'workflow-card-container';
+                        const existingWorkflowCard = cardZoneRef.querySelector(`#${workflowCardId}`);
+                        if (existingWorkflowCard) {
+                            // Check if it's the same mode (template vs execution)
+                            const existingIsTemplate = existingWorkflowCard.innerHTML.includes("预览模式") || 
+                                                       existingWorkflowCard.innerHTML.includes("template_mode");
+                            const newIsTemplate = workflowData.template_mode !== false;
+                            
+                            if (existingIsTemplate === newIsTemplate) {
+                                // 🔥 TASK 1 FIX: Extract existing form ID and return it
+                                const existingForm = existingWorkflowCard.querySelector('form');
+                                const existingFormId = existingForm ? existingForm.id : null;
+                                const existingDataFormId = existingWorkflowCard.getAttribute('data-form-id');
+                                const existingId = existingFormId || existingDataFormId;
+                                
+                                if (existingId) {
+                                    console.log(`✅ [renderWorkflowCard] 重用现有卡片，返回现有ID: ${existingId}`);
+                                    return existingId;  // Return existing ID so execute button knows what to target
+                                } else {
+                                    console.warn("⚠️ [renderWorkflowCard] 工作流卡片已存在但无法提取ID，跳过重复渲染");
+                                    return null;
+                                }
+                            } else {
+                                // Different mode - remove old card to allow upgrade
+                                console.log("✅ [renderWorkflowCard] 允许从预览模式升级到执行模式，移除旧卡片");
+                                existingWorkflowCard.remove();
+                            }
+                        }
+                        
+                        // 🔥 TASK 3: Safety Check - Ignore empty steps from backend
                         const workflowSteps = workflowData.workflow_config?.workflow_data?.steps || 
+                                             workflowData.workflow_config?.steps ||
                                              workflowData.workflow_data?.steps || 
                                              workflowData.steps || [];
+                        
+                        if (!workflowSteps || workflowSteps.length === 0) {
+                            console.warn("⚠️ [renderWorkflowCard] Received empty steps from backend. Ignoring.");
+                            console.warn("   - workflowData:", workflowData);
+                            return null;  // Do NOT render empty card, return null to indicate failure
+                        }
+                        
                         const workflowName = workflowData.workflow_config?.workflow_data?.workflow_name ||
                                           workflowData.workflow_data?.workflow_name ||
                                           workflowData.workflow_name ||
@@ -2107,8 +2170,9 @@
                         addProcessStep('工作流方案已生成', 'done');
                         
                         // 🔥 UI REGRESSION FIX: Restore Interactive Form Structure
+                        // 🔥 TASK 1: Use consistent ID for idempotency check
                         const formId = `wf-card-${Date.now()}`;
-                        let formHtml = `<div class="alert alert-success mt-3 params-form" id="${formId}" style="border-left: 4px solid #28a745;">
+                        let formHtml = `<div class="alert alert-success mt-3 params-form" id="${workflowCardId}" data-form-id="${formId}" style="border-left: 4px solid #28a745;">
                             <h5>
                                 <i class="bi bi-diagram-3"></i> 📋 ${workflowName}
                                     ${isTemplateMode ? '<span class="badge bg-secondary ms-2">[模版预览 Mode]</span>' : ''}
@@ -2268,7 +2332,9 @@
                         // 🔥 CRITICAL: 追加到 cardZone
                         cardZoneRef.insertAdjacentHTML('beforeend', formHtml);
                         
-                        console.log("✅ [renderWorkflowCard] 交互式工作流卡片已渲染到 cardZone");
+                        // 🔥 PHASE 1 FIX: Return the formId so caller can use it
+                        console.log(`✅ [renderWorkflowCard] 交互式工作流卡片已渲染到 cardZone, formId: ${formId}`);
+                        return formId;  // Return the newly generated formId
                     }
                     
                     // 🔥 UI REGRESSION FIX: Execute workflow from form (collects parameters from inputs)
@@ -2405,14 +2471,23 @@
                         clearInterval(timerInterval);
                         const duration = ((Date.now() - startTime) / 1000).toFixed(1);
                         
-                        // 🔥 REQUIREMENT 1: CRITICAL - 彻底移除所有 Thinking spinner
+                        // 🔥 TASK 1: CRITICAL - 彻底移除所有 Thinking spinner 和容器
+                        // Remove .thinking-container immediately
+                        const thinkingContainers = document.querySelectorAll('.thinking-container');
+                        thinkingContainers.forEach(container => container.remove());
+                        
                         // Remove from textZone
                         const textZoneRef = window.currentMessageZones?.textZone;
                         if (textZoneRef) {
                             const spinner = textZoneRef.querySelector('.spinner-border');
                             if (spinner) spinner.remove();
-                            const thinkingText = textZoneRef.querySelector('span[style*="思考中"], span:contains("思考中")');
-                            if (thinkingText) thinkingText.remove();
+                            // 🔥 TASK 1: Fix :contains selector - use safe removal logic
+                            const allSpans = textZoneRef.querySelectorAll('span');
+                            allSpans.forEach(span => {
+                                if (span.textContent && span.textContent.includes('思考中')) {
+                                    span.remove();
+                                }
+                            });
                         }
                         
                         // Remove from aiContentDiv
@@ -2833,7 +2908,37 @@
             return row.querySelector('.bubble');
         }
 
-        // 🔥 核心功能：局部打印 (只打印报告部分，不打印聊天记录)
+        // 🔥 TASK 1: Print unified report container (hide chat history)
+        window.printReport = function() {
+            const reportContainer = document.querySelector('.unified-report-container');
+            if (!reportContainer) {
+                alert('未找到报告容器');
+                return;
+            }
+            const content = reportContainer.innerHTML;
+            const printWindow = window.open('', '', 'height=800,width=800');
+            printWindow.document.write('<html><head><title>分析结题报告</title>');
+            printWindow.document.write('<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">');
+            printWindow.document.write('<style>');
+            printWindow.document.write(`
+                body { font-family: 'Times New Roman', serif; padding: 40px; color: #000; }
+                .btn { display: none !important; }
+                .accordion-button { pointer-events: none; padding: 0; font-weight: bold; color: #000; background: none; border: none; }
+                .accordion-button::after { display: none; }
+                .accordion-collapse { display: block !important; }
+                .accordion-item { border: none; border-bottom: 1px solid #ddd; margin-bottom: 10px; }
+                img { max-width: 80%; display: block; margin: 10px auto; page-break-inside: avoid; }
+                .table-responsive { overflow-x: visible; }
+            `);
+            printWindow.document.write('</style></head><body>');
+            printWindow.document.write(content);
+            printWindow.document.write('</body></html>');
+            printWindow.document.close();
+            printWindow.focus();
+            setTimeout(() => printWindow.print(), 250);
+        };
+
+        // 🔥 核心功能：局部打印 (只打印报告部分，不打印聊天记录) - Legacy function
         function printReport(reportId) {
             const content = document.getElementById(reportId).innerHTML;
             const printWindow = window.open('', '', 'height=800,width=800');

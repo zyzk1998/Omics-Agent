@@ -580,10 +580,15 @@ Use Simplified Chinese for all content."""
             # 🔥 CRITICAL DEBUGGING: 包装在详细的 try-except 中
             try:
                 logger.info(f"📞 [DataDiagnostician] 调用 LLM 生成报告...")
+                logger.info(f"📊 [DataDiagnostician] 统计数据摘要: n_samples={stats.get('n_samples', stats.get('n_cells', stats.get('n_rows', 0)))}, n_features={stats.get('n_features', stats.get('n_genes', stats.get('n_metabolites', stats.get('n_cols', 0))))}")
+                logger.info(f"📊 [DataDiagnostician] Stats JSON 长度: {len(stats_json)} 字符")
+                if len(stats_json) < 100:
+                    logger.warning(f"⚠️ [DataDiagnostician] 警告：Stats JSON 过短，可能缺少关键数据")
                 logger.debug(f"📝 [DEBUG] LLM Client type: {type(self.llm_client)}")
                 logger.debug(f"📝 [DEBUG] LLM Client methods: {dir(self.llm_client)}")
                 
                 completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=1500)
+                logger.info(f"✅ [DataDiagnostician] LLM调用完成，开始解析响应...")
                 
                 logger.debug(f"📝 [DEBUG] LLM completion type: {type(completion)}")
                 logger.debug(f"📝 [DEBUG] LLM completion: {completion}")
@@ -639,12 +644,100 @@ Use Simplified Chinese for all content."""
             # 🔥 返回详细的错误信息，而不是 None，这样用户可以在 UI 中看到
             return f"⚠️ **诊断报告生成失败**\n\n错误: {str(e)}\n\n请检查服务器日志获取详细信息。"
     
+    def _read_execution_results(self, output_dir: Optional[str] = None) -> Dict[str, Any]:
+        """
+        🔥 TASK 3: Read actual execution results from generated files
+        
+        Args:
+            output_dir: Output directory path (from executor)
+        
+        Returns:
+            Dictionary containing:
+            - csv_files: List of CSV files with head rows and describe()
+            - image_files: List of generated PNG images
+            - summary: Text summary of findings
+        """
+        import pandas as pd
+        from pathlib import Path
+        import os
+        
+        results_context = {
+            "csv_files": [],
+            "image_files": [],
+            "summary": ""
+        }
+        
+        if not output_dir or not os.path.exists(output_dir):
+            logger.warning(f"⚠️ [ResultReader] 输出目录不存在: {output_dir}")
+            return results_context
+        
+        try:
+            output_path = Path(output_dir)
+            
+            # 🔥 TASK 3: Read CSV files (e.g., deg_results.csv, pathway_results.csv)
+            csv_files = list(output_path.glob("*.csv"))
+            for csv_file in csv_files[:5]:  # Limit to first 5 CSV files
+                try:
+                    df = pd.read_csv(csv_file, nrows=100)  # Read first 100 rows
+                    head_rows = df.head(10).to_dict(orient='records')
+                    
+                    # Get describe() statistics
+                    numeric_cols = df.select_dtypes(include=['number']).columns
+                    describe_stats = {}
+                    if len(numeric_cols) > 0:
+                        describe_stats = df[numeric_cols].describe().to_dict()
+                    
+                    results_context["csv_files"].append({
+                        "filename": csv_file.name,
+                        "path": str(csv_file),
+                        "shape": f"{len(df)} rows × {len(df.columns)} columns",
+                        "columns": list(df.columns),
+                        "head_rows": head_rows[:5],  # First 5 rows
+                        "statistics": describe_stats,
+                        "summary": f"Found {len(df)} rows with {len(df.columns)} columns. Top columns: {', '.join(df.columns[:5])}"
+                    })
+                    logger.info(f"✅ [ResultReader] 读取CSV文件: {csv_file.name} ({len(df)} rows)")
+                except Exception as e:
+                    logger.warning(f"⚠️ [ResultReader] 无法读取CSV文件 {csv_file.name}: {e}")
+            
+            # 🔥 TASK 3: List image files (PNG, JPG, etc.)
+            image_extensions = ['.png', '.jpg', '.jpeg', '.pdf', '.svg']
+            for ext in image_extensions:
+                image_files = list(output_path.glob(f"*{ext}"))
+                for img_file in image_files[:10]:  # Limit to first 10 images per type
+                    results_context["image_files"].append({
+                        "filename": img_file.name,
+                        "path": str(img_file),
+                        "type": ext[1:]  # Remove dot
+                    })
+            
+            # Build summary text
+            if results_context["csv_files"]:
+                csv_summary = f"发现 {len(results_context['csv_files'])} 个CSV结果文件:\n"
+                for csv_info in results_context["csv_files"]:
+                    csv_summary += f"- {csv_info['filename']}: {csv_info['shape']}, 列: {', '.join(csv_info['columns'][:5])}\n"
+                results_context["summary"] += csv_summary
+            
+            if results_context["image_files"]:
+                img_summary = f"\n发现 {len(results_context['image_files'])} 个图片文件:\n"
+                for img_info in results_context["image_files"][:5]:
+                    img_summary += f"- {img_info['filename']}\n"
+                results_context["summary"] += img_summary
+            
+            logger.info(f"✅ [ResultReader] 读取执行结果完成: {len(results_context['csv_files'])} CSV, {len(results_context['image_files'])} 图片")
+            
+        except Exception as e:
+            logger.error(f"❌ [ResultReader] 读取执行结果失败: {e}", exc_info=True)
+        
+        return results_context
+    
     async def _generate_analysis_summary(
         self,
         steps_results: List[Dict[str, Any]],
         omics_type: str = "Metabolomics",
         workflow_name: str = "Analysis Pipeline",
-        summary_context: Optional[Dict[str, Any]] = None
+        summary_context: Optional[Dict[str, Any]] = None,
+        output_dir: Optional[str] = None  # 🔥 TASK 3: Add output_dir parameter
     ) -> Optional[str]:
         """
         基于工作流执行结果生成分析摘要（AI Expert Diagnosis）
@@ -654,6 +747,7 @@ Use Simplified Chinese for all content."""
             omics_type: 组学类型（"Metabolomics", "scRNA", 等）
             workflow_name: 工作流名称
             summary_context: 可选的上下文信息（包含失败步骤等）
+            output_dir: 输出目录路径（用于读取生成的文件）
         
         Returns:
             Markdown 格式的分析摘要，如果失败返回 None
@@ -662,6 +756,9 @@ Use Simplified Chinese for all content."""
         
         try:
             logger.info(f"📝 [AnalysisSummary] 开始生成分析摘要 - 组学类型: {omics_type}")
+            
+            # 🔥 TASK 3: Read actual execution results from files
+            execution_results = self._read_execution_results(output_dir)
             
             # 🔥 CRITICAL FIX: Extract failure information from context
             has_failures = False
@@ -900,75 +997,124 @@ Use Simplified Chinese for all content."""
             if has_failures:
                 rule3_text = "- ⚠️ Some steps failed during execution. You MUST still summarize the successful steps (e.g., PCA, PLS-DA, Volcano plots) and explain what insights can be drawn from them.\n- For failed steps, briefly note what went wrong (e.g., 'Pathway enrichment failed due to missing gseapy library') but focus on interpreting the successful results."
             
-            # 🔥 TASK 2: Extract Key Findings for enhanced prompt
+            # 🔥 TASK 3: Extract Key Findings with SPECIFIC metrics (Feed the Brain)
             key_findings = {
                 "pca_separation": "N/A",
+                "pca_variance": {"PC1": "N/A", "PC2": "N/A"},
                 "differential_count": "N/A",
+                "differential_up_down": {"up": 0, "down": 0},
                 "top_pathways": [],
-                "top_vip_metabolites": [],
-                "top_differential_metabolites": []
+                "top_vip_metabolites": [],  # Names only for biological interpretation
+                "top_differential_metabolites": []  # Names only for biological interpretation
             }
             
             for step_info in results_summary.get("steps", []):
                 step_name = step_info.get("name", "").lower()
                 
-                # Extract PCA separation
+                # 🔥 TASK 3: Extract PCA metrics (Explained Variance)
                 if "pca" in step_name and "visualize" not in step_name:
                     separation = step_info.get("separation_quality", "unknown")
-                    pc1_var = step_info.get("pc1_variance", "N/A")
-                    pc2_var = step_info.get("pc2_variance", "N/A")
+                    pc1_var = step_info.get("pc1_variance", step_info.get("pc1_var", "N/A"))
+                    pc2_var = step_info.get("pc2_variance", step_info.get("pc2_var", "N/A"))
+                    # Extract numeric values
+                    if isinstance(pc1_var, str) and "%" in pc1_var:
+                        pc1_val = pc1_var.replace("%", "").strip()
+                    else:
+                        pc1_val = str(pc1_var)
+                    if isinstance(pc2_var, str) and "%" in pc2_var:
+                        pc2_val = pc2_var.replace("%", "").strip()
+                    else:
+                        pc2_val = str(pc2_var)
+                    
+                    key_findings["pca_variance"] = {"PC1": pc1_val, "PC2": pc2_val}
                     if separation == "clear":
                         key_findings["pca_separation"] = f"清晰分离 (PC1: {pc1_var}, PC2: {pc2_var})"
                     else:
                         key_findings["pca_separation"] = f"中等分离 (PC1: {pc1_var}, PC2: {pc2_var})"
                 
-                # Extract differential analysis count
+                # 🔥 TASK 3: Extract differential analysis (Up/Down counts and top metabolites)
                 if "differential" in step_name:
                     sig_count = step_info.get("significant_count", "N/A")
                     total_count = step_info.get("total_count", "N/A")
+                    top_up = step_info.get("top_up", [])
+                    top_down = step_info.get("top_down", [])
+                    
                     key_findings["differential_count"] = f"发现 {sig_count} 个显著差异代谢物（共 {total_count} 个）"
-                    # Extract top markers
+                    key_findings["differential_up_down"] = {
+                        "up": len(top_up) if isinstance(top_up, list) else 0,
+                        "down": len(top_down) if isinstance(top_down, list) else 0
+                    }
+                    
+                    # Extract top marker NAMES (for biological interpretation)
                     top_markers = step_info.get("top_markers", [])
                     if top_markers:
                         key_findings["top_differential_metabolites"] = [
-                            f"{m.get('name', 'Unknown')} (Log2FC: {m.get('log2fc', 0):.2f}, FDR: {m.get('fdr', 1.0):.4f})"
-                            for m in top_markers[:5]
+                            m.get('name', 'Unknown') for m in top_markers[:5]
                         ]
+                    elif top_up:
+                        # Fallback to top_up list
+                        key_findings["top_differential_metabolites"] = top_up[:5] if isinstance(top_up, list) else []
                 
-                # Extract PLS-DA VIP metabolites
+                # 🔥 TASK 3: Extract PLS-DA VIP metabolites (Top 5 NAMES)
                 if "plsda" in step_name or "pls-da" in step_name:
                     top_vip = step_info.get("top_vip_markers", [])
                     if top_vip:
+                        # Extract metabolite NAMES only (for biological interpretation)
                         key_findings["top_vip_metabolites"] = [
-                            f"{v.get('name', 'Unknown')} (VIP: {v.get('vip_score', v.get('vip', 0)):.2f})"
-                            for v in top_vip[:5]
+                            v.get('name', 'Unknown') for v in top_vip[:5]
                         ]
                 
-                # Extract pathway enrichment
+                # 🔥 TASK 3: Extract pathway enrichment (Top 5 PATHWAY NAMES)
                 if "pathway" in step_name or "enrichment" in step_name:
                     top_pathways = step_info.get("top_pathways", [])
                     if top_pathways:
-                        key_findings["top_pathways"] = []
-                        for p in top_pathways[:3]:
-                            p_name = p.get('name', 'Unknown')
-                            p_val = p.get('p_value', 1.0)
-                            # Handle both string and numeric p-values
-                            if isinstance(p_val, str):
-                                p_val_str = p_val
-                            else:
-                                p_val_str = f"{p_val:.4f}"
-                            key_findings["top_pathways"].append(f"{p_name} (p-value: {p_val_str})")
+                        # Extract pathway NAMES only (for biological interpretation)
+                        key_findings["top_pathways"] = [
+                            p.get('name', 'Unknown') if isinstance(p, dict) else str(p)
+                            for p in top_pathways[:5]
+                        ]
             
             key_findings_json = json.dumps(key_findings, ensure_ascii=False, indent=2)
             
-            prompt = f"""You are a Senior Bioinformatics Scientist publishing in Nature Medicine. Your role is to interpret biological data and provide deep scientific insights, connecting findings to biological mechanisms and literature knowledge.
+            # 🔥 TASK 3: Include actual file contents in prompt
+            execution_results_text = ""
+            if execution_results and (execution_results.get("csv_files") or execution_results.get("image_files")):
+                execution_results_text = "\n**Actual Analysis Results (From Generated Files):**\n"
+                
+                if execution_results.get("csv_files"):
+                    execution_results_text += "\n**CSV Results Files:**\n"
+                    for csv_info in execution_results["csv_files"]:
+                        execution_results_text += f"\n- **{csv_info['filename']}**: {csv_info['shape']}\n"
+                        execution_results_text += f"  Columns: {', '.join(csv_info['columns'][:10])}\n"
+                        if csv_info.get("head_rows"):
+                            execution_results_text += f"  First 3 rows:\n"
+                            for i, row in enumerate(csv_info["head_rows"][:3], 1):
+                                execution_results_text += f"    Row {i}: {json.dumps(row, ensure_ascii=False)}\n"
+                        if csv_info.get("statistics"):
+                            execution_results_text += f"  Statistics: {json.dumps(csv_info['statistics'], ensure_ascii=False, indent=2)}\n"
+                
+                if execution_results.get("image_files"):
+                    execution_results_text += f"\n**Generated Images ({len(execution_results['image_files'])} files):**\n"
+                    for img_info in execution_results["image_files"][:5]:
+                        execution_results_text += f"- {img_info['filename']} ({img_info['type']})\n"
+            else:
+                execution_results_text = "\n**Note**: No generated files found in output directory. Analysis results are based on step summaries only.\n"
+            
+            prompt = f"""You are a Senior Bioinformatics Scientist writing a Results & Discussion section for a top-tier journal (Nature Medicine). Your role is to interpret biological data and provide deep scientific insights, connecting findings to biological mechanisms and literature knowledge.
+
+**User Goal:**
+{workflow_name}
 
 **Execution Results (Successful Steps):**
 {summary_json}
 
-**Key Findings Extracted:**
+**Key Findings Extracted (Specific Metrics):**
 {key_findings_json}
+{execution_results_text}
 {failure_info}
+
+**CRITICAL INSTRUCTION:**
+Based on the provided metrics above, interpret the biological significance. Use your internal knowledge base (PubMed/Literature) to explain **WHY** these specific metabolites/pathways might be altered in this context. Generate a structured Markdown report with deep biological interpretation.
 
 **Domain Context:**
 {domain_context}
@@ -1002,31 +1148,27 @@ Use Simplified Chinese for all content."""
 
 6. **Output Structure (MUST FOLLOW):**
 
-### 1. 结果摘要 (Results Summary)
-- Quantitative summary: sample size, groups, detected features
-- Data quality assessment (missing values, outliers based on PCA)
+### 1. 统计概览 (Statistical Overview)
+- Quantitative summary: PCA separation quality, PC1/PC2 variance explained, differential analysis counts (up/down regulated)
+- Data quality assessment based on PCA results
 - Overall data characteristics and key statistics
 
-### 2. 统计分析结果 (Statistical Findings)
-- **PCA Analysis**: Interpret group separation (clear/unclear), PC1/PC2 variance explained, clustering patterns, and what they indicate about group differences
-- **Differential Analysis**: Report total features analyzed, up-regulated/down-regulated counts, significant features (FDR threshold), statistical method used
-- **Key Markers**: List top 3-5 metabolites with highest VIP scores (PLS-DA) or highest |Log2FC| (differential analysis), including their names and fold changes
+### 2. 关键生物标志物 (Key Biomarkers)
+- **VIP代谢物**: Discuss the top VIP metabolites from PLS-DA analysis (names: {', '.join(key_findings.get('top_vip_metabolites', [])[:5]) if key_findings.get('top_vip_metabolites') else 'see data'})
+- **差异代谢物**: Discuss the top differentially expressed metabolites (names: {', '.join(key_findings.get('top_differential_metabolites', [])[:5]) if key_findings.get('top_differential_metabolites') else 'see data'})
+- **生物学功能**: Use your internal knowledge base (PubMed/Literature) to explain the potential functions and biological significance of these metabolites
+- **标志物潜力**: Discuss the potential of these metabolites as biomarkers
 
-### 3. 生物学机制解读 (Biological Mechanism Interpretation)
-- **Deep Dive**: Connect the top metabolites/pathways to biological functions
-- **Pathway Analysis**: If enrichment data exists, interpret the enriched KEGG pathways and their biological significance. Explain how these pathways relate to the biological question
-- **Mechanism Discussion**: Relate findings to potential biological mechanisms, disease processes, or physiological states
-- **Functional Implications**: Discuss what the differentially expressed metabolites mean in terms of biological function
+### 3. 通路机制解读 (Pathway Mechanism Interpretation)
+- **富集通路**: Deep dive into the enriched pathways (names: {', '.join(key_findings.get('top_pathways', [])[:5]) if key_findings.get('top_pathways') else 'see data'})
+- **通路功能**: Explain the biological functions of these pathways and their significance in the current research context
+- **机制讨论**: Relate findings to potential biological mechanisms, disease processes, or physiological states
+- **功能意义**: Discuss what the differentially expressed metabolites mean in terms of biological function
 
-### 4. 潜在标志物 (Potential Biomarkers)
-- Discuss the VIP molecules from PLS-DA analysis
-- Explain their biological relevance and potential as biomarkers
-- Connect to known literature and metabolic pathways
-
-### 5. 下一步建议 (Next Steps & Recommendations)
-- Suggest validation experiments (e.g., targeted metabolomics, qPCR validation)
-- Recommend targeted analysis (e.g., specific pathway validation)
-- Propose follow-up studies based on the findings
+### 4. 结论与建议 (Conclusions & Recommendations)
+- **主要发现总结**: Summarize key findings and their biological significance
+- **验证实验建议**: Suggest validation experiments (e.g., targeted metabolomics, qPCR validation)
+- **后续研究**: Propose follow-up studies based on the findings
 
 **Output Format:**
 - Use Simplified Chinese (简体中文)
@@ -1080,9 +1222,19 @@ Use Simplified Chinese for all content."""
             # 🔥 TASK 2: Force LLM call - ALWAYS call LLM, never return simple list
             logger.info(f"📞 [AnalysisSummary] 调用 LLM 生成深度生物学解释...")
             logger.info(f"📊 [AnalysisSummary] 提取的关键指标: {key_findings_json}")
+            logger.info(f"📊 [AnalysisSummary] 成功步骤数: {len(successful_steps)}/{len(steps_results)}")
+            logger.info(f"📊 [AnalysisSummary] 失败步骤数: {len(failed_steps)}")
+            
+            # 🔥 TASK 2: Debug logging - Log metrics being sent to LLM
+            if not key_findings_json or key_findings_json == "{}":
+                logger.warning(f"⚠️ [AnalysisSummary] 警告：关键指标为空，LLM可能无法生成有意义的报告")
+            else:
+                logger.info(f"✅ [AnalysisSummary] 关键指标已提取，包含数据，准备发送给LLM")
             
             try:
+                logger.info(f"📞 [AnalysisSummary] 开始LLM调用，max_tokens=2500...")
                 completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=2500)  # 🔥 TASK 2: Increase tokens for comprehensive report
+                logger.info(f"✅ [AnalysisSummary] LLM调用完成，开始解析响应...")
                 think_content, response = self.llm_client.extract_think_and_content(completion)
                 
                 # 🔥 FEATURE: Return original content with tags for frontend parsing
@@ -1124,30 +1276,38 @@ Minimum 500 words. Be scientific and detailed."""
                         return retry_original_content if '<think>' in retry_original_content or '<think>' in retry_original_content else retry_response
                     else:
                         logger.error(f"❌ [AnalysisSummary] 重试后仍无法生成有效内容")
-                        # 🔥 TASK 2: Do NOT hide LLM failure - return error message
-                        return f"""## ⚠️ LLM 生成失败
+                        # 🔥 TASK 3: Return user-friendly error message instead of raw traceback
+                        return f"""## ⚠️ 分析报告生成失败
 
-**错误信息**: LLM 返回内容过短或无效
-
-**分析指标**:
-{key_findings_json}
+**说明**: AI 专家解读服务暂时不可用，无法生成深度生物学解释报告。
 
 **已完成的步骤**: {len(successful_steps)}/{len(steps_results)}
 
-**说明**: 无法生成深度生物学解释报告。请检查 LLM 服务状态或联系技术支持。"""
+**关键指标**:
+{key_findings_json if key_findings_json != "{}" else "暂无可用指标"}
+
+**建议**: 请查看上方的详细图表和统计结果以获取分析信息。"""
             except Exception as llm_error:
                 logger.error(f"❌ [AnalysisSummary] LLM 调用失败: {llm_error}", exc_info=True)
-                # 🔥 TASK 2: Do NOT hide LLM failure - return explicit error
-                return f"""## ❌ LLM 生成失败
+                # 🔥 TASK 3: Sanitize error message - remove traceback, return user-friendly message
+                error_msg = str(llm_error)
+                # Remove traceback patterns
+                if "Traceback" in error_msg or "most recent call last" in error_msg:
+                    # Extract only the error type and message
+                    error_lines = error_msg.split('\n')
+                    error_type = error_lines[-1] if error_lines else str(llm_error)
+                    error_msg = error_type.split(':')[-1].strip() if ':' in error_type else error_type
+                
+                return f"""## ⚠️ AI 专家解读服务暂时不可用
 
-**错误信息**: {str(llm_error)}
-
-**分析指标**:
-{key_findings_json}
+**说明**: 无法生成深度生物学解释报告。{error_msg if len(error_msg) < 100 else "服务调用失败"}
 
 **已完成的步骤**: {len(successful_steps)}/{len(steps_results)}
 
-**说明**: LLM 服务调用失败。请检查网络连接或 LLM 服务状态。"""
+**关键指标**:
+{key_findings_json if key_findings_json != "{}" else "暂无可用指标"}
+
+**建议**: 请查看上方的详细图表和统计结果以获取分析信息。"""
                 
         except Exception as e:
             logger.error(f"❌ [AnalysisSummary] 生成分析摘要失败: {e}", exc_info=True)

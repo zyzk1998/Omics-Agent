@@ -439,7 +439,7 @@ def run_pathway_enrichment(
                 col_normalized = col.lower().replace(' ', '').replace('_', '').replace('-', '')
                 if col_normalized == group_column_normalized:
                     matched_column = col
-                    logger.info(f"🔄 [PLS-DA] 模糊匹配分组列: '{group_column}' -> '{col}'")
+                    logger.info(f"🔄 [Pathway Enrichment] 模糊匹配分组列: '{group_column}' -> '{col}'")
                     break
             
             if matched_column:

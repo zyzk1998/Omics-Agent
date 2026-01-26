@@ -342,6 +342,9 @@ class AgentOrchestrator:
                 
                 logger.info(f"✅ [Orchestrator] 工作流执行完成，结果: {type(results)}")
                 
+                # 🔥 TASK 3: Store executor reference for later use (to get output_dir)
+                executor_output_dir = getattr(executor, 'output_dir', None)
+                
                 # 🔥 CRITICAL REGRESSION FIX: Check for async_job_started status
                 steps_details = results.get("steps_details", [])
                 has_async_job = False
@@ -418,11 +421,19 @@ class AgentOrchestrator:
                         }
                         
                         try:
+                            # 🔥 TASK 3: Extract output_dir from results or executor to pass to Reporter
+                            output_dir = results.get("output_dir") or results.get("output_path")
+                            if not output_dir:
+                                output_dir = executor_output_dir  # Use stored executor reference
+                            
+                            logger.info(f"📂 [Orchestrator] 传递output_dir给Reporter: {output_dir}")
+                            
                             # 🔥 TASK 2: Force LLM call - _generate_analysis_summary now always returns structured content
                             summary = await self.agent._generate_analysis_summary(
                                 results, 
                                 domain_name,
-                                summary_context=summary_context
+                                summary_context=summary_context,
+                                output_dir=output_dir  # 🔥 TASK 3: Pass output_dir to Reporter
                             )
                             
                             # 🔥 TASK 2: Ensure summary is not None or empty (should always have structured fallback)
@@ -863,10 +874,22 @@ class AgentOrchestrator:
                     self.conversation_state[session_id] = session_state
                     logger.info(f"💾 [Orchestrator] 已保存待处理模态: {domain_name} (session_id={session_id})")
                     
-                    # Step A2: Yield Template Card
+                    # Step A2: Yield Template Card - ONLY if steps are not empty
                     workflow_data = template_result.get("workflow_data") or template_result
                     if workflow_data:
-                        steps_count = len(workflow_data.get("steps", []))
+                        steps = workflow_data.get("steps", [])
+                        steps_count = len(steps)
+                        
+                        # 🔥 TASK 1: Empty Guard - Do NOT yield empty plans
+                        if not steps or len(steps) == 0:
+                            logger.error(f"❌ [Orchestrator] Plan-First模式: 模板工作流步骤为空，不发送workflow事件")
+                            yield self._format_sse("error", {
+                                "error": "模板生成失败",
+                                "message": "无法生成有效的工作流模板，请检查输入或联系技术支持"
+                            })
+                            return
+                        
+                        logger.info(f"✅ [Orchestrator] Plan-First模式: 发送workflow事件，包含 {steps_count} 个步骤")
                         workflow_event_data = {
                             "workflow_config": workflow_data,
                             "workflow_data": workflow_data,
@@ -1069,12 +1092,24 @@ class AgentOrchestrator:
                         except Exception as e:
                             logger.error(f"❌ [Orchestrator] Path A: 硬编码 SOP 生成失败: {e}", exc_info=True)
                     
-                    # Yield workflow event
+                    # 🔥 TASK 1: Yield workflow event - ONLY if steps are not empty
                     workflow_data = result.get("workflow_data") or result
                     
                     # 🔥 CRITICAL: Extract steps BEFORE yielding workflow event
                     steps = workflow_data.get("steps", []) if workflow_data else []
                     has_valid_plan = bool(workflow_data and steps and len(steps) > 0)
+                    
+                    # 🔥 TASK 1: Empty Guard - Do NOT yield empty plans
+                    if not has_valid_plan:
+                        logger.error(f"❌ [Orchestrator] Path A: 工作流规划失败，步骤为空。不发送workflow事件。")
+                        logger.error(f"   - workflow_data存在: {workflow_data is not None}")
+                        logger.error(f"   - steps长度: {len(steps) if steps else 0}")
+                        yield self._format_sse("error", {
+                            "error": "工作流规划失败",
+                            "message": "无法生成有效的工作流步骤，请检查输入数据或联系技术支持"
+                        })
+                        return
+                    
                     # 🔥 CRITICAL: In Path A, files are guaranteed to exist (we're in the else branch)
                     has_files = True  # Path A means files were detected
                     
@@ -1084,28 +1119,29 @@ class AgentOrchestrator:
                     if workflow_data:
                         logger.info(f"🔍 [Orchestrator] DEBUG: workflow_data.steps exists={('steps' in workflow_data)}, steps type={type(steps)}, steps length={len(steps) if steps else 0}")
                     
-                    if workflow_data:
-                        yield self._format_sse("workflow", {
-                            "workflow_config": workflow_data,
-                            "template_mode": False  # 🔥 CRITICAL: Always False in Path A
-                        })
-                        await asyncio.sleep(0.01)
-                        
-                        # Yield result event with workflow config
-                        yield self._format_sse("result", {
-                            "workflow_config": workflow_data,
-                            "template_mode": False
-                        })
-                        await asyncio.sleep(0.01)
-                        
-                        yield self._format_sse("status", {
-                            "content": "工作流规划完成，请确认执行。",
-                            "state": "completed"
-                        })
-                        await asyncio.sleep(0.01)
-                        
-                        yield self._format_sse("done", {"status": "success"})
-                        return  # 🔥 CRITICAL: STOP HERE - Do NOT auto-execute
+                    # 🔥 TASK 1: Yield workflow event ONLY ONCE, at the very end of planning block
+                    logger.info(f"✅ [Orchestrator] Path A: 发送workflow事件，包含 {len(steps)} 个步骤")
+                    yield self._format_sse("workflow", {
+                        "workflow_config": workflow_data,
+                        "template_mode": False  # 🔥 CRITICAL: Always False in Path A
+                    })
+                    await asyncio.sleep(0.01)
+                    
+                    # Yield result event with workflow config
+                    yield self._format_sse("result", {
+                        "workflow_config": workflow_data,
+                        "template_mode": False
+                    })
+                    await asyncio.sleep(0.01)
+                    
+                    yield self._format_sse("status", {
+                        "content": "工作流规划完成，请确认执行。",
+                        "state": "completed"
+                    })
+                    await asyncio.sleep(0.01)
+                    
+                    yield self._format_sse("done", {"status": "success"})
+                    return  # 🔥 CRITICAL: STOP HERE - Do NOT auto-execute
                         
                         # 🔥 REMOVED: Auto-execution logic
                         # The workflow should stop at planning stage and wait for explicit execution request

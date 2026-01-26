@@ -251,7 +251,7 @@ class WorkflowExecutor:
                 try:
                     validated_params = tool_metadata.args_schema.model_validate(params, strict=False)
                     params = validated_params.model_dump(exclude_unset=False)
-                logger.debug(f"✅ 参数验证通过: {step_id}")
+                    logger.debug(f"✅ 参数验证通过: {step_id}")
                 except Exception as e:
                     # 如果 model_validate 失败，尝试使用 __init__ 但捕获额外字段
                     try:
@@ -774,7 +774,7 @@ class WorkflowExecutor:
                 # 非占位符参数已经在循环开始前复制，这里不需要再次复制
                 # 但如果这个 key 不在 processed 中（不应该发生），还是复制一下
                 if key not in processed:
-                processed[key] = value
+                    processed[key] = value
         
         # 🔥 CRITICAL FIX: 强制确保 group_column 等关键参数没有被意外移除
         # 这是最后的保护措施，确保即使前面的逻辑有问题，group_column 也不会丢失
@@ -991,10 +991,10 @@ class WorkflowExecutor:
             # 占位符会在 execute_step 内部的 _process_data_flow 中解析
             # 只有在没有占位符且参数缺失时，才自动注入
             if not has_placeholder:
-            # 自动注入文件路径（如果缺失且我们有当前文件路径）
-            if file_param_name not in params and current_file_path:
-                params[file_param_name] = current_file_path
-                logger.info(f"🔄 自动注入 {file_param_name}: {current_file_path}")
+                # 自动注入文件路径（如果缺失且我们有当前文件路径）
+                if file_param_name not in params and current_file_path:
+                    params[file_param_name] = current_file_path
+                    logger.info(f"🔄 自动注入 {file_param_name}: {current_file_path}")
             else:
                 # 有占位符，记录日志但不自动注入
                 placeholder_keys = [k for k, v in params.items() if isinstance(v, str) and v.startswith("<") and v.endswith(">")]
