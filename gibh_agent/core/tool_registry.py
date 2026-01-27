@@ -39,12 +39,14 @@ class ToolRegistry:
     _instance: Optional['ToolRegistry'] = None
     _tools: Dict[str, ToolMetadata] = {}
     _executables: Dict[str, Callable] = {}
+    _aliases: Dict[str, str] = {}  # 🔥 TASK 3: 别名映射 (alias -> actual_name)
     
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._tools = {}
             cls._instance._executables = {}
+            cls._instance._aliases = {}
         return cls._instance
     
     def register(
@@ -163,6 +165,12 @@ class ToolRegistry:
             self._tools[name] = metadata
             self._executables[name] = func
             
+            # 🔥 TASK 3: 注册常用别名（支持不同的命名约定）
+            # 例如：preprocess_data 也可以作为 metabolomics_preprocess_data 使用
+            if name == "preprocess_data":
+                self._aliases["metabolomics_preprocess_data"] = name
+                logger.info(f"✅ 工具已注册别名: metabolomics_preprocess_data -> {name}")
+            
             logger.info(f"✅ 工具已注册: {name} (类别: {category})")
             
             # 保留原始函数签名和元数据
@@ -199,24 +207,28 @@ class ToolRegistry:
         获取工具的可执行函数
         
         Args:
-            name: 工具名称
+            name: 工具名称（支持别名）
         
         Returns:
             工具函数，如果不存在返回 None
         """
-        return self._executables.get(name)
+        # 🔥 TASK 3: 首先检查别名
+        actual_name = self._aliases.get(name, name)
+        return self._executables.get(actual_name)
     
     def get_metadata(self, name: str) -> Optional[ToolMetadata]:
         """
         获取工具的元数据
         
         Args:
-            name: 工具名称
+            name: 工具名称（支持别名）
         
         Returns:
             工具元数据，如果不存在返回 None
         """
-        return self._tools.get(name)
+        # 🔥 TASK 3: 首先检查别名
+        actual_name = self._aliases.get(name, name)
+        return self._tools.get(actual_name)
     
     def get_all_tools_json(self) -> list[Dict[str, Any]]:
         """

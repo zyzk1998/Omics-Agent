@@ -8,6 +8,9 @@ from openai import OpenAI, AsyncOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 import os
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
@@ -340,6 +343,46 @@ class LLMClient:
 
 class LLMClientFactory:
     """LLM 客户端工厂，根据配置创建客户端"""
+    
+    @staticmethod
+    def create_default() -> LLMClient:
+        """
+        🔥 TASK 1: 创建默认LLM客户端，统一使用硅基流动DeepSeek API
+        
+        优先级：
+        1. SILICONFLOW_API_KEY 环境变量（硅基流动）
+        2. 如果未设置，抛出错误（不再回退到本地LLM）
+        
+        Returns:
+            LLMClient 实例（硅基流动DeepSeek API）
+        """
+        # 🔥 TASK 1: 统一使用硅基流动API
+        api_key = os.getenv("SILICONFLOW_API_KEY")
+        if not api_key:
+            error_msg = (
+                "❌ [LLMClientFactory] SILICONFLOW_API_KEY 环境变量未设置！\n"
+                "本项目统一使用硅基流动DeepSeek API，请设置环境变量：\n"
+                "  export SILICONFLOW_API_KEY='your_api_key_here'\n"
+                "或在 .env 文件中添加：\n"
+                "  SILICONFLOW_API_KEY=your_api_key_here"
+            )
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        # 使用硅基流动API
+        base_url = "https://api.siliconflow.cn/v1"
+        model = os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-R1")
+        
+        logger.info(f"🔗 [LLMClientFactory] 创建硅基流动LLM客户端: {base_url} (model: {model})")
+        logger.info(f"   API Key: {'***' + api_key[-4:] if len(api_key) > 4 else '***'}")
+        
+        return LLMClient(
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            temperature=0.7,
+            max_tokens=4096
+        )
     
     @staticmethod
     def create_from_config(config: Dict[str, Any]) -> LLMClient:

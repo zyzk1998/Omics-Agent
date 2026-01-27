@@ -436,6 +436,21 @@ class AgentOrchestrator:
                                 output_dir=output_dir  # 🔥 TASK 3: Pass output_dir to Reporter
                             )
                             
+                            # 🔥 TASK: 检查是否有LLM错误，如果有则通过SSE发送详细错误信息到前端
+                            if hasattr(self.agent, 'context') and "last_llm_error" in self.agent.context:
+                                llm_error_info = self.agent.context.pop("last_llm_error")  # 取出后清除
+                                logger.warning(f"⚠️ [Orchestrator] 检测到LLM调用错误，发送详细错误信息到前端")
+                                yield self._format_sse("error", {
+                                    "error": llm_error_info.get("error_message", "LLM调用失败"),
+                                    "message": f"LLM调用失败: {llm_error_info.get('error_message', '未知错误')}",
+                                    "error_type": llm_error_info.get("error_type", "Unknown"),
+                                    "details": llm_error_info.get("error_details", ""),
+                                    "context": llm_error_info.get("context", {}),
+                                    "possible_causes": llm_error_info.get("possible_causes", []),
+                                    "debug_info": llm_error_info.get("error_details", "")  # 兼容前端字段名
+                                })
+                                await asyncio.sleep(0.01)
+                            
                             # 🔥 TASK 2: Ensure summary is not None or empty (should always have structured fallback)
                             if not summary or len(summary.strip()) < 50:
                                 logger.warning(f"⚠️ [Orchestrator] 摘要过短，使用结构化后备")
@@ -728,13 +743,13 @@ class AgentOrchestrator:
                 logger.info(f"✅ [Orchestrator] 恢复模式: domain={domain_name}, target_steps={target_steps}")
                 # Skip to file inspection (Branch B) - don't analyze intent again
             else:
-                # 🔥 CRITICAL REFACTOR: Step 3 - ALWAYS Analyze Intent First (Dynamic Scoping)
-                # Step 3.1: Analyze Intent (ALWAYS FIRST) - Determine modality and target_steps
-                yield self._format_sse("status", {
-                    "content": "正在分析您的需求...",
-                    "state": "running"
-                })
-                await asyncio.sleep(0.01)
+            # 🔥 CRITICAL REFACTOR: Step 3 - ALWAYS Analyze Intent First (Dynamic Scoping)
+            # Step 3.1: Analyze Intent (ALWAYS FIRST) - Determine modality and target_steps
+            yield self._format_sse("status", {
+                "content": "正在分析您的需求...",
+                "state": "running"
+            })
+            await asyncio.sleep(0.01)
             
             # Initialize planner for intent analysis
             from .planner import SOPPlanner
@@ -783,7 +798,7 @@ class AgentOrchestrator:
                     logger.warning(f"⚠️ [Orchestrator] 无法从文件对象中提取路径")
             else:
                 logger.info(f"ℹ️ [Orchestrator] 没有文件，跳过文件检查")
-                
+            
             # Analyze intent: classify domain and determine target_steps
             intent_result = await planner._classify_intent(refined_query, file_metadata_for_intent)
             domain_name = intent_result.get("domain_name")
@@ -903,7 +918,7 @@ class AgentOrchestrator:
                     yield self._format_sse("message", {
                         "content": f"已为您规划 **{modality_display}** 分析流程（包含 {steps_count} 个步骤）。请上传数据以激活。"
                     })
-                    await asyncio.sleep(0.01)
+                        await asyncio.sleep(0.01)
                     
                     # 输出结果事件
                     yield self._format_sse("result", {
@@ -962,17 +977,17 @@ class AgentOrchestrator:
                 
                 # Inspect file
                 file_metadata = None
-                try:
+                        try:
                     file_metadata = self.file_inspector.inspect_file(file_path)
                     logger.info(f"✅ [Orchestrator] Path A: 文件检查完成: {file_path}")
-                    
-                    if file_metadata and file_metadata.get("status") == "success":
+                            
+                            if file_metadata and file_metadata.get("status") == "success":
                         # Extract statistics
-                        n_samples = file_metadata.get("n_samples") or file_metadata.get("n_obs") or file_metadata.get("shape", {}).get("rows", 0)
-                        n_features = file_metadata.get("n_features") or file_metadata.get("n_vars") or file_metadata.get("shape", {}).get("cols", 0)
-                        
+                                n_samples = file_metadata.get("n_samples") or file_metadata.get("n_obs") or file_metadata.get("shape", {}).get("rows", 0)
+                                n_features = file_metadata.get("n_features") or file_metadata.get("n_vars") or file_metadata.get("shape", {}).get("cols", 0)
+                                
                         # Build diagnosis message
-                        if domain_name == "Metabolomics":
+                                if domain_name == "Metabolomics":
                                     diagnosis_message = f"""### 📊 数据体检报告
 
 **数据规模**:
@@ -988,8 +1003,8 @@ class AgentOrchestrator:
 - 数据范围: {file_metadata.get('data_range', {}).get('min', 'N/A')} ~ {file_metadata.get('data_range', {}).get('max', 'N/A')}
 
 **下一步**: 已为您规划分析流程，请确认执行。"""
-                        else:  # RNA
-                            diagnosis_message = f"""### 📊 数据体检报告
+                                else:  # RNA
+                                    diagnosis_message = f"""### 📊 数据体检报告
 
 **数据规模**:
 - **细胞数**: {n_samples} 个
@@ -1002,21 +1017,21 @@ class AgentOrchestrator:
 **数据质量**: 数据已就绪，可以开始分析。
 
 **下一步**: 已为您规划分析流程，请确认执行。"""
-                            
-                            yield self._format_sse("diagnosis", {
-                                "message": diagnosis_message,
-                                "n_samples": n_samples,
-                                "n_features": n_features,
-                                "file_type": file_metadata.get('file_type'),
+                                
+                                yield self._format_sse("diagnosis", {
+                                    "message": diagnosis_message,
+                                    "n_samples": n_samples,
+                                    "n_features": n_features,
+                                    "file_type": file_metadata.get('file_type'),
                                 "status": "data_ready"
-                            })
-                            await asyncio.sleep(0.01)
-                except Exception as e:
+                                })
+                                await asyncio.sleep(0.01)
+                        except Exception as e:
                     logger.error(f"❌ [Orchestrator] Path A: 文件检查失败: {e}", exc_info=True)
                     yield self._format_sse("error", {
                         "error": str(e),
                         "message": f"文件检查失败: {str(e)}"
-                    })
+                        })
                     return
                 
                 # A2. Plan (With Metadata) - CRITICAL: Explicitly tell planner this is NOT a template
@@ -1054,8 +1069,23 @@ class AgentOrchestrator:
                 logger.info(f"✅ [Orchestrator] Path A: 工作流规划完成")
                 logger.info(f"✅ [Orchestrator] Path A: 返回结果 template_mode: {result.get('template_mode', 'N/A')}")
                     
+                # 🔥 TASK: 检查是否有LLM错误（数据诊断阶段），如果有则通过SSE发送详细错误信息到前端
+                if hasattr(self.agent, 'context') and "last_llm_error" in self.agent.context:
+                    llm_error_info = self.agent.context.pop("last_llm_error")  # 取出后清除
+                    logger.warning(f"⚠️ [Orchestrator] 检测到LLM调用错误（数据诊断阶段），发送详细错误信息到前端")
+                    yield self._format_sse("error", {
+                        "error": llm_error_info.get("error_message", "LLM调用失败"),
+                        "message": f"数据诊断LLM调用失败: {llm_error_info.get('error_message', '未知错误')}",
+                        "error_type": llm_error_info.get("error_type", "Unknown"),
+                        "details": llm_error_info.get("error_details", ""),
+                        "context": llm_error_info.get("context", {}),
+                        "possible_causes": llm_error_info.get("possible_causes", []),
+                        "debug_info": llm_error_info.get("error_details", "")  # 兼容前端字段名
+                    })
+                    await asyncio.sleep(0.01)
+                    
                 # A3. Force Validation
-                if isinstance(result, dict):
+            if isinstance(result, dict):
                     # FORCE OVERRIDE: Explicitly set template_mode = False
                     if result.get("template_mode"):
                         logger.error("❌ [Orchestrator] Path A: 逻辑错误 - Planner 返回 template_mode=True  despite file presence. 强制覆盖。")
@@ -1122,11 +1152,11 @@ class AgentOrchestrator:
                     # 🔥 TASK 1: Yield workflow event ONLY ONCE, at the very end of planning block
                     logger.info(f"✅ [Orchestrator] Path A: 发送workflow事件，包含 {len(steps)} 个步骤")
                     yield self._format_sse("workflow", {
-                        "workflow_config": workflow_data,
+                            "workflow_config": workflow_data,
                         "template_mode": False  # 🔥 CRITICAL: Always False in Path A
                     })
-                    await asyncio.sleep(0.01)
-                    
+                        await asyncio.sleep(0.01)
+                
                     # Yield result event with workflow config
                     yield self._format_sse("result", {
                         "workflow_config": workflow_data,
@@ -1134,13 +1164,13 @@ class AgentOrchestrator:
                     })
                     await asyncio.sleep(0.01)
                     
-                    yield self._format_sse("status", {
+            yield self._format_sse("status", {
                         "content": "工作流规划完成，请确认执行。",
-                        "state": "completed"
-                    })
-                    await asyncio.sleep(0.01)
-                    
-                    yield self._format_sse("done", {"status": "success"})
+                "state": "completed"
+            })
+            await asyncio.sleep(0.01)
+            
+                yield self._format_sse("done", {"status": "success"})
                     return  # 🔥 CRITICAL: STOP HERE - Do NOT auto-execute
                         
                         # 🔥 REMOVED: Auto-execution logic

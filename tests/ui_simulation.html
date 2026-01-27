@@ -190,7 +190,7 @@
                 <form id="${formId}">
                     <p>工作流包含 ${workflowSteps.length} 个步骤</p>
                     <button type="button" class="btn btn-success btn-sm" id="execute-workflow-${formId}" 
-                            onclick="executeWorkflowFromForm('${formId}')">
+                            onclick="executeWorkflowFromForm(this)">
                         🚀 执行工作流
                     </button>
                 </form>
@@ -201,16 +201,19 @@
             return formId;  // Return the newly generated formId
         }
         
-        // Mock executeWorkflowFromForm function
-        function executeWorkflowFromForm(formId) {
-            console.log("🚀 [executeWorkflowFromForm] 从表单执行工作流，formId:", formId);
-            const formElement = document.getElementById(formId);
+        // 🔥 TASK 1 FIX: Mock executeWorkflowFromForm function (using DOM traversal)
+        function executeWorkflowFromForm(buttonElement) {
+            // 🔥 TASK 1: Find form using DOM traversal (works 100% of the time)
+            const formElement = buttonElement.closest('form');
             if (!formElement) {
-                console.error("❌ [executeWorkflowFromForm] 未找到表单元素:", formId);
+                console.error("❌ [executeWorkflowFromForm] 未找到表单元素（通过DOM遍历）");
                 alert("错误：未找到工作流表单");
                 return false;
             }
-            console.log("✅ [executeWorkflowFromForm] 成功找到表单元素");
+            
+            const formId = formElement.id;
+            console.log("🚀 [executeWorkflowFromForm] 从表单执行工作流，formId:", formId);
+            console.log("✅ [executeWorkflowFromForm] 成功找到表单元素（使用DOM遍历）");
             return true;
         }
         

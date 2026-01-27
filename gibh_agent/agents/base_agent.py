@@ -578,22 +578,31 @@ Use Simplified Chinese for all content."""
             
             # 🔥 Step 3: 调用 LLM 生成 Markdown 报告
             # 🔥 CRITICAL DEBUGGING: 包装在详细的 try-except 中
+            # 🔥 TASK 2: 统一LLM客户端获取逻辑（与规划阶段一致）
             try:
+                # 🔥 TASK 2: 如果 self.llm_client 不可用，使用工厂方法创建（与规划阶段一致）
+                llm_client_to_use = self.llm_client
+                if not llm_client_to_use:
+                    logger.warning("⚠️ [DataDiagnostician] self.llm_client 不可用，使用 LLMClientFactory.create_default()")
+                    from gibh_agent.core.llm_client import LLMClientFactory
+                    llm_client_to_use = LLMClientFactory.create_default()
+                    logger.info(f"✅ [DataDiagnostician] 已创建默认LLM客户端: {llm_client_to_use.base_url}")
+                
                 logger.info(f"📞 [DataDiagnostician] 调用 LLM 生成报告...")
                 logger.info(f"📊 [DataDiagnostician] 统计数据摘要: n_samples={stats.get('n_samples', stats.get('n_cells', stats.get('n_rows', 0)))}, n_features={stats.get('n_features', stats.get('n_genes', stats.get('n_metabolites', stats.get('n_cols', 0))))}")
                 logger.info(f"📊 [DataDiagnostician] Stats JSON 长度: {len(stats_json)} 字符")
                 if len(stats_json) < 100:
                     logger.warning(f"⚠️ [DataDiagnostician] 警告：Stats JSON 过短，可能缺少关键数据")
-                logger.debug(f"📝 [DEBUG] LLM Client type: {type(self.llm_client)}")
-                logger.debug(f"📝 [DEBUG] LLM Client methods: {dir(self.llm_client)}")
+                logger.debug(f"📝 [DEBUG] LLM Client type: {type(llm_client_to_use)}")
+                logger.debug(f"📝 [DEBUG] LLM Client methods: {dir(llm_client_to_use)}")
                 
-                completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=1500)
+                completion = await llm_client_to_use.achat(messages, temperature=0.3, max_tokens=1500)
                 logger.info(f"✅ [DataDiagnostician] LLM调用完成，开始解析响应...")
                 
                 logger.debug(f"📝 [DEBUG] LLM completion type: {type(completion)}")
                 logger.debug(f"📝 [DEBUG] LLM completion: {completion}")
                 
-                think_content, response = self.llm_client.extract_think_and_content(completion)
+                think_content, response = llm_client_to_use.extract_think_and_content(completion)
                 
                 # 🔥 DEBUG: 打印诊断报告信息
                 if response:
@@ -613,23 +622,82 @@ Use Simplified Chinese for all content."""
                 # LLM 客户端方法不存在
                 import traceback
                 error_msg = (
-                    f"LLM 客户端方法调用失败: {str(attr_err)}\n"
-                    f"LLM Client type: {type(self.llm_client)}\n"
-                    f"Available methods: {[m for m in dir(self.llm_client) if not m.startswith('_')]}\n"
-                    f"Stack trace:\n{traceback.format_exc()}"
+                    f"❌ [DataDiagnostician] LLM 客户端方法调用失败\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"错误类型: AttributeError\n"
+                    f"错误信息: {str(attr_err)}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"调用上下文:\n"
+                    f"  - LLM Client type: {type(llm_client_to_use)}\n"
+                    f"  - LLM Client base_url: {llm_client_to_use.base_url if hasattr(llm_client_to_use, 'base_url') else 'N/A'}\n"
+                    f"  - LLM Client model: {llm_client_to_use.model if hasattr(llm_client_to_use, 'model') else 'N/A'}\n"
+                    f"  - Available methods: {[m for m in dir(llm_client_to_use) if not m.startswith('_')]}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"调用参数:\n"
+                    f"  - messages数量: {len(messages)}\n"
+                    f"  - temperature: 0.3\n"
+                    f"  - max_tokens: 1500\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"完整堆栈:\n{traceback.format_exc()}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                 )
-                logger.error(f"❌ [DataDiagnostician] {error_msg}")
+                logger.error(error_msg)
                 return f"⚠️ **诊断报告生成失败**\n\nLLM 客户端错误: {str(attr_err)}\n\n请检查服务器日志获取详细信息。"
                 
             except Exception as llm_err:
-                # LLM 调用失败
+                # LLM 调用失败 - 🔥 TASK 2: 增强错误日志输出
                 import traceback
+                error_type = type(llm_err).__name__
                 error_msg = (
-                    f"LLM 调用失败: {str(llm_err)}\n"
-                    f"Error type: {type(llm_err).__name__}\n"
-                    f"Stack trace:\n{traceback.format_exc()}"
+                    f"❌ [DataDiagnostician] LLM 调用失败\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"错误类型: {error_type}\n"
+                    f"错误信息: {str(llm_err)}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"调用上下文:\n"
+                    f"  - LLM Client base_url: {llm_client_to_use.base_url if hasattr(llm_client_to_use, 'base_url') else 'N/A'}\n"
+                    f"  - LLM Client model: {llm_client_to_use.model if hasattr(llm_client_to_use, 'model') else 'N/A'}\n"
+                    f"  - API Key: {'已设置' if hasattr(llm_client_to_use, 'api_key') and llm_client_to_use.api_key else '未设置'}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"调用参数:\n"
+                    f"  - messages数量: {len(messages)}\n"
+                    f"  - system message长度: {len(messages[0]['content']) if messages else 0} 字符\n"
+                    f"  - user message长度: {len(messages[1]['content']) if len(messages) > 1 else 0} 字符\n"
+                    f"  - temperature: 0.3\n"
+                    f"  - max_tokens: 1500\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"可能原因:\n"
+                    f"  - API密钥无效或过期\n"
+                    f"  - 网络连接问题\n"
+                    f"  - API服务暂时不可用\n"
+                    f"  - 请求超时\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"完整堆栈:\n{traceback.format_exc()}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                 )
-                logger.error(f"❌ [DataDiagnostician] {error_msg}")
+                logger.error(error_msg)
+                
+                # 🔥 TASK: 将详细错误信息存储到context，供orchestrator通过SSE发送到前端
+                self.context["last_llm_error"] = {
+                    "error_type": error_type,
+                    "error_message": str(llm_err),
+                    "error_details": error_msg,
+                    "context": {
+                        "llm_client_base_url": llm_client_to_use.base_url if hasattr(llm_client_to_use, 'base_url') else 'N/A',
+                        "llm_client_model": llm_client_to_use.model if hasattr(llm_client_to_use, 'model') else 'N/A',
+                        "api_key_set": bool(hasattr(llm_client_to_use, 'api_key') and llm_client_to_use.api_key),
+                        "messages_count": len(messages),
+                        "temperature": 0.3,
+                        "max_tokens": 1500
+                    },
+                    "possible_causes": [
+                        "API密钥无效或过期",
+                        "网络连接问题",
+                        "API服务暂时不可用",
+                        "请求超时"
+                    ]
+                }
+                
                 return f"⚠️ **诊断报告生成失败**\n\n错误: {str(llm_err)}\n\n请检查服务器日志获取详细信息。"
             
         except Exception as e:
@@ -820,9 +888,9 @@ Use Simplified Chinese for all content."""
                         # Use summary dict if available (from Phase 2 enhancement)
                         step_info["significant_count"] = summary.get("significant_count", summary.get("sig_count", "N/A"))
                         step_info["total_count"] = summary.get("total_metabolites", "N/A")
-                        step_info["method"] = summary.get("method", "N/A")
-                        step_info["case_group"] = summary.get("case_group", "N/A")
-                        step_info["control_group"] = summary.get("control_group", "N/A")
+                    step_info["method"] = summary.get("method", "N/A")
+                    step_info["case_group"] = summary.get("case_group", "N/A")
+                    step_info["control_group"] = summary.get("control_group", "N/A")
                         # Extract top_up and top_down from summary
                         step_info["top_up"] = summary.get("top_up", [])
                         step_info["top_down"] = summary.get("top_down", [])
@@ -869,18 +937,20 @@ Use Simplified Chinese for all content."""
                         step_info["comp2_variance"] = f"{summary.get('comp2_variance', 0):.1f}%"
                     else:
                         # Fallback: Extract from vip_scores (old format)
-                        vip_scores = step_data.get("vip_scores", [])
-                        if vip_scores:
-                            # 提取top VIP标记物
-                            if isinstance(vip_scores, list):
-                                sorted_vip = sorted(vip_scores, key=lambda x: x.get("vip_score", 0), reverse=True)
-                                step_info["top_vip_markers"] = [
-                                    {
-                                        "name": v.get("metabolite", "Unknown"),
-                                        "vip_score": v.get("vip_score", 0)
-                                    }
-                                    for v in sorted_vip[:5]
-                                ]
+                    vip_scores = step_data.get("vip_scores", [])
+                    if vip_scores:
+                        # 提取top VIP标记物
+                        if isinstance(vip_scores, list):
+                            sorted_vip = sorted(vip_scores, key=lambda x: x.get("vip_score", 0), reverse=True)
+                            step_info["top_vip_markers"] = [
+                                {
+                                    "name": v.get("metabolite", "Unknown"),
+                                    "vip_score": v.get("vip_score", 0)
+                                }
+                                for v in sorted_vip[:5]
+                            ]
+                            else:
+                                step_info["top_vip_markers"] = []
                         else:
                             step_info["top_vip_markers"] = []
                 
@@ -929,14 +999,14 @@ Use Simplified Chinese for all content."""
                         step_info["separation_quality"] = summary.get("separation", "unknown")
                     else:
                         # Fallback: Extract from explained_variance (old format)
-                        explained_var = step_data.get("explained_variance", {})
-                        if explained_var:
-                            pc1_var = explained_var.get("PC1", 0) * 100 if isinstance(explained_var.get("PC1"), (int, float)) else 0
-                            pc2_var = explained_var.get("PC2", 0) * 100 if isinstance(explained_var.get("PC2"), (int, float)) else 0
+                    explained_var = step_data.get("explained_variance", {})
+                    if explained_var:
+                        pc1_var = explained_var.get("PC1", 0) * 100 if isinstance(explained_var.get("PC1"), (int, float)) else 0
+                        pc2_var = explained_var.get("PC2", 0) * 100 if isinstance(explained_var.get("PC2"), (int, float)) else 0
                             step_info["pc1_var"] = explained_var.get("PC1", 0)
                             step_info["pc2_var"] = explained_var.get("PC2", 0)
-                            step_info["pc1_variance"] = f"{pc1_var:.1f}%"
-                            step_info["pc2_variance"] = f"{pc2_var:.1f}%"
+                        step_info["pc1_variance"] = f"{pc1_var:.1f}%"
+                        step_info["pc2_variance"] = f"{pc2_var:.1f}%"
                             step_info["total_variance"] = f"{(pc1_var + pc2_var):.1f}%"
                             # Extract separation info if available
                             if pc1_var + pc2_var > 50:
@@ -1232,21 +1302,29 @@ Based on the provided metrics above, interpret the biological significance. Use 
                 logger.info(f"✅ [AnalysisSummary] 关键指标已提取，包含数据，准备发送给LLM")
             
             try:
-                logger.info(f"📞 [AnalysisSummary] 开始LLM调用，max_tokens=2500...")
-                completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=2500)  # 🔥 TASK 2: Increase tokens for comprehensive report
-                logger.info(f"✅ [AnalysisSummary] LLM调用完成，开始解析响应...")
-                think_content, response = self.llm_client.extract_think_and_content(completion)
+                # 🔥 TASK 3: 统一LLM客户端获取逻辑（与规划阶段一致）
+                llm_client_to_use = self.llm_client
+                if not llm_client_to_use:
+                    logger.warning("⚠️ [AnalysisSummary] self.llm_client 不可用，使用 LLMClientFactory.create_default()")
+                    from gibh_agent.core.llm_client import LLMClientFactory
+                    llm_client_to_use = LLMClientFactory.create_default()
+                    logger.info(f"✅ [AnalysisSummary] 已创建默认LLM客户端: {llm_client_to_use.base_url}")
                 
+                logger.info(f"📞 [AnalysisSummary] 开始LLM调用，max_tokens=2500...")
+                completion = await llm_client_to_use.achat(messages, temperature=0.3, max_tokens=2500)  # 🔥 TASK 2: Increase tokens for comprehensive report
+                logger.info(f"✅ [AnalysisSummary] LLM调用完成，开始解析响应...")
+                think_content, response = llm_client_to_use.extract_think_and_content(completion)
+            
                 # 🔥 FEATURE: Return original content with tags for frontend parsing
                 # Frontend will parse <think> tags to show thinking process
                 original_content = completion.choices[0].message.content or ""
                 
                 if response and len(response.strip()) > 100:  # Ensure meaningful response
                     logger.info(f"✅ [AnalysisSummary] 深度生物学解释生成成功，长度: {len(response)}")
-                    logger.debug(f"📝 [DEBUG] Summary preview: {response[:200]}...")
+                logger.debug(f"📝 [DEBUG] Summary preview: {response[:200]}...")
                     # Return original content with tags so frontend can parse and display reasoning
                     return original_content if '<think>' in original_content or '<think>' in original_content else response
-                else:
+            else:
                     logger.warning(f"⚠️ [AnalysisSummary] LLM 返回内容过短，尝试重新生成...")
                     # Retry with simpler prompt if first attempt failed
                     retry_prompt = f"""Based on these analysis metrics: {key_findings_json}
@@ -1264,8 +1342,8 @@ Minimum 500 words. Be scientific and detailed."""
                         {"role": "user", "content": retry_prompt}
                     ]
                     
-                    retry_completion = await self.llm_client.achat(retry_messages, temperature=0.3, max_tokens=2000)
-                    retry_think, retry_response = self.llm_client.extract_think_and_content(retry_completion)
+                    retry_completion = await llm_client_to_use.achat(retry_messages, temperature=0.3, max_tokens=2000)
+                    retry_think, retry_response = llm_client_to_use.extract_think_and_content(retry_completion)
                     
                     # 🔥 FEATURE: Return original content with tags for frontend parsing
                     retry_original_content = retry_completion.choices[0].message.content or ""
@@ -1279,7 +1357,6 @@ Minimum 500 words. Be scientific and detailed."""
                         # 🔥 TASK 3: Return user-friendly error message instead of raw traceback
                         return f"""## ⚠️ 分析报告生成失败
 
-**说明**: AI 专家解读服务暂时不可用，无法生成深度生物学解释报告。
 
 **已完成的步骤**: {len(successful_steps)}/{len(steps_results)}
 
@@ -1288,19 +1365,83 @@ Minimum 500 words. Be scientific and detailed."""
 
 **建议**: 请查看上方的详细图表和统计结果以获取分析信息。"""
             except Exception as llm_error:
-                logger.error(f"❌ [AnalysisSummary] LLM 调用失败: {llm_error}", exc_info=True)
+                # 🔥 TASK 2: 增强错误日志输出
+                import traceback
+                error_type = type(llm_error).__name__
+                error_msg = (
+                    f"❌ [AnalysisSummary] LLM 调用失败\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"错误类型: {error_type}\n"
+                    f"错误信息: {str(llm_error)}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"调用上下文:\n"
+                    f"  - LLM Client base_url: {llm_client_to_use.base_url if hasattr(llm_client_to_use, 'base_url') else 'N/A'}\n"
+                    f"  - LLM Client model: {llm_client_to_use.model if hasattr(llm_client_to_use, 'model') else 'N/A'}\n"
+                    f"  - API Key: {'已设置' if hasattr(llm_client_to_use, 'api_key') and llm_client_to_use.api_key else '未设置'}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"调用参数:\n"
+                    f"  - messages数量: {len(messages)}\n"
+                    f"  - system message长度: {len(messages[0]['content']) if messages else 0} 字符\n"
+                    f"  - user message长度: {len(messages[1]['content']) if len(messages) > 1 else 0} 字符\n"
+                    f"  - temperature: 0.3\n"
+                    f"  - max_tokens: 2500\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"执行上下文:\n"
+                    f"  - 成功步骤数: {len(successful_steps)}/{len(steps_results)}\n"
+                    f"  - 失败步骤数: {len(failed_steps)}\n"
+                    f"  - 关键指标: {key_findings_json[:200] if key_findings_json else 'N/A'}...\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"可能原因:\n"
+                    f"  - API密钥无效或过期\n"
+                    f"  - 网络连接问题\n"
+                    f"  - API服务暂时不可用\n"
+                    f"  - 请求超时\n"
+                    f"  - 请求内容过长\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"完整堆栈:\n{traceback.format_exc()}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                )
+                logger.error(error_msg)
+                
+                # 🔥 TASK: 将详细错误信息存储到context，供orchestrator通过SSE发送到前端
+                self.context["last_llm_error"] = {
+                    "error_type": error_type,
+                    "error_message": str(llm_error),
+                    "error_details": error_msg,
+                    "context": {
+                        "llm_client_base_url": llm_client_to_use.base_url if hasattr(llm_client_to_use, 'base_url') else 'N/A',
+                        "llm_client_model": llm_client_to_use.model if hasattr(llm_client_to_use, 'model') else 'N/A',
+                        "api_key_set": bool(hasattr(llm_client_to_use, 'api_key') and llm_client_to_use.api_key),
+                        "messages_count": len(messages),
+                        "temperature": 0.3,
+                        "max_tokens": 2500,
+                        "successful_steps": len(successful_steps),
+                        "failed_steps": len(failed_steps),
+                        "key_findings": key_findings_json[:200] if key_findings_json else 'N/A'
+                    },
+                    "possible_causes": [
+                        "API密钥无效或过期",
+                        "网络连接问题",
+                        "API服务暂时不可用",
+                        "请求超时",
+                        "请求内容过长"
+                    ]
+                }
+                
                 # 🔥 TASK 3: Sanitize error message - remove traceback, return user-friendly message
-                error_msg = str(llm_error)
+                error_msg_str = str(llm_error)
                 # Remove traceback patterns
                 if "Traceback" in error_msg or "most recent call last" in error_msg:
                     # Extract only the error type and message
                     error_lines = error_msg.split('\n')
-                    error_type = error_lines[-1] if error_lines else str(llm_error)
-                    error_msg = error_type.split(':')[-1].strip() if ':' in error_type else error_type
+                    error_type_clean = error_lines[-1] if error_lines else str(llm_error)
+                    error_msg_clean = error_type_clean.split(':')[-1].strip() if ':' in error_type_clean else error_type_clean
+                else:
+                    error_msg_clean = error_msg_str
                 
                 return f"""## ⚠️ AI 专家解读服务暂时不可用
 
-**说明**: 无法生成深度生物学解释报告。{error_msg if len(error_msg) < 100 else "服务调用失败"}
+**说明**: 无法生成深度生物学解释报告。{error_msg_clean if len(error_msg_clean) < 100 else "服务调用失败"}
 
 **已完成的步骤**: {len(successful_steps)}/{len(steps_results)}
 

@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>前端按钮功能测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-container {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-header {
+            background: #007bff;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+        .test-result {
+            margin: 10px 0;
+            padding: 15px;
+            border-radius: 4px;
+        }
+        .test-result.pass {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .test-result.fail {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        #card-zone {
+            min-height: 200px;
+            border: 2px dashed #ccc;
+            padding: 15px;
+            margin: 15px 0;
+            background: #fafafa;
+        }
+        button {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #218838;
+        }
+        .alert {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .alert-success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        pre {
+            background: #f4f4f4;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="test-header">
+            <h1>🧪 前端按钮功能测试</h1>
+            <p>验证"执行工作流"按钮使用DOM遍历可以正常工作</p>
+        </div>
+
+        <div class="test-step">
+            <h3>测试区域</h3>
+            <div id="card-zone"></div>
+            <button onclick="runButtonTests()">🚀 运行按钮测试</button>
+            <button onclick="clearTests()" style="background: #dc3545;">🗑️ 清除测试</button>
+        </div>
+
+        <div id="test-results"></div>
+    </div>
+
+    <script>
+        // 🔥 TASK 1 FIX: 使用DOM遍历的执行函数（从index.html复制）
+        function executeWorkflowFromForm(buttonElement) {
+            // 🔥 TASK 1: Find form using DOM traversal (works 100% of the time)
+            const formElement = buttonElement.closest('form');
+            if (!formElement) {
+                console.error("❌ [executeWorkflowFromForm] 未找到表单元素（通过DOM遍历）");
+                alert("错误：未找到工作流表单");
+                return false;
+            }
+            
+            const formId = formElement.id;
+            console.log("🚀 [executeWorkflowFromForm] 从表单执行工作流，formId:", formId);
+            console.log("✅ [executeWorkflowFromForm] 成功找到表单元素（使用DOM遍历）");
+            return true;
+        }
+
+        // 模拟渲染工作流卡片
+        function renderWorkflowCard(workflowData) {
+            const cardZoneRef = document.getElementById('card-zone');
+            if (!cardZoneRef) return null;
+            
+            const formId = `wf-card-${Date.now()}`;
+            const workflowCardId = 'workflow-card-container';
+            
+            let formHtml = `<div class="alert alert-success" id="${workflowCardId}" data-form-id="${formId}">
+                <h5>📋 ${workflowData.workflow_name || '测试工作流'}</h5>
+                <form id="${formId}">
+                    <p>工作流包含 ${workflowData.steps?.length || 0} 个步骤</p>
+                    <button type="button" class="btn btn-success btn-sm" id="execute-workflow-${formId}" 
+                            onclick="executeWorkflowFromForm(this)">
+                        🚀 执行工作流
+                    </button>
+                </form>
+            </div>`;
+            
+            cardZoneRef.insertAdjacentHTML('beforeend', formHtml);
+            return formId;
+        }
+
+        function addTestResult(testName, passed, message, details = '') {
+            const resultsDiv = document.getElementById('test-results');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = 'test-result ' + (passed ? 'pass' : 'fail');
+            resultDiv.innerHTML = `
+                <h4>${testName}</h4>
+                <p><strong>${passed ? '✅ PASS' : '❌ FAIL'}:</strong> ${message}</p>
+                ${details ? `<pre>${details}</pre>` : ''}
+            `;
+            resultsDiv.appendChild(resultDiv);
+        }
+
+        function clearTests() {
+            document.getElementById('card-zone').innerHTML = '';
+            document.getElementById('test-results').innerHTML = '';
+        }
+
+        function runButtonTests() {
+            clearTests();
+            const resultsDiv = document.getElementById('test-results');
+            resultsDiv.innerHTML = '<h2>测试结果</h2>';
+            
+            let allPassed = true;
+            
+            // 测试 1: 正常渲染和按钮点击
+            try {
+                const workflowData = {
+                    workflow_name: '测试工作流',
+                    steps: [
+                        { id: 'step1', name: '步骤1' },
+                        { id: 'step2', name: '步骤2' }
+                    ]
+                };
+                
+                const formId = renderWorkflowCard(workflowData);
+                const button = document.querySelector(`#execute-workflow-${formId}`);
+                
+                if (!button) {
+                    addTestResult('测试 1: 按钮渲染', false, '未找到执行按钮');
+                    allPassed = false;
+                } else {
+                    const result = executeWorkflowFromForm(button);
+                    if (result) {
+                        addTestResult('测试 1: 按钮渲染和点击', true, 
+                            `成功找到表单并执行，formId: ${formId}`);
+                    } else {
+                        addTestResult('测试 1: 按钮渲染和点击', false, '执行失败');
+                        allPassed = false;
+                    }
+                }
+            } catch (e) {
+                addTestResult('测试 1: 按钮渲染和点击', false, `异常: ${e.message}`);
+                allPassed = false;
+            }
+            
+            // 测试 2: ID动态变化后仍能工作
+            try {
+                const form = document.querySelector('form');
+                if (!form) {
+                    addTestResult('测试 2: ID动态变化', false, '未找到表单');
+                    allPassed = false;
+                } else {
+                    const originalId = form.id;
+                    form.id = 'changed-id-' + Date.now();
+                    const button = form.querySelector('button[onclick*="executeWorkflowFromForm"]');
+                    
+                    if (button) {
+                        const result = executeWorkflowFromForm(button);
+                        form.id = originalId; // 恢复
+                        
+                        if (result) {
+                            addTestResult('测试 2: ID动态变化', true, 
+                                'DOM遍历在ID变化后仍能正常工作');
+                        } else {
+                            addTestResult('测试 2: ID动态变化', false, 'DOM遍历失败');
+                            allPassed = false;
+                        }
+                    } else {
+                        addTestResult('测试 2: ID动态变化', false, '未找到按钮');
+                        allPassed = false;
+                    }
+                }
+            } catch (e) {
+                addTestResult('测试 2: ID动态变化', false, `异常: ${e.message}`);
+                allPassed = false;
+            }
+            
+            // 测试 3: 多个表单，确保找到正确的表单
+            try {
+                const workflowData2 = {
+                    workflow_name: '第二个工作流',
+                    steps: [{ id: 'step1', name: '步骤1' }]
+                };
+                const formId2 = renderWorkflowCard(workflowData2);
+                const button2 = document.querySelector(`#execute-workflow-${formId2}`);
+                
+                if (button2) {
+                    const result = executeWorkflowFromForm(button2);
+                    const foundFormId = button2.closest('form').id;
+                    
+                    if (result && foundFormId === formId2) {
+                        addTestResult('测试 3: 多个表单', true, 
+                            `成功找到正确的表单，formId: ${foundFormId}`);
+                    } else {
+                        addTestResult('测试 3: 多个表单', false, 
+                            `表单ID不匹配: 期望 ${formId2}, 实际 ${foundFormId}`);
+                        allPassed = false;
+                    }
+                } else {
+                    addTestResult('测试 3: 多个表单', false, '未找到第二个按钮');
+                    allPassed = false;
+                }
+            } catch (e) {
+                addTestResult('测试 3: 多个表单', false, `异常: ${e.message}`);
+                allPassed = false;
+            }
+            
+            // 总结
+            const summaryDiv = document.createElement('div');
+            summaryDiv.className = 'test-result ' + (allPassed ? 'pass' : 'fail');
+            summaryDiv.innerHTML = `
+                <h3>📊 测试总结</h3>
+                <p><strong>${allPassed ? '✅ 所有测试通过' : '❌ 部分测试失败'}</strong></p>
+            `;
+            resultsDiv.appendChild(summaryDiv);
+        }
+    </script>
+</body>
+</html>

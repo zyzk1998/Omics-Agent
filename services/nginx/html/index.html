@@ -2307,7 +2307,7 @@
                                 formHtml += `
                                     <div class="mt-3">
                                         <button class="btn btn-success btn-sm" id="execute-workflow-${formId}" 
-                                                onclick="executeWorkflowFromForm('${formId}')">
+                                                onclick="executeWorkflowFromForm(this)">
                                             <i class="bi bi-play-circle"></i> 🚀 执行工作流
                                         </button>
                                     </div>
@@ -2337,16 +2337,25 @@
                         return formId;  // Return the newly generated formId
                     }
                     
-                    // 🔥 UI REGRESSION FIX: Execute workflow from form (collects parameters from inputs)
-                    window.executeWorkflowFromForm = function(formId) {
-                        console.log("🚀 [executeWorkflowFromForm] 从表单执行工作流，formId:", formId);
-                        
-                        const formElement = document.getElementById(formId);
+                    // 🔥 CRITICAL FIX: Execute workflow from form (collects parameters from inputs)
+                    // 🔥 TASK 1: Use DOM traversal instead of ID lookup for robustness
+                    window.executeWorkflowFromForm = function(buttonElement) {
+                        // 🔥 TASK 1: Find form container using DOM traversal (works 100% of the time)
+                        // Since we don't have <form> tag, find the params-form container div instead
+                        const formElement = buttonElement.closest('.params-form, [data-form-id]');
                         if (!formElement) {
-                            console.error("❌ [executeWorkflowFromForm] 未找到表单元素:", formId);
+                            console.error("❌ [executeWorkflowFromForm] 未找到表单容器元素（通过DOM遍历）");
+                            console.error("   按钮元素:", buttonElement);
+                            console.error("   按钮父元素:", buttonElement.parentElement);
                             alert("错误：未找到工作流表单");
                             return;
                         }
+                        
+                        // Get formId from data-form-id attribute or form id inside container
+                        const formId = formElement.getAttribute('data-form-id') || 
+                                      (formElement.querySelector('form')?.id) || 
+                                      formElement.id;
+                        console.log("🚀 [executeWorkflowFromForm] 从表单执行工作流，formId:", formId);
                         
                         // 🔥 Task 4: Collect form data and construct updatedSteps
                         const updatedSteps = [];
@@ -2548,11 +2557,39 @@
                     function handleErrorEvent(data) {
                         clearInterval(timerInterval);
                         
+                        // 🔥 TASK: 增强错误日志输出到控制台
+                        const errorMsg = data.error || data.message || '未知错误';
+                        const errorDetails = data.details || data.debug_info || '';
+                        
+                        // 输出详细错误信息到控制台
+                        console.error('❌ [Frontend Error Handler] 收到后端错误事件');
+                        console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                        console.error('错误信息:', errorMsg);
+                        if (errorDetails) {
+                            console.error('详细错误信息:');
+                            console.error(errorDetails);
+                        }
+                        if (data.error_type) {
+                            console.error('错误类型:', data.error_type);
+                        }
+                        if (data.context) {
+                            console.error('调用上下文:', data.context);
+                        }
+                        if (data.possible_causes) {
+                            console.error('可能原因:', data.possible_causes);
+                        }
+                        console.error('完整错误数据:', data);
+                        console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                        
                         // 添加错误步骤
-                        addProcessStep(`错误: ${data.error || data.message || '未知错误'}`, 'error');
+                        addProcessStep(`错误: ${errorMsg}`, 'error');
                         
                         if (aiContentDiv) {
-                            aiContentDiv.innerHTML = `<div class="alert alert-danger">❌ 错误: ${escapeHtml(data.error || data.message || '未知错误')}</div>`;
+                            aiContentDiv.innerHTML = `<div class="alert alert-danger">
+                                <h5>❌ 错误: ${escapeHtml(errorMsg)}</h5>
+                                ${errorDetails ? `<pre style="white-space: pre-wrap; font-size: 12px; max-height: 300px; overflow-y: auto;">${escapeHtml(errorDetails)}</pre>` : ''}
+                                <p><small>💡 提示: 请查看浏览器控制台获取详细错误信息</small></p>
+                            </div>`;
                         }
                     }
                     

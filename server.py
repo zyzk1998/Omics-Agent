@@ -1611,8 +1611,8 @@ async def chat_endpoint(req: ChatRequest):
                 file_path_str = ""
                 
                 if isinstance(file_info, dict):
-                    file_name = file_info.get("file_name") or file_info.get("name", "")
-                    file_path_str = file_info.get("file_path") or file_info.get("path", "")
+                file_name = file_info.get("file_name") or file_info.get("name", "")
+                file_path_str = file_info.get("file_path") or file_info.get("path", "")
                 elif hasattr(file_info, "path"):
                     # Pydantic model
                     file_path_str = file_info.path
@@ -2627,7 +2627,9 @@ async def plan_workflow(req: WorkflowPlanRequest):
         if not workflow_planner:
             from gibh_agent.core.llm_client import LLMClient
             from gibh_agent.core.planner import SOPPlanner
-            llm_client = LLMClient() if agent else None
+            # 🔥 TASK 2: 使用统一的LLM客户端创建方法
+            from gibh_agent.core.llm_client import LLMClientFactory
+            llm_client = LLMClientFactory.create_default() if agent else None
             if not llm_client:
                 raise HTTPException(status_code=500, detail="LLM 客户端未初始化")
             
