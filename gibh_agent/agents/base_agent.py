@@ -863,72 +863,95 @@ Use Simplified Chinese for all content."""
                     })
                     logger.debug(f"⚠️ [AnalysisSummary] 记录失败的步骤: {step_name} (status: {step_status})")
             
+            # 🔥 修复：只提取核心字段，不包含完整step_data，避免JSON过长
             # 解析成功的步骤结果
             for step_result in successful_steps:
                 step_data = step_result.get("data", {})
                 step_name = step_result.get("step_name", "Unknown Step")
                 step_status = step_result.get("status", "unknown")
                 
+                # 🔥 修复：只创建最小化的step_info，不包含任何大型数据
                 step_info = {
                     "name": step_name,
                     "status": step_status
                 }
                 
+                # 🔥 修复：只从summary中提取关键指标，不包含data中的其他字段（如file_path、preview等）
+                # 🔥 注意：summary可能是字符串（RNA分析）或字典（代谢组学分析）
+                summary_raw = step_data.get("summary", {})
+                if isinstance(summary_raw, str):
+                    # 如果summary是字符串（RNA分析），将其转换为空字典，从step_data中直接提取指标
+                    summary = {}
+                else:
+                    # 如果summary是字典（代谢组学分析），直接使用
+                    summary = summary_raw if isinstance(summary_raw, dict) else {}
+                
                 # 根据不同的工具类型提取关键指标
                 if "inspect_data" in step_name.lower() or "inspection" in step_name.lower():
-                    summary = step_data.get("summary", {})
-                    step_info["n_samples"] = summary.get("n_samples", "N/A")
-                    step_info["n_features"] = summary.get("n_features", "N/A")
-                    step_info["missing_rate"] = summary.get("missing_rate", "N/A")
+                    # 🔥 修复：从step_data中提取关键指标（因为summary可能是字符串）
+                    # 优先从step_data中提取，如果summary是字典，也可以从summary中提取
+                    step_info["n_samples"] = step_data.get("n_samples", step_data.get("n_cells", summary.get("n_samples", summary.get("n_cells", "N/A"))))
+                    step_info["n_features"] = step_data.get("n_features", step_data.get("n_genes", summary.get("n_features", summary.get("n_genes", "N/A"))))
+                    step_info["missing_rate"] = step_data.get("missing_rate", summary.get("missing_rate", "N/A"))
+                    # 🔥 RNA分析特定指标
+                    if "n_cells" in step_data or "n_cells" in summary:
+                        step_info["n_cells"] = step_data.get("n_cells", summary.get("n_cells", "N/A"))
+                    if "n_genes" in step_data or "n_genes" in summary:
+                        step_info["n_genes"] = step_data.get("n_genes", summary.get("n_genes", "N/A"))
+                    if "mitochondrial_percentage" in step_data or "mitochondrial_percentage" in summary:
+                        step_info["mitochondrial_percentage"] = step_data.get("mitochondrial_percentage", summary.get("mitochondrial_percentage", "N/A"))
+                    # 🔥 不包含file_path、preview等大型数据
                 
                 elif "differential" in step_name.lower():
-                    # 🔥 Phase 3: Extract differential analysis summary from tool output
-                    summary = step_data.get("summary", {})
+                    # 🔥 修复：只从summary提取关键指标，不包含完整的results列表
                     if summary:
                         # Use summary dict if available (from Phase 2 enhancement)
                         step_info["significant_count"] = summary.get("significant_count", summary.get("sig_count", "N/A"))
                         step_info["total_count"] = summary.get("total_metabolites", "N/A")
-                    step_info["method"] = summary.get("method", "N/A")
-                    step_info["case_group"] = summary.get("case_group", "N/A")
-                    step_info["control_group"] = summary.get("control_group", "N/A")
-                        # Extract top_up and top_down from summary
-                        step_info["top_up"] = summary.get("top_up", [])
-                        step_info["top_down"] = summary.get("top_down", [])
+                        step_info["method"] = summary.get("method", "N/A")
+                        step_info["case_group"] = summary.get("case_group", "N/A")
+                        step_info["control_group"] = summary.get("control_group", "N/A")
+                        # 🔥 修复：只保留top标记物名称，不包含完整数据
+                        top_markers = summary.get("top_markers", [])
+                        if top_markers:
+                            step_info["top_markers"] = [
+                                {
+                                    "name": m.get("name", m.get("metabolite", "Unknown")),
+                                    "log2fc": round(m.get("log2fc", 0), 3),  # 只保留3位小数
+                                    "fdr": round(m.get("fdr", m.get("fdr_corrected_pvalue", 1.0)), 4)  # 只保留4位小数
+                                }
+                                for m in top_markers[:3]  # 🔥 只保留top 3
+                            ]
+                        else:
+                            # Fallback: 从top_up/top_down提取名称（只保留名称，不包含其他数据）
+                            top_up = summary.get("top_up", [])[:3]
+                            top_down = summary.get("top_down", [])[:3]
+                            step_info["top_up_names"] = [str(m) for m in top_up] if top_up else []
+                            step_info["top_down_names"] = [str(m) for m in top_down] if top_down else []
                     else:
-                        # Fallback: Extract from results list (old format)
+                        # Fallback: 只提取关键计数，不包含完整results列表
                         step_info["significant_count"] = "N/A"
                         step_info["total_count"] = "N/A"
                         step_info["method"] = "N/A"
                         step_info["case_group"] = "N/A"
                         step_info["control_group"] = "N/A"
                     
-                    # 提取结果列表，用于识别关键标记物
-                    results_list = step_data.get("results", [])
-                    if results_list:
-                        # 按 |log2fc| 排序，获取top标记物
-                        sorted_results = sorted(results_list, key=lambda x: abs(x.get("log2fc", 0)), reverse=True)
-                        step_info["top_markers"] = [
-                            {
-                                "name": r.get("metabolite", "Unknown"),
-                                "log2fc": r.get("log2fc", 0),
-                                "fdr": r.get("fdr", r.get("fdr_corrected_pvalue", 1.0))
-                            }
-                            for r in sorted_results[:5]
-                        ]
+                    # 🔥 修复：不提取完整的results_list，只从summary中获取top标记物
+                    # 如果summary中没有top_markers，则跳过（避免处理大型results列表）
                 
                 elif "plsda" in step_name.lower() or "pls-da" in step_name.lower():
-                    # 🔥 Phase 3: Extract PLS-DA summary from tool output
-                    summary = step_data.get("summary", {})
+                    # 🔥 修复：只从summary提取关键指标，不包含完整的vip_scores列表
                     if summary and isinstance(summary, dict):
                         # Use summary dict if available (from Phase 2 enhancement)
                         top_vip_markers = summary.get("top_vip_markers", [])
                         if top_vip_markers:
+                            # 🔥 只保留top 3，只包含名称和VIP分数（保留2位小数）
                             step_info["top_vip_markers"] = [
                                 {
                                     "name": v.get("name", "Unknown"),
-                                    "vip_score": v.get("vip", 0)
+                                    "vip": round(v.get("vip", v.get("vip_score", 0)), 2)
                                 }
-                                for v in top_vip_markers[:5]
+                                for v in top_vip_markers[:3]  # 🔥 只保留top 3
                             ]
                         else:
                             step_info["top_vip_markers"] = []
@@ -936,95 +959,210 @@ Use Simplified Chinese for all content."""
                         step_info["comp1_variance"] = f"{summary.get('comp1_variance', 0):.1f}%"
                         step_info["comp2_variance"] = f"{summary.get('comp2_variance', 0):.1f}%"
                     else:
-                        # Fallback: Extract from vip_scores (old format)
-                    vip_scores = step_data.get("vip_scores", [])
-                    if vip_scores:
-                        # 提取top VIP标记物
-                        if isinstance(vip_scores, list):
-                            sorted_vip = sorted(vip_scores, key=lambda x: x.get("vip_score", 0), reverse=True)
-                            step_info["top_vip_markers"] = [
-                                {
-                                    "name": v.get("metabolite", "Unknown"),
-                                    "vip_score": v.get("vip_score", 0)
-                                }
-                                for v in sorted_vip[:5]
-                            ]
-                            else:
-                                step_info["top_vip_markers"] = []
-                        else:
-                            step_info["top_vip_markers"] = []
+                        # 🔥 修复：不处理完整的vip_scores列表，只设置默认值
+                        step_info["top_vip_markers"] = []
+                        step_info["n_components"] = "N/A"
+                        step_info["comp1_variance"] = "N/A"
+                        step_info["comp2_variance"] = "N/A"
                 
                 elif "pathway" in step_name.lower() or "enrichment" in step_name.lower():
-                    # 🔥 Phase 3: Extract pathway enrichment summary from tool output
-                    summary = step_data.get("summary", {})
-                    enriched_pathways = step_data.get("enriched_pathways", [])
-                    
+                    # 🔥 修复：只从summary提取关键指标，不包含完整的enriched_pathways列表
                     if summary and isinstance(summary, dict):
                         # Use summary dict if available (from Phase 2 enhancement)
-                        step_info["enriched_pathway_count"] = summary.get("n_significant", len(enriched_pathways) if enriched_pathways else 0)
+                        step_info["enriched_pathway_count"] = summary.get("n_significant", 0)
                         top_pathways_list = summary.get("top_pathways", [])
                         if top_pathways_list:
+                            # 🔥 只保留top 3通路名称，不包含完整数据
                             step_info["top_pathways"] = [
-                                {"name": p, "p_value": "N/A"} if isinstance(p, str) else p
-                                for p in top_pathways_list[:5]
+                                {"name": p if isinstance(p, str) else p.get("name", "Unknown")}
+                                for p in top_pathways_list[:3]  # 🔥 只保留top 3
                             ]
                         else:
                             step_info["top_pathways"] = []
-                    elif enriched_pathways:
-                        # Fallback: Extract from enriched_pathways list (old format)
-                        step_info["enriched_pathway_count"] = len(enriched_pathways)
-                        step_info["top_pathways"] = [
-                            {
-                                "name": p.get("pathway", p.get("name", p.get("Term", "Unknown"))),
-                                "p_value": p.get("p_value", p.get("pvalue", p.get("Adjusted P-value", 1.0))),
-                                "enrichment_score": p.get("enrichment_score", p.get("score", 0))
-                            }
-                            for p in enriched_pathways[:5]
-                        ]
                     else:
+                        # 🔥 修复：不处理完整的enriched_pathways列表，只设置默认值
                         step_info["enriched_pathway_count"] = 0
                         step_info["top_pathways"] = []
                 
                 elif "pca" in step_name.lower() and "visualize" not in step_name.lower():
-                    # 🔥 Phase 3: Extract PCA summary from tool output
-                    summary = step_data.get("summary", {})
-                    if summary:
-                        # Use summary dict if available (from Phase 2 enhancement)
-                        step_info["pc1_var"] = summary.get("pc1_var", 0)
-                        step_info["pc2_var"] = summary.get("pc2_var", 0)
-                        step_info["separation"] = summary.get("separation", "unknown")
-                        step_info["pc1_variance"] = f"{summary.get('pc1_var', 0) * 100:.1f}%"
-                        step_info["pc2_variance"] = f"{summary.get('pc2_var', 0) * 100:.1f}%"
-                        step_info["total_variance"] = f"{summary.get('total_variance_explained', 0) * 100:.1f}%"
-                        step_info["separation_quality"] = summary.get("separation", "unknown")
+                    # 🔥 修复：从data中提取关键指标（explained_variance在data中，不在summary中）
+                    explained_variance = step_data.get("explained_variance", {})
+                    if explained_variance and isinstance(explained_variance, dict):
+                        pc1_var = explained_variance.get("PC1", 0)
+                        pc2_var = explained_variance.get("PC2", 0)
+                        # 计算总方差（前10个PC的累计）
+                        total_var = sum(explained_variance.get(f"PC{i+1}", 0) for i in range(min(10, len(explained_variance))))
+                        step_info["pc1_variance"] = f"{pc1_var * 100:.1f}%"
+                        step_info["pc2_variance"] = f"{pc2_var * 100:.1f}%"
+                        step_info["total_variance"] = f"{total_var * 100:.1f}%"
+                        # RNA分析的PCA通常不评估分离质量，但可以基于方差判断
+                        if total_var > 0.3:
+                            step_info["separation_quality"] = "clear"
+                        elif total_var > 0.15:
+                            step_info["separation_quality"] = "moderate"
+                        else:
+                            step_info["separation_quality"] = "weak"
                     else:
-                        # Fallback: Extract from explained_variance (old format)
-                    explained_var = step_data.get("explained_variance", {})
-                    if explained_var:
-                        pc1_var = explained_var.get("PC1", 0) * 100 if isinstance(explained_var.get("PC1"), (int, float)) else 0
-                        pc2_var = explained_var.get("PC2", 0) * 100 if isinstance(explained_var.get("PC2"), (int, float)) else 0
-                            step_info["pc1_var"] = explained_var.get("PC1", 0)
-                            step_info["pc2_var"] = explained_var.get("PC2", 0)
-                        step_info["pc1_variance"] = f"{pc1_var:.1f}%"
-                        step_info["pc2_variance"] = f"{pc2_var:.1f}%"
-                            step_info["total_variance"] = f"{(pc1_var + pc2_var):.1f}%"
-                            # Extract separation info if available
-                            if pc1_var + pc2_var > 50:
-                                step_info["separation_quality"] = "clear"
-                                step_info["separation"] = "observed"
-                            else:
-                                step_info["separation_quality"] = "moderate"
-                                step_info["separation"] = "unclear"
+                        # 🔥 修复：不处理完整的explained_variance，只设置默认值
+                        step_info["pc1_variance"] = "N/A"
+                        step_info["pc2_variance"] = "N/A"
+                        step_info["total_variance"] = "N/A"
+                        step_info["separation_quality"] = "unknown"
                 
                 elif "preprocess" in step_name.lower():
-                    shape = step_data.get("shape", {})
+                    # 🔥 修复：只从summary或shape提取关键信息，不包含完整数据
+                    if summary and isinstance(summary, dict):
+                        shape = summary.get("shape", {})
+                    else:
+                        shape = step_data.get("shape", {})
                     step_info["preprocessed_rows"] = shape.get("rows", "N/A")
                     step_info["preprocessed_cols"] = shape.get("columns", "N/A")
+                    # 🔥 不包含完整的shape数据或其他冗余信息
+                
+                # 🔥 RNA分析特定步骤：质量控制
+                elif "qc" in step_name.lower() or "quality" in step_name.lower() or "filter" in step_name.lower():
+                    # 🔥 修复：从data中提取关键指标（因为summary可能是字符串）
+                    step_info["cells_before_qc"] = step_data.get("n_obs_before", step_data.get("cells_before_qc", "N/A"))
+                    step_info["cells_after_qc"] = step_data.get("n_obs_after", step_data.get("cells_after_qc", "N/A"))
+                    step_info["genes_before_qc"] = step_data.get("n_vars_before", step_data.get("genes_before_qc", "N/A"))
+                    step_info["genes_after_qc"] = step_data.get("n_vars_after", step_data.get("genes_after_qc", "N/A"))
+                    step_info["mitochondrial_percentage"] = step_data.get("mitochondrial_percentage", "N/A")
+                
+                # 🔥 RNA分析特定步骤：标记基因识别
+                elif "marker" in step_name.lower() or "find_markers" in step_name.lower():
+                    # 🔥 修复：从data中提取关键指标
+                    step_info["n_markers"] = step_data.get("n_genes_per_cluster", step_data.get("n_markers", "N/A"))
+                    step_info["n_clusters"] = step_data.get("n_clusters", "N/A")
+                    # 🔥 修复：从markers_table中提取top标记基因（只保留前3个cluster的前3个基因）
+                    markers_table = step_data.get("markers_table", [])
+                    if markers_table and isinstance(markers_table, list) and len(markers_table) > 0:
+                        # markers_table是一个列表，每个元素是一个字典，包含多个cluster的标记基因
+                        top_markers = []
+                        for i, marker_row in enumerate(markers_table[:3]):  # 只处理前3行
+                            if isinstance(marker_row, dict):
+                                # 提取每个cluster的top基因（从列名中提取cluster编号）
+                                for key, value in marker_row.items():
+                                    if "_names" in key and value:
+                                        cluster_num = key.replace("_names", "")
+                                        gene_name = value if isinstance(value, str) else str(value)
+                                        if gene_name and gene_name != "None":
+                                            top_markers.append({
+                                                "gene": gene_name,
+                                                "cluster": cluster_num,
+                                                "log2fc": "N/A"  # markers_table中没有log2fc
+                                            })
+                                            if len(top_markers) >= 5:  # 只保留top 5
+                                                break
+                            if len(top_markers) >= 5:
+                                break
+                        if top_markers:
+                            step_info["top_markers"] = top_markers[:5]
+                
+                # 🔥 RNA分析特定步骤：聚类
+                elif "cluster" in step_name.lower() and "marker" not in step_name.lower():
+                    # 🔥 修复：从data中提取关键指标
+                    step_info["n_clusters"] = step_data.get("n_clusters", "N/A")
+                    step_info["resolution"] = step_data.get("resolution", "N/A")
+                    step_info["algorithm"] = step_data.get("algorithm", "N/A")
+                
+                # 🔥 RNA分析特定步骤：UMAP
+                elif "umap" in step_name.lower():
+                    # 🔥 修复：从data中提取关键指标（UMAP通常没有summary字段）
+                    step_info["n_neighbors"] = step_data.get("n_neighbors", "N/A")
+                    step_info["min_dist"] = step_data.get("min_dist", "N/A")
+                    # UMAP本身不产生聚类，但可能从之前的聚类步骤获取
+                    step_info["n_clusters"] = step_data.get("n_clusters", "N/A")
+                
+                # 🔥 RNA分析特定步骤：细胞类型注释
+                elif "annotation" in step_name.lower() or "cell_type" in step_name.lower():
+                    if summary:
+                        step_info["cell_types"] = summary.get("cell_types", summary.get("annotated_types", []))[:5]  # 只保留前5个
+                        step_info["annotation_method"] = summary.get("method", "N/A")
+                
+                # 🔥 修复：确保step_info不包含任何大型数据（如file_path、preview、完整results列表等）
+                # 移除可能存在的冗余字段
+                step_info.pop("file_path", None)
+                step_info.pop("output_path", None)
+                step_info.pop("preview", None)
+                step_info.pop("results", None)  # 完整的results列表
+                step_info.pop("vip_scores", None)  # 完整的VIP分数列表
+                step_info.pop("enriched_pathways", None)  # 完整的通路列表
+                step_info.pop("explained_variance", None)  # 完整的方差数据
                 
                 results_summary["steps"].append(step_info)
             
             # 格式化结果摘要
-            summary_json = json.dumps(results_summary, ensure_ascii=False, indent=2)
+            # 🔥 修复：限制summary_json的长度，避免prompt过长
+            # 只保留关键信息，移除冗余数据
+            compact_summary = {
+                "total_steps": len(steps_results),
+                "successful_steps": len(successful_steps),
+                "failed_steps": len(failed_steps),
+                "steps": []
+            }
+            
+            # 只提取每个步骤的关键信息，限制数据量
+            for step_info in results_summary.get("steps", []):
+                compact_step = {
+                    "name": step_info.get("name", "Unknown"),
+                    "status": step_info.get("status", "unknown")
+                }
+                # 🔥 修复：保留RNA分析的关键指标（用于key_findings提取）
+                if "cells_after_qc" in step_info:
+                    compact_step["cells_after_qc"] = step_info.get("cells_after_qc", "N/A")
+                if "genes_after_qc" in step_info:
+                    compact_step["genes_after_qc"] = step_info.get("genes_after_qc", "N/A")
+                if "n_clusters" in step_info:
+                    compact_step["n_clusters"] = step_info.get("n_clusters", "N/A")
+                if "top_markers" in step_info:
+                    compact_step["top_markers"] = step_info.get("top_markers", [])
+                if "n_cells" in step_info:
+                    compact_step["n_cells"] = step_info.get("n_cells", "N/A")
+                if "n_genes" in step_info:
+                    compact_step["n_genes"] = step_info.get("n_genes", "N/A")
+                
+                # 🔥 修复：只保留最核心的指标，移除所有冗余数据
+                step_name_lower = step_info.get("name", "").lower()
+                if "pca" in step_name_lower:
+                    compact_step["pc1_variance"] = step_info.get("pc1_variance", "N/A")
+                    compact_step["pc2_variance"] = step_info.get("pc2_variance", "N/A")
+                    compact_step["separation_quality"] = step_info.get("separation_quality", "N/A")
+                    # 🔥 不包含pc1_var、pc2_var、total_variance等冗余字段
+                elif "differential" in step_name_lower:
+                    compact_step["significant_count"] = step_info.get("significant_count", "N/A")
+                    compact_step["total_count"] = step_info.get("total_count", "N/A")
+                    # 🔥 只保留top 3标记物名称，不包含log2fc、fdr等详细数据
+                    top_markers = step_info.get("top_markers", [])[:3]
+                    if top_markers:
+                        compact_step["top_marker_names"] = [m.get("name", "Unknown") for m in top_markers]
+                    # 🔥 不包含top_up、top_down、method、case_group等冗余字段
+                elif "plsda" in step_name_lower or "pls-da" in step_name_lower:
+                    # 🔥 只保留top 3 VIP代谢物名称，不包含VIP分数
+                    top_vip = step_info.get("top_vip_markers", [])[:3]
+                    if top_vip:
+                        compact_step["top_vip_names"] = [v.get("name", "Unknown") for v in top_vip]
+                    # 🔥 不包含n_components、comp1_variance、comp2_variance等冗余字段
+                elif "pathway" in step_name_lower or "enrichment" in step_name_lower:
+                    compact_step["enriched_pathway_count"] = step_info.get("enriched_pathway_count", 0)
+                    # 🔥 只保留top 3通路名称，不包含p_value、enrichment_score等详细数据
+                    top_pathways = step_info.get("top_pathways", [])[:3]
+                    if top_pathways:
+                        compact_step["top_pathway_names"] = [
+                            p.get("name", "Unknown") if isinstance(p, dict) else str(p) 
+                            for p in top_pathways
+                        ]
+                elif "inspect" in step_name_lower or "inspection" in step_name_lower:
+                    compact_step["n_samples"] = step_info.get("n_samples", "N/A")
+                    compact_step["n_features"] = step_info.get("n_features", "N/A")
+                    # 🔥 不包含missing_rate、file_path等冗余字段
+                elif "preprocess" in step_name_lower:
+                    compact_step["preprocessed_rows"] = step_info.get("preprocessed_rows", "N/A")
+                    compact_step["preprocessed_cols"] = step_info.get("preprocessed_cols", "N/A")
+                
+                compact_summary["steps"].append(compact_step)
+            
+            summary_json = json.dumps(compact_summary, ensure_ascii=False, indent=2)
+            logger.info(f"📊 [AnalysisSummary] summary_json长度: {len(summary_json)}字符")
             
             # 构建提示词
             if omics_type.lower() in ["metabolomics", "metabolomic", "metabonomics"]:
@@ -1068,20 +1206,70 @@ Use Simplified Chinese for all content."""
                 rule3_text = "- ⚠️ Some steps failed during execution. You MUST still summarize the successful steps (e.g., PCA, PLS-DA, Volcano plots) and explain what insights can be drawn from them.\n- For failed steps, briefly note what went wrong (e.g., 'Pathway enrichment failed due to missing gseapy library') but focus on interpreting the successful results."
             
             # 🔥 TASK 3: Extract Key Findings with SPECIFIC metrics (Feed the Brain)
-            key_findings = {
-                "pca_separation": "N/A",
-                "pca_variance": {"PC1": "N/A", "PC2": "N/A"},
-                "differential_count": "N/A",
-                "differential_up_down": {"up": 0, "down": 0},
-                "top_pathways": [],
-                "top_vip_metabolites": [],  # Names only for biological interpretation
-                "top_differential_metabolites": []  # Names only for biological interpretation
-            }
+            # 🔥 修复：根据omics_type初始化不同的key_findings结构
+            is_rna_analysis = omics_type.lower() in ["scrna", "scrna-seq", "single_cell", "single-cell", "rna", "rna-seq"]
+            
+            if is_rna_analysis:
+                key_findings = {
+                    "n_cells": "N/A",
+                    "n_genes": "N/A",
+                    "mitochondrial_percentage": "N/A",
+                    "pca_variance": {"PC1": "N/A", "PC2": "N/A"},
+                    "n_clusters": "N/A",
+                    "top_marker_genes": [],  # RNA分析：标记基因
+                    "cell_types": []  # RNA分析：细胞类型
+                }
+            else:
+                key_findings = {
+                    "pca_separation": "N/A",
+                    "pca_variance": {"PC1": "N/A", "PC2": "N/A"},
+                    "differential_count": "N/A",
+                    "differential_up_down": {"up": 0, "down": 0},
+                    "top_pathways": [],
+                    "top_vip_metabolites": [],  # Names only for biological interpretation
+                    "top_differential_metabolites": []  # Names only for biological interpretation
+                }
             
             for step_info in results_summary.get("steps", []):
                 step_name = step_info.get("name", "").lower()
                 
-                # 🔥 TASK 3: Extract PCA metrics (Explained Variance)
+                # 🔥 RNA分析特定指标提取
+                if is_rna_analysis:
+                    # 提取细胞和基因数量（从QC步骤，因为QC步骤有最准确的数据）
+                    if "qc" in step_name or "quality" in step_name or "filter" in step_name:
+                        if "cells_after_qc" in step_info:
+                            key_findings["n_cells"] = step_info.get("cells_after_qc", "N/A")
+                        if "genes_after_qc" in step_info:
+                            key_findings["n_genes"] = step_info.get("genes_after_qc", "N/A")
+                        if "mitochondrial_percentage" in step_info:
+                            key_findings["mitochondrial_percentage"] = step_info.get("mitochondrial_percentage", "N/A")
+                    # 如果QC步骤没有，从inspect步骤提取
+                    elif ("inspect" in step_name or "inspection" in step_name) and key_findings.get("n_cells") == "N/A":
+                        if "n_cells" in step_info:
+                            key_findings["n_cells"] = step_info.get("n_cells", "N/A")
+                        if "n_genes" in step_info:
+                            key_findings["n_genes"] = step_info.get("n_genes", "N/A")
+                    
+                    # 提取标记基因
+                    if "marker" in step_name or "find_markers" in step_name:
+                        top_markers = step_info.get("top_markers", [])
+                        if top_markers:
+                            key_findings["top_marker_genes"] = [
+                                m.get("gene", m.get("name", "Unknown")) for m in top_markers[:5]
+                            ]
+                    
+                    # 提取聚类信息
+                    if "cluster" in step_name and "marker" not in step_name:
+                        if "n_clusters" in step_info:
+                            key_findings["n_clusters"] = step_info.get("n_clusters", "N/A")
+                    
+                    # 提取细胞类型
+                    if "annotation" in step_name or "cell_type" in step_name:
+                        cell_types = step_info.get("cell_types", [])
+                        if cell_types:
+                            key_findings["cell_types"] = cell_types[:5]  # 只保留前5个
+                
+                # 🔥 TASK 3: Extract PCA metrics (Explained Variance) - 适用于所有分析类型
                 if "pca" in step_name and "visualize" not in step_name:
                     separation = step_info.get("separation_quality", "unknown")
                     pc1_var = step_info.get("pc1_variance", step_info.get("pc1_var", "N/A"))
@@ -1097,78 +1285,94 @@ Use Simplified Chinese for all content."""
                         pc2_val = str(pc2_var)
                     
                     key_findings["pca_variance"] = {"PC1": pc1_val, "PC2": pc2_val}
-                    if separation == "clear":
-                        key_findings["pca_separation"] = f"清晰分离 (PC1: {pc1_var}, PC2: {pc2_var})"
-                    else:
-                        key_findings["pca_separation"] = f"中等分离 (PC1: {pc1_var}, PC2: {pc2_var})"
+                    # 🔥 修复：pca_separation只在代谢组学分析中存在
+                    if not is_rna_analysis:
+                        if separation == "clear":
+                            key_findings["pca_separation"] = f"清晰分离 (PC1: {pc1_var}, PC2: {pc2_var})"
+                        else:
+                            key_findings["pca_separation"] = f"中等分离 (PC1: {pc1_var}, PC2: {pc2_var})"
                 
-                # 🔥 TASK 3: Extract differential analysis (Up/Down counts and top metabolites)
-                if "differential" in step_name:
+                # 🔥 修复：只提取关键计数，不包含完整的top_up/top_down列表（仅代谢组学）
+                if not is_rna_analysis and "differential" in step_name:
                     sig_count = step_info.get("significant_count", "N/A")
                     total_count = step_info.get("total_count", "N/A")
-                    top_up = step_info.get("top_up", [])
-                    top_down = step_info.get("top_down", [])
+                    # 🔥 不提取top_up和top_down列表（可能很长），只使用计数
+                    top_up_count = len(step_info.get("top_up", [])) if isinstance(step_info.get("top_up"), list) else 0
+                    top_down_count = len(step_info.get("top_down", [])) if isinstance(step_info.get("top_down"), list) else 0
                     
                     key_findings["differential_count"] = f"发现 {sig_count} 个显著差异代谢物（共 {total_count} 个）"
                     key_findings["differential_up_down"] = {
-                        "up": len(top_up) if isinstance(top_up, list) else 0,
-                        "down": len(top_down) if isinstance(top_down, list) else 0
+                        "up": top_up_count,
+                        "down": top_down_count
                     }
                     
-                    # Extract top marker NAMES (for biological interpretation)
+                    # 🔥 修复：只提取top标记物名称，不包含完整数据
                     top_markers = step_info.get("top_markers", [])
                     if top_markers:
                         key_findings["top_differential_metabolites"] = [
-                            m.get('name', 'Unknown') for m in top_markers[:5]
+                            m.get('name', 'Unknown') for m in top_markers[:3]  # 🔥 只保留top 3
                         ]
-                    elif top_up:
-                        # Fallback to top_up list
-                        key_findings["top_differential_metabolites"] = top_up[:5] if isinstance(top_up, list) else []
+                    elif step_info.get("top_up_names"):
+                        # Fallback to top_up_names（如果存在）
+                        key_findings["top_differential_metabolites"] = step_info.get("top_up_names", [])[:3]
                 
-                # 🔥 TASK 3: Extract PLS-DA VIP metabolites (Top 5 NAMES)
-                if "plsda" in step_name or "pls-da" in step_name:
+                # 🔥 修复：只提取top VIP代谢物名称，不包含完整数据（仅代谢组学）
+                if not is_rna_analysis and ("plsda" in step_name or "pls-da" in step_name):
                     top_vip = step_info.get("top_vip_markers", [])
                     if top_vip:
                         # Extract metabolite NAMES only (for biological interpretation)
                         key_findings["top_vip_metabolites"] = [
-                            v.get('name', 'Unknown') for v in top_vip[:5]
+                            v.get('name', 'Unknown') for v in top_vip[:3]  # 🔥 只保留top 3
                         ]
                 
-                # 🔥 TASK 3: Extract pathway enrichment (Top 5 PATHWAY NAMES)
-                if "pathway" in step_name or "enrichment" in step_name:
+                # 🔥 修复：只提取top通路名称，不包含完整数据（仅代谢组学）
+                if not is_rna_analysis and ("pathway" in step_name or "enrichment" in step_name):
                     top_pathways = step_info.get("top_pathways", [])
                     if top_pathways:
                         # Extract pathway NAMES only (for biological interpretation)
                         key_findings["top_pathways"] = [
                             p.get('name', 'Unknown') if isinstance(p, dict) else str(p)
-                            for p in top_pathways[:5]
+                            for p in top_pathways[:3]  # 🔥 只保留top 3
                         ]
             
             key_findings_json = json.dumps(key_findings, ensure_ascii=False, indent=2)
+            logger.info(f"📊 [AnalysisSummary] key_findings_json长度: {len(key_findings_json)}字符")
             
-            # 🔥 TASK 3: Include actual file contents in prompt
+            # 🔥 修复：限制execution_results_text的长度，避免prompt过长
             execution_results_text = ""
             if execution_results and (execution_results.get("csv_files") or execution_results.get("image_files")):
                 execution_results_text = "\n**Actual Analysis Results (From Generated Files):**\n"
                 
                 if execution_results.get("csv_files"):
                     execution_results_text += "\n**CSV Results Files:**\n"
-                    for csv_info in execution_results["csv_files"]:
+                    # 🔥 限制：只处理前3个CSV文件，避免数据过多
+                    for csv_info in execution_results["csv_files"][:3]:
                         execution_results_text += f"\n- **{csv_info['filename']}**: {csv_info['shape']}\n"
-                        execution_results_text += f"  Columns: {', '.join(csv_info['columns'][:10])}\n"
-                        if csv_info.get("head_rows"):
-                            execution_results_text += f"  First 3 rows:\n"
-                            for i, row in enumerate(csv_info["head_rows"][:3], 1):
-                                execution_results_text += f"    Row {i}: {json.dumps(row, ensure_ascii=False)}\n"
+                        # 只显示前5个列名
+                        columns_preview = ', '.join(csv_info['columns'][:5])
+                        if len(csv_info['columns']) > 5:
+                            columns_preview += f" ... (共{len(csv_info['columns'])}列)"
+                        execution_results_text += f"  Columns: {columns_preview}\n"
+                        # 🔥 限制：不包含完整的行数据，只显示统计信息
                         if csv_info.get("statistics"):
-                            execution_results_text += f"  Statistics: {json.dumps(csv_info['statistics'], ensure_ascii=False, indent=2)}\n"
+                            # 只保留关键统计信息，限制长度
+                            stats = csv_info['statistics']
+                            compact_stats = {}
+                            for key in ['mean', 'median', 'std', 'min', 'max']:
+                                if key in stats:
+                                    compact_stats[key] = stats[key]
+                            if compact_stats:
+                                execution_results_text += f"  Statistics: {json.dumps(compact_stats, ensure_ascii=False)}\n"
                 
                 if execution_results.get("image_files"):
                     execution_results_text += f"\n**Generated Images ({len(execution_results['image_files'])} files):**\n"
-                    for img_info in execution_results["image_files"][:5]:
+                    # 只显示前3个图片
+                    for img_info in execution_results["image_files"][:3]:
                         execution_results_text += f"- {img_info['filename']} ({img_info['type']})\n"
             else:
                 execution_results_text = "\n**Note**: No generated files found in output directory. Analysis results are based on step summaries only.\n"
+            
+            logger.info(f"📊 [AnalysisSummary] execution_results_text长度: {len(execution_results_text)}字符")
             
             prompt = f"""You are a Senior Bioinformatics Scientist writing a Results & Discussion section for a top-tier journal (Nature Medicine). Your role is to interpret biological data and provide deep scientific insights, connecting findings to biological mechanisms and literature knowledge.
 
@@ -1310,22 +1514,158 @@ Based on the provided metrics above, interpret the biological significance. Use 
                     llm_client_to_use = LLMClientFactory.create_default()
                     logger.info(f"✅ [AnalysisSummary] 已创建默认LLM客户端: {llm_client_to_use.base_url}")
                 
+                # 🔥 修复：检查prompt总长度，避免超过API限制
+                system_message_length = len(messages[0]["content"]) if messages else 0
+                user_message_length = len(messages[1]["content"]) if len(messages) > 1 else 0
+                total_prompt_length = system_message_length + user_message_length
+                
+                logger.info(f"📊 [AnalysisSummary] Prompt长度检查:")
+                logger.info(f"  - System message: {system_message_length}字符")
+                logger.info(f"  - User message: {user_message_length}字符")
+                logger.info(f"  - 总长度: {total_prompt_length}字符")
+                
+                # 🔥 修复：如果prompt过长（>100k字符），截断或简化
+                MAX_PROMPT_LENGTH = 100000  # 100k字符限制
+                if total_prompt_length > MAX_PROMPT_LENGTH:
+                    logger.warning(f"⚠️ [AnalysisSummary] Prompt过长（{total_prompt_length}字符），超过限制（{MAX_PROMPT_LENGTH}字符），进行截断")
+                    # 截断execution_results_text
+                    if len(execution_results_text) > 5000:
+                        execution_results_text = execution_results_text[:5000] + "\n... (内容已截断)"
+                        logger.warning(f"⚠️ [AnalysisSummary] execution_results_text已截断到5000字符")
+                    # 简化summary_json（如果仍然过长）
+                    if len(summary_json) > 20000:
+                        # 只保留最关键的步骤信息
+                        import json
+                        compact_summary = {
+                            "total_steps": len(steps_results),
+                            "successful_steps": len(successful_steps),
+                            "failed_steps": len(failed_steps),
+                            "key_metrics": {
+                                "pca_variance": key_findings.get("pca_variance", {}),
+                                "differential_count": key_findings.get("differential_count", "N/A"),
+                                "top_pathways": key_findings.get("top_pathways", [])[:3],
+                                "top_vip_metabolites": key_findings.get("top_vip_metabolites", [])[:3]
+                            }
+                        }
+                        summary_json = json.dumps(compact_summary, ensure_ascii=False, indent=2)
+                        logger.warning(f"⚠️ [AnalysisSummary] summary_json已简化，新长度: {len(summary_json)}字符")
+                    
+                    # 重新构建prompt（使用简化后的数据）
+                    prompt = f"""You are a Senior Bioinformatics Scientist writing a Results & Discussion section for a top-tier journal (Nature Medicine). Your role is to interpret biological data and provide deep scientific insights, connecting findings to biological mechanisms and literature knowledge.
+
+**User Goal:**
+{workflow_name}
+
+**Execution Results Summary:**
+{summary_json}
+
+**Key Findings Extracted (Specific Metrics):**
+{key_findings_json}
+{execution_results_text}
+{failure_info}
+
+**CRITICAL INSTRUCTION:**
+Based on the provided metrics above, interpret the biological significance. Use your internal knowledge base (PubMed/Literature) to explain **WHY** these specific metabolites/pathways might be altered in this context. Generate a structured Markdown report with deep biological interpretation.
+
+**Domain Context:**
+{domain_context}
+
+**CRITICAL RULES:**
+
+1. **Reasoning Process (DeepSeek-R1)**: 
+   - Use the `<think>` tag to show your reasoning process before generating the final report
+   - Inside `<think>`, analyze the data metrics, connect metabolites to pathways, and reason about biological mechanisms
+   - After reasoning, output the final report outside the `<think>` tags
+
+2. **Scientific Persona**: You are a Senior Bioinformatics Scientist writing a publication-quality results section for Nature Medicine. Write as if you are describing results in a Methods/Results section of a high-impact research paper.
+
+3. **NO Technical Debugging**: 
+   - DO NOT mention step names, tool names, file paths, or technical errors
+   - DO NOT say "Step X failed" or "Tool Y encountered an error"
+   - DO NOT mention Python errors, missing libraries, or code issues
+   - If a step failed, simply state the biological limitation
+
+4. **Deep Biological Interpretation**:
+   - Connect metabolites/pathways to biological functions using your internal knowledge base (PubMed/Literature)
+   - Explain the MECHANISM, not just the numbers
+   - Discuss how the identified metabolites/pathways relate to biological processes, disease mechanisms, or physiological states
+
+5. **Professional Language**:
+   - Use scientific terminology appropriate for Nature Medicine
+   - Write in Simplified Chinese (简体中文)
+   - Be precise, detailed, and academically rigorous
+   - Minimum 800 words, aim for comprehensive coverage
+
+6. **Output Structure (MUST FOLLOW):**
+
+### 1. 统计概览 (Statistical Overview)
+- Quantitative summary: PCA separation quality, PC1/PC2 variance explained, differential analysis counts
+- Data quality assessment based on PCA results
+- Overall data characteristics and key statistics
+
+### 2. 关键生物标志物 (Key Biomarkers)
+- **VIP代谢物**: Discuss the top VIP metabolites from PLS-DA analysis
+- **差异代谢物**: Discuss the top differentially expressed metabolites
+- **生物学功能**: Explain the potential functions and biological significance
+- **标志物潜力**: Discuss the potential of these metabolites as biomarkers
+
+### 3. 通路机制解读 (Pathway Mechanism Interpretation)
+- **富集通路**: Deep dive into the enriched pathways
+- **通路功能**: Explain the biological functions of these pathways
+- **机制讨论**: Relate findings to potential biological mechanisms
+- **功能意义**: Discuss what the differentially expressed metabolites mean
+
+### 4. 结论与建议 (Conclusions & Recommendations)
+- **主要发现总结**: Summarize key findings and their biological significance
+- **验证实验建议**: Suggest validation experiments
+- **后续研究**: Propose follow-up studies based on the findings
+
+**Output Format:**
+- Use Simplified Chinese (简体中文)
+- Use Markdown format with proper headings (###)
+- Be professional, academic, and detailed
+
+**Tone**: Professional, Academic, Detailed, Nature Medicine style. Focus on deep biological interpretation and scientific insights, connecting findings to mechanisms.
+
+**CRITICAL**: You MUST provide a detailed Biological Interpretation and Mechanism Analysis. Do NOT just list steps or metrics. Explain the biological meaning, connect findings to known pathways, and discuss mechanisms.
+
+**IMPORTANT**: Use `<think>` tags to show your reasoning process. Analyze the data deeply, then output the final report.
+
+现在生成全面的分析报告（遵循上述结构，详细且专业，包含深度生物学机制解读）："""
+                    
+                    messages[1]["content"] = prompt
+                    
+                    # 重新计算长度
+                    system_message_length = len(messages[0]["content"])
+                    user_message_length = len(messages[1]["content"])
+                    total_prompt_length = system_message_length + user_message_length
+                    logger.info(f"📊 [AnalysisSummary] 截断后Prompt长度: {total_prompt_length}字符")
+                
                 logger.info(f"📞 [AnalysisSummary] 开始LLM调用，max_tokens=2500...")
                 completion = await llm_client_to_use.achat(messages, temperature=0.3, max_tokens=2500)  # 🔥 TASK 2: Increase tokens for comprehensive report
                 logger.info(f"✅ [AnalysisSummary] LLM调用完成，开始解析响应...")
-                think_content, response = llm_client_to_use.extract_think_and_content(completion)
-            
-                # 🔥 FEATURE: Return original content with tags for frontend parsing
-                # Frontend will parse <think> tags to show thinking process
                 original_content = completion.choices[0].message.content or ""
+                logger.info(f"🔍 [AnalysisSummary] 原始内容长度: {len(original_content)}")
                 
+                think_content, response = llm_client_to_use.extract_think_and_content(completion)
+                logger.info(f"🔍 [AnalysisSummary] 内容提取结果: think_length={len(think_content) if think_content else 0}, response_length={len(response) if response else 0}")
+                logger.debug(f"🔍 [AnalysisSummary] original_content 预览: {original_content[:300]}...")
+                logger.debug(f"🔍 [AnalysisSummary] response 预览: {response[:300] if response else 'N/A'}...")
+                
+                # 🔥 修复：如果提取后的response太短，但original_content很长，说明主要内容可能在标签内
+                # 在这种情况下，应该使用original_content（前端会解析标签）
                 if response and len(response.strip()) > 100:  # Ensure meaningful response
                     logger.info(f"✅ [AnalysisSummary] 深度生物学解释生成成功，长度: {len(response)}")
-                logger.debug(f"📝 [DEBUG] Summary preview: {response[:200]}...")
+                    logger.debug(f"📝 [DEBUG] Summary preview: {response[:200]}...")
                     # Return original content with tags so frontend can parse and display reasoning
-                    return original_content if '<think>' in original_content or '<think>' in original_content else response
-            else:
-                    logger.warning(f"⚠️ [AnalysisSummary] LLM 返回内容过短，尝试重新生成...")
+                    has_think_tags = any(tag in original_content for tag in ['<think>', '<think>', '<reasoning>', '<thought>', '<thinking>'])
+                    return original_content if has_think_tags else response
+                elif original_content and len(original_content.strip()) > 100:
+                    # 🔥 修复：如果response太短但original_content很长，使用original_content
+                    logger.warning(f"⚠️ [AnalysisSummary] 提取后的内容过短，但原始内容较长，使用原始内容（长度: {len(original_content)}）")
+                    return original_content
+                else:
+                    logger.warning(f"⚠️ [AnalysisSummary] LLM 返回内容过短（response: {len(response) if response else 0}字符, original: {len(original_content)}字符），尝试重新生成...")
                     # Retry with simpler prompt if first attempt failed
                     retry_prompt = f"""Based on these analysis metrics: {key_findings_json}
 
@@ -1347,13 +1687,19 @@ Minimum 500 words. Be scientific and detailed."""
                     
                     # 🔥 FEATURE: Return original content with tags for frontend parsing
                     retry_original_content = retry_completion.choices[0].message.content or ""
+                    logger.info(f"🔍 [AnalysisSummary] 重试内容提取结果: think_length={len(retry_think) if retry_think else 0}, response_length={len(retry_response) if retry_response else 0}, original_length={len(retry_original_content)}")
                     
                     if retry_response and len(retry_response.strip()) > 100:
                         logger.info(f"✅ [AnalysisSummary] 重试成功，生成深度解释，长度: {len(retry_response)}")
                         # Return original content with tags so frontend can parse and display reasoning
-                        return retry_original_content if '<think>' in retry_original_content or '<think>' in retry_original_content else retry_response
+                        has_think_tags = any(tag in retry_original_content for tag in ['<think>', '<think>', '<reasoning>', '<thought>', '<thinking>', '<think>'])
+                        return retry_original_content if has_think_tags else retry_response
+                    elif retry_original_content and len(retry_original_content.strip()) > 100:
+                        # 🔥 修复：如果重试后的response太短但original_content很长，使用original_content
+                        logger.warning(f"⚠️ [AnalysisSummary] 重试后提取的内容过短，但原始内容较长，使用原始内容（长度: {len(retry_original_content)}）")
+                        return retry_original_content
                     else:
-                        logger.error(f"❌ [AnalysisSummary] 重试后仍无法生成有效内容")
+                        logger.error(f"❌ [AnalysisSummary] 重试后仍无法生成有效内容（response: {len(retry_response) if retry_response else 0}字符, original: {len(retry_original_content)}字符）")
                         # 🔥 TASK 3: Return user-friendly error message instead of raw traceback
                         return f"""## ⚠️ 分析报告生成失败
 
@@ -1428,27 +1774,27 @@ Minimum 500 words. Be scientific and detailed."""
                     ]
                 }
                 
-                # 🔥 TASK 3: Sanitize error message - remove traceback, return user-friendly message
-                error_msg_str = str(llm_error)
-                # Remove traceback patterns
-                if "Traceback" in error_msg or "most recent call last" in error_msg:
-                    # Extract only the error type and message
-                    error_lines = error_msg.split('\n')
-                    error_type_clean = error_lines[-1] if error_lines else str(llm_error)
-                    error_msg_clean = error_type_clean.split(':')[-1].strip() if ':' in error_type_clean else error_type_clean
-                else:
-                    error_msg_clean = error_msg_str
+                # 🔥 修复：去除降级处理，LLM失败时返回用户友好的错误信息
+                logger.error(f"❌ [AnalysisSummary] LLM调用失败，返回用户友好的错误信息")
                 
-                return f"""## ⚠️ AI 专家解读服务暂时不可用
+                # 返回用户友好的错误信息（面向用户，非技术性）
+                user_friendly_error = f"""## ⚠️ AI专家分析报告生成失败
 
-**说明**: 无法生成深度生物学解释报告。{error_msg_clean if len(error_msg_clean) < 100 else "服务调用失败"}
+很抱歉，AI专家分析报告生成时遇到了技术问题，请稍后再试。
 
-**已完成的步骤**: {len(successful_steps)}/{len(steps_results)}
+**分析执行情况**:
+- 已完成的步骤: {len(successful_steps)}/{len(steps_results)}
+- 失败的步骤: {len(failed_steps)}
 
-**关键指标**:
-{key_findings_json if key_findings_json != "{}" else "暂无可用指标"}
+**建议**:
+- 请查看上方的详细图表和统计结果获取分析信息
+- 如果问题持续存在，请联系技术支持
 
-**建议**: 请查看上方的详细图表和统计结果以获取分析信息。"""
+**错误信息**: {error_type} - {str(llm_error)[:100]}{'...' if len(str(llm_error)) > 100 else ''}
+"""
+                
+                logger.info(f"✅ [AnalysisSummary] 已返回用户友好的错误信息，长度: {len(user_friendly_error)}")
+                return user_friendly_error
                 
         except Exception as e:
             logger.error(f"❌ [AnalysisSummary] 生成分析摘要失败: {e}", exc_info=True)

@@ -188,7 +188,7 @@ def run_plsda(
             # SSY = sum((T[:, i] * Q_flat[i])^2) = Q_flat[i]^2 * sum(T[:, i]^2)
             if i < len(Q_flat) and i < T.shape[1]:
                 ssy = Q_flat[i] ** 2 * np.sum(T[:, i] ** 2)
-            explained_variance.append(ssy)
+                explained_variance.append(ssy)
             else:
                 # 如果索引越界，使用默认值
                 logger.warning(f"⚠️ [PLS-DA] 索引 {i} 越界，跳过该成分")
@@ -228,17 +228,17 @@ def run_plsda(
             # 🔥 CRITICAL FIX: 处理不同数量的成分
             if actual_n_components >= 2 and X_scores.shape[1] >= 2:
                 # 2D 散点图（Component 1 vs Component 2）
-            for i, group in enumerate(unique_groups):
-                mask = y == group
-                plt.scatter(
-                    X_scores[mask, 0], 
-                    X_scores[mask, 1],
-                    label=group,
-                    color=colors[i],
-                    alpha=0.6,
-                    s=50
-                )
-            
+                for i, group in enumerate(unique_groups):
+                    mask = y == group
+                    plt.scatter(
+                        X_scores[mask, 0], 
+                        X_scores[mask, 1],
+                        label=group,
+                        color=colors[i],
+                        alpha=0.6,
+                        s=50
+                    )
+                
                 comp1_var = explained_variance[0]/total_ssy*100 if len(explained_variance) > 0 and total_ssy > 0 else 0.0
                 comp2_var = explained_variance[1]/total_ssy*100 if len(explained_variance) > 1 and total_ssy > 0 else 0.0
                 plt.xlabel(f"PLS Component 1 ({comp1_var:.1f}%)")

@@ -510,8 +510,8 @@ class SOPPlanner:
             if not domain_name:
                 logger.info("🔍 [SOPPlanner] Step 1: 意图分类（识别域名和模式）...")
                 logger.info(f"🔍 [SOPPlanner] file_metadata 存在: {has_file_metadata}")
-            intent_result = await self._classify_intent(user_query, file_metadata)
-            domain_name = intent_result.get("domain_name")
+                intent_result = await self._classify_intent(user_query, file_metadata)
+                domain_name = intent_result.get("domain_name")
                 execution_mode = intent_result.get("mode", "PLANNING")  # 🔥 NEW: Extract mode
                 
                 # 🔥 CRITICAL FIX: 如果 file_metadata 存在但模式是 PLANNING，检查是否是明确的预览请求
@@ -552,8 +552,8 @@ class SOPPlanner:
             # 🔥 ARCHITECTURAL FIX: 优先运行意图分析（Plan-First）
             # Step 4: Analyze User Intent (LLM) - 从可用工具集中选择目标步骤（如果未提供）
             if target_steps is None:
-            logger.info("🔍 [SOPPlanner] Step 2: 分析用户意图（选择目标步骤）...")
-            target_steps = await self._analyze_user_intent(user_query, workflow)
+                logger.info("🔍 [SOPPlanner] Step 2: 分析用户意图（选择目标步骤）...")
+                target_steps = await self._analyze_user_intent(user_query, workflow)
             else:
                 logger.info(f"✅ [SOPPlanner] 使用提供的目标步骤: {target_steps}")
             
@@ -641,7 +641,7 @@ class SOPPlanner:
                 if not file_metadata:
                     logger.error("❌ [SOPPlanner] EXECUTION 模式但 file_metadata 不存在！这是逻辑错误。")
                     # Fallback: Use placeholders but log error
-                workflow_config = self._fill_placeholders(workflow_config, user_query)
+                    workflow_config = self._fill_placeholders(workflow_config, user_query)
                     logger.warning("⚠️ [SOPPlanner] 回退到占位符模式（但这是错误的）")
                 else:
                     workflow_config = self._fill_parameters(workflow_config, file_metadata, workflow, template_mode=False)
@@ -1237,7 +1237,7 @@ Classify the intent and return JSON only. Remember:
                         domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
             else:
                 # 未知文件类型，使用关键词匹配
-        rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "h5ad"]
+                rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "h5ad"]
                 domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
         else:
             # No file metadata - check RNA keywords
@@ -1340,7 +1340,7 @@ Classify the intent and return JSON only. Remember:
                 if group_cols:
                     # 强制设置 group_column 参数
                     if "group_column" not in params:
-                params["group_column"] = group_cols[0]
+                        params["group_column"] = group_cols[0]
                         logger.info(f"✅ [SOPPlanner] 强制填充 group_column: {group_cols[0]} -> {step_id}")
                     elif params.get("group_column") != group_cols[0]:
                         # 如果已存在但值不同，更新它
@@ -1364,7 +1364,7 @@ Classify the intent and return JSON only. Remember:
         # 如果 Planner 返回 diagnosis: null，可能会覆盖 UI
         if not template_mode and "diagnosis" in workflow_config:
             # 🔥 TASK 2: Remove diagnosis key entirely in execution mode
-                workflow_config.pop("diagnosis", None)
+            workflow_config.pop("diagnosis", None)
             logger.info("✅ [SOPPlanner] EXECUTION 模式：已移除 diagnosis 字段，避免覆盖 Orchestrator 的真实诊断")
         
         # 确保 workflow_data 中包含模式标记
@@ -1491,8 +1491,8 @@ Classify the intent and return JSON only. Remember:
         group_column = None
         has_groups = False
         if file_metadata:
-        group_column = self._detect_group_column_heuristic(file_metadata)
-        has_groups = group_column is not None
+            group_column = self._detect_group_column_heuristic(file_metadata)
+            has_groups = group_column is not None
         
         logger.info(f"🔍 [SOPPlanner] 分组检测结果: {group_column if has_groups else '无分组列'}")
         

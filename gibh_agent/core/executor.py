@@ -49,6 +49,7 @@ class WorkflowExecutor:
         """
         self.output_dir = output_dir
         self.upload_dir = upload_dir or os.getenv("UPLOAD_DIR", "/app/uploads")
+        self.upload_dir = upload_dir or os.getenv("UPLOAD_DIR", "/app/uploads")
         self.results_dir = os.getenv("RESULTS_DIR", "/app/results")
         self.step_results: Dict[str, Any] = {}  # 存储步骤结果，用于数据流传递
     
@@ -298,15 +299,23 @@ class WorkflowExecutor:
                 logger.error(f"❌ [Executor] 处理后参数中缺少 group_column！")
         
         # 🔥 CRITICAL FIX: 对于 scRNA-seq 工具，确保移除 file_path 参数（如果存在）
-        if tool_category == "scRNA-seq" and "file_path" in processed_params:
-            # 如果已经有 adata_path，移除 file_path
-            if "adata_path" in processed_params:
-                del processed_params["file_path"]
-                logger.info(f"🔄 [Executor] 移除多余的 file_path 参数（工具已有 adata_path）")
-            else:
-                # 如果没有 adata_path，将 file_path 映射为 adata_path
-                processed_params["adata_path"] = processed_params.pop("file_path")
-                logger.info(f"🔄 [Executor] 参数映射: file_path -> adata_path (工具: {tool_id})")
+        # 🔥 EXCEPTION: rna_cellranger_count 和 rna_convert_cellranger_to_h5ad 不使用 adata_path
+        tools_not_using_adata_path = ["rna_cellranger_count", "rna_convert_cellranger_to_h5ad"]
+        if tool_category == "scRNA-seq" and tool_id not in tools_not_using_adata_path:
+            if "file_path" in processed_params:
+                # 如果已经有 adata_path，移除 file_path
+                if "adata_path" in processed_params:
+                    del processed_params["file_path"]
+                    logger.info(f"🔄 [Executor] 移除多余的 file_path 参数（工具已有 adata_path）")
+                else:
+                    # 如果没有 adata_path，将 file_path 映射为 adata_path
+                    processed_params["adata_path"] = processed_params.pop("file_path")
+                    logger.info(f"🔄 [Executor] 参数映射: file_path -> adata_path (工具: {tool_id})")
+        
+        # 🔥 CRITICAL FIX: 对于 rna_cellranger_count 和 rna_convert_cellranger_to_h5ad，移除 adata_path 参数（如果存在）
+        if tool_id in tools_not_using_adata_path and "adata_path" in processed_params:
+            logger.warning(f"⚠️ [Executor] 工具 {tool_id} 不接受 adata_path 参数，已移除")
+            del processed_params["adata_path"]
         
         # 🔥 CRITICAL FIX: 对于 visualize_volcano，自动注入 diff_results（如果缺失）
         if tool_id == "visualize_volcano":
@@ -813,6 +822,52 @@ class WorkflowExecutor:
         
         return file_ext in image_extensions
     
+    def _is_10x_format(self, file_path: str) -> bool:
+        """
+        检测文件路径是否为10x Genomics格式（包含matrix.mtx的目录）
+        
+        Args:
+            file_path: 文件路径（可能是目录或文件）
+        
+        Returns:
+            如果是10x格式返回 True，否则返回 False
+        """
+        if not file_path:
+            return False
+        
+        path_obj = Path(file_path)
+        
+        # 如果是目录，检查是否包含10x格式文件
+        if path_obj.is_dir():
+            try:
+                dir_contents = os.listdir(path_obj)
+                # 检查是否包含matrix.mtx（压缩或未压缩）
+                has_matrix = any(f in dir_contents for f in ['matrix.mtx', 'matrix.mtx.gz'])
+                # 检查是否包含barcodes或features文件
+                has_barcodes = any('barcodes' in f for f in dir_contents)
+                has_features = any(f in dir_contents for f in ['features.tsv', 'features.tsv.gz', 'genes.tsv', 'genes.tsv.gz'])
+                
+                if has_matrix and (has_barcodes or has_features):
+                    logger.info(f"✅ [10x检测] 检测到10x格式目录: {file_path}")
+                    return True
+                
+                # 递归搜索子目录（最多搜索2层）
+                for root, dirs, files in os.walk(path_obj):
+                    depth = root.replace(str(path_obj), '').count(os.sep)
+                    if depth > 2:  # 限制搜索深度
+                        break
+                    if any(f in files for f in ['matrix.mtx', 'matrix.mtx.gz']):
+                        logger.info(f"✅ [10x检测] 在子目录检测到10x格式: {root}")
+                        return True
+            except Exception as e:
+                logger.debug(f"⚠️ [10x检测] 检查目录失败: {e}")
+        
+        # 如果是.h5ad文件，不是10x格式（已经是处理后的格式）
+        if file_path.endswith('.h5ad'):
+            return False
+        
+        return False
+    
     def _detect_group_column_from_file(self, file_path: str) -> Optional[str]:
         """
         从文件中自动检测分组列
@@ -952,6 +1007,13 @@ class WorkflowExecutor:
                         logger.info(f"🔄 [Executor] 解析输入文件路径: {fp} -> {resolved}")
         current_file_path = resolved_file_paths[0] if resolved_file_paths else None
         
+        # 🔥 TASK 1 FIX: 检测输入文件类型，如果是10x格式，标记需要跳过cellranger步骤
+        is_10x_input = False
+        if current_file_path:
+            is_10x_input = self._is_10x_format(current_file_path)
+            if is_10x_input:
+                logger.info(f"✅ [Executor] 检测到输入文件是10x格式，将自动跳过cellranger和convert步骤")
+        
         # 执行每个步骤
         for i, step in enumerate(steps, 1):
             step_id = step.get("step_id", f"step{i}")
@@ -963,6 +1025,73 @@ class WorkflowExecutor:
             if tool_id == "visualize_pca" or step_id == "visualize_pca":
                 logger.warning(f"⚠️ [Executor] 完全移除 visualize_pca 步骤（pca_analysis 已包含可视化）")
                 continue  # 直接跳过，不添加到步骤详情中
+            
+            # 🔥 TASK 1 FIX: 如果输入是10x格式，自动跳过cellranger和convert步骤
+            if is_10x_input:
+                if tool_id in ["rna_cellranger_count", "rna_convert_cellranger_to_h5ad"]:
+                    logger.info(f"⏭️ [Executor] 跳过步骤 {step_name} ({tool_id})：输入文件已经是10x格式，无需执行此步骤")
+                    # 对于convert步骤，我们需要直接转换10x格式为h5ad
+                    if tool_id == "rna_convert_cellranger_to_h5ad":
+                        # 直接使用10x目录转换为h5ad
+                        from ..tools.rna.upstream import convert_cellranger_to_h5ad
+                        output_h5ad = os.path.join(self.output_dir, "converted_from_10x.h5ad")
+                        convert_result = convert_cellranger_to_h5ad(
+                            cellranger_matrix_dir=current_file_path,
+                            output_h5ad_path=output_h5ad
+                        )
+                        if convert_result.get("status") == "success":
+                            current_file_path = convert_result.get("output_path")
+                            logger.info(f"✅ [Executor] 10x格式已转换为h5ad: {current_file_path}")
+                            # 记录步骤结果
+                            self.step_results[step_id] = {
+                                "status": "success",
+                                "result": convert_result,
+                                "message": "10x格式已自动转换为h5ad格式"
+                            }
+                            # 构建步骤详情并添加到列表
+                            step_detail = {
+                                "step_id": step_id,
+                                "tool_id": tool_id,
+                                "name": step_name,
+                                "status": "success",
+                                "summary": "10x格式已自动转换为h5ad格式",
+                                "step_result": {
+                                    "step_name": step_name,
+                                    "status": "success",
+                                    "logs": "10x格式已自动转换为h5ad格式",
+                                    "data": convert_result
+                                }
+                            }
+                            steps_details.append(step_detail)
+                            steps_results.append(step_detail["step_result"])
+                            continue
+                        else:
+                            logger.error(f"❌ [Executor] 10x格式转换失败: {convert_result.get('error')}")
+                            # 转换失败，继续执行原步骤（可能会失败，但至少尝试了）
+                    else:
+                        # cellranger步骤直接跳过
+                        self.step_results[step_id] = {
+                            "status": "skipped",
+                            "result": {"message": "输入文件已经是10x格式，无需执行Cell Ranger计数"},
+                            "message": "步骤已跳过：输入文件已经是10x格式"
+                        }
+                        # 构建步骤详情并添加到列表
+                        step_detail = {
+                            "step_id": step_id,
+                            "tool_id": tool_id,
+                            "name": step_name,
+                            "status": "skipped",
+                            "summary": "步骤已跳过：输入文件已经是10x格式",
+                            "step_result": {
+                                "step_name": step_name,
+                                "status": "skipped",
+                                "logs": "输入文件已经是10x格式，无需执行Cell Ranger计数",
+                                "data": {"message": "输入文件已经是10x格式，无需执行Cell Ranger计数"}
+                            }
+                        }
+                        steps_details.append(step_detail)
+                        steps_results.append(step_detail["step_result"])
+                        continue
             
             logger.info(f"\n{'=' * 80}")
             logger.info(f"📌 步骤 {i}/{len(steps)}: {step_name} ({step_id})")
@@ -1012,6 +1141,30 @@ class WorkflowExecutor:
             if file_param_name == "adata_path" and "file_path" in params and file_param_name not in params:
                 params[file_param_name] = params.pop("file_path")
                 logger.info(f"🔄 参数映射: file_path -> {file_param_name}")
+            
+            # 🔥 修复：自动检测并替换 group_column 参数
+            # 如果工具需要 group_column，但指定的列不存在，尝试自动检测
+            if "group_column" in params and current_file_path:
+                specified_group_col = params["group_column"]
+                detected_group_col = self._detect_group_column_from_file(current_file_path)
+                
+                if detected_group_col:
+                    # 检查指定的列是否存在
+                    try:
+                        import pandas as pd
+                        df = pd.read_csv(current_file_path, nrows=10)
+                        if specified_group_col not in df.columns:
+                            # 指定的列不存在，使用检测到的列
+                            logger.warning(f"⚠️ [Executor] 指定的分组列 '{specified_group_col}' 不存在，自动使用检测到的分组列: '{detected_group_col}'")
+                            params["group_column"] = detected_group_col
+                        else:
+                            # 指定的列存在，使用指定的列
+                            logger.info(f"✅ [Executor] 使用指定的分组列: '{specified_group_col}'")
+                    except Exception as e:
+                        logger.warning(f"⚠️ [Executor] 无法验证分组列，使用检测到的分组列: '{detected_group_col}'")
+                        params["group_column"] = detected_group_col
+                else:
+                    logger.warning(f"⚠️ [Executor] 无法自动检测分组列，使用指定的分组列: '{specified_group_col}'")
             
             # 如果工具需要 output_dir，也自动注入
             if "output_dir" not in params and self.output_dir:

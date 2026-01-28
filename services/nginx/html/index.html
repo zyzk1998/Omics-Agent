@@ -10,6 +10,11 @@
     <!-- 代码高亮样式 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
     
+    <script>
+        // #region agent log (已禁用调试请求)
+        // fetch('http://localhost:7242/ingest/a20db80c-65c6-48df-a98b-487ebd31754b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.html:13',message:'Before loading external scripts',data:{documentReadyState:document.readyState},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -46,6 +51,103 @@
         }
         .brand-logo { font-weight: 600; font-size: 1.1rem; color: #333; display: flex; align-items: center; gap: 8px; }
         .navbar-right { position: absolute; right: 20px; display: flex; align-items: center; gap: 10px; }
+        
+        /* 🔥 左侧功能面板样式 */
+        #left-sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 280px;
+            height: 100vh;
+            background: #ffffff;
+            border-right: 1px solid #e0e0e0;
+            z-index: 999;
+            transform: translateX(-100%);
+            transition: transform 0.3s ease;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            padding-top: 60px;
+        }
+        #left-sidebar.open {
+            transform: translateX(0);
+        }
+        .sidebar-section {
+            border-bottom: 1px solid #e0e0e0;
+            padding: 15px;
+        }
+        .sidebar-section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .sidebar-section-header:hover {
+            color: var(--primary-color);
+        }
+        .sidebar-section-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+        .sidebar-section-content.expanded {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .file-manager-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 10px;
+            margin: 5px 0;
+            background: #f8f9fa;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        .file-manager-item .file-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .file-manager-item .file-actions {
+            display: flex;
+            gap: 5px;
+        }
+        .file-manager-item .btn-sm {
+            padding: 2px 8px;
+            font-size: 11px;
+        }
+        .favorite-workflow-item {
+            padding: 10px;
+            margin: 5px 0;
+            background: #f8f9fa;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .favorite-workflow-item:hover {
+            background: #eef2ff;
+        }
+        .favorite-workflow-item .workflow-name {
+            font-weight: 600;
+            font-size: 13px;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        .favorite-workflow-item .workflow-steps {
+            font-size: 11px;
+            color: #666;
+        }
+        .favorite-workflow-item .workflow-actions {
+            margin-top: 5px;
+            display: flex;
+            justify-content: flex-end;
+        }
         
         /* 🔥 Task 2: 调试侧边栏样式 */
         #debug-sidebar {
@@ -118,6 +220,11 @@
             overflow-y: auto;
             padding: 80px 20px 200px 20px;
             scroll-behavior: smooth;
+            margin-left: 0;
+            transition: margin-left 0.3s ease;
+        }
+        .chat-scroll-area.sidebar-open {
+            margin-left: 280px;
         }
         .chat-content { max-width: var(--chat-width); margin: 0 auto; }
 
@@ -574,11 +681,39 @@
             <div class="brand-logo" ondblclick="toggleDebugSidebar()" style="cursor: pointer;" title="双击打开调试面板"><i class="bi bi-stars" style="color: var(--primary-color);"></i> Omics Agent</div>
         </div>
         <div class="navbar-right">
+            <button class="icon-btn" onclick="toggleLeftSidebar()" title="文件与收藏">
+                <i class="bi bi-list"></i>
+            </button>
             <button class="icon-btn" onclick="toggleDebugSidebar()" title="调试面板">
                 <i class="bi bi-bug"></i>
             </button>
         </div>
     </nav>
+    
+    <!-- 🔥 左侧功能面板：文件管理和收藏 -->
+    <div id="left-sidebar">
+        <div class="sidebar-section">
+            <div class="sidebar-section-header" onclick="toggleSection('file-manager-section')">
+                <span><i class="bi bi-folder"></i> 文件管理</span>
+                <i class="bi bi-chevron-down" id="file-manager-chevron"></i>
+            </div>
+            <div class="sidebar-section-content" id="file-manager-section">
+                <div id="file-manager-list"></div>
+                <button class="btn btn-sm btn-primary w-100 mt-2" onclick="document.getElementById('fileInput').click()">
+                    <i class="bi bi-plus"></i> 添加文件
+                </button>
+            </div>
+        </div>
+        <div class="sidebar-section">
+            <div class="sidebar-section-header" onclick="toggleSection('favorite-section')">
+                <span><i class="bi bi-star"></i> 收藏工作流</span>
+                <i class="bi bi-chevron-down" id="favorite-chevron"></i>
+            </div>
+            <div class="sidebar-section-content" id="favorite-section">
+                <div id="favorite-workflows-list"></div>
+            </div>
+        </div>
+    </div>
     
     <!-- 🔥 Task 2: 调试侧边栏 -->
     <div id="debug-sidebar">
@@ -642,8 +777,22 @@
     </div>
 
     <script>
+        // 🔥 关键变量提前声明，避免暂时性死区错误
+        let pendingFiles = []; // 🔥 Staging: 待上传的文件（File 对象）
+        let chatHistory = []; 
+        let uploadedFiles = []; // 已上传的文件（用于聊天请求）
+        let isProcessing = false; 
+        let abortController = null;
+        
+        // #region agent log
+        // 已禁用调试请求: fetch('http://localhost:7242/ingest/...',...).catch(()=>{});
+        // #endregion
+        
         // 🔥 自定义代码块渲染 + 手动高亮
-        const renderer = new marked.Renderer();
+        // #region agent log
+        // 已禁用调试请求: fetch('http://localhost:7242/ingest/...',...).catch(()=>{});
+        // #endregion
+        const renderer = typeof marked !== 'undefined' ? new marked.Renderer() : null;
         
         renderer.code = function(code, language) {
             let codeText = code;
@@ -674,7 +823,24 @@
             </div>`;
         };
 
-        marked.use({ renderer });
+        // #region agent log
+        // 已禁用调试请求: fetch('http://localhost:7242/ingest/...',...).catch(()=>{});
+        // #endregion
+        if (typeof marked !== 'undefined' && renderer) {
+            marked.use({ renderer });
+        }
+        
+        // 安全的 marked 包装函数
+        function safeMarkedParse(text) {
+            // #region agent log
+            // 已禁用调试请求: fetch('http://localhost:7242/ingest/...',...).catch(()=>{});
+            // #endregion
+            if (typeof marked !== 'undefined' && marked.parse) {
+                return marked.parse(text);
+            }
+            // 降级：简单的 HTML 转义和换行处理
+            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+        }
 
         const chatContent = document.getElementById('chatContent');
         const chatScrollArea = document.getElementById('chatBox');
@@ -683,12 +849,6 @@
         const stopBtn = document.getElementById('stopBtn');
         const filePreviewArea = document.getElementById('filePreviewArea');
         const dropOverlay = document.getElementById('dropOverlay');
-
-        let chatHistory = []; 
-        let uploadedFiles = []; // 已上传的文件（用于聊天请求）
-        let pendingFiles = []; // 🔥 Staging: 待上传的文件（File 对象）
-        let isProcessing = false; 
-        let abortController = null;
 
         function autoResize(textarea) {
             textarea.style.height = 'auto';
@@ -762,7 +922,12 @@
 
         // 🔥 重写：Staging 模式 - 只添加到待上传列表，不立即上传
         function handleFileSelect(files) {
+            // #region agent log
+            // 已禁用调试请求: fetch('http://localhost:7242/ingest/...',...).catch(()=>{});
+            // #endregion
             if (files.length === 0) return;
+            
+            // pendingFiles 已在脚本开始处声明，这里不需要再检查
             
             // 将新文件添加到 pendingFiles 数组
             for (let i = 0; i < files.length; i++) {
@@ -931,6 +1096,8 @@
                 div.innerHTML = `<i class="bi bi-file-earmark-text"></i><span>${f.name}</span><i class="bi bi-x" style="cursor:pointer" onclick="removeFile(${index})"></i>`;
                 filePreviewArea.appendChild(div);
             });
+            // 🔥 同步更新文件管理器列表
+            updateFileManagerList();
         }
         function removeFile(index) { 
             if(!isProcessing && index >= 0 && index < uploadedFiles.length) { 
@@ -977,6 +1144,8 @@
                     // 将新上传的文件添加到 uploadedFiles 数组
                     uploadedFiles.push(...newlyUploadedFiles);
                         console.log('📋 [sendMessage] 当前 uploadedFiles 总数:', uploadedFiles.length);
+                    // 🔥 更新文件管理器列表
+                    updateFileManagerList();
                 } catch (e) {
                         console.error('❌ [sendMessage] 文件上传失败:', e);
                     toggleLoadingState(false);
@@ -1438,10 +1607,22 @@
                         
                         // 执行工具
                         if (contentLower.includes('execut') || contentLower.includes('执行') || contentLower.includes('调用')) {
-                            // 尝试提取工具名称
+                            // 🔥 修复：优先提取"正在执行步骤: XXX..."格式中的工具名称
+                            const stepMatch = content.match(/正在执行步骤[：:]\s*([^…]+)/) || content.match(/正在执行步骤[：:]\s*([^.]+)/);
+                            if (stepMatch) {
+                                const toolName = stepMatch[1].trim();
+                                if (toolName && toolName !== '...') {
+                                    return `正在执行步骤: ${toolName}...`;
+                                }
+                            }
+                            // 尝试提取工具名称（其他格式）
                             const toolMatch = content.match(/工具[：:]\s*([^，,。.]+)/) || content.match(/tool[：:]\s*([^，,。.]+)/i);
                             if (toolMatch) {
                                 return `正在调用工具: ${toolMatch[1]}...`;
+                            }
+                            // 如果content本身已经包含工具名称，直接使用
+                            if (content.includes('正在执行步骤:') || content.includes('正在执行步骤：')) {
+                                return content; // 直接使用原始内容（已包含工具名称）
                             }
                             return '正在执行分析...';
                         }
@@ -1583,7 +1764,7 @@
                             }
                             
                             try {
-                                finalAnswerElement.innerHTML = marked.parse(finalAnswerBuffer);
+                                finalAnswerElement.innerHTML = safeMarkedParse(finalAnswerBuffer);
                             } catch (e) {
                                 console.error('❌ [SSE] Markdown 解析错误:', e);
                                 finalAnswerElement.innerHTML = escapeHtml(finalAnswerBuffer);
@@ -1612,7 +1793,7 @@
                         
                         // 🔥 CRITICAL: 只更新 textZone 的内容，不覆盖 cardZone
                         try {
-                            textZoneRef.innerHTML = marked.parse(text);
+                            textZoneRef.innerHTML = safeMarkedParse(text);
                             // 滚动到底部
                             textZoneRef.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                         } catch (e) {
@@ -1661,9 +1842,7 @@
                                         <h5 class="mb-0">
                                             <i class="bi bi-file-earmark-text"></i> 📊 数据诊断报告
                                         </h5>
-                                        <button class="btn btn-sm btn-light" onclick="window.print()">
-                                            <i class="bi bi-printer"></i> 🖨️ 打印报告
-                                        </button>
+                                        <!-- 🔥 修复：数据诊断报告无打印按钮 -->
                                     </div>
                                     <div class="card-body">
                                         <div class="execution-results-section"></div>
@@ -1680,13 +1859,6 @@
                             return;
                         }
                         
-                        // 🔥 REQUIREMENT 1: Check if already rendered to prevent duplicates
-                        const existingTitle = expertSection.querySelector('h6');
-                        if (existingTitle && existingTitle.textContent.includes('AI 专家分析报告')) {
-                            console.log('ℹ️ [renderDiagnosisCard] 专家报告已存在，跳过重复渲染');
-                            return;
-                        }
-                        
                         // 检查是否为结构化诊断数据
                         let diagnosisMessage = '';
                         if (typeof diagnosisData === 'string') {
@@ -1695,6 +1867,37 @@
                             diagnosisMessage = diagnosisData.message;
                         } else {
                             diagnosisMessage = JSON.stringify(diagnosisData, null, 2);
+                        }
+                        
+                        // 🔥 修复：先确定报告类型，然后再进行重复检查
+                        // 🔥 REQUIREMENT 1: Dynamic Titles based on status (prevent confusion)
+                        let reportTitle = "💡 AI 专家分析报告";
+                        let reportIcon = "bi-lightbulb";
+                        
+                        // Check if this is pre-analysis (data diagnosis) or post-analysis
+                        if (fullData) {
+                            const status = fullData.status || fullData.report_data?.status || '';
+                            // 计划阶段（数据诊断）显示"数据诊断报告"
+                            if (status === 'data_ready' || status === 'template_ready' || diagnosisMessage.includes('数据体检') || diagnosisMessage.includes('数据概况') || diagnosisMessage.includes('数据诊断')) {
+                                reportTitle = "📊 数据诊断报告";
+                                reportIcon = "bi-clipboard-check";
+                            }
+                        }
+                        
+                        // 🔥 修复：检查是否已存在相同类型的报告，避免重复渲染（在确定reportTitle之后）
+                        const existingTitles = expertSection.querySelectorAll('h6');
+                        for (const existingTitle of existingTitles) {
+                            const titleText = existingTitle.textContent || '';
+                            // 如果是数据诊断报告，且当前也要渲染数据诊断报告，则跳过
+                            if (titleText.includes('数据诊断报告') && reportTitle.includes('数据诊断报告')) {
+                                console.log('ℹ️ [renderDiagnosisCard] 数据诊断报告已存在，跳过重复渲染');
+                                return;
+                            }
+                            // 如果是AI专家分析报告，且当前也要渲染AI专家分析报告，则跳过
+                            if (titleText.includes('AI 专家分析报告') && reportTitle.includes('AI 专家分析报告')) {
+                                console.log('ℹ️ [renderDiagnosisCard] AI专家分析报告已存在，跳过重复渲染');
+                                return;
+                            }
                         }
                         
                         // 🔥 Phase 4: Extract reasoning content from <think> tags (DeepSeek-R1 format)
@@ -1719,20 +1922,6 @@
                             }
                         }
                         
-                        // 🔥 REQUIREMENT 1: Dynamic Titles based on status (prevent confusion)
-                        let reportTitle = "💡 AI 专家分析报告";
-                        let reportIcon = "bi-lightbulb";
-                        
-                        // Check if this is pre-analysis (data diagnosis) or post-analysis
-                        if (fullData) {
-                            const status = fullData.status || fullData.report_data?.status || '';
-                            // 计划阶段（数据诊断）显示"数据诊断报告"
-                            if (status === 'data_ready' || status === 'template_ready' || diagnosisMessage.includes('数据体检') || diagnosisMessage.includes('数据概况') || diagnosisMessage.includes('数据诊断')) {
-                                reportTitle = "📊 数据诊断报告";
-                                reportIcon = "bi-clipboard-check";
-                            }
-                        }
-                        
                         // 🔥 Phase 4: Build HTML with collapsible thinking section
                         let thinkingHtml = '';
                         if (thinkingContent) {
@@ -1751,18 +1940,21 @@
                             `;
                         }
                         
-                        // 🔥 REQUIREMENT 1: Render in expert insight section (replace, don't append)
+                        // 🔥 修复：追加到expert insight section，而不是替换，使数据诊断报告和AI专家分析报告能够共存
                         const diagnosisHtml = `
-                            <h6 class="mb-3">
-                                <i class="bi ${reportIcon}"></i> ${reportTitle}
+                            <div class="diagnosis-report-item" style="margin-bottom: 30px;">
+                                <h6 class="mb-3">
+                                    <i class="bi ${reportIcon}"></i> ${reportTitle}
                                 </h6>
-                            ${thinkingHtml}
-                            <div class="expert-report-content" style="font-size: 14px; line-height: 1.8; color: #333; background: #f0f7ff; padding: 20px; border-radius: 8px; border-left: 4px solid #4d6bfe;">
-                                ${marked.parse(reportContent)}
+                                ${thinkingHtml}
+                                <div class="expert-report-content" style="font-size: 14px; line-height: 1.8; color: #333; background: #f0f7ff; padding: 20px; border-radius: 8px; border-left: 4px solid #4d6bfe;">
+                                    ${safeMarkedParse(reportContent)}
+                                </div>
                             </div>
                         `;
                         
-                        expertSection.innerHTML = diagnosisHtml;
+                        // 追加而不是替换，使多个报告能够共存
+                        expertSection.insertAdjacentHTML('beforeend', diagnosisHtml);
                         console.log(`✅ [renderDiagnosisCard] ${reportTitle}已渲染到统一报告容器${thinkingContent ? ' (包含思考过程)' : ''}`);
                     }
                     
@@ -2029,7 +2221,8 @@
                     }
                     
                     // 🔥 CRITICAL REFACTOR: 渲染工作流卡片 - 只更新 cardZone，不覆盖 textZone
-                    function renderWorkflowCard(workflowData) {
+                    // 🔥 修复：将renderWorkflowCard提升到全局作用域，以便useFavoriteWorkflow可以访问
+                    window.renderWorkflowCard = function(workflowData) {
                         // 🔥 DEBUG: 添加调试日志
                         console.log("🔍 [renderWorkflowCard] Rendering Interactive Workflow Card:", workflowData);
                         
@@ -2172,6 +2365,16 @@
                         // 🔥 UI REGRESSION FIX: Restore Interactive Form Structure
                         // 🔥 TASK 1: Use consistent ID for idempotency check
                         const formId = `wf-card-${Date.now()}`;
+                        
+                        // 🔥 缓存工作流数据（用于收藏功能）
+                        if (!window.workflowCache) {
+                            window.workflowCache = {};
+                        }
+                        window.workflowCache[formId] = {
+                            workflowData: workflowData,
+                            originalQuery: userInput.value.trim() || '继续分析'
+                        };
+                        
                         let formHtml = `<div class="alert alert-success mt-3 params-form" id="${workflowCardId}" data-form-id="${formId}" style="border-left: 4px solid #28a745;">
                             <h5>
                                 <i class="bi bi-diagram-3"></i> 📋 ${workflowName}
@@ -2182,15 +2385,6 @@
                         if (isTemplateMode) {
                             const originalQuery = userInput.value.trim() || '继续分析';
                             const workflowId = formId;
-                            
-                            if (!window.workflowCache) {
-                                window.workflowCache = {};
-                            }
-                            
-                            window.workflowCache[workflowId] = {
-                                workflowData: workflowData,
-                                originalQuery: originalQuery
-                            };
                             
                             formHtml += `
                                 <div class="alert alert-warning mt-2 mb-3" style="background: #fff3cd; border-left: 4px solid #ffc107;">
@@ -2305,7 +2499,10 @@
                             // 🔥 Task 4: Execute Button (Execution Mode)
                             if (!isTemplateMode) {
                                 formHtml += `
-                                    <div class="mt-3">
+                                    <div class="mt-3 d-flex justify-content-between align-items-center">
+                                        <button class="btn btn-outline-primary btn-sm" onclick="addFavoriteWorkflowFromCard('${formId}')" title="收藏工作流">
+                                            <i class="bi bi-star"></i> 收藏
+                                        </button>
                                         <button class="btn btn-success btn-sm" id="execute-workflow-${formId}" 
                                                 onclick="executeWorkflowFromForm(this)">
                                             <i class="bi bi-play-circle"></i> 🚀 执行工作流
@@ -2335,7 +2532,7 @@
                         // 🔥 PHASE 1 FIX: Return the formId so caller can use it
                         console.log(`✅ [renderWorkflowCard] 交互式工作流卡片已渲染到 cardZone, formId: ${formId}`);
                         return formId;  // Return the newly generated formId
-                    }
+                    };
                     
                     // 🔥 CRITICAL FIX: Execute workflow from form (collects parameters from inputs)
                     // 🔥 TASK 1: Use DOM traversal instead of ID lookup for robustness
@@ -2749,14 +2946,14 @@
                                 if (rawResult) resultText = rawResult[1].trim();
                             }
 
-                            let finalHtml = marked.parse(preText);
+                            let finalHtml = safeMarkedParse(preText);
                             if (codeBlock) {
                                 finalHtml += `<button class="code-collapse-btn" onclick="toggleCode(this)"><i class="bi bi-code-slash"></i> 查看策略代码</button><div class="code-block-container"><pre><code class="language-python">${codeBlock}</code></pre></div>`;
                             }
                             if (resultText) finalHtml += formatExecutionResult(resultText);
                             content = finalHtml;
                         } else {
-                            content = marked.parse(content);
+                            content = safeMarkedParse(content);
                         }
                         appendMessage('ai', content, null, duration, true);
                     }
@@ -2822,7 +3019,7 @@
                         if (parts && parts[1]) {
                             finalAnswer += parts[1];
                             const answerDiv = aiContentDiv.querySelector('.final-answer');
-                            if(answerDiv) answerDiv.innerHTML = marked.parse(finalAnswer);
+                            if(answerDiv) answerDiv.innerHTML = safeMarkedParse(finalAnswer);
                         }
                         continue; 
                     }
@@ -2838,11 +3035,11 @@
                         // 处理正文内容
                         if (!hasThoughtBlock) {
                             finalAnswer += processChunk;
-                            aiContentDiv.innerHTML = marked.parse(finalAnswer);
+                            aiContentDiv.innerHTML = safeMarkedParse(finalAnswer);
                         } else {
                             finalAnswer += processChunk;
                             const answerDiv = aiContentDiv.querySelector('.final-answer');
-                            if(answerDiv) answerDiv.innerHTML = marked.parse(finalAnswer);
+                            if(answerDiv) answerDiv.innerHTML = safeMarkedParse(finalAnswer);
                         }
                     }
                     
@@ -2937,7 +3134,7 @@
             }
 
             // 🔒 安全：确保 Markdown 渲染和思考过程不受影响
-            const bubbleContent = isHtml ? content : marked.parse(content);
+            const bubbleContent = isHtml ? content : safeMarkedParse(content);
             // 文件卡片独立于 bubble，不会影响 Markdown 渲染
             row.innerHTML = `${role === 'ai' ? avatarHtml : ''}<div class="message-container">${fileCardsHtml}<div class="bubble">${bubbleContent}</div>${userActionsHtml}${footerHtml}</div>`;
             chatContent.appendChild(row);
@@ -2945,14 +3142,78 @@
             return row.querySelector('.bubble');
         }
 
-        // 🔥 TASK 1: Print unified report container (hide chat history)
+        // 🔥 修复：打印分析结题报告，只打印数据诊断报告、执行结果详情和AI专家分析报告
         window.printReport = function() {
             const reportContainer = document.querySelector('.unified-report-container');
             if (!reportContainer) {
                 alert('未找到报告容器');
                 return;
             }
-            const content = reportContainer.innerHTML;
+            
+            // 🔥 修复：只提取需要打印的部分
+            // 1. 数据诊断报告（expert-insight-section中包含"数据诊断报告"的部分）
+            // 2. 执行结果详情（execution-results-section）
+            // 3. AI专家分析报告（expert-insight-section中包含"AI 专家分析报告"的部分）
+            
+            const executionSection = reportContainer.querySelector('.execution-results-section');
+            const expertSection = reportContainer.querySelector('.expert-insight-section');
+            
+            let printContent = '<div class="print-report-container">';
+            printContent += '<h1 style="text-align: center; margin-bottom: 30px; border-bottom: 3px solid #4d6bfe; padding-bottom: 15px;">分析结题报告</h1>';
+            
+            // 🔥 修复：正确提取expert-insight-section中的所有内容
+            // expert-insight-section可能包含多个h6标题，需要按顺序提取
+            if (expertSection) {
+                const allH6 = expertSection.querySelectorAll('h6');
+                const allChildren = Array.from(expertSection.children);
+                
+                // 按顺序处理每个h6及其后续内容
+                for (let i = 0; i < allH6.length; i++) {
+                    const h6 = allH6[i];
+                    const h6Text = h6.textContent || '';
+                    const h6Index = allChildren.indexOf(h6);
+                    
+                    // 确定这是数据诊断报告还是AI专家分析报告
+                    let sectionTitle = '';
+                    let sectionType = '';
+                    if (h6Text.includes('数据诊断报告') || (h6Text.includes('📊') && !h6Text.includes('AI'))) {
+                        sectionTitle = '📊 数据诊断报告';
+                        sectionType = 'diagnosis';
+                    } else if (h6Text.includes('AI 专家分析报告') || h6Text.includes('专家分析报告') || h6Text.includes('💡')) {
+                        sectionTitle = '💡 AI 专家分析报告';
+                        sectionType = 'ai_expert';
+                    } else {
+                        continue; // 跳过不匹配的h6
+                    }
+                    
+                    // 提取从当前h6到下一个h6之间的所有内容
+                    let sectionContent = '<div class="print-section" style="margin-bottom: 30px; page-break-inside: avoid;">';
+                    sectionContent += `<h2 style="border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px;">${sectionTitle}</h2>`;
+                    
+                    // 收集从当前h6到下一个h6（或section结束）的所有内容
+                    const nextH6Index = i < allH6.length - 1 ? allChildren.indexOf(allH6[i + 1]) : allChildren.length;
+                    for (let j = h6Index; j < nextH6Index; j++) {
+                        // 🔥 修复：检查元素是否存在，避免undefined错误
+                        if (allChildren[j] && allChildren[j].outerHTML) {
+                            sectionContent += allChildren[j].outerHTML;
+                        }
+                    }
+                    
+                    sectionContent += '</div>';
+                    printContent += sectionContent;
+                }
+            }
+            
+            // 2. 执行结果详情
+            if (executionSection && executionSection.innerHTML.trim()) {
+                printContent += '<div class="print-section" style="margin-bottom: 30px; page-break-inside: avoid;">';
+                printContent += '<h2 style="border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px;">执行结果详情</h2>';
+                printContent += executionSection.innerHTML;
+                printContent += '</div>';
+            }
+            
+            printContent += '</div>';
+            
             const printWindow = window.open('', '', 'height=800,width=800');
             printWindow.document.write('<html><head><title>分析结题报告</title>');
             printWindow.document.write('<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">');
@@ -2960,15 +3221,19 @@
             printWindow.document.write(`
                 body { font-family: 'Times New Roman', serif; padding: 40px; color: #000; }
                 .btn { display: none !important; }
+                .card-header { background: #4d6bfe !important; color: white !important; padding: 15px; }
                 .accordion-button { pointer-events: none; padding: 0; font-weight: bold; color: #000; background: none; border: none; }
                 .accordion-button::after { display: none; }
                 .accordion-collapse { display: block !important; }
                 .accordion-item { border: none; border-bottom: 1px solid #ddd; margin-bottom: 10px; }
                 img { max-width: 80%; display: block; margin: 10px auto; page-break-inside: avoid; }
                 .table-responsive { overflow-x: visible; }
+                .print-section { page-break-inside: avoid; margin-bottom: 30px; }
+                h1, h2, h3, h4, h5, h6 { color: #000; }
+                .expert-report-content { background: #f0f7ff; padding: 20px; border-radius: 8px; border-left: 4px solid #4d6bfe; }
             `);
             printWindow.document.write('</style></head><body>');
-            printWindow.document.write(content);
+            printWindow.document.write(printContent);
             printWindow.document.write('</body></html>');
             printWindow.document.close();
             printWindow.focus();
@@ -3011,6 +3276,230 @@
 
         // 🔥 核心修复：通用化结果展示逻辑 (Last Plot Wins)
         // 🔥 Task 2: 调试侧边栏函数
+        // 🔥 左侧面板切换
+        function toggleLeftSidebar() {
+            const sidebar = document.getElementById('left-sidebar');
+            const chatArea = document.getElementById('chatBox');
+            if (sidebar.classList.contains('open')) {
+                sidebar.classList.remove('open');
+                chatArea.classList.remove('sidebar-open');
+            } else {
+                sidebar.classList.add('open');
+                chatArea.classList.add('sidebar-open');
+                updateFileManagerList();
+                updateFavoriteWorkflowsList();
+            }
+        }
+        
+        // 🔥 切换侧边栏章节
+        function toggleSection(sectionId) {
+            const section = document.getElementById(sectionId);
+            const chevron = document.getElementById(sectionId.replace('-section', '-chevron'));
+            if (section.classList.contains('expanded')) {
+                section.classList.remove('expanded');
+                chevron.style.transform = 'rotate(0deg)';
+            } else {
+                section.classList.add('expanded');
+                chevron.style.transform = 'rotate(180deg)';
+            }
+        }
+        
+        // 🔥 更新文件管理列表
+        function updateFileManagerList() {
+            const listContainer = document.getElementById('file-manager-list');
+            if (!listContainer) return;
+            
+            listContainer.innerHTML = '';
+            if (uploadedFiles.length === 0) {
+                listContainer.innerHTML = '<p class="text-muted text-center" style="font-size: 12px; padding: 10px;">暂无文件</p>';
+                return;
+            }
+            
+            uploadedFiles.forEach((file, index) => {
+                const item = document.createElement('div');
+                item.className = 'file-manager-item';
+                item.innerHTML = `
+                    <span class="file-name" title="${file.name || file.path}">${file.name || file.path}</span>
+                    <div class="file-actions">
+                        <button class="btn btn-sm btn-danger" onclick="removeFileFromManager(${index})" title="删除">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                `;
+                listContainer.appendChild(item);
+            });
+        }
+        
+        // 🔥 从文件管理器删除文件
+        function removeFileFromManager(index) {
+            if (isProcessing) {
+                alert('正在处理中，无法删除文件');
+                return;
+            }
+            if (index >= 0 && index < uploadedFiles.length) {
+                uploadedFiles.splice(index, 1);
+                updateFileManagerList();
+                renderFileTags();
+                checkInput();
+            }
+        }
+        
+        // 🔥 工作流收藏功能
+        function getUserId() {
+            // 从localStorage或session获取用户ID，未登录返回'guest'
+            return localStorage.getItem('userId') || 'guest';
+        }
+        
+        function getFavoriteWorkflows() {
+            const userId = getUserId();
+            const key = `favorite_workflows_${userId}`;
+            const stored = localStorage.getItem(key);
+            return stored ? JSON.parse(stored) : [];
+        }
+        
+        function saveFavoriteWorkflows(workflows) {
+            const userId = getUserId();
+            const key = `favorite_workflows_${userId}`;
+            localStorage.setItem(key, JSON.stringify(workflows));
+        }
+        
+        function addFavoriteWorkflow(workflowData) {
+            const favorites = getFavoriteWorkflows();
+            const workflowId = workflowData.workflow_config?.workflow_data?.workflow_name || 
+                              workflowData.workflow_data?.workflow_name || 
+                              workflowData.workflow_name || 
+                              `工作流_${Date.now()}`;
+            
+            // 检查是否已存在
+            const exists = favorites.find(f => f.id === workflowId);
+            if (exists) {
+                alert('该工作流已收藏');
+                return;
+            }
+            
+            const favorite = {
+                id: workflowId,
+                name: workflowId,
+                steps: workflowData.workflow_config?.workflow_data?.steps || 
+                       workflowData.workflow_data?.steps || 
+                       workflowData.steps || [],
+                workflowData: workflowData,
+                createdAt: new Date().toISOString()
+            };
+            
+            favorites.push(favorite);
+            saveFavoriteWorkflows(favorites);
+            updateFavoriteWorkflowsList();
+            alert('收藏成功！');
+        }
+        
+        // 🔥 从工作流卡片添加收藏
+        function addFavoriteWorkflowFromCard(formId) {
+            const formElement = document.querySelector(`[data-form-id="${formId}"]`);
+            if (!formElement) {
+                alert('未找到工作流卡片');
+                return;
+            }
+            
+            // 从工作流缓存中获取数据
+            if (window.workflowCache && window.workflowCache[formId]) {
+                addFavoriteWorkflow(window.workflowCache[formId].workflowData);
+                return;
+            }
+            
+            // 如果没有缓存，尝试从DOM中提取
+            const workflowName = formElement.querySelector('h5')?.textContent?.replace('📋 ', '').replace(' [模版预览 Mode]', '') || '工作流';
+            const steps = [];
+            const stepCheckboxes = formElement.querySelectorAll('.step-checkbox:checked');
+            
+            stepCheckboxes.forEach(checkbox => {
+                const index = parseInt(checkbox.getAttribute('data-index'));
+                const toolId = formElement.querySelector(`input[name="tool_id_${index}"]`)?.value || '';
+                const stepName = formElement.querySelector(`input[name="step_name_${index}"]`)?.value || '';
+                const stepId = formElement.querySelector(`input[name="step_id_${index}"]`)?.value || '';
+                const params = {};
+                
+                // 提取参数
+                formElement.querySelectorAll(`input[name^="param_${index}_"]`).forEach(input => {
+                    const paramName = input.name.replace(`param_${index}_`, '');
+                    if (input.type === 'checkbox') {
+                        params[paramName] = input.checked;
+                    } else if (input.type === 'number') {
+                        params[paramName] = parseFloat(input.value) || 0;
+                    } else {
+                        params[paramName] = input.value;
+                    }
+                });
+                
+                steps.push({
+                    step_id: stepId,
+                    tool_id: toolId,
+                    name: stepName,
+                    params: params
+                });
+            });
+            
+            const workflowData = {
+                workflow_data: {
+                    workflow_name: workflowName,
+                    steps: steps
+                }
+            };
+            
+            addFavoriteWorkflow(workflowData);
+        }
+        
+        function removeFavoriteWorkflow(workflowId) {
+            const favorites = getFavoriteWorkflows();
+            const filtered = favorites.filter(f => f.id !== workflowId);
+            saveFavoriteWorkflows(filtered);
+            updateFavoriteWorkflowsList();
+        }
+        
+        function useFavoriteWorkflow(workflowId) {
+            const favorites = getFavoriteWorkflows();
+            const favorite = favorites.find(f => f.id === workflowId);
+            if (!favorite) {
+                alert('工作流不存在');
+                return;
+            }
+            
+            // 渲染工作流卡片
+            renderWorkflowCard(favorite.workflowData);
+        }
+        
+        function updateFavoriteWorkflowsList() {
+            const listContainer = document.getElementById('favorite-workflows-list');
+            if (!listContainer) return;
+            
+            const favorites = getFavoriteWorkflows();
+            listContainer.innerHTML = '';
+            
+            if (favorites.length === 0) {
+                listContainer.innerHTML = '<p class="text-muted text-center" style="font-size: 12px; padding: 10px;">暂无收藏</p>';
+                return;
+            }
+            
+            favorites.forEach(favorite => {
+                const item = document.createElement('div');
+                item.className = 'favorite-workflow-item';
+                const stepsCount = favorite.steps ? favorite.steps.length : 0;
+                item.innerHTML = `
+                    <div class="workflow-name">${favorite.name}</div>
+                    <div class="workflow-steps">${stepsCount} 个步骤</div>
+                    <div class="workflow-actions">
+                        <button class="btn btn-sm btn-primary" onclick="useFavoriteWorkflow('${favorite.id}')" title="使用">
+                            <i class="bi bi-play"></i>
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="removeFavoriteWorkflow('${favorite.id}')" title="删除">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                `;
+                listContainer.appendChild(item);
+            });
+        }
+        
         function toggleDebugSidebar() {
             const sidebar = document.getElementById('debug-sidebar');
             sidebar.classList.toggle('open');
@@ -3243,7 +3732,7 @@
             html += `</div></div>
                 <div class="report-section">
                     <h6>2. AI 专家诊断</h6>
-                    <div class="llm-diagnosis" style="display: block; padding: 15px; background: #f0f7ff; border-left: 4px solid #4d6bfe; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333;">${diagnosis && diagnosis !== "暂无诊断信息" ? marked.parse(diagnosis) : '<p class="text-muted">暂无诊断信息</p>'}</div>
+                    <div class="llm-diagnosis" style="display: block; padding: 15px; background: #f0f7ff; border-left: 4px solid #4d6bfe; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333;">${diagnosis && diagnosis !== "暂无诊断信息" ? safeMarkedParse(diagnosis) : '<p class="text-muted">暂无诊断信息</p>'}</div>
                 </div>
                 ${keyPlotHtml}
             </div>`;
@@ -3361,7 +3850,7 @@
                         <i class="bi bi-clipboard-check"></i> ${isTemplateMode ? '方案已生成' : '数据诊断与参数推荐报告'}
                     </h6>
                     <div style="font-size: 14px; line-height: 1.6; color: #333;">
-                        ${marked.parse(diagnosisReport)}
+                        ${safeMarkedParse(diagnosisReport)}
                     </div>
                 </div>`;
             }

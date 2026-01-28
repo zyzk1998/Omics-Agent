@@ -211,9 +211,16 @@ def run_doublet_detection(
                     "summary": f"检测到 {n_doublets} 个双联体（{doublet_rate:.2f}%）"
                 }
             except ImportError:
+                logger.warning("⚠️ scrublet 未安装，双联体检测步骤将跳过")
+                # 🔥 TASK 2 FIX: 优雅降级 - 如果scrublet未安装，返回警告但不标记为错误
+                # 将双联体检测标记为跳过，而不是错误
                 return {
-                    "status": "error",
-                    "error": "scrublet not installed. Please install: pip install scrublet"
+                    "status": "skipped",
+                    "error": "scrublet not installed. Please install: pip install scrublet",
+                    "message": "双联体检测步骤已跳过（scrublet未安装）。建议安装: pip install scrublet",
+                    "n_doublets": 0,
+                    "doublet_rate": 0.0,
+                    "summary": "双联体检测已跳过（scrublet未安装）"
                 }
         else:
             return {

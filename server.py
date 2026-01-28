@@ -1611,8 +1611,8 @@ async def chat_endpoint(req: ChatRequest):
                 file_path_str = ""
                 
                 if isinstance(file_info, dict):
-                file_name = file_info.get("file_name") or file_info.get("name", "")
-                file_path_str = file_info.get("file_path") or file_info.get("path", "")
+                    file_name = file_info.get("file_name") or file_info.get("name", "")
+                    file_path_str = file_info.get("file_path") or file_info.get("path", "")
                 elif hasattr(file_info, "path"):
                     # Pydantic model
                     file_path_str = file_info.path

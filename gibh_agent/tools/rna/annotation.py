@@ -63,7 +63,51 @@ def run_cell_annotation(
                 # 下载或加载模型
                 if not model_path.exists():
                     logger.info(f"📥 正在下载 CellTypist 模型: {model_name}")
-                    models.download_models(model=model_name, folder=str(cache_path))
+                    # 🔥 FIX: celltypist 的 download_models 使用 model 参数，不使用 folder 参数
+                    # 模型会自动下载到默认位置，然后我们需要移动到指定目录
+                    try:
+                        # 尝试使用新版本 API（如果支持）
+                        models.download_models(model=model_name)
+                        # 查找下载的模型文件并移动到指定目录
+                        import shutil
+                        from pathlib import Path
+                        # 默认下载位置通常在用户目录下的 .celltypist 文件夹
+                        default_cache = Path.home() / ".celltypist" / "models"
+                        if default_cache.exists():
+                            downloaded_model = default_cache / model_name
+                            if downloaded_model.exists():
+                                shutil.move(str(downloaded_model), str(model_path))
+                                logger.info(f"✅ 模型已移动到: {model_path}")
+                    except TypeError as e:
+                        # 🔥 TASK 3 FIX: 如果新版本 API 不支持，尝试旧版本（可能使用不同的参数）
+                        logger.debug(f"🔍 [CellAnnotation] 新版本API失败: {e}，尝试旧版本API")
+                        try:
+                            # 某些版本可能使用 path 而不是 folder
+                            models.download_models(model=model_name, path=str(cache_path))
+                            logger.info(f"✅ [CellAnnotation] 使用path参数下载模型成功")
+                        except (TypeError, AttributeError) as e2:
+                            # 🔥 TASK 3 FIX: 如果都不支持，尝试直接下载到默认位置，然后复制
+                            logger.debug(f"🔍 [CellAnnotation] path参数也失败: {e2}，尝试默认位置下载")
+                            try:
+                                models.download_models(model=model_name)
+                                # 尝试从默认位置复制到目标位置
+                                default_cache = Path.home() / ".celltypist" / "models"
+                                if default_cache.exists():
+                                    downloaded_model = default_cache / model_name
+                                    if downloaded_model.exists():
+                                        import shutil
+                                        shutil.copy2(str(downloaded_model), str(model_path))
+                                        logger.info(f"✅ [CellAnnotation] 模型已从默认位置复制到: {model_path}")
+                                    else:
+                                        logger.warning(f"⚠️ [CellAnnotation] 模型已下载到默认位置，但未找到: {downloaded_model}")
+                                else:
+                                    logger.warning(f"⚠️ [CellAnnotation] 模型已下载到默认位置，请手动移动到: {cache_path}")
+                            except Exception as e3:
+                                logger.error(f"❌ [CellAnnotation] 所有下载方法都失败: {e3}")
+                                return {
+                                    "status": "error",
+                                    "error": f"无法下载CellTypist模型: {str(e3)}。请检查网络连接或手动下载模型。"
+                                }
                 
                 # 加载模型
                 model = celltypist.models.Model.load(str(model_path))

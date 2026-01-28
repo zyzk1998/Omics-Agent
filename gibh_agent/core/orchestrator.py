@@ -327,8 +327,28 @@ class AgentOrchestrator:
                     if tool_id == "visualize_pca" or step.get("step_id") == "visualize_pca":
                         continue
                     
+                    # 🔥 修复：从工具注册表获取工具名称，显示具体工具名称
+                    tool_display_name = step_name
+                    if tool_id:
+                        try:
+                            from gibh_agent.core.tool_registry import ToolRegistry
+                            registry = ToolRegistry()
+                            tool_metadata = registry.get_metadata(tool_id)
+                            if tool_metadata:
+                                # 使用工具的描述作为显示名称（更友好）
+                                tool_display_name = tool_metadata.description if tool_metadata.description else step_name
+                                # 如果描述太长，截断
+                                if len(tool_display_name) > 50:
+                                    tool_display_name = tool_display_name[:50] + "..."
+                            else:
+                                # 如果工具注册表中没有，使用step_name
+                                tool_display_name = step_name
+                        except Exception as e:
+                            logger.debug(f"⚠️ [Orchestrator] 无法从工具注册表获取工具名称: {e}，使用默认名称")
+                            tool_display_name = step_name
+                    
                     yield self._format_sse("status", {
-                        "content": f"正在执行步骤: {step_name}...",
+                        "content": f"正在执行步骤: {tool_display_name}...",
                         "state": "running"
                     })
                     await asyncio.sleep(0.01)
@@ -389,18 +409,44 @@ class AgentOrchestrator:
                 # 4. Generate Summary (if agent available and no async job)
                 # 🔥 CRITICAL FIX: ALWAYS generate summary, regardless of workflow status
                 # Even if some steps failed, we should summarize what succeeded
-                if self.agent and hasattr(self.agent, '_generate_analysis_summary'):
-                    yield self._format_sse("status", {
-                        "content": "正在生成专家解读...",
-                        "state": "running"
-                    })
-                    await asyncio.sleep(0.01)
-                    
-                    # Detect domain from workflow name or steps
+                # 🔥 修复：从GIBHAgent.agents中选择合适的领域智能体
+                target_agent = None
+                if self.agent:
+                    # 检测领域类型，选择对应的智能体
                     domain_name = "Metabolomics"  # Default
                     workflow_name = workflow_config.get("workflow_name", "")
                     if "RNA" in workflow_name or "rna" in workflow_name.lower():
                         domain_name = "RNA"
+                        # 检查步骤中的工具ID来确定领域
+                        for step in steps:
+                            tool_id = step.get("tool_id", "").lower()
+                            if "rna" in tool_id or "cellranger" in tool_id or "scanpy" in tool_id:
+                                domain_name = "RNA"
+                                break
+                            elif "metabolomics" in tool_id or "pca" in tool_id or "pls" in tool_id:
+                                domain_name = "Metabolomics"
+                                break
+                    
+                    # 根据领域选择智能体
+                    if hasattr(self.agent, 'agents') and self.agent.agents:
+                        if domain_name == "RNA" and "rna_agent" in self.agent.agents:
+                            target_agent = self.agent.agents["rna_agent"]
+                        elif domain_name == "Metabolomics" and "metabolomics_agent" in self.agent.agents:
+                            target_agent = self.agent.agents["metabolomics_agent"]
+                        else:
+                            # 如果没有匹配的智能体，使用第一个可用的
+                            target_agent = list(self.agent.agents.values())[0] if self.agent.agents else None
+                    
+                    logger.info(f"🎯 [Orchestrator] 选择智能体: {domain_name}, target_agent: {target_agent.__class__.__name__ if target_agent else 'None'}")
+                
+                if target_agent and hasattr(target_agent, '_generate_analysis_summary'):
+                    import time
+                    start_time = time.time()
+                    yield self._format_sse("status", {
+                        "content": "正在生成专家解读报告...",
+                        "state": "running"
+                    })
+                    await asyncio.sleep(0.01)
                     
                     # 🔥 CRITICAL FIX: Check if there are failed/warning steps
                     failed_steps = [s for s in steps_details if s.get("status") == "error"]
@@ -427,18 +473,42 @@ class AgentOrchestrator:
                                 output_dir = executor_output_dir  # Use stored executor reference
                             
                             logger.info(f"📂 [Orchestrator] 传递output_dir给Reporter: {output_dir}")
+                            logger.info(f"🚀 [Orchestrator] 开始调用LLM生成AI专家分析报告，领域: {domain_name}")
+                            
+                            # 🔥 修复：从results或steps_details中提取steps_results列表
+                            steps_results = results.get("steps_results", [])
+                            if not steps_results:
+                                # 从steps_details中提取step_result
+                                steps_results = []
+                                for step_detail in steps_details:
+                                    if "step_result" in step_detail:
+                                        steps_results.append(step_detail["step_result"])
+                                    elif "status" in step_detail:
+                                        # 如果没有step_result，构建一个基本的step_result
+                                        steps_results.append({
+                                            "step_name": step_detail.get("name", step_detail.get("step_id", "Unknown")),
+                                            "status": step_detail.get("status", "unknown"),
+                                            "data": step_detail.get("data", {})
+                                        })
+                            
+                            logger.info(f"📊 [Orchestrator] 提取到 {len(steps_results)} 个步骤结果用于生成报告")
                             
                             # 🔥 TASK 2: Force LLM call - _generate_analysis_summary now always returns structured content
-                            summary = await self.agent._generate_analysis_summary(
-                                results, 
-                                domain_name,
+                            summary = await target_agent._generate_analysis_summary(
+                                steps_results=steps_results,  # 🔥 修复：传递正确的参数
+                                omics_type=domain_name,  # 🔥 修复：使用正确的参数名
+                                workflow_name=workflow_config.get("workflow_name", "工作流"),
                                 summary_context=summary_context,
                                 output_dir=output_dir  # 🔥 TASK 3: Pass output_dir to Reporter
                             )
                             
+                            elapsed_time = time.time() - start_time
+                            logger.info(f"✅ [Orchestrator] AI专家分析报告生成完成，耗时: {elapsed_time:.2f}秒，长度: {len(summary) if summary else 0}字符")
+                            logger.debug(f"🔍 [Orchestrator] summary 预览: {summary[:300] if summary else 'None'}...")
+                            
                             # 🔥 TASK: 检查是否有LLM错误，如果有则通过SSE发送详细错误信息到前端
-                            if hasattr(self.agent, 'context') and "last_llm_error" in self.agent.context:
-                                llm_error_info = self.agent.context.pop("last_llm_error")  # 取出后清除
+                            if hasattr(target_agent, 'context') and "last_llm_error" in target_agent.context:
+                                llm_error_info = target_agent.context.pop("last_llm_error")  # 取出后清除
                                 logger.warning(f"⚠️ [Orchestrator] 检测到LLM调用错误，发送详细错误信息到前端")
                                 yield self._format_sse("error", {
                                     "error": llm_error_info.get("error_message", "LLM调用失败"),
@@ -451,9 +521,10 @@ class AgentOrchestrator:
                                 })
                                 await asyncio.sleep(0.01)
                             
-                            # 🔥 TASK 2: Ensure summary is not None or empty (should always have structured fallback)
-                            if not summary or len(summary.strip()) < 50:
-                                logger.warning(f"⚠️ [Orchestrator] 摘要过短，使用结构化后备")
+                            # 🔥 修复：检查summary是否包含真正的生信分析内容，而不是错误信息
+                            # 如果summary是错误信息或过短，才使用后备方案
+                            if not summary:
+                                logger.warning(f"⚠️ [Orchestrator] summary为None，使用结构化后备")
                                 summary = f"""## 分析结果摘要
 
 本次分析完成了 {len(successful_steps)} 个步骤。请查看上方的详细图表和统计结果以获取更深入的生物学解释。
@@ -461,10 +532,26 @@ class AgentOrchestrator:
 ### 关键发现
 - 成功步骤: {len(successful_steps)}/{len(steps_details)}
 - 请查看执行结果中的图表和数据表格获取详细分析。"""
+                            elif len(summary.strip()) < 50:
+                                logger.warning(f"⚠️ [Orchestrator] 摘要过短（{len(summary.strip())}字符），使用结构化后备")
+                                summary = f"""## 分析结果摘要
+
+本次分析完成了 {len(successful_steps)} 个步骤。请查看上方的详细图表和统计结果以获取更深入的生物学解释。
+
+### 关键发现
+- 成功步骤: {len(successful_steps)}/{len(steps_details)}
+- 请查看执行结果中的图表和数据表格获取详细分析。"""
+                            elif "⚠️" in summary or "AI专家分析报告生成失败" in summary or "分析报告生成失败" in summary:
+                                # 如果summary是错误信息，保留它（用户需要看到错误）
+                                logger.warning(f"⚠️ [Orchestrator] summary包含错误信息，保留原内容")
+                                # 不替换，让用户看到错误信息
+                            else:
+                                # summary是有效的生信分析内容，直接使用
+                                logger.info(f"✅ [Orchestrator] summary是有效的生信分析内容，长度: {len(summary)}字符")
                             
                             # 🔥 PHASE 2: Generate quality evaluation
                             evaluation = None
-                            if summary and hasattr(self.agent, '_evaluate_analysis_quality'):
+                            if summary and target_agent and hasattr(target_agent, '_evaluate_analysis_quality'):
                                 try:
                                     steps_results = results.get("steps_results", [])
                                     if not steps_results:
@@ -474,7 +561,7 @@ class AgentOrchestrator:
                                             if "step_result" in step_detail:
                                                 steps_results.append(step_detail["step_result"])
                                     
-                                    evaluation = await self.agent._evaluate_analysis_quality(
+                                    evaluation = await target_agent._evaluate_analysis_quality(
                                         steps_results,
                                         summary,
                                         workflow_config.get("workflow_name", "工作流")
@@ -743,252 +830,251 @@ class AgentOrchestrator:
                 logger.info(f"✅ [Orchestrator] 恢复模式: domain={domain_name}, target_steps={target_steps}")
                 # Skip to file inspection (Branch B) - don't analyze intent again
             else:
-            # 🔥 CRITICAL REFACTOR: Step 3 - ALWAYS Analyze Intent First (Dynamic Scoping)
-            # Step 3.1: Analyze Intent (ALWAYS FIRST) - Determine modality and target_steps
-            yield self._format_sse("status", {
-                "content": "正在分析您的需求...",
-                "state": "running"
-            })
-            await asyncio.sleep(0.01)
-            
-            # Initialize planner for intent analysis
-            from .planner import SOPPlanner
-            from .tool_retriever import ToolRetriever
-            
-            llm_client = self._get_llm_client()
-            if not llm_client:
-                raise ValueError("LLM 客户端不可用")
-            
-            tool_retriever = ToolRetriever()
-            planner = SOPPlanner(tool_retriever, llm_client)
-            
-            
-            # 🔥 CRITICAL FIX: Pass file_metadata to intent classification for file-type-based routing
-            # If files exist, inspect first file to get metadata for intent classification
-            file_metadata_for_intent = None
-            if files and len(files) > 0:
-                first_file = files[0]
-                logger.info(f"🔍 [Orchestrator] 准备检查文件用于意图分类: {first_file}, type={type(first_file)}")
-                if isinstance(first_file, dict):
-                    file_path = first_file.get("path") or first_file.get("file_path") or first_file.get("name")
-                elif isinstance(first_file, str):
-                    file_path = first_file
-                else:
-                    file_path = str(first_file)
-                    
-                logger.info(f"🔍 [Orchestrator] 提取的文件路径: {file_path}")
-                    
-                if file_path:
-                    # Ensure absolute path
-                    path_obj = Path(file_path)
-                    if not path_obj.is_absolute():
-                        path_obj = Path(self.upload_dir) / path_obj
-                    file_path = str(path_obj.resolve())
-                        
-                    logger.info(f"🔍 [Orchestrator] 解析后的绝对路径: {file_path}")
-                        
-                    try:
-                        # Inspect file to get metadata for intent classification
-                        file_metadata_for_intent = self.file_inspector.inspect_file(file_path)
-                        logger.info(f"✅ [Orchestrator] 文件检查成功，文件类型: {file_metadata_for_intent.get('file_type', 'unknown')}")
-                        logger.info(f"✅ [Orchestrator] 文件元数据键: {list(file_metadata_for_intent.keys())[:10]}")
-                    except Exception as e:
-                        logger.error(f"❌ [Orchestrator] 文件检查失败，无法用于意图分类: {e}", exc_info=True)
-                else:
-                    logger.warning(f"⚠️ [Orchestrator] 无法从文件对象中提取路径")
-            else:
-                logger.info(f"ℹ️ [Orchestrator] 没有文件，跳过文件检查")
-            
-            # Analyze intent: classify domain and determine target_steps
-            intent_result = await planner._classify_intent(refined_query, file_metadata_for_intent)
-            domain_name = intent_result.get("domain_name")
-            
-            # Validate domain
-            if not domain_name or not self.workflow_registry.is_supported(domain_name):
-                logger.warning(f"⚠️ [Orchestrator] 无法识别域名: {domain_name}")
-                domain_name = "Metabolomics"  # 默认值
-            
-            # Get workflow instance for intent analysis
-            workflow = self.workflow_registry.get_workflow(domain_name)
-            if not workflow:
-                raise ValueError(f"无法获取工作流: {domain_name}")
-            
-            # Analyze user intent to determine target_steps
-            target_steps = await planner._analyze_user_intent(refined_query, workflow)
-            
-            # Ensure target_steps is not empty (fallback to full workflow)
-            if not target_steps:
-                query_lower = refined_query.lower()
-                vague_keywords = ["analyze this", "full analysis", "完整分析", "全部", "all", "complete"]
-                if any(kw in query_lower for kw in vague_keywords):
-                    target_steps = list(workflow.steps_dag.keys())
-                else:
-                    # Fallback to keyword matching
-                    from .planner import SOPPlanner
-                    target_steps = planner._fallback_intent_analysis(refined_query, list(workflow.steps_dag.keys()))
-                    if not target_steps:
-                        target_steps = list(workflow.steps_dag.keys())
-            
-            logger.info(f"✅ [Orchestrator] 意图分析完成: domain={domain_name}, target_steps={target_steps}")
-            
-            # 🔥 SYSTEM REFACTOR: Step 3.2: Check Files (The Branching Point)
-            # Priority: Files check determines execution mode
-            # Note: has_files already checked above for resume action
-            
-            # 🔥 CRITICAL: 详细日志，确保文件检查正确
-            logger.info(f"🔍 [Orchestrator] 文件检查: files={files}, has_files={has_files}")
-            if files:
-                logger.info(f"🔍 [Orchestrator] files 类型: {type(files)}, 长度: {len(files) if hasattr(files, '__len__') else 'N/A'}")
-                for i, f in enumerate(files):
-                    logger.info(f"  [{i}] {f}")
-            else:
-                logger.warning("⚠️ [Orchestrator] files 为空或 None")
-            
-            yield self._format_sse("status", {
-                "content": "正在检测文件输入...",
-                "state": "running"
-            })
-            await asyncio.sleep(0.01)
-            
-            # ============================================================
-            # BRANCH A: Plan-First Mode (No Files)
-            # ============================================================
-            if not has_files:
-                logger.info("⚠️ [Orchestrator] 分支 A: Plan-First 模式（无文件）")
-                logger.info("⚠️ [Orchestrator] 进入预览模式，不会生成诊断报告")
-                
+                # 🔥 CRITICAL REFACTOR: Step 3 - ALWAYS Analyze Intent First (Dynamic Scoping)
+                # Step 3.1: Analyze Intent (ALWAYS FIRST) - Determine modality and target_steps
                 yield self._format_sse("status", {
-                    "content": "未检测到文件，进入方案预览模式...",
+                    "content": "正在分析您的需求...",
                     "state": "running"
                 })
                 await asyncio.sleep(0.01)
                 
-                try:
-                    # Step A1: Generate Template Workflow with target_steps
+                # Initialize planner for intent analysis
+                from .planner import SOPPlanner
+                from .tool_retriever import ToolRetriever
+                
+                llm_client = self._get_llm_client()
+                if not llm_client:
+                    raise ValueError("LLM 客户端不可用")
+                
+                tool_retriever = ToolRetriever()
+                planner = SOPPlanner(tool_retriever, llm_client)
+                
+                
+                # 🔥 CRITICAL FIX: Pass file_metadata to intent classification for file-type-based routing
+                # If files exist, inspect first file to get metadata for intent classification
+                file_metadata_for_intent = None
+                if files and len(files) > 0:
+                    first_file = files[0]
+                    logger.info(f"🔍 [Orchestrator] 准备检查文件用于意图分类: {first_file}, type={type(first_file)}")
+                    if isinstance(first_file, dict):
+                        file_path = first_file.get("path") or first_file.get("file_path") or first_file.get("name")
+                    elif isinstance(first_file, str):
+                        file_path = first_file
+                    else:
+                        file_path = str(first_file)
+                        
+                    logger.info(f"🔍 [Orchestrator] 提取的文件路径: {file_path}")
+                        
+                    if file_path:
+                        # Ensure absolute path
+                        path_obj = Path(file_path)
+                        if not path_obj.is_absolute():
+                            path_obj = Path(self.upload_dir) / path_obj
+                        file_path = str(path_obj.resolve())
+                            
+                        logger.info(f"🔍 [Orchestrator] 解析后的绝对路径: {file_path}")
+                            
+                        try:
+                            # Inspect file to get metadata for intent classification
+                            file_metadata_for_intent = self.file_inspector.inspect_file(file_path)
+                            logger.info(f"✅ [Orchestrator] 文件检查成功，文件类型: {file_metadata_for_intent.get('file_type', 'unknown')}")
+                            logger.info(f"✅ [Orchestrator] 文件元数据键: {list(file_metadata_for_intent.keys())[:10]}")
+                        except Exception as e:
+                            logger.error(f"❌ [Orchestrator] 文件检查失败，无法用于意图分类: {e}", exc_info=True)
+                    else:
+                        logger.warning(f"⚠️ [Orchestrator] 无法从文件对象中提取路径")
+                else:
+                    logger.info(f"ℹ️ [Orchestrator] 没有文件，跳过文件检查")
+                
+                # Analyze intent: classify domain and determine target_steps
+                intent_result = await planner._classify_intent(refined_query, file_metadata_for_intent)
+                domain_name = intent_result.get("domain_name")
+                
+                # Validate domain
+                if not domain_name or not self.workflow_registry.is_supported(domain_name):
+                    logger.warning(f"⚠️ [Orchestrator] 无法识别域名: {domain_name}")
+                    domain_name = "Metabolomics"  # 默认值
+                
+                # Get workflow instance for intent analysis
+                workflow = self.workflow_registry.get_workflow(domain_name)
+                if not workflow:
+                    raise ValueError(f"无法获取工作流: {domain_name}")
+                
+                # Analyze user intent to determine target_steps
+                target_steps = await planner._analyze_user_intent(refined_query, workflow)
+                
+                # Ensure target_steps is not empty (fallback to full workflow)
+                if not target_steps:
+                    query_lower = refined_query.lower()
+                    vague_keywords = ["analyze this", "full analysis", "完整分析", "全部", "all", "complete"]
+                    if any(kw in query_lower for kw in vague_keywords):
+                        target_steps = list(workflow.steps_dag.keys())
+                    else:
+                        # Fallback to keyword matching
+                        from .planner import SOPPlanner
+                        target_steps = planner._fallback_intent_analysis(refined_query, list(workflow.steps_dag.keys()))
+                        if not target_steps:
+                            target_steps = list(workflow.steps_dag.keys())
+                
+                logger.info(f"✅ [Orchestrator] 意图分析完成: domain={domain_name}, target_steps={target_steps}")
+                
+                # 🔥 SYSTEM REFACTOR: Step 3.2: Check Files (The Branching Point)
+                # Priority: Files check determines execution mode
+                # Note: has_files already checked above for resume action
+                
+                # 🔥 CRITICAL: 详细日志，确保文件检查正确
+                logger.info(f"🔍 [Orchestrator] 文件检查: files={files}, has_files={has_files}")
+                if files:
+                    logger.info(f"🔍 [Orchestrator] files 类型: {type(files)}, 长度: {len(files) if hasattr(files, '__len__') else 'N/A'}")
+                    for i, f in enumerate(files):
+                        logger.info(f"  [{i}] {f}")
+                else:
+                    logger.warning("⚠️ [Orchestrator] files 为空或 None")
+                
+                yield self._format_sse("status", {
+                    "content": "正在检测文件输入...",
+                    "state": "running"
+                })
+                await asyncio.sleep(0.01)
+                
+                # ============================================================
+                # BRANCH A: Plan-First Mode (No Files)
+                # ============================================================
+                if not has_files:
+                    logger.info("⚠️ [Orchestrator] 分支 A: Plan-First 模式（无文件）")
+                    logger.info("⚠️ [Orchestrator] 进入预览模式，不会生成诊断报告")
+                    
                     yield self._format_sse("status", {
-                        "content": "正在根据您的需求定制流程...",
+                        "content": "未检测到文件，进入方案预览模式...",
                         "state": "running"
                     })
                     await asyncio.sleep(0.01)
                     
-                    # 🔥 CRITICAL: Use the same target_steps analyzed above
-                    # Path B: PREVIEW MODE - Explicitly tell planner this IS a template
-                    template_result = await planner.generate_plan(
+                    try:
+                        # Step A1: Generate Template Workflow with target_steps
+                        yield self._format_sse("status", {
+                            "content": "正在根据您的需求定制流程...",
+                            "state": "running"
+                        })
+                        await asyncio.sleep(0.01)
+                        
+                        # 🔥 CRITICAL: Use the same target_steps analyzed above
+                        # Path B: PREVIEW MODE - Explicitly tell planner this IS a template
+                        template_result = await planner.generate_plan(
                         user_query=refined_query,
                         file_metadata=None,  # 明确传递 None
                         category_filter=None,
                         domain_name=domain_name,  # 使用已分析的域名
                         target_steps=target_steps,  # 🔥 CRITICAL: 使用已分析的目标步骤
                         is_template=True  # 🔥 CRITICAL: Explicitly IS a template
-                    )
-                    
-                    logger.info(f"✅ [Orchestrator] 模板生成完成: {len(target_steps)} 个目标步骤")
-                    
-                    # 🔥 CRITICAL: Save pending_modality for resume detection
-                    session_state["pending_modality"] = domain_name
-                    self.conversation_state[session_id] = session_state
-                    logger.info(f"💾 [Orchestrator] 已保存待处理模态: {domain_name} (session_id={session_id})")
-                    
-                    # Step A2: Yield Template Card - ONLY if steps are not empty
-                    workflow_data = template_result.get("workflow_data") or template_result
-                    if workflow_data:
-                        steps = workflow_data.get("steps", [])
-                        steps_count = len(steps)
+                        )
                         
-                        # 🔥 TASK 1: Empty Guard - Do NOT yield empty plans
-                        if not steps or len(steps) == 0:
-                            logger.error(f"❌ [Orchestrator] Plan-First模式: 模板工作流步骤为空，不发送workflow事件")
-                            yield self._format_sse("error", {
-                                "error": "模板生成失败",
-                                "message": "无法生成有效的工作流模板，请检查输入或联系技术支持"
-                            })
-                            return
+                        logger.info(f"✅ [Orchestrator] 模板生成完成: {len(target_steps)} 个目标步骤")
                         
-                        logger.info(f"✅ [Orchestrator] Plan-First模式: 发送workflow事件，包含 {steps_count} 个步骤")
-                        workflow_event_data = {
+                        # 🔥 CRITICAL: Save pending_modality for resume detection
+                        session_state["pending_modality"] = domain_name
+                        self.conversation_state[session_id] = session_state
+                        logger.info(f"💾 [Orchestrator] 已保存待处理模态: {domain_name} (session_id={session_id})")
+                        
+                        # Step A2: Yield Template Card - ONLY if steps are not empty
+                        workflow_data = template_result.get("workflow_data") or template_result
+                        if workflow_data:
+                            steps = workflow_data.get("steps", [])
+                            steps_count = len(steps)
+                            
+                            # 🔥 TASK 1: Empty Guard - Do NOT yield empty plans
+                            if not steps or len(steps) == 0:
+                                logger.error(f"❌ [Orchestrator] Plan-First模式: 模板工作流步骤为空，不发送workflow事件")
+                                yield self._format_sse("error", {
+                                    "error": "模板生成失败",
+                                    "message": "无法生成有效的工作流模板，请检查输入或联系技术支持"
+                                })
+                                return
+                            
+                            logger.info(f"✅ [Orchestrator] Plan-First模式: 发送workflow事件，包含 {steps_count} 个步骤")
+                            workflow_event_data = {
+                                "workflow_config": workflow_data,
+                                "workflow_data": workflow_data,
+                                "template_mode": True  # 🔥 CRITICAL: 明确标记为模板模式
+                            }
+                            yield self._format_sse("workflow", workflow_event_data)
+                            await asyncio.sleep(0.01)
+                        
+                        # 🔥 CRITICAL: Generate message with modality and step count
+                        modality_display = "代谢组学" if domain_name == "Metabolomics" else "转录组"
+                        yield self._format_sse("message", {
+                            "content": f"已为您规划 **{modality_display}** 分析流程（包含 {steps_count} 个步骤）。请上传数据以激活。"
+                        })
+                        await asyncio.sleep(0.01)
+                        
+                        # 输出结果事件
+                        yield self._format_sse("result", {
                             "workflow_config": workflow_data,
-                            "workflow_data": workflow_data,
-                            "template_mode": True  # 🔥 CRITICAL: 明确标记为模板模式
-                        }
-                        yield self._format_sse("workflow", workflow_event_data)
+                            "template_mode": True
+                        })
+                        
+                        # 🔥 CRITICAL: STOP HERE - 不继续执行
+                        yield self._format_sse("status", {
+                            "content": "方案模版已生成，等待上传...",
+                            "state": "completed"
+                        })
                         await asyncio.sleep(0.01)
+                        
+                        yield self._format_sse("done", {"status": "success"})
+                        return  # 立即返回，不继续执行
+                    except Exception as e:
+                        logger.error(f"❌ [Orchestrator] Plan-First 模式失败: {e}", exc_info=True)
+                        yield self._format_sse("error", {
+                            "error": str(e),
+                            "message": f"模板生成失败: {str(e)}"
+                        })
+                        return
+                
+                # ============================================================
+                # PATH A: CLASSIC EXECUTION (The "Old Way") - Files Detected
+                # ============================================================
+                else:
+                    logger.info("🚀 [Orchestrator] Path A: 文件检测到。强制执行模式（经典执行路径）")
                     
-                    # 🔥 CRITICAL: Generate message with modality and step count
-                    modality_display = "代谢组学" if domain_name == "Metabolomics" else "转录组"
-                    yield self._format_sse("message", {
-                        "content": f"已为您规划 **{modality_display}** 分析流程（包含 {steps_count} 个步骤）。请上传数据以激活。"
-                    })
-                        await asyncio.sleep(0.01)
+                    # A1. File Inspection - Extract file path and inspect
+                    first_file = files[0]
+                    if isinstance(first_file, dict):
+                        file_path = first_file.get("path") or first_file.get("file_path") or first_file.get("name")
+                    elif isinstance(first_file, str):
+                        file_path = first_file
+                    else:
+                        file_path = str(first_file)
                     
-                    # 输出结果事件
-                    yield self._format_sse("result", {
-                        "workflow_config": workflow_data,
-                        "template_mode": True
-                    })
+                    logger.info(f"🔍 [Orchestrator] Path A: 提取文件路径: {file_path}")
                     
-                    # 🔥 CRITICAL: STOP HERE - 不继续执行
+                    if not file_path:
+                        logger.error("❌ [Orchestrator] Path A: 无法提取文件路径")
+                        yield self._format_sse("error", {
+                            "error": "文件路径无效",
+                            "message": "无法从文件对象中提取路径"
+                        })
+                        return
+                    
                     yield self._format_sse("status", {
-                        "content": "方案模版已生成，等待上传...",
-                        "state": "completed"
+                        "content": f"检测到文件，正在进行数据体检...",
+                        "state": "running"
                     })
                     await asyncio.sleep(0.01)
                     
-                    yield self._format_sse("done", {"status": "success"})
-                    return  # 立即返回，不继续执行
-                    
-                except Exception as e:
-                    logger.error(f"❌ [Orchestrator] Plan-First 模式失败: {e}", exc_info=True)
-                    yield self._format_sse("error", {
-                        "error": str(e),
-                        "message": f"模板生成失败: {str(e)}"
-                    })
-                    return
-            
-            # ============================================================
-            # PATH A: CLASSIC EXECUTION (The "Old Way") - Files Detected
-            # ============================================================
-            else:
-                logger.info("🚀 [Orchestrator] Path A: 文件检测到。强制执行模式（经典执行路径）")
-                
-                # A1. File Inspection - Extract file path and inspect
-                first_file = files[0]
-                if isinstance(first_file, dict):
-                    file_path = first_file.get("path") or first_file.get("file_path") or first_file.get("name")
-                elif isinstance(first_file, str):
-                    file_path = first_file
-                else:
-                    file_path = str(first_file)
-                
-                logger.info(f"🔍 [Orchestrator] Path A: 提取文件路径: {file_path}")
-                
-                if not file_path:
-                    logger.error("❌ [Orchestrator] Path A: 无法提取文件路径")
-                    yield self._format_sse("error", {
-                        "error": "文件路径无效",
-                        "message": "无法从文件对象中提取路径"
-                    })
-                    return
-                
-                yield self._format_sse("status", {
-                    "content": f"检测到文件，正在进行数据体检...",
-                    "state": "running"
-                })
-                await asyncio.sleep(0.01)
-                
-                # Inspect file
-                file_metadata = None
-                        try:
-                    file_metadata = self.file_inspector.inspect_file(file_path)
-                    logger.info(f"✅ [Orchestrator] Path A: 文件检查完成: {file_path}")
+                    # Inspect file
+                    file_metadata = None
+                    try:
+                        file_metadata = self.file_inspector.inspect_file(file_path)
+                        logger.info(f"✅ [Orchestrator] Path A: 文件检查完成: {file_path}")
+                        
+                        if file_metadata and file_metadata.get("status") == "success":
+                            # Extract statistics
+                            n_samples = file_metadata.get("n_samples") or file_metadata.get("n_obs") or file_metadata.get("shape", {}).get("rows", 0)
+                            n_features = file_metadata.get("n_features") or file_metadata.get("n_vars") or file_metadata.get("shape", {}).get("cols", 0)
                             
-                            if file_metadata and file_metadata.get("status") == "success":
-                        # Extract statistics
-                                n_samples = file_metadata.get("n_samples") or file_metadata.get("n_obs") or file_metadata.get("shape", {}).get("rows", 0)
-                                n_features = file_metadata.get("n_features") or file_metadata.get("n_vars") or file_metadata.get("shape", {}).get("cols", 0)
-                                
-                        # Build diagnosis message
-                                if domain_name == "Metabolomics":
-                                    diagnosis_message = f"""### 📊 数据体检报告
+                            # Build diagnosis message
+                            if domain_name == "Metabolomics":
+                                diagnosis_message = f"""### 📊 数据体检报告
 
 **数据规模**:
 - **样本数**: {n_samples} 个
@@ -1003,8 +1089,8 @@ class AgentOrchestrator:
 - 数据范围: {file_metadata.get('data_range', {}).get('min', 'N/A')} ~ {file_metadata.get('data_range', {}).get('max', 'N/A')}
 
 **下一步**: 已为您规划分析流程，请确认执行。"""
-                                else:  # RNA
-                                    diagnosis_message = f"""### 📊 数据体检报告
+                            else:  # RNA
+                                diagnosis_message = f"""### 📊 数据体检报告
 
 **数据规模**:
 - **细胞数**: {n_samples} 个
@@ -1017,179 +1103,179 @@ class AgentOrchestrator:
 **数据质量**: 数据已就绪，可以开始分析。
 
 **下一步**: 已为您规划分析流程，请确认执行。"""
-                                
-                                yield self._format_sse("diagnosis", {
-                                    "message": diagnosis_message,
-                                    "n_samples": n_samples,
-                                    "n_features": n_features,
-                                    "file_type": file_metadata.get('file_type'),
+                            
+                            yield self._format_sse("diagnosis", {
+                                "message": diagnosis_message,
+                                "n_samples": n_samples,
+                                "n_features": n_features,
+                                "file_type": file_metadata.get('file_type'),
                                 "status": "data_ready"
-                                })
-                                await asyncio.sleep(0.01)
-                        except Exception as e:
-                    logger.error(f"❌ [Orchestrator] Path A: 文件检查失败: {e}", exc_info=True)
-                    yield self._format_sse("error", {
-                        "error": str(e),
-                        "message": f"文件检查失败: {str(e)}"
-                        })
-                    return
-                
-                # A2. Plan (With Metadata) - CRITICAL: Explicitly tell planner this is NOT a template
-                yield self._format_sse("status", {
-                    "content": "正在根据您的需求定制流程...",
-                    "state": "running"
-                })
-                await asyncio.sleep(0.01)
-                
-                if planner is None:
-                    from .planner import SOPPlanner
-                    from .tool_retriever import ToolRetriever
-                    llm_client = self._get_llm_client()
-                    if not llm_client:
-                        raise ValueError("LLM 客户端不可用")
-                    tool_retriever = ToolRetriever()
-                    planner = SOPPlanner(tool_retriever, llm_client)
-                
-                logger.info(f"🔍 [Orchestrator] Path A: 调用 planner.generate_plan (is_template=False)")
-                logger.info(f"  - file_metadata 存在: {file_metadata is not None}")
-                logger.info(f"  - domain_name: {domain_name}")
-                logger.info(f"  - target_steps: {target_steps}")
-                if file_metadata:
-                    logger.info(f"  - file_metadata.file_path: {file_metadata.get('file_path', 'N/A')}")
-                
-                result = await planner.generate_plan(
-                    user_query=refined_query,
-                    file_metadata=file_metadata,  # 🔥 CRITICAL: file_metadata exists
-                    category_filter=None,
-                    domain_name=domain_name,
-                    target_steps=target_steps,
-                    is_template=False  # 🔥 CRITICAL: Explicitly NOT a template
-                )
-                
-                logger.info(f"✅ [Orchestrator] Path A: 工作流规划完成")
-                logger.info(f"✅ [Orchestrator] Path A: 返回结果 template_mode: {result.get('template_mode', 'N/A')}")
-                    
-                # 🔥 TASK: 检查是否有LLM错误（数据诊断阶段），如果有则通过SSE发送详细错误信息到前端
-                if hasattr(self.agent, 'context') and "last_llm_error" in self.agent.context:
-                    llm_error_info = self.agent.context.pop("last_llm_error")  # 取出后清除
-                    logger.warning(f"⚠️ [Orchestrator] 检测到LLM调用错误（数据诊断阶段），发送详细错误信息到前端")
-                    yield self._format_sse("error", {
-                        "error": llm_error_info.get("error_message", "LLM调用失败"),
-                        "message": f"数据诊断LLM调用失败: {llm_error_info.get('error_message', '未知错误')}",
-                        "error_type": llm_error_info.get("error_type", "Unknown"),
-                        "details": llm_error_info.get("error_details", ""),
-                        "context": llm_error_info.get("context", {}),
-                        "possible_causes": llm_error_info.get("possible_causes", []),
-                        "debug_info": llm_error_info.get("error_details", "")  # 兼容前端字段名
-                    })
-                    await asyncio.sleep(0.01)
-                    
-                # A3. Force Validation
-            if isinstance(result, dict):
-                    # FORCE OVERRIDE: Explicitly set template_mode = False
-                    if result.get("template_mode"):
-                        logger.error("❌ [Orchestrator] Path A: 逻辑错误 - Planner 返回 template_mode=True  despite file presence. 强制覆盖。")
-                    result["template_mode"] = False
-                    if "workflow_data" in result:
-                        result["workflow_data"]["template_mode"] = False
-                    
-                    # Validate Steps
-                    workflow_data = result.get("workflow_data") or result
-                    steps = workflow_data.get("steps", [])
-                    if not steps or len(steps) == 0:
-                        logger.warning(f"⚠️ [Orchestrator] Path A: Planner 返回空步骤，回退到硬编码 SOP")
-                        # Regenerate using hardcoded SOP
-                        try:
-                            workflow = self.workflow_registry.get_workflow(domain_name)
-                            if not workflow:
-                                raise ValueError(f"无法获取工作流: {domain_name}")
-                            
-                            if domain_name == "Metabolomics":
-                                hardcoded_result = planner._generate_metabolomics_plan(file_metadata)
-                            else:
-                                hardcoded_result = workflow.generate_template(
-                                    target_steps=target_steps or list(workflow.steps_dag.keys()),
-                                    file_metadata=file_metadata
-                                )
-                                hardcoded_result = planner._fill_parameters(hardcoded_result, file_metadata, workflow, template_mode=False)
-                            
-                            result = {
-                                "type": "workflow_config",
-                                "workflow_data": hardcoded_result.get("workflow_data") or hardcoded_result,
-                                "template_mode": False
-                            }
-                            logger.info(f"✅ [Orchestrator] Path A: 使用硬编码 SOP 生成工作流: {len(result.get('workflow_data', {}).get('steps', []))} 个步骤")
-                        except Exception as e:
-                            logger.error(f"❌ [Orchestrator] Path A: 硬编码 SOP 生成失败: {e}", exc_info=True)
-                    
-                    # 🔥 TASK 1: Yield workflow event - ONLY if steps are not empty
-                    workflow_data = result.get("workflow_data") or result
-                    
-                    # 🔥 CRITICAL: Extract steps BEFORE yielding workflow event
-                    steps = workflow_data.get("steps", []) if workflow_data else []
-                    has_valid_plan = bool(workflow_data and steps and len(steps) > 0)
-                    
-                    # 🔥 TASK 1: Empty Guard - Do NOT yield empty plans
-                    if not has_valid_plan:
-                        logger.error(f"❌ [Orchestrator] Path A: 工作流规划失败，步骤为空。不发送workflow事件。")
-                        logger.error(f"   - workflow_data存在: {workflow_data is not None}")
-                        logger.error(f"   - steps长度: {len(steps) if steps else 0}")
+                            })
+                            await asyncio.sleep(0.01)
+                    except Exception as e:
+                        logger.error(f"❌ [Orchestrator] Path A: 文件检查失败: {e}", exc_info=True)
                         yield self._format_sse("error", {
-                            "error": "工作流规划失败",
-                            "message": "无法生成有效的工作流步骤，请检查输入数据或联系技术支持"
+                            "error": str(e),
+                            "message": f"文件检查失败: {str(e)}"
                         })
                         return
                     
-                    # 🔥 CRITICAL: In Path A, files are guaranteed to exist (we're in the else branch)
-                    has_files = True  # Path A means files were detected
-                    
-                    # Debug logging BEFORE execution decision
-                    logger.info(f"🔍 [Orchestrator] DEBUG: Query='{refined_query}', Files={len(files) if files else 0}, Plan Generated={has_valid_plan}, Steps={len(steps) if steps else 0}")
-                    logger.info(f"🔍 [Orchestrator] DEBUG: workflow_data keys={list(workflow_data.keys()) if workflow_data else 'None'}")
-                    if workflow_data:
-                        logger.info(f"🔍 [Orchestrator] DEBUG: workflow_data.steps exists={('steps' in workflow_data)}, steps type={type(steps)}, steps length={len(steps) if steps else 0}")
-                    
-                    # 🔥 TASK 1: Yield workflow event ONLY ONCE, at the very end of planning block
-                    logger.info(f"✅ [Orchestrator] Path A: 发送workflow事件，包含 {len(steps)} 个步骤")
-                    yield self._format_sse("workflow", {
-                            "workflow_config": workflow_data,
-                        "template_mode": False  # 🔥 CRITICAL: Always False in Path A
-                    })
-                        await asyncio.sleep(0.01)
-                
-                    # Yield result event with workflow config
-                    yield self._format_sse("result", {
-                        "workflow_config": workflow_data,
-                        "template_mode": False
+                    # A2. Plan (With Metadata) - CRITICAL: Explicitly tell planner this is NOT a template
+                    yield self._format_sse("status", {
+                        "content": "正在根据您的需求定制流程...",
+                        "state": "running"
                     })
                     await asyncio.sleep(0.01)
                     
-            yield self._format_sse("status", {
-                        "content": "工作流规划完成，请确认执行。",
-                "state": "completed"
-            })
-            await asyncio.sleep(0.01)
-            
-                yield self._format_sse("done", {"status": "success"})
-                    return  # 🔥 CRITICAL: STOP HERE - Do NOT auto-execute
+                    if planner is None:
+                        from .planner import SOPPlanner
+                        from .tool_retriever import ToolRetriever
+                        llm_client = self._get_llm_client()
+                        if not llm_client:
+                            raise ValueError("LLM 客户端不可用")
+                        tool_retriever = ToolRetriever()
+                        planner = SOPPlanner(tool_retriever, llm_client)
+                    
+                    logger.info(f"🔍 [Orchestrator] Path A: 调用 planner.generate_plan (is_template=False)")
+                    logger.info(f"  - file_metadata 存在: {file_metadata is not None}")
+                    logger.info(f"  - domain_name: {domain_name}")
+                    logger.info(f"  - target_steps: {target_steps}")
+                    if file_metadata:
+                        logger.info(f"  - file_metadata.file_path: {file_metadata.get('file_path', 'N/A')}")
+                    
+                    result = await planner.generate_plan(
+                        user_query=refined_query,
+                        file_metadata=file_metadata,  # 🔥 CRITICAL: file_metadata exists
+                        category_filter=None,
+                        domain_name=domain_name,
+                        target_steps=target_steps,
+                        is_template=False  # 🔥 CRITICAL: Explicitly NOT a template
+                    )
+                    
+                    logger.info(f"✅ [Orchestrator] Path A: 工作流规划完成")
+                    logger.info(f"✅ [Orchestrator] Path A: 返回结果 template_mode: {result.get('template_mode', 'N/A')}")
+                    
+                    # 🔥 TASK: 检查是否有LLM错误（数据诊断阶段），如果有则通过SSE发送详细错误信息到前端
+                    if hasattr(self.agent, 'context') and "last_llm_error" in self.agent.context:
+                        llm_error_info = self.agent.context.pop("last_llm_error")  # 取出后清除
+                        logger.warning(f"⚠️ [Orchestrator] 检测到LLM调用错误（数据诊断阶段），发送详细错误信息到前端")
+                        yield self._format_sse("error", {
+                            "error": llm_error_info.get("error_message", "LLM调用失败"),
+                            "message": f"数据诊断LLM调用失败: {llm_error_info.get('error_message', '未知错误')}",
+                            "error_type": llm_error_info.get("error_type", "Unknown"),
+                            "details": llm_error_info.get("error_details", ""),
+                            "context": llm_error_info.get("context", {}),
+                            "possible_causes": llm_error_info.get("possible_causes", []),
+                            "debug_info": llm_error_info.get("error_details", "")  # 兼容前端字段名
+                        })
+                        await asyncio.sleep(0.01)
+                        
+                    # A3. Force Validation
+                    if isinstance(result, dict):
+                        # FORCE OVERRIDE: Explicitly set template_mode = False
+                        if result.get("template_mode"):
+                            logger.error("❌ [Orchestrator] Path A: 逻辑错误 - Planner 返回 template_mode=True  despite file presence. 强制覆盖。")
+                        result["template_mode"] = False
+                        if "workflow_data" in result:
+                            result["workflow_data"]["template_mode"] = False
+                        
+                        # Validate Steps
+                        workflow_data = result.get("workflow_data") or result
+                        steps = workflow_data.get("steps", [])
+                        if not steps or len(steps) == 0:
+                            logger.warning(f"⚠️ [Orchestrator] Path A: Planner 返回空步骤，回退到硬编码 SOP")
+                            # Regenerate using hardcoded SOP
+                            try:
+                                workflow = self.workflow_registry.get_workflow(domain_name)
+                                if not workflow:
+                                    raise ValueError(f"无法获取工作流: {domain_name}")
+                                
+                                if domain_name == "Metabolomics":
+                                    hardcoded_result = planner._generate_metabolomics_plan(file_metadata)
+                                else:
+                                    hardcoded_result = workflow.generate_template(
+                                        target_steps=target_steps or list(workflow.steps_dag.keys()),
+                                        file_metadata=file_metadata
+                                    )
+                                    hardcoded_result = planner._fill_parameters(hardcoded_result, file_metadata, workflow, template_mode=False)
+                                
+                                result = {
+                                    "type": "workflow_config",
+                                    "workflow_data": hardcoded_result.get("workflow_data") or hardcoded_result,
+                                    "template_mode": False
+                                }
+                                logger.info(f"✅ [Orchestrator] Path A: 使用硬编码 SOP 生成工作流: {len(result.get('workflow_data', {}).get('steps', []))} 个步骤")
+                            except Exception as e:
+                                logger.error(f"❌ [Orchestrator] Path A: 硬编码 SOP 生成失败: {e}", exc_info=True)
+                        
+                        # 🔥 TASK 1: Yield workflow event - ONLY if steps are not empty
+                        workflow_data = result.get("workflow_data") or result
+                        
+                        # 🔥 CRITICAL: Extract steps BEFORE yielding workflow event
+                        steps = workflow_data.get("steps", []) if workflow_data else []
+                        has_valid_plan = bool(workflow_data and steps and len(steps) > 0)
+                        
+                        # 🔥 TASK 1: Empty Guard - Do NOT yield empty plans
+                        if not has_valid_plan:
+                            logger.error(f"❌ [Orchestrator] Path A: 工作流规划失败，步骤为空。不发送workflow事件。")
+                            logger.error(f"   - workflow_data存在: {workflow_data is not None}")
+                            logger.error(f"   - steps长度: {len(steps) if steps else 0}")
+                            yield self._format_sse("error", {
+                                "error": "工作流规划失败",
+                                "message": "无法生成有效的工作流步骤，请检查输入数据或联系技术支持"
+                            })
+                            return
+                        
+                        # 🔥 CRITICAL: In Path A, files are guaranteed to exist (we're in the else branch)
+                        has_files = True  # Path A means files were detected
+                        
+                        # Debug logging BEFORE execution decision
+                        logger.info(f"🔍 [Orchestrator] DEBUG: Query='{refined_query}', Files={len(files) if files else 0}, Plan Generated={has_valid_plan}, Steps={len(steps) if steps else 0}")
+                        logger.info(f"🔍 [Orchestrator] DEBUG: workflow_data keys={list(workflow_data.keys()) if workflow_data else 'None'}")
+                        if workflow_data:
+                            logger.info(f"🔍 [Orchestrator] DEBUG: workflow_data.steps exists={('steps' in workflow_data)}, steps type={type(steps)}, steps length={len(steps) if steps else 0}")
+                        
+                        # 🔥 TASK 1: Yield workflow event ONLY ONCE, at the very end of planning block
+                        logger.info(f"✅ [Orchestrator] Path A: 发送workflow事件，包含 {len(steps)} 个步骤")
+                        yield self._format_sse("workflow", {
+                            "workflow_config": workflow_data,
+                            "template_mode": False  # 🔥 CRITICAL: Always False in Path A
+                        })
+                        await asyncio.sleep(0.01)
+                    
+                        # Yield result event with workflow config
+                        yield self._format_sse("result", {
+                            "workflow_config": workflow_data,
+                            "template_mode": False
+                        })
+                        await asyncio.sleep(0.01)
+                        
+                        yield self._format_sse("status", {
+                            "content": "工作流规划完成，请确认执行。",
+                            "state": "completed"
+                        })
+                        await asyncio.sleep(0.01)
+                        
+                        yield self._format_sse("done", {"status": "success"})
+                        return  # 🔥 CRITICAL: STOP HERE - Do NOT auto-execute
                         
                         # 🔥 REMOVED: Auto-execution logic
                         # The workflow should stop at planning stage and wait for explicit execution request
                         # Execution will be triggered by a second request with workflow_data parameter
-                else:
-                    # 🔥 CRITICAL: If result is not a dict, log error but still try to execute if workflow_data exists
-                    logger.error(f"❌ [Orchestrator] Path A: result 不是字典类型: {type(result)}")
-                    if workflow_data:
-                        logger.info(f"🚀 [Orchestrator] Path A: result 不是字典，但 workflow_data 存在，尝试执行")
-                        # Try to execute with workflow_data
-                        should_auto_execute = True
-                        # ... (same execution logic as above) ...
-                        # For now, just log and return error
-                        yield self._format_sse("error", {
-                            "error": "工作流规划结果格式错误",
-                            "message": f"规划结果不是字典类型: {type(result)}"
-                        })
-                        return
+                    else:
+                        # 🔥 CRITICAL: If result is not a dict, log error but still try to execute if workflow_data exists
+                        logger.error(f"❌ [Orchestrator] Path A: result 不是字典类型: {type(result)}")
+                        if workflow_data:
+                            logger.info(f"🚀 [Orchestrator] Path A: result 不是字典，但 workflow_data 存在，尝试执行")
+                            # Try to execute with workflow_data
+                            should_auto_execute = True
+                            # ... (same execution logic as above) ...
+                            # For now, just log and return error
+                            yield self._format_sse("error", {
+                                "error": "工作流规划结果格式错误",
+                                "message": f"规划结果不是字典类型: {type(result)}"
+                            })
+                            return
             
         except Exception as e:
             logger.error(f"❌ 流式处理失败: {e}", exc_info=True)

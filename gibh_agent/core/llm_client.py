@@ -40,7 +40,7 @@ class LLMClient:
         model: str = "gpt-3.5-turbo",
         temperature: float = 0.7,
         max_tokens: int = 2048,
-        timeout: float = 60.0
+        timeout: float = 180.0  # 🔥 修复：增加到180秒，支持DeepSeek-R1等推理模型的长时间响应
     ):
         """
         初始化 LLM 客户端
@@ -307,8 +307,14 @@ class LLMClient:
             matches = re.findall(pattern, content, flags)
             if matches:
                 think_content = "\n\n".join(matches)
-                # 移除 think 标签，保留实际内容
+                # 🔥 修复：移除 think 标签，保留实际内容
+                # 使用非贪婪匹配，确保只移除标签，保留标签外的内容
                 actual_content = re.sub(pattern, '', content, flags=flags).strip()
+                # 🔥 修复：如果移除标签后内容为空或很短，但原始内容很长，说明主要内容可能在标签内
+                # 在这种情况下，保留原始内容（让前端解析）
+                if len(actual_content.strip()) < 50 and len(content.strip()) > 200:
+                    logger.warning(f"⚠️ [LLMClient] 移除标签后内容过短，但原始内容较长，可能主要内容在标签内")
+                    # 不设置actual_content，让后续逻辑使用原始内容
                 break
         
         # 如果没有找到标签，检查是否有其他格式的思考过程
@@ -381,7 +387,8 @@ class LLMClientFactory:
             api_key=api_key,
             model=model,
             temperature=0.7,
-            max_tokens=4096
+            max_tokens=4096,
+            timeout=180.0  # 🔥 修复：显式设置180秒超时时间，支持DeepSeek-R1等推理模型
         )
     
     @staticmethod
@@ -401,7 +408,7 @@ class LLMClientFactory:
             model=config.get("model", "gpt-3.5-turbo"),
             temperature=config.get("temperature", 0.7),
             max_tokens=config.get("max_tokens", 2048),
-            timeout=config.get("timeout", 60.0)
+            timeout=config.get("timeout", 180.0)  # 🔥 修复：使用180秒作为默认超时时间，支持DeepSeek-R1等推理模型
         )
     
     @staticmethod
@@ -439,6 +446,7 @@ class LLMClientFactory:
             api_key=api_key,
             model=model,
             temperature=0.7,
-            max_tokens=4096
+            max_tokens=4096,
+            timeout=180.0  # 🔥 修复：显式设置180秒超时时间，支持DeepSeek-R1等推理模型
         )
 
