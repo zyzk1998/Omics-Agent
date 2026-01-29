@@ -530,6 +530,11 @@ class WorkflowExecutor:
             if tool_status == "error":
                 error_msg = result.get("error") or result.get("message") or f"步骤 {step_name} 执行失败"
                 logger.error(f"❌ 步骤 {step_id} 执行失败: {error_msg}")
+                
+                # 🔥 TASK 4: 格式化错误信息，使其对用户友好
+                from .error_formatter import ErrorFormatter
+                formatted_error = ErrorFormatter.format_error(error_msg, tool_id, step_name)
+                
                 # 存储结果供后续步骤使用（即使失败也存储，用于调试）
                 self.step_results[step_id] = result
                 return {
@@ -539,7 +544,12 @@ class WorkflowExecutor:
                     "tool_id": tool_id,
                     "result": result,
                     "error": error_msg,
-                    "message": error_msg  # 🔥 使用错误消息，而不是"执行完成"
+                    "message": formatted_error["user_message"],  # 🔥 使用用户友好的错误消息
+                    "user_message": formatted_error["user_message"],
+                    "error_category": formatted_error["error_category"],
+                    "suggestion": formatted_error["suggestion"],
+                    "can_skip": formatted_error["can_skip"],
+                    "technical_details": formatted_error.get("technical_details", error_msg)  # 保留技术细节
                 }
             else:
                 logger.info(f"✅ 步骤 {step_id} 执行成功")
@@ -558,13 +568,22 @@ class WorkflowExecutor:
             error_msg = f"步骤 {step_id} 执行失败: {str(e)}"
             logger.error(f"❌ {error_msg}", exc_info=True)
             
+            # 🔥 TASK 4: 格式化异常错误信息
+            from .error_formatter import ErrorFormatter
+            formatted_error = ErrorFormatter.format_error(str(e), tool_id, step_name, error_type="exception")
+            
             return {
                 "status": "error",
                 "step_id": step_id,
                 "step_name": step_name,
                 "tool_id": tool_id,
                 "error": str(e),
-                "message": error_msg
+                "message": formatted_error["user_message"],
+                "user_message": formatted_error["user_message"],
+                "error_category": formatted_error["error_category"],
+                "suggestion": formatted_error["suggestion"],
+                "can_skip": formatted_error["can_skip"],
+                "technical_details": formatted_error.get("technical_details", str(e))
             }
     
     def _process_data_flow(

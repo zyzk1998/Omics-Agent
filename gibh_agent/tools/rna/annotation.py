@@ -70,7 +70,7 @@ def run_cell_annotation(
                         models.download_models(model=model_name)
                         # 查找下载的模型文件并移动到指定目录
                         import shutil
-                        from pathlib import Path
+                        # Path 已在文件顶部导入，无需重复导入
                         # 默认下载位置通常在用户目录下的 .celltypist 文件夹
                         default_cache = Path.home() / ".celltypist" / "models"
                         if default_cache.exists():

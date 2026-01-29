@@ -418,6 +418,109 @@
             flex: 1;
             line-height: 1.5;
         }
+        
+        /* 🔥 TASK 2: Cell Ranger 等待气泡样式 */
+        .waiting-bubble {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 16px 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            z-index: 10000;
+            display: none;
+            align-items: center;
+            gap: 12px;
+            max-width: 400px;
+            animation: pulse 2s infinite;
+        }
+        .waiting-bubble.show {
+            display: flex;
+        }
+        .waiting-bubble-icon {
+            font-size: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+        }
+        .waiting-bubble-message {
+            flex: 1;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .waiting-bubble-close {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .waiting-bubble-close:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        /* 🔥 TASK 3: 测试数据询问对话框样式 */
+        .test-data-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 10001;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .test-data-modal.show {
+            display: flex;
+        }
+        .test-data-dialog {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        .test-data-dialog h3 {
+            margin-top: 0;
+            margin-bottom: 16px;
+            color: #333;
+        }
+        .test-data-dialog p {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+        .test-data-info {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+        }
+        .test-data-info strong {
+            color: #333;
+        }
+        .test-data-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
 
         /* ⏱️ 底部栏与计时器 */
         .message-footer {
@@ -1448,6 +1551,10 @@
                         switch (eventType) {
                             case 'status':
                                 updateProcessLog(data.content || '', data.state || 'running');
+                                // 🔥 TASK 2: 处理 Cell Ranger 等待气泡
+                                if (data.show_waiting_bubble) {
+                                    showWaitingBubble(data.waiting_message || data.content || "正在处理，请稍候...");
+                                }
                                 break;
                                 
                             case 'thought':
@@ -1480,6 +1587,11 @@
                                 break;
                                 
                             case 'workflow':
+                                // 🔥 TASK 3: 检查是否为测试数据询问
+                                if (data.test_data_question) {
+                                    handleTestDataQuestion(data.test_data_question);
+                                    return true; // 停止处理，等待用户确认
+                                }
                                 const returnedFormId = renderWorkflowCard(data);
                                 if (returnedFormId) {
                                     // Store the returned form ID for later use
@@ -1522,6 +1634,8 @@
                                 break;
                                 
                             case 'done':
+                                // 🔥 TASK 2: 隐藏等待气泡
+                                hideWaitingBubble();
                                 handleDoneEvent(data);
                                 break;
                                 
@@ -2204,7 +2318,19 @@
                                             ${step.summary ? `<div class="small text-muted mb-2">${escapeHtml(step.summary)}</div>` : ''}
                                             ${stepError && stepStatus === 'error' ? `
                                                 <div class="alert alert-danger alert-sm mb-2" style="font-size: 0.875rem; padding: 0.5rem;">
-                                                    <strong>错误：</strong>${escapeHtml(stepError)}
+                                                    <strong>❌ 执行失败：</strong>
+                                                    <div class="mt-2">
+                                                        ${step.user_message ? `<div class="mb-2"><strong>问题：</strong>${escapeHtml(step.user_message)}</div>` : `<div class="mb-2">${escapeHtml(stepError)}</div>`}
+                                                        ${step.error_category ? `<div class="small text-muted mb-1"><strong>错误类型：</strong>${escapeHtml(step.error_category)}</div>` : ''}
+                                                        ${step.suggestion ? `<div class="small text-info mb-1"><strong>💡 建议：</strong>${escapeHtml(step.suggestion)}</div>` : ''}
+                                                        ${step.can_skip ? `<div class="small text-success mb-1"><strong>✓ 可跳过：</strong>此步骤可以跳过，不影响其他分析</div>` : ''}
+                                                        ${step.technical_details ? `
+                                                            <details class="mt-2">
+                                                                <summary class="small text-muted" style="cursor: pointer;">查看技术细节</summary>
+                                                                <pre class="small mt-2 p-2 bg-light rounded" style="max-height: 200px; overflow-y: auto; font-size: 11px;">${escapeHtml(step.technical_details)}</pre>
+                                                            </details>
+                                                        ` : ''}
+                                                    </div>
                                                 </div>
                                             ` : ''}
                                             ${resultContentHtml || '<p class="text-muted small">暂无结果数据</p>'}
@@ -2751,6 +2877,76 @@
                     }
                     
                     // 🔥 UI 更新函数：处理错误事件
+                    // 🔥 TASK 2: Cell Ranger 等待气泡函数
+                    function showWaitingBubble(message) {
+                        let bubble = document.getElementById('waiting-bubble');
+                        if (!bubble) {
+                            bubble = document.createElement('div');
+                            bubble.id = 'waiting-bubble';
+                            bubble.className = 'waiting-bubble';
+                            bubble.innerHTML = `
+                                <div class="waiting-bubble-icon">⏳</div>
+                                <div class="waiting-bubble-message">${escapeHtml(message)}</div>
+                                <button class="waiting-bubble-close" onclick="hideWaitingBubble()">×</button>
+                            `;
+                            document.body.appendChild(bubble);
+                        }
+                        bubble.querySelector('.waiting-bubble-message').textContent = message;
+                        bubble.classList.add('show');
+                    }
+                    
+                    function hideWaitingBubble() {
+                        const bubble = document.getElementById('waiting-bubble');
+                        if (bubble) {
+                            bubble.classList.remove('show');
+                        }
+                    }
+                    
+                    // 🔥 TASK 3: 测试数据询问处理函数
+                    function handleTestDataQuestion(questionData) {
+                        const modal = document.createElement('div');
+                        modal.className = 'test-data-modal show';
+                        modal.innerHTML = `
+                            <div class="test-data-dialog">
+                                <h3>${escapeHtml(questionData.question || '使用测试数据？')}</h3>
+                                <p>${escapeHtml(questionData.message || '')}</p>
+                                ${questionData.test_data_info ? `
+                                    <div class="test-data-info">
+                                        <strong>测试数据信息：</strong><br>
+                                        名称: ${escapeHtml(questionData.test_data_info.name || 'N/A')}<br>
+                                        描述: ${escapeHtml(questionData.test_data_info.description || 'N/A')}<br>
+                                        大小: ${escapeHtml(questionData.test_data_info.size || 'N/A')}
+                                    </div>
+                                ` : ''}
+                                <div class="test-data-actions">
+                                    <button class="btn btn-secondary" onclick="this.closest('.test-data-modal').remove()">取消</button>
+                                    <button class="btn btn-primary" onclick="confirmTestData('${escapeHtml(questionData.test_data_path)}', '${escapeHtml(questionData.test_data_info?.name || 'test_data')}')">确认使用</button>
+                                </div>
+                            </div>
+                        `;
+                        document.body.appendChild(modal);
+                        
+                        // 点击背景关闭
+                        modal.addEventListener('click', (e) => {
+                            if (e.target === modal) {
+                                modal.remove();
+                            }
+                        });
+                    }
+                    
+                    // 确认使用测试数据
+                    window.confirmTestData = function(testDataPath, testDataName) {
+                        const modal = document.querySelector('.test-data-modal');
+                        if (modal) modal.remove();
+                        
+                        // 使用测试数据重新发送请求
+                        const query = userInput.value.trim() || '分析这个数据文件';
+                        sendMessage(null, query, null, null, false, [{
+                            name: testDataName,
+                            path: testDataPath
+                        }]);
+                    };
+                    
                     function handleErrorEvent(data) {
                         clearInterval(timerInterval);
                         

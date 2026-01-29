@@ -380,11 +380,26 @@ class AgentOrchestrator:
                 # 🔥 CRITICAL: If async job started, yield status and STOP (do not continue)
                 if has_async_job:
                     logger.info("🚀 [Orchestrator] 异步作业已启动，停止执行流程")
-                    yield self._format_sse("status", {
-                        "content": f"异步作业已启动: {async_step_detail.get('step_id', 'Unknown')}",
-                        "state": "async_job_started"
-                    })
-                    await asyncio.sleep(0.01)
+                    
+                    # 🔥 TASK 2: 检测是否为 Cell Ranger 步骤，发送友好的等待提示
+                    step_id = async_step_detail.get('step_id', '')
+                    is_cellranger = 'cellranger' in step_id.lower()
+                    
+                    if is_cellranger:
+                        # Cell Ranger 步骤：发送友好的等待提示
+                        yield self._format_sse("status", {
+                            "content": "⏳ Cell Ranger 正在后台运行，这可能需要较长时间（通常 30 分钟到数小时），请耐心等待...",
+                            "state": "async_job_started",
+                            "show_waiting_bubble": True,
+                            "waiting_message": "Cell Ranger 正在处理您的数据，请稍候..."
+                        })
+                        await asyncio.sleep(0.01)
+                    else:
+                        yield self._format_sse("status", {
+                            "content": f"异步作业已启动: {step_id}",
+                            "state": "async_job_started"
+                        })
+                        await asyncio.sleep(0.01)
                     
                     # Yield async job status
                     async_response = {
@@ -392,15 +407,18 @@ class AgentOrchestrator:
                             "step_id": async_step_detail.get("step_id"),
                             "job_id": async_step_detail.get("job_id"),
                             "status": "async_job_started",
-                            "message": async_step_detail.get("summary", "异步作业已启动，等待完成")
+                            "message": async_step_detail.get("summary", "异步作业已启动，等待完成"),
+                            "is_cellranger": is_cellranger,
+                            "waiting_message": "Cell Ranger 正在处理您的数据，请稍候..." if is_cellranger else None
                         },
                         "steps_details": steps_details
                     }
                     
                     yield self._format_sse("result", async_response)
                     yield self._format_sse("status", {
-                        "content": "等待异步作业完成...",
-                        "state": "waiting"
+                        "content": "等待异步作业完成..." if not is_cellranger else "⏳ Cell Ranger 正在后台运行，请耐心等待...",
+                        "state": "waiting",
+                        "show_waiting_bubble": is_cellranger
                     })
                     await asyncio.sleep(0.01)
                     yield self._format_sse("done", {"status": "async_job_started"})
@@ -943,6 +961,48 @@ class AgentOrchestrator:
                 if not has_files:
                     logger.info("⚠️ [Orchestrator] 分支 A: Plan-First 模式（无文件）")
                     logger.info("⚠️ [Orchestrator] 进入预览模式，不会生成诊断报告")
+                    
+                    # 🔥 TASK 2: 检测用户意图是否包含 RNA 分析全流程（包括 cellranger）
+                    query_lower = refined_query.lower()
+                    rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "cell ranger"]
+                    full_workflow_keywords = ["完整", "全流程", "全部", "full", "complete", "all", "标准流程"]
+                    has_cellranger_intent = any(kw in query_lower for kw in ["cellranger", "cell ranger", "fastq", "测序"])
+                    is_full_workflow = any(kw in query_lower for kw in full_workflow_keywords) or len(target_steps) > 5
+                    is_rna_domain = domain_name == "RNA"
+                    
+                    # 检测是否包含 cellranger 步骤
+                    has_cellranger_step = any("cellranger" in step.lower() for step in target_steps)
+                    
+                    # 如果用户意图包含 RNA 分析全流程（包括 cellranger），询问是否使用测试数据
+                    if is_rna_domain and (has_cellranger_intent or has_cellranger_step or is_full_workflow):
+                        logger.info("🔍 [Orchestrator] 检测到 RNA 分析全流程意图（包含 cellranger），询问是否使用测试数据")
+                        yield self._format_sse("status", {
+                            "content": "检测到您想要进行 RNA 分析全流程（包含 Cell Ranger 步骤）...",
+                            "state": "running"
+                        })
+                        await asyncio.sleep(0.01)
+                        
+                        # 发送测试数据询问
+                        test_data_question = {
+                            "type": "test_data_question",
+                            "message": "检测到您想要进行 RNA 分析全流程，但未上传文件。Cell Ranger 步骤需要原始 FASTQ 文件，文件通常较大。",
+                            "question": "是否使用测试数据进行全流程分析？",
+                            "test_data_path": "/app/test_data/pbmc_1k_v3_fastqs",  # 测试数据路径
+                            "test_data_info": {
+                                "name": "PBMC 1k v3",
+                                "description": "10x Genomics 单细胞 RNA-seq 测试数据",
+                                "size": "约 100MB"
+                            },
+                            "workflow_steps": target_steps
+                        }
+                        yield self._format_sse("workflow", {
+                            "workflow_config": None,
+                            "template_mode": True,
+                            "test_data_question": test_data_question
+                        })
+                        await asyncio.sleep(0.01)
+                        yield self._format_sse("done", {"status": "test_data_question"})
+                        return  # 等待用户确认
                     
                     yield self._format_sse("status", {
                         "content": "未检测到文件，进入方案预览模式...",

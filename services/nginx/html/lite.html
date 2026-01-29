@@ -525,11 +525,44 @@
                             if (line.startsWith('event: ')) {
                                 const eventType = line.substring(7).trim();
                                 fullResponse += `\n[事件类型: ${eventType}]\n`;
+                                
+                                // 🔥 TASK 2: 处理 Cell Ranger 等待气泡
+                                if (eventType === 'status') {
+                                    // 在下一个 data 行处理
+                                }
                             } else if (line.startsWith('data: ')) {
                                 const dataStr = line.substring(6).trim();
                                 try {
                                     const data = JSON.parse(dataStr);
                                     fullResponse += JSON.stringify(data, null, 2) + '\n\n';
+                                    
+                                    // 🔥 TASK 2: 检测并显示等待气泡
+                                    if (data.show_waiting_bubble) {
+                                        console.log('⏳ 显示等待气泡:', data.waiting_message || data.content);
+                                        // 在瘦前端中，可以简单地在控制台显示或添加一个简单的提示
+                                        fullResponse += `\n[提示] ${data.waiting_message || data.content}\n\n`;
+                                    }
+                                    
+                                    // 🔥 TASK 3: 处理测试数据询问
+                                    if (data.test_data_question) {
+                                        const question = data.test_data_question;
+                                        const confirmed = confirm(
+                                            `${question.question}\n\n${question.message}\n\n` +
+                                            `测试数据: ${question.test_data_info?.name || 'N/A'}\n` +
+                                            `描述: ${question.test_data_info?.description || 'N/A'}\n` +
+                                            `大小: ${question.test_data_info?.size || 'N/A'}\n\n` +
+                                            `是否使用测试数据？`
+                                        );
+                                        if (confirmed) {
+                                            // 使用测试数据重新发送请求
+                                            uploadedFiles = [{
+                                                name: question.test_data_info?.name || 'test_data',
+                                                path: question.test_data_path
+                                            }];
+                                            sendMessage();
+                                            return; // 停止当前流
+                                        }
+                                    }
                                 } catch (e) {
                                     fullResponse += dataStr + '\n\n';
                                 }
