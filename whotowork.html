@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Omics Agent - How to Work 全流程数据流向图</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 32px;
+            text-align: center;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 40px;
+            font-size: 16px;
+        }
+        
+        .flow-diagram {
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 40px;
+            margin: 40px 0;
+            overflow-x: auto;
+        }
+        
+        .flow-container {
+            min-width: 1200px;
+            position: relative;
+        }
+        
+        .flow-layer {
+            margin-bottom: 40px;
+            position: relative;
+        }
+        
+        .layer-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #e9ecef;
+            border-radius: 6px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .component-box {
+            display: inline-block;
+            background: white;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin: 10px;
+            min-width: 150px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .component-box:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .component-title {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        
+        .component-desc {
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .arrow {
+            stroke: #667eea;
+            stroke-width: 2;
+            fill: none;
+            marker-end: url(#arrowhead);
+        }
+        
+        .arrow-label {
+            font-size: 11px;
+            fill: #495057;
+            background: white;
+            padding: 2px 4px;
+        }
+        
+        .data-flow {
+            position: absolute;
+            pointer-events: none;
+        }
+        
+        .flow-step {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .flow-step h3 {
+            color: #856404;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+        
+        .flow-step ol {
+            margin-left: 20px;
+        }
+        
+        .flow-step li {
+            margin: 8px 0;
+            color: #333;
+        }
+        
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+        
+        .section {
+            margin: 40px 0;
+        }
+        
+        .section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 24px;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+        }
+        
+        .data-format {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .data-format h4 {
+            color: #1976D2;
+            margin-bottom: 8px;
+        }
+        
+        .print-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            z-index: 1000;
+        }
+        
+        .print-btn:hover {
+            background: #5568d3;
+        }
+        
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+            
+            .print-btn {
+                display: none;
+            }
+            
+            .container {
+                box-shadow: none;
+                padding: 20px;
+            }
+            
+            .flow-diagram {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+    <button class="print-btn" onclick="window.print()">🖨️ 打印/导出 PDF</button>
+    
+    <div class="container">
+        <h1>🚀 Omics Agent - How to Work</h1>
+        <p class="subtitle">全流程数据流向与工具交互架构图</p>
+        
+        <!-- 流程图 -->
+        <div class="flow-diagram">
+            <div class="flow-container">
+                <!-- SVG 定义 -->
+                <svg width="100%" height="100%" style="position: absolute; top: 0; left: 0; pointer-events: none;">
+                    <defs>
+                        <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                            <polygon points="0 0, 10 3, 0 6" fill="#667eea" />
+                        </marker>
+                    </defs>
+                    
+                    <!-- 数据流箭头 -->
+                    <!-- Frontend -> API Server -->
+                    <line x1="200" y1="100" x2="200" y2="200" class="arrow" />
+                    <text x="210" y="150" class="arrow-label">HTTP POST</text>
+                    
+                    <!-- API Server -> Orchestrator -->
+                    <line x1="200" y1="250" x2="200" y2="350" class="arrow" />
+                    <text x="210" y="300" class="arrow-label">stream_process()</text>
+                    
+                    <!-- Orchestrator -> Router Agent -->
+                    <line x1="200" y1="400" x2="100" y2="500" class="arrow" />
+                    <text x="120" y="450" class="arrow-label">路由决策</text>
+                    
+                    <!-- Orchestrator -> Planner -->
+                    <line x1="200" y1="400" x2="300" y2="500" class="arrow" />
+                    <text x="280" y="450" class="arrow-label">工作流规划</text>
+                    
+                    <!-- Planner -> Tool Retriever -->
+                    <line x1="300" y1="550" x2="400" y2="600" class="arrow" />
+                    <text x="320" y="580" class="arrow-label">语义检索</text>
+                    
+                    <!-- Planner -> LLM -->
+                    <line x1="300" y1="550" x2="500" y2="600" class="arrow" />
+                    <text x="380" y="580" class="arrow-label">LLM 规划</text>
+                    
+                    <!-- Orchestrator -> Domain Agent -->
+                    <line x1="200" y1="400" x2="200" y2="700" class="arrow" />
+                    <text x="210" y="550" class="arrow-label">执行工作流</text>
+                    
+                    <!-- Domain Agent -> Executor -->
+                    <line x1="200" y1="750" x2="200" y2="850" class="arrow" />
+                    <text x="210" y="800" class="arrow-label">execute_workflow()</text>
+                    
+                    <!-- Executor -> Tools -->
+                    <line x1="200" y1="900" x2="100" y2="1000" class="arrow" />
+                    <line x1="200" y1="900" x2="200" y2="1000" class="arrow" />
+                    <line x1="200" y1="900" x2="300" y2="1000" class="arrow" />
+                    <text x="150" y="950" class="arrow-label">工具调用</text>
+                    
+                    <!-- Tools -> Results -->
+                    <line x1="100" y1="1050" x2="200" y2="1100" class="arrow" />
+                    <line x1="200" y1="1050" x2="200" y2="1100" class="arrow" />
+                    <line x1="300" y1="1050" x2="200" y2="1100" class="arrow" />
+                    <text x="150" y="1080" class="arrow-label">结果聚合</text>
+                    
+                    <!-- Results -> AI Report Generator -->
+                    <line x1="200" y1="1150" x2="200" y2="1250" class="arrow" />
+                    <text x="210" y="1200" class="arrow-label">生成报告</text>
+                    
+                    <!-- AI Report -> SSE Stream -->
+                    <line x1="200" y1="1300" x2="200" y2="1400" class="arrow" />
+                    <text x="210" y="1350" class="arrow-label">SSE 流式输出</text>
+                    
+                    <!-- SSE Stream -> Frontend -->
+                    <line x1="200" y1="1450" x2="200" y2="1550" class="arrow" />
+                    <text x="210" y="1500" class="arrow-label">实时渲染</text>
+                </svg>
+                
+                <!-- 前端层 -->
+                <div class="flow-layer" style="margin-top: 0;">
+                    <div class="layer-title">🌐 前端层 (Frontend Layer)</div>
+                    <div class="component-box" style="margin-left: 150px;">
+                        <div class="component-title">Web UI</div>
+                        <div class="component-desc">HTML + Bootstrap<br/>Markdown 渲染<br/>实时更新</div>
+                    </div>
+                </div>
+                
+                <!-- API 服务层 -->
+                <div class="flow-layer" style="margin-top: 50px;">
+                    <div class="layer-title">🔌 API 服务层 (API Service Layer)</div>
+                    <div class="component-box" style="margin-left: 150px;">
+                        <div class="component-title">FastAPI Server</div>
+                        <div class="component-desc">/api/chat<br/>/api/upload<br/>/api/execute</div>
+                    </div>
+                </div>
+                
+                <!-- 编排层 -->
+                <div class="flow-layer" style="margin-top: 50px;">
+                    <div class="layer-title">🎯 编排层 (Orchestration Layer)</div>
+                    <div class="component-box" style="margin-left: 150px;">
+                        <div class="component-title">AgentOrchestrator</div>
+                        <div class="component-desc">意图分类<br/>流程编排<br/>SSE 流式输出</div>
+                    </div>
+                </div>
+                
+                <!-- 智能体层 -->
+                <div class="flow-layer" style="margin-top: 50px;">
+                    <div class="layer-title">🤖 智能体层 (Agent Layer)</div>
+                    <div class="component-box" style="margin-left: 50px;">
+                        <div class="component-title">Router Agent</div>
+                        <div class="component-desc">组学类型识别<br/>智能路由</div>
+                    </div>
+                    <div class="component-box">
+                        <div class="component-title">Workflow Planner</div>
+                        <div class="component-desc">动态工作流规划<br/>LLM 驱动</div>
+                    </div>
+                    <div class="component-box">
+                        <div class="component-title">Domain Agents</div>
+                        <div class="component-desc">RNA Agent<br/>Metabolomics Agent</div>
+                    </div>
+                </div>
+                
+                <!-- 工具检索层 -->
+                <div class="flow-layer" style="margin-top: 50px;">
+                    <div class="layer-title">🔍 工具检索层 (Tool Retrieval Layer)</div>
+                    <div class="component-box" style="margin-left: 350px;">
+                        <div class="component-title">Tool Retriever</div>
+                        <div class="component-desc">ChromaDB<br/>语义检索<br/>Embeddings</div>
+                    </div>
+                    <div class="component-box">
+                        <div class="component-title">LLM Client</div>
+                        <div class="component-desc">DeepSeek-V3.2<br/>工作流规划<br/>参数推荐</div>
+                    </div>
+                </div>
+                
+                <!-- 执行层 -->
+                <div class="flow-layer" style="margin-top: 50px;">
+                    <div class="layer-title">⚙️ 执行层 (Execution Layer)</div>
+                    <div class="component-box" style="margin-left: 150px;">
+                        <div class="component-title">WorkflowExecutor</div>
+                        <div class="component-desc">通用执行引擎<br/>参数验证<br/>数据流处理</div>
+                    </div>
+                </div>
+                
+                <!-- 工具层 -->
+                <div class="flow-layer" style="margin-top: 50px;">
+                    <div class="layer-title">🛠️ 工具层 (Tool Layer)</div>
+                    <div class="component-box" style="margin-left: 50px;">
+                        <div class="component-title">File Inspector</div>
+                        <div class="component-desc">文件检查<br/>元数据生成</div>
+                    </div>
+                    <div class="component-box">
+                        <div class="component-title">Analysis Tools</div>
+                        <div class="component-desc">预处理<br/>统计分析<br/>可视化</div>
+                    </div>
+                    <div class="component-box">
+                        <div class="component-title">Domain Tools</div>
+                        <div class="component-desc">Scanpy<br/>Cell Ranger<br/>Metabolomics</div>
+                    </div>
+                </div>
+                
+                <!-- 结果聚合层 -->
+                <div class="flow-layer" style="margin-top: 50px;">
+                    <div class="layer-title">📊 结果聚合层 (Result Aggregation Layer)</div>
+                    <div class="component-box" style="margin-left: 150px;">
+                        <div class="component-title">Result Collector</div>
+                        <div class="component-desc">步骤结果聚合<br/>数据格式化<br/>图表路径处理</div>
+                    </div>
+                </div>
+                
+                <!-- AI 报告生成层 -->
+                <div class="flow-layer" style="margin-top: 50px;">
+                    <div class="layer-title">📝 AI 报告生成层 (AI Report Generation Layer)</div>
+                    <div class="component-box" style="margin-left: 150px;">
+                        <div class="component-title">AI Expert Report</div>
+                        <div class="component-desc">LLM 分析<br/>关键指标提取<br/>Markdown 生成</div>
+                    </div>
+                </div>
+                
+                <!-- SSE 流式输出层 -->
+                <div class="flow-layer" style="margin-top: 50px;">
+                    <div class="layer-title">📡 SSE 流式输出层 (SSE Streaming Layer)</div>
+                    <div class="component-box" style="margin-left: 150px;">
+                        <div class="component-title">SSE Event Stream</div>
+                        <div class="component-desc">status<br/>workflow<br/>step_result<br/>diagnosis<br/>result</div>
+                    </div>
+                </div>
+                
+                <!-- 前端渲染层 -->
+                <div class="flow-layer" style="margin-top: 50px;">
+                    <div class="layer-title">🎨 前端渲染层 (Frontend Rendering Layer)</div>
+                    <div class="component-box" style="margin-left: 150px;">
+                        <div class="component-title">Real-time Render</div>
+                        <div class="component-desc">工作流卡片<br/>执行步骤<br/>分析报告<br/>AI 诊断</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 详细流程说明 -->
+        <div class="section">
+            <h2>📋 全流程数据流向详解</h2>
+            
+            <!-- 步骤 1: 用户交互 -->
+            <div class="flow-step">
+                <h3>步骤 1: 用户交互与文件上传</h3>
+                <ol>
+                    <li><strong>用户操作</strong>：用户在 Web UI 中选择文件或输入查询文本</li>
+                    <li><strong>文件上传</strong>：前端调用 <code>POST /api/upload</code>，上传文件到服务器</li>
+                    <li><strong>文件处理</strong>：
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li>服务器自动识别 10x Genomics 数据（matrix.mtx, barcodes.tsv, features.tsv）</li>
+                            <li>文件保存到 <code>{user_id}/{session_id}/</code> 目录</li>
+                            <li>生成文件元数据（文件类型、样本数、特征数等）</li>
+                        </ul>
+                    </li>
+                    <li><strong>返回路径</strong>：服务器返回 <code>file_paths</code> 数组和 <code>session_id</code></li>
+                </ol>
+                <div class="data-format">
+                    <h4>数据格式：文件上传响应</h4>
+                    <div class="code-block">{
+  "status": "success",
+  "file_paths": ["guest/20250128_120000/example.csv"],
+  "file_info": [{"name": "example.csv", "size": 1024000, "path": "..."}],
+  "session_id": "20250128_120000",
+  "user_id": "guest"
+}</div>
+                </div>
+            </div>
+            
+            <!-- 步骤 2: 聊天请求 -->
+            <div class="flow-step">
+                <h3>步骤 2: 聊天请求与意图分类</h3>
+                <ol>
+                    <li><strong>发送请求</strong>：前端调用 <code>POST /api/chat</code>，包含：
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li><code>message</code>：用户查询文本</li>
+                            <li><code>uploaded_files</code>：已上传的文件列表（name, path）</li>
+                            <li><code>stream: true</code>：启用 SSE 流式响应</li>
+                            <li><code>user_id</code> 和 <code>session_id</code>：用户和会话标识</li>
+                        </ul>
+                    </li>
+                    <li><strong>API 路由</strong>：FastAPI 服务器接收请求，创建 <code>AgentOrchestrator</code> 实例</li>
+                    <li><strong>意图分类</strong>：<code>AgentOrchestrator.stream_process()</code> 首先进行全局意图分类：
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li><strong>Chat 模式</strong>：如果查询是普通对话（无文件、无分析关键词），直接调用 LLM 返回回答</li>
+                            <li><strong>Task 模式</strong>：如果查询包含分析任务，进入工作流规划和执行流程</li>
+                        </ul>
+                    </li>
+                </ol>
+                <div class="data-format">
+                    <h4>数据格式：聊天请求</h4>
+                    <div class="code-block">{
+  "message": "分析这个文件",
+  "uploaded_files": [
+    {"name": "example.csv", "path": "guest/20250128_120000/example.csv"}
+  ],
+  "stream": true,
+  "user_id": "guest",
+  "session_id": "20250128_120000"
+}</div>
+                </div>
+            </div>
+            
+            <!-- 步骤 3: 文件检查与数据诊断 -->
+            <div class="flow-step">
+                <h3>步骤 3: 文件检查与数据诊断（Task 模式）</h3>
+                <ol>
+                    <li><strong>文件检查</strong>：调用 <code>FileInspector</code> 工具检查上传的文件
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li>识别文件类型（CSV, H5AD, MTX 等）</li>
+                            <li>提取基本统计信息（样本数、特征数、缺失值比例等）</li>
+                            <li>生成数据预览</li>
+                        </ul>
+                    </li>
+                    <li><strong>数据诊断</strong>：可选的数据质量评估
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li>调用 LLM 生成数据诊断报告</li>
+                            <li>识别潜在问题（缺失值、异常值、数据分布等）</li>
+                            <li>通过 SSE 事件 <code>diagnosis</code> 发送到前端</li>
+                        </ul>
+                    </li>
+                </ol>
+            </div>
+            
+            <!-- 步骤 4: 工作流规划 -->
+            <div class="flow-step">
+                <h3>步骤 4: 动态工作流规划</h3>
+                <ol>
+                    <li><strong>工具检索</strong>：<code>WorkflowPlanner</code> 调用 <code>ToolRetriever</code>
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li>使用 ChromaDB 向量数据库进行语义检索</li>
+                            <li>根据用户查询和文件类型，检索相关的分析工具</li>
+                            <li>返回工具的 JSON Schema（参数定义、描述等）</li>
+                        </ul>
+                    </li>
+                    <li><strong>LLM 规划</strong>：将工具 Schema 注入到 LLM 提示词中
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li>LLM 根据用户查询和可用工具，生成工作流计划</li>
+                            <li>输出 JSON 格式的工作流配置：<code>{workflow_name, steps: [{step_id, tool_id, name, params}]}</code></li>
+                            <li>每个步骤包含工具ID和参数配置</li>
+                        </ul>
+                    </li>
+                    <li><strong>参数推荐</strong>：可选步骤，LLM 根据数据特征推荐最佳参数
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li>分析数据统计信息</li>
+                            <li>生成参数推荐（如缺失值阈值、标准化方法等）</li>
+                            <li>填充到工作流步骤的 <code>params</code> 中</li>
+                        </ul>
+                    </li>
+                    <li><strong>返回工作流</strong>：通过 SSE 事件 <code>workflow</code> 发送工作流配置到前端</li>
+                </ol>
+                <div class="data-format">
+                    <h4>数据格式：工作流配置</h4>
+                    <div class="code-block">{
+  "type": "workflow",
+  "workflow_config": {
+    "workflow_name": "Metabolomics Analysis Pipeline",
+    "steps": [
+      {
+        "step_id": "inspect_data",
+        "tool_id": "inspect_data",
+        "name": "数据检查",
+        "params": {"file_path": "example.csv"}
+      },
+      {
+        "step_id": "preprocess_data",
+        "tool_id": "preprocess_data",
+        "name": "数据预处理",
+        "params": {
+          "file_path": "example.csv",
+          "missing_threshold": "0.5",
+          "normalization": "log2"
+        }
+      }
+    ]
+  },
+  "template_mode": false
+}</div>
+                </div>
+            </div>
+            
+            <!-- 步骤 5: 工作流执行 -->
+            <div class="flow-step">
+                <h3>步骤 5: 工作流执行与工具调用</h3>
+                <ol>
+                    <li><strong>用户确认</strong>：前端显示工作流配置卡片，用户点击"执行"按钮</li>
+                    <li><strong>执行请求</strong>：前端发送 <code>workflow_data</code> 到 <code>/api/chat</code> 或 <code>/api/execute</code></li>
+                    <li><strong>路由到领域智能体</strong>：
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li><code>RouterAgent</code> 根据 <code>workflow_name</code> 或文件类型，路由到对应的领域智能体（RNA Agent 或 Metabolomics Agent）</li>
+                            <li>领域智能体负责执行特定组学类型的分析</li>
+                        </ul>
+                    </li>
+                    <li><strong>创建执行器</strong>：领域智能体创建 <code>WorkflowExecutor</code> 实例</li>
+                    <li><strong>逐步执行</strong>：<code>WorkflowExecutor</code> 按顺序执行每个步骤
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li>从 <code>ToolRegistry</code> 查找工具（通过 <code>tool_id</code>）</li>
+                            <li>使用 Pydantic 验证步骤参数</li>
+                            <li>调用工具函数，传入参数</li>
+                            <li>收集工具返回的结果</li>
+                            <li>处理步骤间的数据流（如将前一步的输出作为下一步的输入）</li>
+                        </ul>
+                    </li>
+                    <li><strong>实时更新</strong>：每个步骤执行完成后，通过 SSE 事件 <code>step_result</code> 发送结果到前端</li>
+                </ol>
+                <div class="data-format">
+                    <h4>数据格式：步骤执行结果</h4>
+                    <div class="code-block">{
+  "type": "step_result",
+  "report_data": {
+    "step_id": "inspect_data",
+    "tool_id": "inspect_data",
+    "name": "数据检查",
+    "summary": "检查完成: 77 个样本, 50 个代谢物",
+    "status": "success",
+    "plot": "/results/run_20250128_120000/inspect_plot.png",
+    "step_result": {
+      "step_name": "数据检查",
+      "status": "success",
+      "logs": "检查完成: 77 个样本, 50 个代谢物",
+      "data": {
+        "summary": {
+          "n_samples": 77,
+          "n_metabolites": 50,
+          "missing_percentage": 2.5
+        },
+        "preview": [...],
+        "images": ["/results/run_20250128_120000/inspect_plot.png"]
+      }
+    }
+  }
+}</div>
+                </div>
+            </div>
+            
+            <!-- 步骤 6: 结果聚合 -->
+            <div class="flow-step">
+                <h3>步骤 6: 结果聚合与格式化</h3>
+                <ol>
+                    <li><strong>结果收集</strong>：<code>WorkflowExecutor</code> 收集所有步骤的执行结果</li>
+                    <li><strong>数据格式化</strong>：
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li>统一结果格式（<code>steps_details</code>, <code>steps_results</code>）</li>
+                            <li>处理图片路径（转换为可访问的 URL，如 <code>/results/run_xxx/plot.png</code>）</li>
+                            <li>提取关键指标（样本数、特征数、聚类数等）</li>
+                        </ul>
+                    </li>
+                    <li><strong>生成最终报告</strong>：构建完整的分析报告数据结构</li>
+                </ol>
+            </div>
+            
+            <!-- 步骤 7: AI 专家分析报告 -->
+            <div class="flow-step">
+                <h3>步骤 7: AI 专家分析报告生成</h3>
+                <ol>
+                    <li><strong>提取关键指标</strong>：<code>BaseAgent._generate_analysis_summary()</code> 从步骤结果中提取关键指标
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li>RNA 分析：细胞数、基因数、线粒体比例、标记基因、聚类数、细胞类型等</li>
+                            <li>代谢组学：样本数、代谢物数、差异代谢物、VIP 值、通路富集等</li>
+                        </ul>
+                    </li>
+                    <li><strong>构建提示词</strong>：
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li>精简步骤信息（只保留核心字段，过滤冗余数据）</li>
+                            <li>限制列表长度（如只保留 top 3-5 个标记基因/通路）</li>
+                            <li>检查提示词长度，防止超出 LLM 上下文窗口</li>
+                        </ul>
+                    </li>
+                    <li><strong>LLM 生成报告</strong>：调用 LLM 生成 Markdown 格式的专家分析报告
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li>包含分析结果摘要</li>
+                            <li>关键发现和生物学解释</li>
+                            <li>数据质量评估</li>
+                            <li>建议和下一步分析方向</li>
+                        </ul>
+                    </li>
+                    <li><strong>返回报告</strong>：通过 SSE 事件 <code>diagnosis</code> 发送 AI 专家分析报告到前端</li>
+                </ol>
+                <div class="data-format">
+                    <h4>数据格式：AI 专家分析报告</h4>
+                    <div class="code-block">{
+  "type": "diagnosis",
+  "report_data": {
+    "diagnosis": "## AI 专家分析报告\n\n### 分析结果摘要\n\n本次分析完成了 5 个步骤...\n\n### 关键发现\n\n- 成功步骤: 5/5\n- 细胞数量: 2,700\n- 基因数量: 3,274\n..."
+  }
+}</div>
+                </div>
+            </div>
+            
+            <!-- 步骤 8: SSE 流式输出 -->
+            <div class="flow-step">
+                <h3>步骤 8: SSE 流式输出与前端渲染</h3>
+                <ol>
+                    <li><strong>SSE 事件流</strong>：<code>AgentOrchestrator</code> 通过 <code>yield</code> 生成 SSE 事件
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li><code>status</code>：状态更新（"正在执行步骤...", "正在生成报告..."）</li>
+                            <li><code>workflow</code>：工作流配置</li>
+                            <li><code>step_result</code>：步骤执行结果</li>
+                            <li><code>diagnosis</code>：AI 专家分析报告</li>
+                            <li><code>result</code>：最终结果</li>
+                            <li><code>done</code>：完成信号</li>
+                            <li><code>error</code>：错误信息</li>
+                        </ul>
+                    </li>
+                    <li><strong>前端接收</strong>：前端使用 <code>ReadableStream</code> 读取 SSE 流
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li>解析 SSE 格式（<code>event: {type}\ndata: {json}\n\n</code>）</li>
+                            <li>根据事件类型调用相应的处理函数</li>
+                        </ul>
+                    </li>
+                    <li><strong>实时渲染</strong>：
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li><code>status</code> → 更新状态栏</li>
+                            <li><code>workflow</code> → 渲染工作流配置卡片</li>
+                            <li><code>step_result</code> → 渲染步骤执行结果（图表、表格）</li>
+                            <li><code>diagnosis</code> → 渲染 AI 专家分析报告（Markdown）</li>
+                            <li><code>result</code> → 渲染最终分析报告</li>
+                        </ul>
+                    </li>
+                </ol>
+                <div class="data-format">
+                    <h4>SSE 事件格式示例</h4>
+                    <div class="code-block">event: status
+data: {"content": "正在执行步骤: 数据检查...", "state": "running"}
+
+event: step_result
+data: {"report_data": {...}}
+
+event: diagnosis
+data: {"report_data": {"diagnosis": "## AI 专家分析报告\n\n..."}}
+
+event: done
+data: {"status": "success"}</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 关键技术点 -->
+        <div class="section">
+            <h2>🔑 关键技术点</h2>
+            
+            <div class="flow-step">
+                <h3>1. 工具自动发现与注册</h3>
+                <p>系统通过 Python 装饰器和反射机制，自动发现和注册工具到 <code>ToolRegistry</code>。新增工具只需创建文件并添加 <code>@registry.register</code> 装饰器，无需修改核心代码。</p>
+            </div>
+            
+            <div class="flow-step">
+                <h3>2. 语义工具检索</h3>
+                <p>使用 ChromaDB 向量数据库和 Ollama Embeddings，实现基于语义相似度的工具推荐。用户可以用自然语言描述需求，系统自动推荐相关工具。</p>
+            </div>
+            
+            <div class="flow-step">
+                <h3>3. LLM 驱动的工作流规划</h3>
+                <p>将工具 Schema 注入到 LLM 提示词中，LLM 根据用户查询和可用工具，动态生成可执行的工作流计划。无需硬编码模板，支持灵活的分析流程。</p>
+            </div>
+            
+            <div class="flow-step">
+                <h3>4. 通用执行引擎</h3>
+                <p>基于策略模式和依赖注入，实现工具无关的执行框架。支持动态工具查找、参数验证（Pydantic）和结果聚合，无需为每个工具编写特定的执行逻辑。</p>
+            </div>
+            
+            <div class="flow-step">
+                <h3>5. SSE 流式输出</h3>
+                <p>使用 Server-Sent Events (SSE) 实现实时流式输出，前端可以实时接收和渲染分析进度、步骤结果和 AI 报告，提升用户体验。</p>
+            </div>
+            
+            <div class="flow-step">
+                <h3>6. 多用户隔离</h3>
+                <p>支持多用户并发使用，每个用户有独立的文件目录（<code>{user_id}/{session_id}/</code>），工作流和任务历史按用户隔离。</p>
+            </div>
+        </div>
+        
+        <!-- 数据流总结 -->
+        <div class="section">
+            <h2>📊 数据流总结</h2>
+            <div class="flow-step">
+                <h3>完整数据流向</h3>
+                <ol>
+                    <li><strong>前端 → API 服务器</strong>：HTTP POST 请求（文件上传、聊天请求）</li>
+                    <li><strong>API 服务器 → 编排器</strong>：创建 <code>AgentOrchestrator</code>，调用 <code>stream_process()</code></li>
+                    <li><strong>编排器 → 智能体</strong>：意图分类、路由到领域智能体、调用规划器</li>
+                    <li><strong>规划器 → 工具检索器/LLM</strong>：语义检索工具、LLM 生成工作流</li>
+                    <li><strong>领域智能体 → 执行器</strong>：创建 <code>WorkflowExecutor</code>，执行工作流</li>
+                    <li><strong>执行器 → 工具</strong>：动态查找工具、验证参数、调用工具函数</li>
+                    <li><strong>工具 → 执行器</strong>：返回执行结果（数据、图表路径、统计信息）</li>
+                    <li><strong>执行器 → 领域智能体</strong>：聚合步骤结果、生成 AI 报告</li>
+                    <li><strong>领域智能体 → 编排器</strong>：返回完整分析报告</li>
+                    <li><strong>编排器 → API 服务器</strong>：通过 SSE 流式输出事件</li>
+                    <li><strong>API 服务器 → 前端</strong>：SSE 事件流（status, workflow, step_result, diagnosis, result, done）</li>
+                    <li><strong>前端渲染</strong>：实时解析 SSE 事件，渲染工作流卡片、步骤结果、AI 报告</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
