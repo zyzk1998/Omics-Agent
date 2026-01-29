@@ -612,9 +612,15 @@ Use Simplified Chinese for all content."""
                     logger.warning(f"⚠️ [DataDiagnostician] 诊断报告为空")
                     logger.warning(f"⚠️ [DEBUG] Think content: {think_content[:200] if think_content else 'None'}")
                 
-                # Step 4: 保存到上下文（供 UI 和后续步骤使用）
+                # Step 4: 从诊断报告中提取参数推荐
+                # 🔥 TASK 5: 解析诊断报告中的参数推荐表格
+                recommendation = self._extract_parameter_recommendations(response, omics_type, stats)
+                
+                # Step 5: 保存到上下文（供 UI 和后续步骤使用）
                 self.context["diagnosis_report"] = response
                 self.context["diagnosis_stats"] = stats
+                if recommendation:
+                    self.context["parameter_recommendation"] = recommendation
                 
                 return response
                 

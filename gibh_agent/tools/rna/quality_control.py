@@ -211,16 +211,19 @@ def run_doublet_detection(
                     "summary": f"检测到 {n_doublets} 个双联体（{doublet_rate:.2f}%）"
                 }
             except ImportError:
-                logger.warning("⚠️ scrublet 未安装，双联体检测步骤将跳过")
-                # 🔥 TASK 2 FIX: 优雅降级 - 如果scrublet未安装，返回警告但不标记为错误
-                # 将双联体检测标记为跳过，而不是错误
+                logger.error("❌ scrublet 未安装，双联体检测步骤失败")
+                # 🔥 TASK 1 FIX: 检测依赖并给出友好提示
                 return {
-                    "status": "skipped",
+                    "status": "error",
                     "error": "scrublet not installed. Please install: pip install scrublet",
-                    "message": "双联体检测步骤已跳过（scrublet未安装）。建议安装: pip install scrublet",
+                    "message": "双联体检测步骤失败：scrublet 未安装。请在 Docker 容器中安装: pip install scrublet",
+                    "user_message": "依赖缺失：双联体检测步骤需要 scrublet 工具包。",
+                    "error_category": "config_issue",
+                    "suggestion": "请联系管理员在 Docker 容器中安装 scrublet: pip install scrublet，或跳过此步骤。",
+                    "can_skip": True,
                     "n_doublets": 0,
                     "doublet_rate": 0.0,
-                    "summary": "双联体检测已跳过（scrublet未安装）"
+                    "summary": "双联体检测失败（scrublet未安装）"
                 }
         else:
             return {

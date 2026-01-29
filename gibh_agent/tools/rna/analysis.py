@@ -690,10 +690,15 @@ def run_find_markers(
         
         # 保存结果
         output_csv = None
+        output_h5ad = None
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
             output_csv = os.path.join(output_dir, "markers.csv")
             markers_df.to_csv(output_csv, index=False)
+            # 🔥 TASK 3 FIX: 保存带 marker 信息的 h5ad 文件，供后续步骤使用
+            output_h5ad = os.path.join(output_dir, "markers_identified.h5ad")
+            adata.write(output_h5ad)
+            logger.info(f"✅ [Find Markers] Saved data with markers to: {output_h5ad}")
         
         return {
             "status": "success",
@@ -702,6 +707,7 @@ def run_find_markers(
             "n_genes_per_cluster": n_genes,
             "markers_table": markers_df.to_dict(orient='records'),
             "output_csv": output_csv,
+            "output_h5ad": output_h5ad,  # 🔥 TASK 3 FIX: 返回 output_h5ad 供后续步骤使用
             "summary": "Marker 基因鉴定完成"
         }
     

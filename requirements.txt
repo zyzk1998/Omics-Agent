@@ -31,9 +31,8 @@ tabulate>=0.9.0
 gseapy>=1.0.0
 # 细胞类型注释（scanpy_tool 可选功能）
 celltypist>=1.6.0
-# 双联体检测（可选，如果安装失败可跳过）
-# scrublet  # 注释掉，因为最新版本只有 0.2.3，但某些依赖可能要求 >=1.0.0
-# 如果需要 scrublet，可以手动安装: pip install scrublet
+# 双联体检测（必需）
+scrublet>=0.2.3
 # Tool-RAG 架构：Vector Database 和 Embeddings
 langchain-chroma>=0.1.0
 langchain-ollama>=0.1.0

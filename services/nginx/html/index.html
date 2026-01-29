@@ -1991,11 +1991,23 @@
                         // Check if this is pre-analysis (data diagnosis) or post-analysis
                         if (fullData) {
                             const status = fullData.status || fullData.report_data?.status || '';
-                            // 计划阶段（数据诊断）显示"数据诊断报告"
-                            if (status === 'data_ready' || status === 'template_ready' || diagnosisMessage.includes('数据体检') || diagnosisMessage.includes('数据概况') || diagnosisMessage.includes('数据诊断')) {
-                                reportTitle = "📊 数据诊断报告";
-                                reportIcon = "bi-clipboard-check";
+                        // 计划阶段（数据诊断）显示"数据诊断报告"
+                        // 🔥 TASK 4 FIX: 修复标题冗余问题 - 只显示一个标题
+                        if (status === 'data_ready' || status === 'template_ready' || diagnosisMessage.includes('数据体检') || diagnosisMessage.includes('数据概况') || diagnosisMessage.includes('数据诊断')) {
+                            // 检查是否已经存在"数据诊断报告"标题，如果存在则使用"数据体检报告"
+                            const existingTitles = expertSection.querySelectorAll('h6');
+                            let hasDataDiagnosisTitle = false;
+                            for (const existingTitle of existingTitles) {
+                                const titleText = existingTitle.textContent || '';
+                                if (titleText.includes('数据诊断报告')) {
+                                    hasDataDiagnosisTitle = true;
+                                    break;
+                                }
                             }
+                            // 如果已存在"数据诊断报告"标题，使用"数据体检报告"（避免重复）
+                            reportTitle = hasDataDiagnosisTitle ? "📊 数据体检报告" : "📊 数据诊断报告";
+                            reportIcon = "bi-clipboard-check";
+                        }
                         }
                         
                         // 🔥 修复：检查是否已存在相同类型的报告，避免重复渲染（在确定reportTitle之后）
@@ -4041,6 +4053,10 @@
             
             // 🔧 修复：渲染诊断报告（如果有，优先显示）
             if (diagnosisReport) {
+                // 🔥 TASK 5: 检查是否有参数推荐
+                const hasRecommendations = recommendation && recommendation.params && Object.keys(recommendation.params).length > 0;
+                const useRecommendedParams = false; // 默认使用默认参数
+                
                 formHtml += `<div class="alert alert-success mb-3" style="background-color: #f0f7ff; border-left: 4px solid #4d6bfe; padding: 15px; border-radius: 4px;">
                     <h6 style="margin-top: 0; color: #1976D2; margin-bottom: 10px;">
                         <i class="bi bi-clipboard-check"></i> ${isTemplateMode ? '方案已生成' : '数据诊断与参数推荐报告'}
@@ -4048,6 +4064,15 @@
                     <div style="font-size: 14px; line-height: 1.6; color: #333;">
                         ${safeMarkedParse(diagnosisReport)}
                     </div>
+                    ${hasRecommendations ? `
+                        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
+                            <button id="toggle-params-btn-${formId}" class="btn btn-sm ${useRecommendedParams ? 'btn-secondary' : 'btn-primary'}" 
+                                    onclick="toggleParameterRecommendations('${formId}', ${!useRecommendedParams})">
+                                ${useRecommendedParams ? '切换回默认参数' : '使用推荐参数'}
+                            </button>
+                            <span class="text-muted small ms-2">点击按钮切换参数值</span>
+                        </div>
+                    ` : ''}
                 </div>`;
             }
             
@@ -4134,16 +4159,24 @@
                             });
                             formHtml += `</select>`;
                         } else {
-                            // 文本输入 - 🔥 Task 2: 自动填充推荐值
+                            // 文本输入 - 🔥 TASK 5: 支持推荐参数切换
                             let valueStr = paramValue !== null && paramValue !== undefined ? String(paramValue) : '';
-                            // 如果有推荐值，优先使用推荐值
-                            if (recommendation && recommendation.params && recommendation.params[paramName]) {
-                                const recValue = recommendation.params[paramName].value;
-                                if (recValue !== undefined) {
-                                    valueStr = String(recValue);
-                                }
+                            const defaultValue = valueStr; // 保存默认值
+                            const hasRecommendation = recommendation && recommendation.params && recommendation.params[paramName];
+                            const recommendedValue = hasRecommendation ? String(recommendation.params[paramName].value) : null;
+                            
+                            // 添加数据属性，用于切换参数
+                            const dataAttrs = `data-param-name="${paramName}" data-default-value="${defaultValue}" ${recommendedValue ? `data-recommended-value="${recommendedValue}"` : ''}`;
+                            
+                            formHtml += `<input type="text" class="form-control form-control-sm param-input" name="${inputName}" value="${valueStr}" placeholder="${displayName}" ${dataAttrs}>`;
+                            
+                            // 如果有推荐值，显示提示
+                            if (hasRecommendation) {
+                                const reason = recommendation.params[paramName].reason || '基于数据特征推荐';
+                                formHtml += `<small class="text-muted d-block mt-1">
+                                    <i class="bi bi-lightbulb"></i> 推荐值: <code>${recommendedValue}</code> - ${reason}
+                                </small>`;
                             }
-                            formHtml += `<input type="text" class="form-control form-control-sm" name="${inputName}" value="${valueStr}" placeholder="${displayName}">`;
                         }
                         
                         formHtml += `</div>`;

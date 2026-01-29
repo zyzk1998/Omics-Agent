@@ -44,7 +44,45 @@ def run_cell_annotation(
     try:
         import scanpy as sc
         
+        # 🔥 TASK 3 FIX: 验证并解析输入文件路径
+        adata_path_obj = Path(adata_path)
+        if not adata_path_obj.is_absolute():
+            # 如果是相对路径，尝试在多个位置查找
+            potential_paths = [
+                adata_path_obj,
+                Path(os.getcwd()) / adata_path_obj,
+                Path(os.getenv("RESULTS_DIR", "/app/results")) / adata_path_obj,
+                Path(os.getenv("UPLOAD_DIR", "/app/uploads")) / adata_path_obj,
+            ]
+            for potential_path in potential_paths:
+                if potential_path.exists():
+                    adata_path = str(potential_path.resolve())
+                    logger.info(f"✅ [Cell Annotation] 找到输入文件: {adata_path}")
+                    break
+            else:
+                logger.error(f"❌ [Cell Annotation] 无法找到输入文件: {adata_path}")
+                return {
+                    "status": "error",
+                    "error": f"File not found: {adata_path}",
+                    "user_message": f"数据文件问题：细胞类型注释步骤无法找到或读取数据文件。",
+                    "error_category": "data_issue",
+                    "suggestion": f"请检查数据文件路径是否正确，文件是否存在且可读。尝试的路径: {[str(p) for p in potential_paths]}",
+                    "can_skip": False
+                }
+        else:
+            if not adata_path_obj.exists():
+                logger.error(f"❌ [Cell Annotation] 输入文件不存在: {adata_path}")
+                return {
+                    "status": "error",
+                    "error": f"File not found: {adata_path}",
+                    "user_message": f"数据文件问题：细胞类型注释步骤无法找到或读取数据文件。",
+                    "error_category": "data_issue",
+                    "suggestion": f"请检查数据文件路径是否正确，文件是否存在且可读。路径: {adata_path}",
+                    "can_skip": False
+                }
+        
         # 加载数据
+        logger.info(f"📂 [Cell Annotation] 加载数据文件: {adata_path}")
         adata = sc.read_h5ad(adata_path)
         
         if method == "celltypist":

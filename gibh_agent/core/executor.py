@@ -1195,49 +1195,53 @@ class WorkflowExecutor:
             # 执行步骤（内部会调用 _process_data_flow 处理占位符）
             step_result = self.execute_step(step, step_context)
             
-            # 🔥 CRITICAL FIX: 更新 current_file_path 供下一个步骤使用
-            # 但是：只有 preprocess_data 步骤的输出才应该更新 current_file_path
-            # 其他步骤（如 differential_analysis）的输出不应该影响后续步骤的文件路径
-            # 因为后续步骤（如 PLS-DA、PCA）应该使用 <preprocess_data_output> 占位符
+            # 🔥 TASK 3 FIX: 更新 current_file_path 供下一个步骤使用
+            # 对于 scRNA-seq 工具，所有产生 output_h5ad 的步骤都应该更新 current_file_path
             result_data = step_result.get("result", {})
             if isinstance(result_data, dict):
                 tool_id = step.get("tool_id", "")
-                
-                # 🔥 CRITICAL FIX: 只有 preprocess_data 步骤的输出才更新 current_file_path
-                # 其他步骤的输出不应该影响后续步骤的文件路径
-                if tool_id == "preprocess_data" or "preprocess" in tool_id.lower():
-                    # 对于 scRNA-seq 工具，优先查找 output_h5ad
-                    tool_metadata = registry.get_metadata(tool_id)
+                tool_metadata = registry.get_metadata(tool_id)
                 tool_category = tool_metadata.category if tool_metadata else None
                 
+                # 🔥 TASK 3 FIX: 对于 scRNA-seq 工具，所有产生 output_h5ad 的步骤都更新 current_file_path
                 if tool_category == "scRNA-seq":
                     # scRNA-seq 工具优先使用 output_h5ad
                     next_file_path = (
-                            result_data.get("output_h5ad") or
+                        result_data.get("output_h5ad") or
                         result_data.get("output_file") or
                         result_data.get("output_path") or
                         result_data.get("file_path")
                     )
-                else:
-                    # 其他工具使用标准字段
-                    next_file_path = (
-                        result_data.get("output_file") or
-                        result_data.get("output_path") or
-                        result_data.get("file_path") or
-                        result_data.get("preprocessed_file")
-                    )
-                
-                if next_file_path:
-                    # 🔥 修复：即使文件不存在也更新路径（文件可能稍后创建）
-                    current_file_path = next_file_path
-                    if os.path.exists(next_file_path):
-                            logger.info(f"✅ [Executor] 更新当前文件路径（来自 preprocess_data）: {current_file_path}")
+                    
+                    if next_file_path:
+                        # 解析路径（确保是绝对路径）
+                        resolved_path = self._resolve_file_path(next_file_path)
+                        current_file_path = resolved_path
+                        if os.path.exists(resolved_path):
+                            logger.info(f"✅ [Executor] 更新当前文件路径（来自 {tool_id}）: {current_file_path}")
+                        else:
+                            logger.warning(f"⚠️ [Executor] 输出路径不存在，但会使用: {resolved_path} (文件可能稍后创建)")
                     else:
-                            logger.warning(f"⚠️ [Executor] 输出路径不存在，但会使用: {next_file_path} (文件可能稍后创建)")
+                        logger.debug(f"🔍 [Executor] 步骤 {tool_id} 未返回 output_h5ad，保持当前文件路径")
                 else:
-                    # 其他步骤的输出不更新 current_file_path
-                    # 后续步骤应该使用占位符（如 <preprocess_data_output>）而不是 current_file_path
-                    logger.debug(f"🔍 [Executor] 步骤 {tool_id} 的输出不更新 current_file_path（后续步骤应使用占位符）")
+                    # 其他工具（如代谢组学）只在 preprocess_data 步骤更新
+                    if tool_id == "preprocess_data" or "preprocess" in tool_id.lower():
+                        next_file_path = (
+                            result_data.get("output_file") or
+                            result_data.get("output_path") or
+                            result_data.get("file_path") or
+                            result_data.get("preprocessed_file")
+                        )
+                        
+                        if next_file_path:
+                            resolved_path = self._resolve_file_path(next_file_path)
+                            current_file_path = resolved_path
+                            if os.path.exists(resolved_path):
+                                logger.info(f"✅ [Executor] 更新当前文件路径（来自 {tool_id}）: {current_file_path}")
+                            else:
+                                logger.warning(f"⚠️ [Executor] 输出路径不存在，但会使用: {resolved_path}")
+                        else:
+                            logger.debug(f"🔍 [Executor] 步骤 {tool_id} 的输出不更新 current_file_path（后续步骤应使用占位符）")
             
             # 构建步骤详情（符合前端格式）
             step_detail = {
