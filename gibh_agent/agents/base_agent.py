@@ -376,6 +376,11 @@ class BaseAgent(ABC):
         
         这是统一的数据诊断入口，所有 Agent 都应该调用此方法。
         
+        🔥 TASK 3 & 4: 集成诊断缓存机制
+        - 首先检查是否有已保存的诊断结果
+        - 如果有，直接返回缓存的诊断报告
+        - 如果没有，执行诊断并保存结果
+        
         Args:
             file_metadata: FileInspector 返回的文件元数据
             omics_type: 组学类型（"scRNA", "Metabolomics", "BulkRNA", "default"）
@@ -386,6 +391,18 @@ class BaseAgent(ABC):
             Markdown 格式的诊断报告，如果失败返回 None
         """
         try:
+            # 🔥 TASK 4: 检查诊断缓存
+            from ..core.diagnosis_cache import get_diagnosis_cache
+            cache = get_diagnosis_cache()
+            
+            file_path = file_metadata.get("file_path", "")
+            if file_path:
+                cached_diagnosis = cache.load_diagnosis(file_path)
+                if cached_diagnosis:
+                    logger.info(f"✅ [DataDiagnostician] 使用缓存的诊断结果: {file_path}")
+                    # 返回缓存的诊断报告
+                    return cached_diagnosis.get("diagnosis_report")
+            
             logger.info(f"🔍 [DataDiagnostician] 开始数据诊断 - 组学类型: {omics_type}")
             
             # Step 1: 使用 DataDiagnostician 计算统计事实
@@ -621,6 +638,17 @@ Use Simplified Chinese for all content."""
                 self.context["diagnosis_stats"] = stats
                 if recommendation:
                     self.context["parameter_recommendation"] = recommendation
+                
+                # 🔥 TASK 4: 保存诊断结果到缓存
+                if file_path and response:
+                    cache_data = {
+                        "diagnosis_report": response,
+                        "stats": stats,
+                        "recommendation": recommendation,
+                        "omics_type": omics_type
+                    }
+                    cache.save_diagnosis(file_path, cache_data, file_metadata)
+                    logger.info(f"✅ [DataDiagnostician] 诊断结果已保存到缓存")
                 
                 return response
                 

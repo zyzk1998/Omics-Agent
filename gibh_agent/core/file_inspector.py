@@ -587,6 +587,118 @@ class TenXDirectoryHandler(BaseFileHandler):
             }
 
 
+@register_inspector(priority=8)
+class FastqDirectoryHandler(BaseFileHandler):
+    """
+    FASTQ 目录检查器（优先级：8，高于其他目录检查器）
+    
+    检查包含 FASTQ 文件的目录（.fastq, .fq, .fastq.gz, .fq.gz）
+    提供轻量级诊断：文件数量、总大小、文件类型等
+    """
+    
+    def can_handle(self, path: Path) -> bool:
+        """检查是否为 FASTQ 目录"""
+        if not path.is_dir():
+            return False
+        
+        try:
+            # 检查目录中是否包含 FASTQ 文件
+            fastq_extensions = ('.fastq', '.fq', '.fastq.gz', '.fq.gz')
+            for item in path.iterdir():
+                if item.is_file() and item.name.lower().endswith(fastq_extensions):
+                    return True
+                # 也检查子目录（递归一层）
+                elif item.is_dir():
+                    try:
+                        for subitem in item.iterdir():
+                            if subitem.is_file() and subitem.name.lower().endswith(fastq_extensions):
+                                return True
+                    except (PermissionError, OSError):
+                        continue
+            return False
+        except (PermissionError, OSError) as e:
+            logger.warning(f"⚠️ 无法访问目录 {path}: {e}")
+            return False
+    
+    def inspect(self, path: Path) -> Dict[str, Any]:
+        """
+        检查 FASTQ 目录
+        
+        返回轻量级诊断信息：
+        - 文件数量
+        - 总大小
+        - 文件类型（R1, R2, I1等）
+        - 是否包含完整的配对端数据
+        """
+        try:
+            fastq_files = []
+            total_size = 0
+            file_types = set()  # R1, R2, I1等
+            
+            fastq_extensions = ('.fastq', '.fq', '.fastq.gz', '.fq.gz')
+            
+            # 收集所有FASTQ文件
+            for item in path.rglob('*'):  # 递归搜索
+                if item.is_file() and item.name.lower().endswith(fastq_extensions):
+                    fastq_files.append(item)
+                    total_size += item.stat().st_size
+                    
+                    # 识别文件类型（R1, R2, I1等）
+                    name_lower = item.name.lower()
+                    if '_r1_' in name_lower or '_r1.' in name_lower or name_lower.endswith('_r1.fastq') or name_lower.endswith('_r1.fq'):
+                        file_types.add('R1')
+                    elif '_r2_' in name_lower or '_r2.' in name_lower or name_lower.endswith('_r2.fastq') or name_lower.endswith('_r2.fq'):
+                        file_types.add('R2')
+                    elif '_i1_' in name_lower or '_i1.' in name_lower or name_lower.endswith('_i1.fastq') or name_lower.endswith('_i1.fq'):
+                        file_types.add('I1')
+                    elif '_i2_' in name_lower or '_i2.' in name_lower:
+                        file_types.add('I2')
+            
+            if not fastq_files:
+                return {
+                    "status": "error",
+                    "error": f"目录 {path} 中未找到 FASTQ 文件",
+                    "file_type": "directory"
+                }
+            
+            # 检查是否包含配对端数据
+            has_paired_end = 'R1' in file_types and 'R2' in file_types
+            has_index = 'I1' in file_types or 'I2' in file_types
+            
+            # 构建诊断信息
+            diagnosis_info = {
+                "file_count": len(fastq_files),
+                "total_size_bytes": total_size,
+                "total_size_mb": round(total_size / (1024 * 1024), 2),
+                "total_size_gb": round(total_size / (1024 * 1024 * 1024), 2),
+                "file_types": sorted(list(file_types)),
+                "has_paired_end": has_paired_end,
+                "has_index": has_index,
+                "is_10x_format": has_paired_end and has_index,  # 10x格式通常包含R1, R2, I1
+                "sample_names": sorted(list(set(f.name.split('_')[0] for f in fastq_files)))[:10]  # 前10个样本名
+            }
+            
+            return {
+                "status": "success",
+                "success": True,
+                "file_type": "fastq",
+                "file_path": str(path.resolve()),
+                "shape": {"n_files": len(fastq_files)},  # 兼容性
+                "columns": None,
+                "preview": None,
+                "diagnosis_info": diagnosis_info,
+                "message": f"检测到 {len(fastq_files)} 个 FASTQ 文件，总大小 {diagnosis_info['total_size_gb']:.2f} GB"
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ [FastqDirectoryHandler] 检查失败: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": f"无法检查 FASTQ 目录: {str(e)}",
+                "file_type": "directory"
+            }
+
+
 @register_inspector(priority=5)
 class AnnDataHandler(BaseFileHandler):
     """

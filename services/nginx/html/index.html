@@ -2508,8 +2508,13 @@
                         if (!window.workflowCache) {
                             window.workflowCache = {};
                         }
+                        // 🔥 TASK 2 & 3 FIX: 确保缓存包含推荐和诊断数据
                         window.workflowCache[formId] = {
-                            workflowData: workflowData,
+                            workflowData: {
+                                ...workflowData,
+                                recommendation: workflowData.recommendation || null,
+                                diagnosis_report: workflowData.diagnosis_report || null
+                            },
                             originalQuery: userInput.value.trim() || '继续分析'
                         };
                         
@@ -2538,6 +2543,35 @@
                                     </button>
                                 </div>
                             `;
+                        }
+                        
+                        // 🔥 TASK 2 & 3 FIX: 如果有推荐或诊断报告，先显示它们
+                        const recommendation = workflowData.recommendation || null;
+                        const diagnosisReport = workflowData.diagnosis_report || null;
+                        
+                        if (diagnosisReport || recommendation) {
+                            formHtml += `<div class="alert alert-info mb-3" style="background-color: #f0f7ff; border-left: 4px solid #4d6bfe; padding: 15px; border-radius: 4px;">
+                                <h6 style="margin-top: 0; color: #1976D2; margin-bottom: 10px;">
+                                    <i class="bi bi-clipboard-check"></i> 数据诊断与参数推荐报告
+                                </h6>`;
+                            
+                            if (diagnosisReport) {
+                                formHtml += `<div style="font-size: 14px; line-height: 1.6; color: #333; margin-bottom: 10px;">
+                                    ${safeMarkedParse(diagnosisReport)}
+                                </div>`;
+                            }
+                            
+                            if (recommendation && recommendation.params && Object.keys(recommendation.params).length > 0) {
+                                formHtml += `<div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
+                                    <button id="toggle-params-btn-${formId}" class="btn btn-sm btn-primary" 
+                                            onclick="toggleParameterRecommendations('${formId}', true)">
+                                        使用推荐参数
+                                    </button>
+                                    <span class="text-muted small ms-2">点击按钮切换参数值</span>
+                                </div>`;
+                            }
+                            
+                            formHtml += `</div>`;
                         }
                         
                         // 🔥 Task 2: Render Steps as Accordion with Checkboxes
@@ -2601,6 +2635,14 @@
                                         formHtml += `<div class="mb-2">
                                             <label class="form-label small">${displayName}</label>`;
                                         
+                                        // 🔥 TASK 3 FIX: 检查是否有参数推荐
+                                        const hasRecommendation = recommendation && recommendation.params && recommendation.params[paramName];
+                                        const recommendedValue = hasRecommendation ? String(recommendation.params[paramName].value) : null;
+                                        const defaultValue = String(paramValue || '');
+                                        
+                                        // 添加数据属性，用于切换参数
+                                        const dataAttrs = `data-param-name="${escapeHtml(paramName)}" data-default-value="${escapeHtml(defaultValue)}" ${recommendedValue ? `data-recommended-value="${escapeHtml(recommendedValue)}"` : ''}`;
+                                        
                                         // 🔥 Task 3: Parameter Input Types
                                         if (typeof paramValue === 'boolean') {
                                             const checked = paramValue ? 'checked' : '';
@@ -2608,6 +2650,7 @@
                                                 <input class="form-check-input" type="checkbox" 
                                                        name="${inputName}" 
                                                        ${checked}
+                                                       ${dataAttrs}
                                                        ${isTemplateMode ? 'disabled' : ''}>
                                             </div>`;
                                         } else if (typeof paramValue === 'number') {
@@ -2615,14 +2658,24 @@
                                                        class="form-control form-control-sm" 
                                                        name="${inputName}" 
                                                        value="${paramValue}" 
+                                                       ${dataAttrs}
                                                        ${isTemplateMode ? 'readonly style="background-color: #e9ecef;"' : ''}>`;
                                         } else {
                                             formHtml += `<input type="text" 
                                                        class="form-control form-control-sm" 
                                                        name="${inputName}" 
-                                                       value="${escapeHtml(String(paramValue || ''))}" 
+                                                       value="${escapeHtml(defaultValue)}" 
                                                        placeholder="${displayName}"
+                                                       ${dataAttrs}
                                                        ${isTemplateMode ? 'readonly style="background-color: #e9ecef;"' : ''}>`;
+                                        }
+                                        
+                                        // 🔥 TASK 3 FIX: 显示推荐值提示
+                                        if (hasRecommendation) {
+                                            const reason = recommendation.params[paramName].reason || '基于数据特征推荐';
+                                            formHtml += `<small class="text-muted d-block mt-1">
+                                                <i class="bi bi-lightbulb"></i> 推荐值: <code>${escapeHtml(recommendedValue)}</code> - ${escapeHtml(reason)}
+                                            </small>`;
                                         }
                                         
                                         formHtml += `</div>`;
@@ -2743,9 +2796,36 @@
                         console.log("📋 [executeWorkflowFromForm] 更新的步骤:", updatedSteps);
                         console.log("📁 [executeWorkflowFromForm] 文件路径:", filePaths);
                         
-                        // Validate file paths
+                        // 🔥 TASK 2 FIX: Validate and collect file paths from multiple sources
+                        // 1. 从表单参数中提取（已处理）
+                        // 2. 从全局 uploadedFiles 中提取
                         if (filePaths.length === 0 && uploadedFiles.length > 0) {
                             filePaths.push(...uploadedFiles.map(f => f.path || f.file_path || f.name).filter(p => p));
+                        }
+                        
+                        // 3. 从工作流缓存中提取（如果存在）
+                        if (filePaths.length === 0 && window.workflowCache && window.workflowCache[formId]) {
+                            const cachedData = window.workflowCache[formId].workflowData;
+                            const cachedFilePaths = cachedData?.file_paths || cachedData?.workflow_data?.file_paths || [];
+                            if (cachedFilePaths.length > 0) {
+                                filePaths.push(...cachedFilePaths.filter(p => p && p !== '<PENDING_UPLOAD>' && p !== '<待上传数据>'));
+                            }
+                        }
+                        
+                        // 4. 从当前消息的文件中提取
+                        if (filePaths.length === 0) {
+                            const messageRow = formElement.closest('.message-row');
+                            if (messageRow) {
+                                const fileChips = messageRow.querySelectorAll('.file-chip');
+                                fileChips.forEach(chip => {
+                                    const fileName = chip.textContent.trim();
+                                    // 尝试从全局 uploadedFiles 中找到对应的路径
+                                    const matchedFile = uploadedFiles.find(f => f.name === fileName || f.file_name === fileName);
+                                    if (matchedFile && matchedFile.path) {
+                                        filePaths.push(matchedFile.path);
+                                    }
+                                });
+                            }
                         }
                         
                         if (filePaths.length === 0) {
@@ -2753,6 +2833,8 @@
                             document.getElementById('fileInput')?.click();
                             return;
                         }
+                        
+                        console.log("📁 [executeWorkflowFromForm] 最终文件路径:", filePaths);
                         
                         // 🔥 CRITICAL REGRESSION FIX: Construct workflow payload correctly
                         const workflowName = formElement.querySelector('h5')?.textContent?.replace('📋 ', '').replace(' [模版预览 Mode]', '') || '工作流';
@@ -2816,16 +2898,16 @@
                         const duration = ((Date.now() - startTime) / 1000).toFixed(1);
                         
                         // 🔥 TASK 1: CRITICAL - 彻底移除所有 Thinking spinner 和容器
-                        // Remove .thinking-container immediately
+                        // 1. Remove .thinking-container immediately
                         const thinkingContainers = document.querySelectorAll('.thinking-container');
                         thinkingContainers.forEach(container => container.remove());
                         
-                        // Remove from textZone
+                        // 2. Remove from textZone
                         const textZoneRef = window.currentMessageZones?.textZone;
                         if (textZoneRef) {
                             const spinner = textZoneRef.querySelector('.spinner-border');
                             if (spinner) spinner.remove();
-                            // 🔥 TASK 1: Fix :contains selector - use safe removal logic
+                            // Remove all spans containing "思考中"
                             const allSpans = textZoneRef.querySelectorAll('span');
                             allSpans.forEach(span => {
                                 if (span.textContent && span.textContent.includes('思考中')) {
@@ -2834,7 +2916,7 @@
                             });
                         }
                         
-                        // Remove from aiContentDiv
+                        // 3. Remove from aiContentDiv (全局搜索)
                         if (aiContentDiv) {
                             const spinner = aiContentDiv.querySelector('.spinner-border');
                             if (spinner) spinner.remove();
@@ -2846,10 +2928,37 @@
                                 if (el.textContent && el.textContent.includes('思考中')) {
                                     if (el.tagName === 'SPAN' || el.tagName === 'DIV') {
                                         el.remove();
-                            }
+                                    }
                                 }
                             });
                         }
+                        
+                        // 4. 🔥 TASK 1 FIX: 全局搜索并移除所有"思考中"spinner（包括聊天模式）
+                        const allSpinners = document.querySelectorAll('.spinner-border');
+                        allSpinners.forEach(spinner => {
+                            const parent = spinner.parentElement;
+                            if (parent && (parent.textContent.includes('思考中') || parent.querySelector('span')?.textContent?.includes('思考中'))) {
+                                spinner.remove();
+                                // 如果父元素只包含"思考中"文本，也移除
+                                const textAfter = parent.textContent.trim();
+                                if (textAfter === '思考中' || textAfter === '思考中...') {
+                                    parent.remove();
+                                }
+                            }
+                        });
+                        
+                        // 5. 移除所有包含"思考中"的span元素（全局）
+                        const allThinkingSpans = document.querySelectorAll('span');
+                        allThinkingSpans.forEach(span => {
+                            if (span.textContent && (span.textContent.includes('思考中') || span.textContent.includes('思考中...'))) {
+                                // 检查是否是spinner的兄弟元素
+                                const hasSpinner = span.previousElementSibling?.classList.contains('spinner-border') || 
+                                                   span.nextElementSibling?.classList.contains('spinner-border');
+                                if (hasSpinner || span.textContent.trim() === '思考中' || span.textContent.trim() === '思考中...') {
+                                    span.remove();
+                                }
+                            }
+                        });
                         
                         // 🔥 REQUIREMENT 1: Update status log only, no separate bubble
                         addProcessStep(`完成 (${duration}s)`, 'done');
@@ -2916,40 +3025,167 @@
                     
                     // 🔥 TASK 3: 测试数据询问处理函数
                     function handleTestDataQuestion(questionData) {
+                        // 🔥 TASK 2: 移除"思考中"spinner（在显示模态框之前）
+                        const textZoneRef = window.currentMessageZones?.textZone;
+                        if (textZoneRef) {
+                            const spinner = textZoneRef.querySelector('.spinner-border');
+                            if (spinner) spinner.remove();
+                            const thinkingSpans = textZoneRef.querySelectorAll('span');
+                            thinkingSpans.forEach(span => {
+                                if (span.textContent && span.textContent.includes('思考中')) {
+                                    span.remove();
+                                }
+                            });
+                        }
+                        
                         const modal = document.createElement('div');
                         modal.className = 'test-data-modal show';
+                        modal.id = 'test-data-modal-instance';
+                        
+                        // 🔥 TASK 2: 根据工作流步骤推荐对应的测试数据
+                        const workflowSteps = questionData.workflow_steps || [];
+                        const needsCellRanger = workflowSteps.some(step => 
+                            step && (step.toLowerCase().includes('cellranger') || step.toLowerCase().includes('cell_ranger'))
+                        );
+                        const needsH5ad = workflowSteps.some(step => 
+                            step && (step.toLowerCase().includes('qc') || step.toLowerCase().includes('normalize') || 
+                                    step.toLowerCase().includes('clustering') || step.toLowerCase().includes('annotation'))
+                        ) && !needsCellRanger;
+                        
+                        // 构建测试数据选项
+                        let testDataOptions = '';
+                        if (needsCellRanger) {
+                            // 全流程需要FASTQ文件
+                            testDataOptions = `
+                                <div class="test-data-option" data-path="/app/test_data/pbmc_1k_v3_fastqs" data-name="PBMC 1k v3 FASTQ">
+                                    <strong>📦 PBMC 1k v3 FASTQ 文件</strong><br>
+                                    <small>适用于：Cell Ranger 全流程分析</small><br>
+                                    <small>包含：R1, R2, I1 文件</small>
+                                </div>
+                            `;
+                        } else if (needsH5ad) {
+                            // 下游分析需要h5ad文件
+                            testDataOptions = `
+                                <div class="test-data-option" data-path="/app/test_data/pbmc_1k_v3_filtered.h5ad" data-name="PBMC 1k v3 (h5ad)">
+                                    <strong>📦 PBMC 1k v3 (已处理)</strong><br>
+                                    <small>适用于：质控、标准化、聚类、注释等下游分析</small>
+                                </div>
+                            `;
+                        } else {
+                            // 默认提供两个选项
+                            testDataOptions = `
+                                <div class="test-data-option" data-path="/app/test_data/pbmc_1k_v3_fastqs" data-name="PBMC 1k v3 FASTQ">
+                                    <strong>📦 PBMC 1k v3 FASTQ 文件</strong><br>
+                                    <small>适用于：Cell Ranger 全流程分析</small>
+                                </div>
+                                <div class="test-data-option" data-path="/app/test_data/pbmc_1k_v3_filtered.h5ad" data-name="PBMC 1k v3 (h5ad)">
+                                    <strong>📦 PBMC 1k v3 (已处理)</strong><br>
+                                    <small>适用于：下游分析（质控、标准化、聚类等）</small>
+                                </div>
+                            `;
+                        }
+                        
                         modal.innerHTML = `
                             <div class="test-data-dialog">
                                 <h3>${escapeHtml(questionData.question || '使用测试数据？')}</h3>
                                 <p>${escapeHtml(questionData.message || '')}</p>
                                 ${questionData.test_data_info ? `
                                     <div class="test-data-info">
-                                        <strong>测试数据信息：</strong><br>
+                                        <strong>推荐测试数据：</strong><br>
                                         名称: ${escapeHtml(questionData.test_data_info.name || 'N/A')}<br>
                                         描述: ${escapeHtml(questionData.test_data_info.description || 'N/A')}<br>
                                         大小: ${escapeHtml(questionData.test_data_info.size || 'N/A')}
                                     </div>
                                 ` : ''}
+                                <div class="test-data-options" style="margin: 15px 0;">
+                                    ${testDataOptions}
+                                </div>
                                 <div class="test-data-actions">
-                                    <button class="btn btn-secondary" onclick="this.closest('.test-data-modal').remove()">取消</button>
-                                    <button class="btn btn-primary" onclick="confirmTestData('${escapeHtml(questionData.test_data_path)}', '${escapeHtml(questionData.test_data_info?.name || 'test_data')}')">确认使用</button>
+                                    <button class="btn btn-secondary" onclick="cancelTestData()">取消</button>
+                                    <button class="btn btn-primary" onclick="confirmTestData('${escapeHtml(questionData.test_data_path || '/app/test_data/pbmc_1k_v3_fastqs')}', '${escapeHtml(questionData.test_data_info?.name || 'test_data')}')">确认使用推荐数据</button>
                                 </div>
                             </div>
                         `;
                         document.body.appendChild(modal);
                         
+                        // 点击测试数据选项
+                        modal.querySelectorAll('.test-data-option').forEach(option => {
+                            option.style.cssText = 'border: 2px solid #ddd; border-radius: 8px; padding: 10px; margin: 5px 0; cursor: pointer; transition: all 0.2s;';
+                            option.addEventListener('click', function() {
+                                modal.querySelectorAll('.test-data-option').forEach(opt => {
+                                    opt.style.borderColor = '#ddd';
+                                    opt.style.backgroundColor = '';
+                                });
+                                this.style.borderColor = '#4CAF50';
+                                this.style.backgroundColor = '#f0f7ff';
+                                const path = this.dataset.path;
+                                const name = this.dataset.name;
+                                // 更新确认按钮
+                                const confirmBtn = modal.querySelector('.btn-primary');
+                                if (confirmBtn) {
+                                    confirmBtn.onclick = () => confirmTestData(path, name);
+                                }
+                            });
+                        });
+                        
                         // 点击背景关闭
                         modal.addEventListener('click', (e) => {
                             if (e.target === modal) {
-                                modal.remove();
+                                cancelTestData();
                             }
                         });
                     }
                     
+                    // 🔥 TASK 2: 取消测试数据选择
+                    window.cancelTestData = function() {
+                        const modal = document.getElementById('test-data-modal-instance');
+                        if (modal) modal.remove();
+                        
+                        // 移除"思考中"spinner
+                        const textZoneRef = window.currentMessageZones?.textZone;
+                        if (textZoneRef) {
+                            const spinner = textZoneRef.querySelector('.spinner-border');
+                            if (spinner) spinner.remove();
+                            const thinkingSpans = textZoneRef.querySelectorAll('span');
+                            thinkingSpans.forEach(span => {
+                                if (span.textContent && span.textContent.includes('思考中')) {
+                                    span.remove();
+                                }
+                            });
+                        }
+                        
+                        // 显示提示消息
+                        const textZoneRef2 = window.currentMessageZones?.textZone || aiContentDiv;
+                        if (textZoneRef2) {
+                            const cancelMsg = document.createElement('div');
+                            cancelMsg.className = 'alert alert-info';
+                            cancelMsg.style.cssText = 'margin: 10px 0; padding: 10px; border-radius: 4px;';
+                            cancelMsg.innerHTML = '<i class="bi bi-info-circle"></i> 已取消测试数据选择。您可以上传自己的数据文件继续分析。';
+                            textZoneRef2.appendChild(cancelMsg);
+                        }
+                        
+                        // 重置加载状态
+                        toggleLoadingState(false);
+                        clearInterval(timerInterval);
+                    };
+                    
                     // 确认使用测试数据
                     window.confirmTestData = function(testDataPath, testDataName) {
-                        const modal = document.querySelector('.test-data-modal');
+                        const modal = document.getElementById('test-data-modal-instance');
                         if (modal) modal.remove();
+                        
+                        // 移除"思考中"spinner
+                        const textZoneRef = window.currentMessageZones?.textZone;
+                        if (textZoneRef) {
+                            const spinner = textZoneRef.querySelector('.spinner-border');
+                            if (spinner) spinner.remove();
+                            const thinkingSpans = textZoneRef.querySelectorAll('span');
+                            thinkingSpans.forEach(span => {
+                                if (span.textContent && span.textContent.includes('思考中')) {
+                                    span.remove();
+                                }
+                            });
+                        }
                         
                         // 使用测试数据重新发送请求
                         const query = userInput.value.trim() || '分析这个数据文件';
@@ -3573,25 +3809,44 @@
         
         function addFavoriteWorkflow(workflowData) {
             const favorites = getFavoriteWorkflows();
-            const workflowId = workflowData.workflow_config?.workflow_data?.workflow_name || 
-                              workflowData.workflow_data?.workflow_name || 
-                              workflowData.workflow_name || 
-                              `工作流_${Date.now()}`;
             
-            // 检查是否已存在
-            const exists = favorites.find(f => f.id === workflowId);
+            // 🔥 TASK 4 FIX: 生成唯一ID并提取工作流名称
+            const workflowName = workflowData.workflow_config?.workflow_data?.workflow_name || 
+                                workflowData.workflow_data?.workflow_name || 
+                                workflowData.workflow_name || 
+                                `工作流_${Date.now()}`;
+            const workflowId = `workflow_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            
+            // 提取步骤
+            const steps = workflowData.workflow_config?.workflow_data?.steps || 
+                         workflowData.workflow_data?.steps || 
+                         workflowData.steps || [];
+            
+            // 检查是否已存在（基于工作流名称和步骤数量）
+            const exists = favorites.find(f => {
+                const fSteps = f.workflowData?.workflow_data?.steps || f.steps || [];
+                return f.name === workflowName && fSteps.length === steps.length;
+            });
             if (exists) {
                 alert('该工作流已收藏');
                 return;
             }
             
+            // 🔥 TASK 4 FIX: 保存完整的workflowData结构
             const favorite = {
                 id: workflowId,
-                name: workflowId,
-                steps: workflowData.workflow_config?.workflow_data?.steps || 
-                       workflowData.workflow_data?.steps || 
-                       workflowData.steps || [],
-                workflowData: workflowData,
+                name: workflowName,
+                steps: steps,
+                workflowData: {
+                    workflow_config: workflowData.workflow_config || workflowData,
+                    workflow_data: workflowData.workflow_data || workflowData.workflow_config?.workflow_data || {
+                        workflow_name: workflowName,
+                        steps: steps
+                    },
+                    file_paths: workflowData.file_paths || [],
+                    recommendation: workflowData.recommendation || null,
+                    diagnosis_report: workflowData.diagnosis_report || null
+                },
                 createdAt: new Date().toISOString()
             };
             
@@ -3609,9 +3864,18 @@
                 return;
             }
             
-            // 从工作流缓存中获取数据
+            // 🔥 TASK 4 FIX: 优先从工作流缓存中获取完整数据
             if (window.workflowCache && window.workflowCache[formId]) {
-                addFavoriteWorkflow(window.workflowCache[formId].workflowData);
+                const cachedData = window.workflowCache[formId].workflowData;
+                // 确保保存完整的workflowData结构
+                const workflowDataToSave = {
+                    workflow_config: cachedData.workflow_config || cachedData,
+                    workflow_data: cachedData.workflow_data || cachedData.workflow_config?.workflow_data || cachedData,
+                    file_paths: cachedData.file_paths || [],
+                    recommendation: cachedData.recommendation || null,
+                    diagnosis_report: cachedData.diagnosis_report || null
+                };
+                addFavoriteWorkflow(workflowDataToSave);
                 return;
             }
             
@@ -3628,7 +3892,7 @@
                 const params = {};
                 
                 // 提取参数
-                formElement.querySelectorAll(`input[name^="param_${index}_"]`).forEach(input => {
+                formElement.querySelectorAll(`input[name^="param_${index}_"], select[name^="param_${index}_"]`).forEach(input => {
                     const paramName = input.name.replace(`param_${index}_`, '');
                     if (input.type === 'checkbox') {
                         params[paramName] = input.checked;
@@ -3647,11 +3911,19 @@
                 });
             });
             
+            // 🔥 TASK 4 FIX: 保存完整的workflowData结构
             const workflowData = {
+                workflow_config: {
+                    workflow_data: {
+                        workflow_name: workflowName,
+                        steps: steps
+                    }
+                },
                 workflow_data: {
                     workflow_name: workflowName,
                     steps: steps
-                }
+                },
+                file_paths: []
             };
             
             addFavoriteWorkflow(workflowData);
@@ -3672,8 +3944,50 @@
                 return;
             }
             
-            // 渲染工作流卡片
-            renderWorkflowCard(favorite.workflowData);
+            // 🔥 TASK 4 FIX: 确保 renderWorkflowCard 可用，如果不可用则延迟重试
+            if (typeof window.renderWorkflowCard === 'function') {
+                // 渲染工作流卡片
+                try {
+                    const workflowData = favorite.workflowData || {
+                        workflow_config: {
+                            workflow_data: {
+                                workflow_name: favorite.name,
+                                steps: favorite.steps || []
+                            }
+                        },
+                        workflow_data: {
+                            workflow_name: favorite.name,
+                            steps: favorite.steps || []
+                        }
+                    };
+                    window.renderWorkflowCard(workflowData);
+                } catch (e) {
+                    console.error('❌ [useFavoriteWorkflow] 渲染失败:', e);
+                    alert('工作流渲染失败: ' + e.message);
+                }
+            } else {
+                console.error('❌ renderWorkflowCard 未定义，等待函数加载...');
+                // 等待一段时间后重试（函数可能在异步加载中）
+                setTimeout(() => {
+                    if (typeof window.renderWorkflowCard === 'function') {
+                        const workflowData = favorite.workflowData || {
+                            workflow_config: {
+                                workflow_data: {
+                                    workflow_name: favorite.name,
+                                    steps: favorite.steps || []
+                                }
+                            },
+                            workflow_data: {
+                                workflow_name: favorite.name,
+                                steps: favorite.steps || []
+                            }
+                        };
+                        window.renderWorkflowCard(workflowData);
+                    } else {
+                        alert('工作流渲染功能暂不可用，请刷新页面后重试。');
+                    }
+                }, 500);
+            }
         }
         
         function updateFavoriteWorkflowsList() {

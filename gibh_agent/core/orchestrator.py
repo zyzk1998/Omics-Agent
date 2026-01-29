@@ -973,27 +973,47 @@ class AgentOrchestrator:
                     # 检测是否包含 cellranger 步骤
                     has_cellranger_step = any("cellranger" in step.lower() for step in target_steps)
                     
-                    # 如果用户意图包含 RNA 分析全流程（包括 cellranger），询问是否使用测试数据
-                    if is_rna_domain and (has_cellranger_intent or has_cellranger_step or is_full_workflow):
-                        logger.info("🔍 [Orchestrator] 检测到 RNA 分析全流程意图（包含 cellranger），询问是否使用测试数据")
+                    # 🔥 TASK 2 & 3: 如果用户意图包含 RNA 分析，询问是否使用测试数据（根据工作流步骤推荐对应数据）
+                    if is_rna_domain and (has_cellranger_intent or has_cellranger_step or is_full_workflow or len(target_steps) > 0):
+                        logger.info("🔍 [Orchestrator] 检测到 RNA 分析意图，询问是否使用测试数据")
                         yield self._format_sse("status", {
-                            "content": "检测到您想要进行 RNA 分析全流程（包含 Cell Ranger 步骤）...",
+                            "content": "检测到您想要进行 RNA 分析，但未上传文件...",
                             "state": "running"
                         })
                         await asyncio.sleep(0.01)
                         
+                        # 🔥 TASK 3: 根据工作流步骤推荐对应的测试数据
+                        from ..core.test_data_manager import TestDataManager
+                        test_data_manager = TestDataManager()
+                        recommended_datasets = test_data_manager.get_datasets_by_workflow_type(target_steps)
+                        
+                        # 选择最合适的测试数据
+                        recommended_dataset = None
+                        if recommended_datasets:
+                            # 优先选择第一个推荐的数据集
+                            recommended_dataset = recommended_datasets[0]
+                        
+                        # 构建消息
+                        if has_cellranger_step or has_cellranger_intent:
+                            message = "检测到您想要进行 RNA 分析全流程（包含 Cell Ranger 步骤），但未上传文件。Cell Ranger 步骤需要原始 FASTQ 文件，文件通常较大。"
+                            question = "是否使用测试数据进行全流程分析？"
+                        else:
+                            message = "检测到您想要进行 RNA 分析，但未上传文件。"
+                            question = "是否使用测试数据进行分析？"
+                        
                         # 发送测试数据询问
                         test_data_question = {
                             "type": "test_data_question",
-                            "message": "检测到您想要进行 RNA 分析全流程，但未上传文件。Cell Ranger 步骤需要原始 FASTQ 文件，文件通常较大。",
-                            "question": "是否使用测试数据进行全流程分析？",
-                            "test_data_path": "/app/test_data/pbmc_1k_v3_fastqs",  # 测试数据路径
+                            "message": message,
+                            "question": question,
+                            "test_data_path": recommended_dataset.get("fastq_dir") or recommended_dataset.get("h5ad_file") or "/app/test_data/pbmc_1k_v3_fastqs" if recommended_dataset else "/app/test_data/pbmc_1k_v3_fastqs",
                             "test_data_info": {
-                                "name": "PBMC 1k v3",
-                                "description": "10x Genomics 单细胞 RNA-seq 测试数据",
+                                "name": recommended_dataset.get("name", "PBMC 1k v3") if recommended_dataset else "PBMC 1k v3",
+                                "description": recommended_dataset.get("description", "10x Genomics 单细胞 RNA-seq 测试数据") if recommended_dataset else "10x Genomics 单细胞 RNA-seq 测试数据",
                                 "size": "约 100MB"
                             },
-                            "workflow_steps": target_steps
+                            "workflow_steps": target_steps,
+                            "recommended_datasets": recommended_datasets  # 传递所有推荐的数据集供前端选择
                         }
                         yield self._format_sse("workflow", {
                             "workflow_config": None,
@@ -1150,26 +1170,59 @@ class AgentOrchestrator:
 
 **下一步**: 已为您规划分析流程，请确认执行。"""
                             else:  # RNA
-                                diagnosis_message = f"""### 📊 数据体检报告
+                                # 🔥 TASK 1 FIX: 对于FASTQ文件，显示轻量级诊断信息
+                                file_type = file_metadata.get('file_type', '未知')
+                                if file_type == "fastq":
+                                    # FASTQ文件的轻量级诊断
+                                    diagnosis_info = file_metadata.get("diagnosis_info", {})
+                                    file_count = diagnosis_info.get("file_count", 0)
+                                    total_size_gb = diagnosis_info.get("total_size_gb", 0)
+                                    has_paired_end = diagnosis_info.get("has_paired_end", False)
+                                    has_index = diagnosis_info.get("has_index", False)
+                                    
+                                    diagnosis_message = f"""### 📊 数据体检报告
+
+**数据规模**:
+- **FASTQ文件数**: {file_count} 个
+- **总大小**: {total_size_gb:.2f} GB
+
+**数据特征**:
+- 文件类型: FASTQ 目录
+- 配对端数据: {'是' if has_paired_end else '否'}
+- 索引文件: {'是' if has_index else '否'}
+- 10x格式: {'是' if diagnosis_info.get('is_10x_format', False) else '否'}
+
+**数据质量**: FASTQ 原始数据，需要先进行 Cell Ranger 计数处理。
+
+**下一步**: 已为您规划分析流程（包含 Cell Ranger 步骤），请确认执行。"""
+                                else:
+                                    # 非FASTQ文件的诊断
+                                    diagnosis_message = f"""### 📊 数据体检报告
 
 **数据规模**:
 - **细胞数**: {n_samples} 个
 - **基因数**: {n_features} 个
 
 **数据特征**:
-- 文件类型: {file_metadata.get('file_type', '未知')}
+- 文件类型: {file_type}
 - 稀疏度: {file_metadata.get('sparsity', 'N/A')}
 
 **数据质量**: 数据已就绪，可以开始分析。
 
 **下一步**: 已为您规划分析流程，请确认执行。"""
                             
+                            # 🔥 TASK 2 & 3 FIX: 添加参数推荐到诊断事件
+                            recommendation_data = None
+                            if hasattr(self.agent, 'context') and "parameter_recommendation" in self.agent.context:
+                                recommendation_data = self.agent.context.get("parameter_recommendation")
+                            
                             yield self._format_sse("diagnosis", {
                                 "message": diagnosis_message,
                                 "n_samples": n_samples,
                                 "n_features": n_features,
                                 "file_type": file_metadata.get('file_type'),
-                                "status": "data_ready"
+                                "status": "data_ready",
+                                "recommendation": recommendation_data  # 🔥 TASK 3: 添加参数推荐
                             })
                             await asyncio.sleep(0.01)
                     except Exception as e:
@@ -1296,18 +1349,32 @@ class AgentOrchestrator:
                             logger.info(f"🔍 [Orchestrator] DEBUG: workflow_data.steps exists={('steps' in workflow_data)}, steps type={type(steps)}, steps length={len(steps) if steps else 0}")
                         
                         # 🔥 TASK 1: Yield workflow event ONLY ONCE, at the very end of planning block
-                        logger.info(f"✅ [Orchestrator] Path A: 发送workflow事件，包含 {len(steps)} 个步骤")
-                        yield self._format_sse("workflow", {
+                        # 🔥 TASK 2 & 3 FIX: 添加参数推荐和诊断报告到工作流配置
+                        workflow_event_data = {
                             "workflow_config": workflow_data,
                             "template_mode": False  # 🔥 CRITICAL: Always False in Path A
-                        })
+                        }
+                        
+                        # 添加参数推荐（如果存在）
+                        if hasattr(self.agent, 'context') and "parameter_recommendation" in self.agent.context:
+                            recommendation = self.agent.context.get("parameter_recommendation")
+                            if recommendation:
+                                workflow_event_data["recommendation"] = recommendation
+                                logger.info(f"✅ [Orchestrator] 添加参数推荐到工作流事件: {len(recommendation.get('params', {}))} 个参数")
+                        
+                        # 添加诊断报告（如果存在）
+                        if hasattr(self.agent, 'context') and "diagnosis_report" in self.agent.context:
+                            diagnosis_report = self.agent.context.get("diagnosis_report")
+                            if diagnosis_report:
+                                workflow_event_data["diagnosis_report"] = diagnosis_report
+                                logger.info(f"✅ [Orchestrator] 添加诊断报告到工作流事件")
+                        
+                        logger.info(f"✅ [Orchestrator] Path A: 发送workflow事件，包含 {len(steps)} 个步骤")
+                        yield self._format_sse("workflow", workflow_event_data)
                         await asyncio.sleep(0.01)
                     
-                        # Yield result event with workflow config
-                        yield self._format_sse("result", {
-                            "workflow_config": workflow_data,
-                            "template_mode": False
-                        })
+                        # Yield result event with workflow config (包含推荐和诊断)
+                        yield self._format_sse("result", workflow_event_data)
                         await asyncio.sleep(0.01)
                         
                         yield self._format_sse("status", {

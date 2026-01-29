@@ -543,16 +543,30 @@
                                         fullResponse += `\n[提示] ${data.waiting_message || data.content}\n\n`;
                                     }
                                     
-                                    // 🔥 TASK 3: 处理测试数据询问
+                                    // 🔥 TASK 2 & 3: 处理测试数据询问（支持取消和推荐数据）
                                     if (data.test_data_question) {
                                         const question = data.test_data_question;
-                                        const confirmed = confirm(
-                                            `${question.question}\n\n${question.message}\n\n` +
-                                            `测试数据: ${question.test_data_info?.name || 'N/A'}\n` +
-                                            `描述: ${question.test_data_info?.description || 'N/A'}\n` +
-                                            `大小: ${question.test_data_info?.size || 'N/A'}\n\n` +
-                                            `是否使用测试数据？`
-                                        );
+                                        
+                                        // 构建确认消息
+                                        let confirmMessage = `${question.question}\n\n${question.message}\n\n`;
+                                        
+                                        // 如果有推荐的数据集，显示它们
+                                        if (question.recommended_datasets && question.recommended_datasets.length > 0) {
+                                            confirmMessage += '推荐测试数据：\n';
+                                            question.recommended_datasets.forEach((ds, idx) => {
+                                                confirmMessage += `${idx + 1}. ${ds.name} (${ds.workflow_type || '通用'})\n`;
+                                                confirmMessage += `   ${ds.description}\n`;
+                                            });
+                                            confirmMessage += '\n';
+                                        } else if (question.test_data_info) {
+                                            confirmMessage += `测试数据: ${question.test_data_info.name || 'N/A'}\n`;
+                                            confirmMessage += `描述: ${question.test_data_info.description || 'N/A'}\n`;
+                                            confirmMessage += `大小: ${question.test_data_info.size || 'N/A'}\n\n`;
+                                        }
+                                        
+                                        confirmMessage += '是否使用测试数据？';
+                                        
+                                        const confirmed = confirm(confirmMessage);
                                         if (confirmed) {
                                             // 使用测试数据重新发送请求
                                             uploadedFiles = [{
@@ -561,6 +575,11 @@
                                             }];
                                             sendMessage();
                                             return; // 停止当前流
+                                        } else {
+                                            // 🔥 TASK 2: 用户点击取消，显示提示信息
+                                            fullResponse += '\n\n[提示] 已取消测试数据选择。您可以上传自己的数据文件继续分析。\n\n';
+                                            chatResponse.textContent = fullResponse;
+                                            return; // 停止当前流，等待用户上传文件
                                         }
                                     }
                                 } catch (e) {

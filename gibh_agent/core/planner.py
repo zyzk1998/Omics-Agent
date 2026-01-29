@@ -1119,13 +1119,25 @@ Classify the intent and return JSON only. Remember:
                 else:
                     logger.warning(f"⚠️ [SOPPlanner] 文件元数据中没有 file_path")
                 
-                # Check file_type from metadata
-                if file_type == "tabular":
+                # 🔥 TASK 2 FIX: Check file_type from metadata (more reliable than extension for directories)
+                if file_type == "fastq":
+                    if domain_name == "Metabolomics":
+                        logger.warning(f"⚠️ LLM 将 FASTQ 目录分类为 Metabolomics，强制覆盖为 RNA")
+                        domain_name = "RNA"
+                    else:
+                        logger.info(f"✅ FASTQ 目录已正确分类为 {domain_name}")
+                elif file_type == "tabular":
                     if domain_name == "RNA":
                         logger.warning(f"⚠️ LLM 将 tabular 文件分类为 RNA，强制覆盖为 Metabolomics")
                         domain_name = "Metabolomics"
                     else:
                         logger.info(f"✅ tabular 文件已正确分类为 {domain_name}")
+                elif file_type == "10x_mtx" or file_type == "anndata":
+                    if domain_name == "Metabolomics":
+                        logger.warning(f"⚠️ LLM 将 {file_type} 文件分类为 Metabolomics，强制覆盖为 RNA")
+                        domain_name = "RNA"
+                    else:
+                        logger.info(f"✅ {file_type} 文件已正确分类为 {domain_name}")
             else:
                 logger.warning(f"⚠️ [SOPPlanner] 没有文件元数据，无法进行文件类型检查")
             

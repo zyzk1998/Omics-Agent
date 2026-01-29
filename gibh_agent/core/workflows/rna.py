@@ -205,4 +205,187 @@ class RNAWorkflow(BaseWorkflow):
             raise ValueError(f"未知的步骤ID: {step_id}")
         
         return metadata_map[step_id]
+    
+    def generate_template(
+        self,
+        target_steps: Optional[List[str]] = None,
+        file_metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        生成工作流模板（RNA特定实现）
+        
+        🔥 TASK 1 FIX: 根据文件类型调整步骤顺序
+        - 如果输入是FASTQ，必须先做 cellranger_count -> convert_cellranger_to_h5ad -> qc_filter
+        - 如果输入是H5AD/10x，直接从 qc_filter 开始，跳过 cellranger 步骤
+        
+        Args:
+            target_steps: 用户请求的步骤列表（如果为 None，返回完整工作流）
+            file_metadata: 文件元数据（可选，用于填充参数）
+            
+        Returns:
+            符合前端格式的工作流配置字典
+        """
+        # 如果没有指定目标步骤，返回完整工作流
+        if target_steps is None:
+            target_steps = list(self.steps_dag.keys())
+        
+        # 🔥 TASK 1 FIX: 根据文件类型调整步骤顺序
+        file_type = file_metadata.get("file_type", "") if file_metadata else ""
+        file_path = file_metadata.get("file_path", "") if file_metadata else ""
+        
+        # 检测是否为FASTQ文件
+        is_fastq = False
+        if file_type == "fastq":
+            is_fastq = True
+        elif file_path:
+            # 检查文件路径或目录名
+            import os
+            if os.path.isdir(file_path):
+                # 检查目录中是否包含FASTQ文件
+                try:
+                    fastq_files = [f for f in os.listdir(file_path) if f.endswith(('.fastq', '.fq', '.fastq.gz', '.fq.gz'))]
+                    if fastq_files:
+                        is_fastq = True
+                except (OSError, PermissionError):
+                    pass
+            elif file_path.lower().endswith(('.fastq', '.fq', '.fastq.gz', '.fq.gz')):
+                is_fastq = True
+        
+        # 🔥 TASK 1 FIX: 如果是FASTQ文件，确保包含cellranger步骤
+        if is_fastq:
+            # 如果目标步骤中没有cellranger相关步骤，添加它们
+            if "rna_cellranger_count" not in target_steps:
+                # 检查是否需要添加cellranger步骤
+                # 如果用户请求的是"全流程"或包含"cellranger"，添加这些步骤
+                target_steps = ["rna_cellranger_count", "rna_convert_cellranger_to_h5ad"] + [s for s in target_steps if s not in ["rna_cellranger_count", "rna_convert_cellranger_to_h5ad"]]
+                logger.info(f"✅ [RNAWorkflow] 检测到FASTQ文件，添加Cell Ranger步骤: {target_steps[:2]}")
+        else:
+            # 如果不是FASTQ文件，移除cellranger步骤（如果存在）
+            target_steps = [s for s in target_steps if s not in ["rna_cellranger_count", "rna_convert_cellranger_to_h5ad"]]
+            logger.info(f"✅ [RNAWorkflow] 非FASTQ文件，跳过Cell Ranger步骤")
+        
+        # 解析依赖
+        resolved_steps = self.resolve_dependencies(target_steps)
+        
+        # 🔥 CRITICAL FIX: 确保 resolved_steps 不为空
+        if not resolved_steps:
+            logger.warning(f"⚠️ [RNAWorkflow] resolve_dependencies 返回空列表，使用完整工作流")
+            resolved_steps = list(self.steps_dag.keys())
+        
+        # 🔥 CRITICAL FIX: 再次确保不为空
+        if not resolved_steps:
+            logger.error(f"❌ [RNAWorkflow] steps_dag 为空，无法生成模板")
+            raise ValueError("工作流 DAG 为空，无法生成模板")
+        
+        # 🔥 TASK 1 FIX: 如果是FASTQ，确保步骤顺序正确
+        if is_fastq:
+            # 确保cellranger步骤在qc_filter之前
+            if "rna_cellranger_count" in resolved_steps and "rna_qc_filter" in resolved_steps:
+                cellranger_idx = resolved_steps.index("rna_cellranger_count")
+                convert_idx = resolved_steps.index("rna_convert_cellranger_to_h5ad") if "rna_convert_cellranger_to_h5ad" in resolved_steps else -1
+                qc_idx = resolved_steps.index("rna_qc_filter")
+                
+                # 如果qc_filter在cellranger之前，重新排序
+                if qc_idx < cellranger_idx:
+                    # 移除这些步骤
+                    resolved_steps.remove("rna_cellranger_count")
+                    if convert_idx >= 0:
+                        resolved_steps.remove("rna_convert_cellranger_to_h5ad")
+                    resolved_steps.remove("rna_qc_filter")
+                    
+                    # 重新插入到正确位置
+                    # 找到第一个下游步骤的位置
+                    downstream_steps = ["rna_doublet_detection", "rna_normalize", "rna_hvg"]
+                    insert_pos = 0
+                    for ds in downstream_steps:
+                        if ds in resolved_steps:
+                            insert_pos = resolved_steps.index(ds)
+                            break
+                    
+                    # 在正确位置插入
+                    resolved_steps.insert(insert_pos, "rna_cellranger_count")
+                    if convert_idx >= 0:
+                        resolved_steps.insert(insert_pos + 1, "rna_convert_cellranger_to_h5ad")
+                    resolved_steps.insert(insert_pos + (2 if convert_idx >= 0 else 1), "rna_qc_filter")
+                    
+                    logger.info(f"✅ [RNAWorkflow] 重新排序步骤，确保FASTQ流程正确: {resolved_steps[:5]}")
+        
+        # 生成步骤配置
+        steps = []
+        for step_id in resolved_steps:
+            step_meta = self.get_step_metadata(step_id)
+            
+            # 构建步骤配置
+            step_config = {
+                "id": step_id,
+                "step_id": step_id,
+                "tool_id": step_meta.get("tool_id", step_id),
+                "name": step_meta.get("name", step_id),
+                "step_name": step_meta.get("name", step_id),
+                "description": step_meta.get("description", ""),
+                "desc": step_meta.get("description", "")[:100],
+                "selected": True,
+                "params": step_meta.get("default_params", {}).copy()
+            }
+            
+            # 🔥 TASK 1 FIX: 根据文件类型和步骤类型填充参数
+            if file_metadata:
+                file_path = file_metadata.get("file_path")
+                if file_path:
+                    # CellRanger步骤需要fastqs_path
+                    if step_id == "rna_cellranger_count":
+                        step_config["params"]["fastqs_path"] = file_path
+                        # 设置其他CellRanger参数
+                        if "sample_id" not in step_config["params"]:
+                            import os
+                            sample_id = os.path.basename(file_path).replace("_fastqs", "").replace("fastqs", "").replace("_", "-")
+                            if not sample_id or sample_id == "":
+                                sample_id = "sample"
+                            step_config["params"]["sample_id"] = sample_id
+                        if "transcriptome_path" not in step_config["params"]:
+                            step_config["params"]["transcriptome_path"] = "/opt/refdata-gex-GRCh38-2020-A"  # 默认值
+                        if "output_dir" not in step_config["params"]:
+                            import os
+                            output_dir = os.path.join(os.path.dirname(file_path), "cellranger_output")
+                            step_config["params"]["output_dir"] = output_dir
+                    # Convert步骤需要cellranger输出路径（占位符，执行时自动填充）
+                    elif step_id == "rna_convert_cellranger_to_h5ad":
+                        step_config["params"]["cellranger_matrix_dir"] = "<rna_cellranger_count_output>"
+                    # QC和其他步骤需要adata_path
+                    elif step_id in ["rna_qc_filter", "rna_doublet_detection", "rna_normalize", "rna_hvg", 
+                                    "rna_scale", "rna_pca", "rna_neighbors", "rna_umap", "rna_clustering",
+                                    "rna_find_markers", "rna_cell_annotation"]:
+                        if is_fastq:
+                            # FASTQ流程：qc_filter应该使用convert步骤的输出
+                            step_config["params"]["adata_path"] = "<rna_convert_cellranger_to_h5ad_output>" if step_id == "rna_qc_filter" else "<previous_step_output>"
+                        else:
+                            # 非FASTQ流程：直接使用输入文件
+                            step_config["params"]["adata_path"] = file_path
+            else:
+                # Plan-First模式：使用占位符
+                if step_id == "rna_cellranger_count":
+                    step_config["params"]["fastqs_path"] = "<PENDING_UPLOAD>"
+                elif step_id == "rna_convert_cellranger_to_h5ad":
+                    step_config["params"]["cellranger_matrix_dir"] = "<rna_cellranger_count_output>"
+                elif step_id in ["rna_qc_filter", "rna_doublet_detection", "rna_normalize", "rna_hvg",
+                                "rna_scale", "rna_pca", "rna_neighbors", "rna_umap", "rna_clustering",
+                                "rna_find_markers", "rna_cell_annotation"]:
+                    step_config["params"]["adata_path"] = "<PENDING_UPLOAD>"
+            
+            steps.append(step_config)
+        
+        # 构建工作流配置
+        workflow_name = self._generate_workflow_name(target_steps, file_metadata)
+        if is_fastq:
+            workflow_name = "RNA 全流程分析（含Cell Ranger）"
+        
+        return {
+            "type": "workflow_config",
+            "workflow_data": {
+                "workflow_name": workflow_name,
+                "name": workflow_name,
+                "steps": steps
+            },
+            "file_paths": [file_metadata.get("file_path")] if file_metadata and file_metadata.get("file_path") else []
+        }
 
