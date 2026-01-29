@@ -552,18 +552,18 @@ File Path: {file_path}
                         except Exception as e:
                             logger.warning(f"⚠️ 诊断报告生成失败: {e}")
                         
-                    # 添加诊断报告到结果
-                    if diagnosis_report:
-                        plan_result["diagnosis_report"] = diagnosis_report
-                    
-                    # 🔥 TASK 5: 添加参数推荐到结果
-                    if hasattr(self, 'context') and "parameter_recommendation" in self.context:
-                        recommendation = self.context.get("parameter_recommendation")
-                        if recommendation:
-                            plan_result["recommendation"] = recommendation
-                            logger.info(f"✅ [RNAAgent] 添加参数推荐到结果: {len(recommendation.get('params', {}))} 个参数")
+                        # 添加诊断报告到结果
+                        if diagnosis_report:
+                            plan_result["diagnosis_report"] = diagnosis_report
                         
-                    return plan_result
+                        # 🔥 TASK 5: 添加参数推荐到结果
+                        if hasattr(self, 'context') and "parameter_recommendation" in self.context:
+                            recommendation = self.context.get("parameter_recommendation")
+                            if recommendation:
+                                plan_result["recommendation"] = recommendation
+                                logger.info(f"✅ [RNAAgent] 添加参数推荐到结果: {len(recommendation.get('params', {}))} 个参数")
+                        
+                        return plan_result
                     else:
                         logger.warning(f"⚠️ [RNAPlanner] 规划失败: {plan_result.get('error')}")
                 else:

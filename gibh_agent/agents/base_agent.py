@@ -1943,4 +1943,110 @@ Evaluate and return ONLY the JSON object:"""
                 "weaknesses": [],
                 "recommendations": []
             }
+    
+    def _extract_parameter_recommendations(
+        self,
+        diagnosis_report: str,
+        omics_type: str,
+        stats: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        从诊断报告中提取参数推荐
+        
+        🔥 TASK 5: 解析 Markdown 表格中的参数推荐
+        
+        Args:
+            diagnosis_report: 诊断报告 Markdown 文本
+            omics_type: 组学类型
+            stats: 统计数据
+        
+        Returns:
+            参数推荐字典，格式：
+            {
+                "summary": "推荐摘要",
+                "params": {
+                    "param_name": {
+                        "value": "推荐值",
+                        "reason": "推荐理由"
+                    }
+                }
+            }
+        """
+        if not diagnosis_report:
+            return None
+        
+        try:
+            import re
+            
+            # 查找参数推荐表格（Markdown 表格格式）
+            # 表格格式：| 参数名 | 默认值 | **推荐值** | 推荐理由 |
+            table_pattern = r'###\s*💡\s*参数推荐.*?\n(.*?)(?=\n###|\n##|$)'
+            table_match = re.search(table_pattern, diagnosis_report, re.DOTALL | re.IGNORECASE)
+            
+            if not table_match:
+                logger.debug("⚠️ [ParameterRecommendation] 未找到参数推荐表格")
+                return None
+            
+            table_content = table_match.group(1)
+            
+            # 解析表格行（跳过表头）
+            lines = table_content.strip().split('\n')
+            params = {}
+            
+            for line in lines:
+                line = line.strip()
+                if not line or not line.startswith('|'):
+                    continue
+                
+                # 跳过表头分隔行（如 | :--- | :--- | :--- | :--- |）
+                if re.match(r'^\|[\s:---]+\|', line):
+                    continue
+                
+                # 解析表格行：| 参数名 | 默认值 | **推荐值** | 推荐理由 |
+                cells = [cell.strip() for cell in line.split('|')[1:-1]]  # 去掉首尾空元素
+                
+                if len(cells) >= 4:
+                    param_name = cells[0].strip()
+                    default_value = cells[1].strip()
+                    recommended_value = cells[2].strip()
+                    reason = cells[3].strip()
+                    
+                    # 清理推荐值（移除 Markdown 加粗标记）
+                    recommended_value = re.sub(r'\*\*|\*', '', recommended_value).strip()
+                    
+                    # 尝试转换推荐值为合适的类型
+                    try:
+                        # 尝试转换为数字
+                        if '.' in recommended_value:
+                            recommended_value = float(recommended_value)
+                        else:
+                            recommended_value = int(recommended_value)
+                    except ValueError:
+                        # 保持字符串
+                        pass
+                    
+                    params[param_name] = {
+                        "default": default_value,
+                        "value": recommended_value,
+                        "reason": reason
+                    }
+            
+            if not params:
+                logger.debug("⚠️ [ParameterRecommendation] 表格解析成功但未找到参数")
+                return None
+            
+            # 生成推荐摘要
+            summary = f"基于数据特征，AI 已为您推荐 {len(params)} 个参数的优化值。"
+            
+            recommendation = {
+                "summary": summary,
+                "params": params
+            }
+            
+            logger.info(f"✅ [ParameterRecommendation] 成功提取 {len(params)} 个参数推荐")
+            return recommendation
+            
+        except Exception as e:
+            logger.warning(f"⚠️ [ParameterRecommendation] 提取参数推荐失败: {e}", exc_info=True)
+            return None
 

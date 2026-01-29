@@ -4165,16 +4165,16 @@
                             const hasRecommendation = recommendation && recommendation.params && recommendation.params[paramName];
                             const recommendedValue = hasRecommendation ? String(recommendation.params[paramName].value) : null;
                             
-                            // 添加数据属性，用于切换参数
-                            const dataAttrs = `data-param-name="${paramName}" data-default-value="${defaultValue}" ${recommendedValue ? `data-recommended-value="${recommendedValue}"` : ''}`;
+                            // 添加数据属性，用于切换参数（使用转义确保安全）
+                            const dataAttrs = `data-param-name="${escapeHtml(paramName)}" data-default-value="${escapeHtml(defaultValue)}" ${recommendedValue ? `data-recommended-value="${escapeHtml(recommendedValue)}"` : ''}`;
                             
-                            formHtml += `<input type="text" class="form-control form-control-sm param-input" name="${inputName}" value="${valueStr}" placeholder="${displayName}" ${dataAttrs}>`;
+                            formHtml += `<input type="text" class="form-control form-control-sm param-input" name="${inputName}" value="${escapeHtml(valueStr)}" placeholder="${escapeHtml(displayName)}" ${dataAttrs}>`;
                             
                             // 如果有推荐值，显示提示
                             if (hasRecommendation) {
                                 const reason = recommendation.params[paramName].reason || '基于数据特征推荐';
                                 formHtml += `<small class="text-muted d-block mt-1">
-                                    <i class="bi bi-lightbulb"></i> 推荐值: <code>${recommendedValue}</code> - ${reason}
+                                    <i class="bi bi-lightbulb"></i> 推荐值: <code>${escapeHtml(recommendedValue)}</code> - ${escapeHtml(reason)}
                                 </small>`;
                             }
                         }
@@ -4220,6 +4220,16 @@
             </div>`;
             
             appendMessage('ai', formHtml, null, null, true);
+            
+            // 🔥 TASK 5: 初始化参数推荐切换按钮状态（在 DOM 更新后）
+            setTimeout(() => {
+                const toggleBtn = document.getElementById(`toggle-params-btn-${formId}`);
+                if (toggleBtn) {
+                    // 存储当前状态（默认使用默认参数）
+                    toggleBtn.dataset.useRecommended = 'false';
+                    console.log(`✅ [renderWorkflowForm] 参数推荐切换按钮已初始化: ${formId}`);
+                }
+            }, 100);
         }
         
         // 🔥 ARCHITECTURAL FIX: 全局函数 - 处理模板模式下的文件上传（供 renderWorkflowForm 调用）
@@ -4605,6 +4615,43 @@
             const text = container.querySelector('.bubble').innerText;
             userInput.value = text; userInput.focus(); autoResize(userInput); checkInput();
         }
+        
+        // 🔥 TASK 5: 参数推荐切换函数
+        window.toggleParameterRecommendations = function(formId, useRecommended) {
+            const form = document.getElementById(`workflow-form-${formId}`);
+            if (!form) {
+                console.error(`❌ [toggleParameterRecommendations] 未找到表单: workflow-form-${formId}`);
+                return;
+            }
+            
+            const toggleBtn = document.getElementById(`toggle-params-btn-${formId}`);
+            const paramInputs = form.querySelectorAll('.param-input[data-recommended-value]');
+            
+            paramInputs.forEach(input => {
+                const defaultValue = input.dataset.defaultValue;
+                const recommendedValue = input.dataset.recommendedValue;
+                
+                if (useRecommended && recommendedValue) {
+                    // 切换到推荐值
+                    input.value = recommendedValue;
+                    input.style.backgroundColor = '#fff3cd'; // 高亮显示
+                } else {
+                    // 切换回默认值
+                    input.value = defaultValue;
+                    input.style.backgroundColor = ''; // 恢复默认背景
+                }
+            });
+            
+            // 更新按钮文本和状态
+            if (toggleBtn) {
+                toggleBtn.textContent = useRecommended ? '切换回默认参数' : '使用推荐参数';
+                toggleBtn.className = useRecommended ? 'btn btn-sm btn-secondary' : 'btn btn-sm btn-primary';
+                toggleBtn.onclick = () => toggleParameterRecommendations(formId, !useRecommended);
+                toggleBtn.dataset.useRecommended = String(useRecommended);
+            }
+            
+            console.log(`✅ [toggleParameterRecommendations] 参数已${useRecommended ? '切换到推荐值' : '切换回默认值'}`);
+        };
 
         function selectTool(tool, query) { appendMessage('user', `我选择运行: <b>${tool.name}</b>`); sendMessage(tool, query); }
         function scrollToBottom() { chatScrollArea.scrollTop = chatScrollArea.scrollHeight; }
