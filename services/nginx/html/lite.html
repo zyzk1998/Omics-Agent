@@ -3,139 +3,307 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Omics Agent - API Integration Demo (Lite)</title>
+    <title>Omics Agent - Thin Client</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #f5f5f5;
-            padding: 20px;
+        :root {
+            --primary-color: #4d6bfe;
+            --success-color: #28a745;
+            --error-color: #dc3545;
+            --warning-color: #ffc107;
+            --info-color: #17a2b8;
+            --bg-light: #f8f9fa;
+            --border-color: #dee2e6;
         }
+        
+        * {
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg-light);
+            padding: 20px;
+            margin: 0;
+            line-height: 1.6;
+        }
+        
         .container {
-            max-width: 900px;
+            max-width: 1200px;
             margin: 0 auto;
             background: white;
-            border-radius: 8px;
+            border-radius: 12px;
             padding: 30px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
+        
         h1 {
             color: #333;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
+            font-size: 28px;
+            font-weight: 600;
         }
+        
         .subtitle {
             color: #666;
             margin-bottom: 30px;
             font-size: 14px;
         }
+        
         .section {
             margin-bottom: 30px;
-            padding: 20px;
-            background: #f9f9f9;
-            border-radius: 6px;
+            padding: 24px;
+            background: var(--bg-light);
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
         }
+        
         .section h3 {
             margin-top: 0;
-            color: #4d6bfe;
-            font-size: 18px;
+            margin-bottom: 16px;
+            color: var(--primary-color);
+            font-size: 20px;
+            font-weight: 600;
         }
+        
         .form-group {
-            margin-bottom: 15px;
+            margin-bottom: 16px;
         }
+        
         label {
             font-weight: 500;
             color: #333;
             display: block;
-            margin-bottom: 5px;
-        }
-        input[type="text"], textarea {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            margin-bottom: 6px;
             font-size: 14px;
         }
-        textarea {
-            min-height: 80px;
-            resize: vertical;
+        
+        input[type="text"],
+        textarea,
+        select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s;
         }
+        
+        input[type="text"]:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(77, 107, 254, 0.1);
+        }
+        
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+            font-family: inherit;
+        }
+        
         button {
-            background: #4d6bfe;
+            background: var(--primary-color);
             color: white;
             border: none;
             padding: 10px 20px;
-            border-radius: 4px;
+            border-radius: 6px;
             cursor: pointer;
             font-size: 14px;
+            font-weight: 500;
+            transition: background-color 0.2s, transform 0.1s;
         }
-        button:hover {
+        
+        button:hover:not(:disabled) {
             background: #3d5bfe;
+            transform: translateY(-1px);
         }
+        
+        button:active:not(:disabled) {
+            transform: translateY(0);
+        }
+        
         button:disabled {
             background: #ccc;
             cursor: not-allowed;
+            transform: none;
         }
+        
         .response-box {
             margin-top: 20px;
-            padding: 15px;
+            padding: 16px;
             background: #1e1e1e;
             color: #d4d4d4;
-            border-radius: 4px;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            max-height: 500px;
+            border-radius: 6px;
+            font-family: 'Courier New', 'Consolas', monospace;
+            font-size: 13px;
+            max-height: 600px;
             overflow-y: auto;
             white-space: pre-wrap;
             word-wrap: break-word;
+            line-height: 1.5;
         }
+        
         .status {
-            padding: 8px 12px;
-            border-radius: 4px;
-            margin-bottom: 15px;
+            padding: 10px 14px;
+            border-radius: 6px;
+            margin-bottom: 16px;
             font-size: 13px;
+            font-weight: 500;
         }
+        
         .status.success {
             background: #d4edda;
             color: #155724;
+            border: 1px solid #c3e6cb;
         }
+        
         .status.error {
             background: #f8d7da;
             color: #721c24;
+            border: 1px solid #f5c6cb;
         }
+        
         .status.info {
             background: #d1ecf1;
             color: #0c5460;
+            border: 1px solid #bee5eb;
         }
+        
         .file-info {
-            margin-top: 10px;
-            padding: 10px;
+            margin-top: 12px;
+            padding: 12px;
             background: #e9ecef;
-            border-radius: 4px;
+            border-radius: 6px;
             font-size: 13px;
+            border: 1px solid var(--border-color);
         }
+        
+        .file-list {
+            margin-top: 12px;
+            padding: 12px;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+        }
+        
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .file-item:last-child {
+            border-bottom: none;
+        }
+        
+        .file-item-name {
+            font-weight: 500;
+            color: #333;
+        }
+        
+        .file-item-size {
+            color: #666;
+            font-size: 12px;
+        }
+        
+        .remove-file-btn {
+            background: var(--error-color);
+            color: white;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .remove-file-btn:hover {
+            background: #c82333;
+        }
+        
         code {
             background: #f4f4f4;
             padding: 2px 6px;
             border-radius: 3px;
             font-size: 12px;
+            font-family: 'Courier New', 'Consolas', monospace;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+        }
+        
+        .api-info {
+            background: #f8f9fa;
+            padding: 16px;
+            border-radius: 6px;
+            border-left: 4px solid var(--primary-color);
+            margin-top: 16px;
+        }
+        
+        .api-info h4 {
+            margin-top: 0;
+            margin-bottom: 12px;
+            color: var(--primary-color);
+            font-size: 16px;
+        }
+        
+        .api-info ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+        
+        .api-info li {
+            margin-bottom: 8px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        
+        .sse-event {
+            margin-bottom: 8px;
+            padding: 8px;
+            background: #2d2d2d;
+            border-radius: 4px;
+            border-left: 3px solid var(--primary-color);
+        }
+        
+        .sse-event-type {
+            color: #4d6bfe;
+            font-weight: 600;
+            margin-right: 8px;
+        }
+        
+        .sse-event-data {
+            color: #d4d4d4;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🚀 Omics Agent - API Integration Demo</h1>
-        <p class="subtitle">Thin Client - 演示如何调用后端 API（/api/upload 和 /api/chat）</p>
+        <h1>🚀 Omics Agent - Thin Client</h1>
+        <p class="subtitle">轻量级前端演示 - 展示如何与后端 API 集成</p>
 
         <!-- 文件上传部分 -->
         <div class="section">
             <h3>📤 1. 文件上传 API</h3>
-            <p style="font-size: 13px; color: #666; margin-bottom: 15px;">
-                上传文件到 <code>/api/upload</code>，返回文件路径列表
+            <p style="font-size: 13px; color: #666; margin-bottom: 16px;">
+                上传文件到 <code>POST /api/upload</code>，支持多文件上传和 10x Genomics 数据自动识别
             </p>
             <div class="form-group">
                 <label for="fileInput">选择文件:</label>
-                <input type="file" id="fileInput" accept=".csv,.tsv,.txt,.h5ad,.mtx">
-                <div id="fileStatus" style="margin-top: 10px;"></div>
+                <input type="file" id="fileInput" accept=".csv,.tsv,.txt,.h5ad,.mtx,.gz,.tar,.zip" multiple>
+                <div id="fileStatus" style="margin-top: 12px;"></div>
+                <div id="fileList" class="file-list" style="display: none;"></div>
             </div>
             <button onclick="uploadFile()" id="uploadBtn">上传文件</button>
             <div id="uploadResponse" class="response-box" style="display: none;"></div>
@@ -144,17 +312,24 @@
         <!-- 聊天部分 -->
         <div class="section">
             <h3>💬 2. 聊天 API</h3>
-            <p style="font-size: 13px; color: #666; margin-bottom: 15px;">
-                发送消息到 <code>/api/chat</code>，返回 AI 响应（支持流式输出）
+            <p style="font-size: 13px; color: #666; margin-bottom: 16px;">
+                发送消息到 <code>POST /api/chat</code>，支持流式响应（SSE）和 JSON 响应
             </p>
             <div class="form-group">
                 <label for="queryInput">用户查询:</label>
                 <textarea id="queryInput" placeholder="例如: 分析这个数据文件"></textarea>
             </div>
             <div class="form-group">
-                <label>
-                    <input type="checkbox" id="useStream" checked> 使用流式输出（Streaming）
-                </label>
+                <label for="userInput">用户ID (可选):</label>
+                <input type="text" id="userInput" placeholder="guest" value="guest">
+            </div>
+            <div class="form-group">
+                <label for="sessionInput">会话ID (可选):</label>
+                <input type="text" id="sessionInput" placeholder="自动生成">
+            </div>
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="useStream" checked>
+                <label for="useStream" style="margin: 0;">使用流式输出（Server-Sent Events）</label>
             </div>
             <button onclick="sendMessage()" id="chatBtn">发送消息</button>
             <div id="chatResponse" class="response-box" style="display: none;"></div>
@@ -162,27 +337,50 @@
 
         <!-- API 说明 -->
         <div class="section">
-            <h3>📚 API 说明</h3>
-            <div style="font-size: 13px; line-height: 1.8;">
-                <p><strong>1. 文件上传:</strong></p>
+            <h3>📚 API 接口说明</h3>
+            <div class="api-info">
+                <h4>1. 文件上传接口</h4>
                 <ul>
                     <li><strong>Endpoint:</strong> <code>POST /api/upload</code></li>
                     <li><strong>Content-Type:</strong> <code>multipart/form-data</code></li>
-                    <li><strong>Response:</strong> <code>{ "file_paths": ["/app/uploads/file.csv"] }</code></li>
+                    <li><strong>请求参数:</strong> <code>files</code> (File[]), <code>user_id</code> (可选), <code>session_id</code> (可选)</li>
+                    <li><strong>响应格式:</strong> JSON</li>
+                    <li><strong>响应字段:</strong> <code>status</code>, <code>file_paths</code> (数组), <code>file_info</code> (数组), <code>user_id</code>, <code>session_id</code></li>
+                    <li><strong>特殊处理:</strong> 自动识别 10x Genomics 数据（matrix.mtx, barcodes.tsv, features.tsv）并分组保存</li>
                 </ul>
-                <p style="margin-top: 15px;"><strong>2. 聊天:</strong></p>
+            </div>
+            
+            <div class="api-info" style="margin-top: 16px;">
+                <h4>2. 聊天接口</h4>
                 <ul>
                     <li><strong>Endpoint:</strong> <code>POST /api/chat</code></li>
                     <li><strong>Content-Type:</strong> <code>application/json</code></li>
-                    <li><strong>Request Body:</strong> <code>{ "query": "用户查询", "file_paths": ["/app/uploads/file.csv"], "stream": true }</code></li>
-                    <li><strong>Response:</strong> 流式文本（SSE）或 JSON</li>
+                    <li><strong>请求体字段:</strong>
+                        <ul style="margin-top: 8px;">
+                            <li><code>message</code> (string): 用户消息</li>
+                            <li><code>uploaded_files</code> (array): 已上传的文件列表，格式: <code>[{"name": "file.csv", "path": "path/to/file.csv"}]</code></li>
+                            <li><code>stream</code> (boolean): 是否使用流式响应，默认 false</li>
+                            <li><code>user_id</code> (string, 可选): 用户ID，默认 "guest"</li>
+                            <li><code>session_id</code> (string, 可选): 会话ID，未提供时自动生成</li>
+                            <li><code>history</code> (array, 可选): 对话历史</li>
+                            <li><code>workflow_data</code> (object, 可选): 工作流执行数据</li>
+                        </ul>
+                    </li>
+                    <li><strong>响应类型:</strong> 
+                        <ul style="margin-top: 8px;">
+                            <li><strong>流式响应 (SSE):</strong> <code>text/event-stream</code>，事件类型包括: <code>status</code>, <code>message</code>, <code>workflow</code>, <code>step_result</code>, <code>diagnosis</code>, <code>result</code>, <code>done</code>, <code>error</code></li>
+                            <li><strong>JSON 响应:</strong> <code>application/json</code>，包含 <code>type</code> 字段（如 <code>workflow_config</code>, <code>analysis_report</code>）</li>
+                        </ul>
+                    </li>
                 </ul>
             </div>
         </div>
     </div>
 
     <script>
+        // 全局状态
         let uploadedFiles = [];
+        let currentSessionId = null;
 
         // 文件上传
         async function uploadFile() {
@@ -190,6 +388,7 @@
             const uploadBtn = document.getElementById('uploadBtn');
             const fileStatus = document.getElementById('fileStatus');
             const uploadResponse = document.getElementById('uploadResponse');
+            const fileList = document.getElementById('fileList');
 
             if (!fileInput.files || fileInput.files.length === 0) {
                 fileStatus.innerHTML = '<div class="status error">请选择文件</div>';
@@ -205,6 +404,12 @@
                 for (let file of fileInput.files) {
                     formData.append('files', file);
                 }
+                
+                // 可选：添加 user_id 和 session_id
+                const userId = document.getElementById('userInput').value || 'guest';
+                const sessionId = document.getElementById('sessionInput').value;
+                if (userId) formData.append('user_id', userId);
+                if (sessionId) formData.append('session_id', sessionId);
 
                 const response = await fetch('/api/upload', {
                     method: 'POST',
@@ -215,20 +420,41 @@
                 
                 if (response.ok) {
                     fileStatus.innerHTML = '<div class="status success">上传成功！</div>';
+                    
+                    // 更新上传的文件列表
                     uploadedFiles = result.file_paths || [];
+                    if (result.session_id) {
+                        currentSessionId = result.session_id;
+                        document.getElementById('sessionInput').value = result.session_id;
+                    }
+                    
+                    // 显示文件列表
+                    if (uploadedFiles.length > 0) {
+                        fileList.style.display = 'block';
+                        fileList.innerHTML = '<strong>已上传的文件:</strong><br>';
+                        uploadedFiles.forEach((path, index) => {
+                            const fileName = path.split('/').pop();
+                            fileList.innerHTML += `
+                                <div class="file-item">
+                                    <span class="file-item-name">${fileName}</span>
+                                    <span class="file-item-size">${path}</span>
+                                </div>
+                            `;
+                        });
+                    }
                     
                     // 显示响应 JSON
                     uploadResponse.style.display = 'block';
                     uploadResponse.textContent = JSON.stringify(result, null, 2);
                 } else {
-                    fileStatus.innerHTML = `<div class="status error">上传失败: ${result.error || 'Unknown error'}</div>`;
+                    fileStatus.innerHTML = `<div class="status error">上传失败: ${result.error || result.detail || 'Unknown error'}</div>`;
                     uploadResponse.style.display = 'block';
                     uploadResponse.textContent = JSON.stringify(result, null, 2);
                 }
             } catch (error) {
                 fileStatus.innerHTML = `<div class="status error">错误: ${error.message}</div>`;
                 uploadResponse.style.display = 'block';
-                uploadResponse.textContent = `Error: ${error.message}`;
+                uploadResponse.textContent = `Error: ${error.message}\n\nStack: ${error.stack}`;
             } finally {
                 uploadBtn.disabled = false;
             }
@@ -240,10 +466,12 @@
             const chatBtn = document.getElementById('chatBtn');
             const chatResponse = document.getElementById('chatResponse');
             const useStream = document.getElementById('useStream').checked;
+            const userId = document.getElementById('userInput').value || 'guest';
+            const sessionId = document.getElementById('sessionInput').value || currentSessionId;
 
             const query = queryInput.value.trim();
-            if (!query) {
-                alert('请输入查询内容');
+            if (!query && uploadedFiles.length === 0) {
+                alert('请输入查询内容或上传文件');
                 return;
             }
 
@@ -252,18 +480,26 @@
             chatResponse.textContent = '发送中...\n\n';
 
             try {
+                // 构建请求体
+                const requestBody = {
+                    message: query,
+                    uploaded_files: uploadedFiles.map(path => ({
+                        name: path.split('/').pop(),
+                        path: path
+                    })),
+                    stream: useStream,
+                    user_id: userId,
+                    session_id: sessionId || undefined
+                };
+
                 if (useStream) {
-                    // 流式输出
+                    // 流式输出（SSE）
                     const response = await fetch('/api/chat', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify({
-                            query: query,
-                            file_paths: uploadedFiles,
-                            stream: true
-                        })
+                        body: JSON.stringify(requestBody)
                     });
 
                     if (!response.ok) {
@@ -272,30 +508,44 @@
 
                     const reader = response.body.getReader();
                     const decoder = new TextDecoder();
-                    let fullResponse = '';
+                    let buffer = '';
+                    let fullResponse = '流式响应:\n\n';
 
-                    chatResponse.textContent = '流式响应:\n\n';
+                    chatResponse.textContent = fullResponse;
 
                     while (true) {
                         const { done, value } = await reader.read();
                         if (done) break;
 
-                        const chunk = decoder.decode(value, { stream: true });
-                        fullResponse += chunk;
-                        chatResponse.textContent = '流式响应:\n\n' + fullResponse;
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop() || '';
+
+                        for (const line of lines) {
+                            if (line.startsWith('event: ')) {
+                                const eventType = line.substring(7).trim();
+                                fullResponse += `\n[事件类型: ${eventType}]\n`;
+                            } else if (line.startsWith('data: ')) {
+                                const dataStr = line.substring(6).trim();
+                                try {
+                                    const data = JSON.parse(dataStr);
+                                    fullResponse += JSON.stringify(data, null, 2) + '\n\n';
+                                } catch (e) {
+                                    fullResponse += dataStr + '\n\n';
+                                }
+                            }
+                        }
+
+                        chatResponse.textContent = fullResponse;
                     }
                 } else {
-                    // 非流式输出
+                    // 非流式输出（JSON）
                     const response = await fetch('/api/chat', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify({
-                            query: query,
-                            file_paths: uploadedFiles,
-                            stream: false
-                        })
+                        body: JSON.stringify(requestBody)
                     });
 
                     const result = await response.json();
@@ -311,12 +561,32 @@
         // 文件选择提示
         document.getElementById('fileInput').addEventListener('change', function(e) {
             const fileStatus = document.getElementById('fileStatus');
+            const fileList = document.getElementById('fileList');
+            
             if (e.target.files && e.target.files.length > 0) {
-                const file = e.target.files[0];
-                fileStatus.innerHTML = `<div class="file-info">已选择: <strong>${file.name}</strong> (${(file.size / 1024).toFixed(2)} KB)</div>`;
+                let fileInfo = '<div class="file-info"><strong>已选择文件:</strong><br>';
+                let totalSize = 0;
+                
+                for (let file of e.target.files) {
+                    const size = (file.size / 1024).toFixed(2);
+                    totalSize += file.size;
+                    fileInfo += `• ${file.name} (${size} KB)<br>`;
+                }
+                
+                fileInfo += `<br><strong>总计:</strong> ${(totalSize / 1024).toFixed(2)} KB (${e.target.files.length} 个文件)`;
+                fileInfo += '</div>';
+                
+                fileStatus.innerHTML = fileInfo;
+            } else {
+                fileStatus.innerHTML = '';
             }
         });
+
+        // 自动生成会话ID（如果未提供）
+        if (!document.getElementById('sessionInput').value) {
+            currentSessionId = 'session_' + Date.now();
+            document.getElementById('sessionInput').value = currentSessionId;
+        }
     </script>
 </body>
 </html>
-

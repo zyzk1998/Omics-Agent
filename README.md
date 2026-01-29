@@ -21,18 +21,18 @@
 
 ## 📖 项目简介
 
-**Omics Agent** 是一款企业级多组学数据分析平台，旨在通过自然语言交互（Chat）实现多组学数据的全流程自动化分析。
+**Omics Agent** 是一款面向生物信息学研究的**企业级多组学数据分析智能体平台**，采用**多智能体系统（Multi-Agent System, MAS）架构**和**工具增强生成（Tool-Augmented Generation, TAG）范式**，通过自然语言交互实现多组学数据的端到端自动化分析。
 
-系统采用 **DeepSeek-R1** 多模态大模型作为核心大脑，结合 **Scanpy**、**Cell Ranger** 等强大的计算引擎，让科研人员可以通过对话完成从数据质控（QC）、降维聚类到细胞注释的复杂分析任务。
+系统基于**大语言模型（Large Language Model, LLM）驱动的动态工作流规划**，结合**语义工具检索（Semantic Tool Retrieval）**和**模块化工具执行引擎**，实现了从数据质控、特征提取、统计分析到结果可视化的全流程自动化。核心创新在于将传统的硬编码分析流程转化为**LLM 驱动的智能规划与执行系统**，显著降低了多组学数据分析的技术门槛。
 
 ### ✨ 核心亮点
 
-- **🧬 7 种组学模态支持**：转录组、基因组、表观遗传、代谢组、蛋白质组、空间组学、影像分析
-- **🤖 多模态交互**：支持图文对话，不仅能听懂"帮我分析这个数据"，还能识别并解读生信图表。
-- **⚡ 自动化工作流**：内置标准单细胞分析 Pipeline (QC -> Normalize -> PCA -> Neighbors -> UMAP -> Clustering)。
-- **🔒 数据隐私安全**：支持本地化部署（Local LLM）和云端 API（SiliconFlow）灵活切换，保障科研数据安全。
-- **📊 出版级绘图**：自动生成符合 SCI 发表标准的矢量图表（300 DPI+）。
-- **🚀 多智能体架构**：分层多智能体系统，每个组学模态都有专门的智能体负责。
+- **🧬 多组学模态支持**：覆盖 7 种主流组学类型（转录组、基因组、表观遗传、代谢组、蛋白质组、空间组学、影像分析），采用**领域特定智能体（Domain-Specific Agents）**架构，实现专业化分析能力
+- **🤖 多模态交互能力**：基于 **DeepSeek-V3.2** 多模态大模型，支持自然语言查询、文件上传和图表解读，实现**人机协作式数据分析**
+- **⚡ 动态工作流规划**：采用 **Tool-RAG（Tool Retrieval-Augmented Generation）** 架构，通过语义检索和 LLM 规划生成定制化分析流程，无需硬编码模板
+- **🔒 数据隐私与安全**：支持**混合部署模式**（本地 LLM + 云端 API），满足科研机构数据安全合规要求
+- **📊 出版级可视化**：基于 **Scanpy**、**Matplotlib** 等专业库，自动生成符合学术发表标准的矢量图表（300+ DPI，支持 SVG/PDF 导出）
+- **🚀 可扩展架构**：采用**插件化工具系统**和**通用执行引擎**，新增分析工具无需修改核心代码，支持快速迭代和功能扩展
 
 ---
 
@@ -46,15 +46,16 @@
 
 <br>
 
-系统采用前后端分离的微服务架构，各组件通过 Docker Compose 编排：
+系统采用**前后端分离的微服务架构**，遵循**领域驱动设计（DDD）**和**关注点分离（SoC）**原则，各组件通过 Docker Compose 进行容器化编排：
 
-| 组件 | 技术选型 | 说明 |
+| 架构层次 | 技术选型 | 设计说明 |
 | :--- | :--- | :--- |
-| **前端层** | HTML + Bootstrap + Marked.js | 响应式 Web 界面，支持 Markdown 渲染和代码高亮 |
-| **应用层** | FastAPI + Gunicorn | 高并发异步 API 服务，处理业务逻辑 |
-| **计算层** | Celery + Redis | 分布式任务队列，处理耗时的生信分析任务 |
-| **推理层** | SiliconFlow API (DeepSeek-V3.2) | 云端大模型推理服务，支持多模态对话 |
-| **存储层** | 本地文件系统 | 用户上传数据、分析结果存储 |
+| **表现层（Presentation Layer）** | HTML5 + Bootstrap 5 + Marked.js | 响应式 Web 界面，支持 Markdown 渲染、代码高亮和实时流式更新（SSE） |
+| **应用服务层（Application Layer）** | FastAPI + Gunicorn + Uvicorn | 异步 HTTP 服务，基于 ASGI 协议实现高并发请求处理，支持流式响应（Server-Sent Events） |
+| **业务逻辑层（Business Logic Layer）** | Python 3.10+ + Pydantic v2 | 领域模型封装、参数验证、工作流编排和智能体协调 |
+| **计算执行层（Execution Layer）** | Celery + Redis + Python Workers | 分布式任务队列，支持异步任务调度、结果持久化和状态监控 |
+| **推理服务层（Inference Layer）** | SiliconFlow API / Local LLM | 大语言模型推理服务，支持多模态输入（文本、图像、文件）和流式输出 |
+| **数据持久层（Persistence Layer）** | 本地文件系统 + SQLite（可选） | 用户数据隔离、会话管理、结果存储和元数据管理 |
 
 ### 架构演进
 
@@ -97,11 +98,11 @@ Tools (工具类) - 按领域组织
 ```
 
 **核心特性**:
-- 🔍 **自动发现**: 递归遍历目录，自动发现和注册工具
-- 🔎 **语义检索**: ChromaDB + OllamaEmbeddings 实现工具语义检索
-- 🧠 **动态规划**: LLM 驱动的智能工作流生成
-- ⚙️ **通用执行**: 工具无关的执行引擎，支持任意注册工具
-- 📦 **模块化**: 按领域组织工具，易于扩展
+- 🔍 **自动工具发现（Auto Tool Discovery）**: 基于 Python 装饰器和反射机制，递归遍历工具目录，自动注册工具到全局注册表
+- 🔎 **语义工具检索（Semantic Tool Retrieval）**: 采用 **ChromaDB** 向量数据库和 **Ollama Embeddings**，实现基于语义相似度的工具推荐，支持自然语言查询
+- 🧠 **LLM 驱动的工作流规划（LLM-Driven Workflow Planning）**: 将工具 Schema 注入到 LLM 提示词中，通过结构化输出（JSON）生成可执行的工作流计划
+- ⚙️ **通用执行引擎（Universal Execution Engine）**: 基于**策略模式**和**依赖注入**，实现工具无关的执行框架，支持动态工具查找、参数验证和结果聚合
+- 📦 **模块化工具系统（Modular Tool System）**: 按领域（Domain）组织工具，遵循**单一职责原则（SRP）**，支持插件化扩展和版本管理
 
 ---
 
@@ -309,16 +310,34 @@ docker compose exec api-server bash
 
 ## 🔧 API 文档
 
+### 交互式 API 文档
+
 启动服务后，访问以下地址查看完整的 API 文档：
 
-- **Swagger UI**: `http://localhost:8028/api/docs`
-- **ReDoc**: `http://localhost:8028/api/redoc`
+- **Swagger UI**: `http://localhost:8028/api/docs` - 交互式 API 测试界面
+- **ReDoc**: `http://localhost:8028/api/redoc` - 可读性更强的 API 文档
 
-### 主要 API 端点
+### 完整 API 文档
 
-- `POST /api/chat` - 发送聊天消息，获取分析结果
-- `POST /api/upload` - 上传文件（支持多文件）
-- `GET /api/health` - 健康检查
+详细的 API 接口文档请参考：[**API.md**](API.md)
+
+该文档包含：
+- 所有 API 端点的详细说明（请求/响应格式、参数说明、错误处理）
+- SSE 流式响应格式和事件类型
+- 数据结构定义（TypeScript 接口）
+- 前端集成指南和最佳实践
+- 错误处理策略和常见问题解决方案
+
+### 主要 API 端点概览
+
+| 端点 | 方法 | 说明 | 响应类型 |
+|------|------|------|----------|
+| `/api/upload` | POST | 文件上传（支持多文件、10x Genomics 自动识别） | JSON |
+| `/api/chat` | POST | 聊天接口（支持流式响应 SSE） | SSE / JSON |
+| `/api/execute` | POST | 直接执行工作流 | JSON |
+| `/api/tools/search` | GET | 语义搜索工具 | JSON |
+| `/api/workflows/plan` | POST | 规划工作流（plan-first 模式） | JSON |
+| `/api/health` | GET | 健康检查和组件状态 | JSON |
 
 ---
 
@@ -331,11 +350,18 @@ Copyright © 2025 Omics Agent Team. All Rights Reserved.
 
 ## 🔗 相关文档
 
+### 核心文档
+- [**API.md**](API.md) - 📚 **完整 API 接口文档**（前后端交接必备，包含所有接口的输入输出、错误处理和使用示例）
 - [架构重构总结](ARCHITECTURE_REFACTORING.md) - 🔥 Tool-RAG 动态工作流系统详细说明
 - [项目总结](PROJECT_SUMMARY.md) - 项目概述和架构说明
+
+### 开发文档
 - [重构方案](REFACTORING_PLAN.md) - 详细的重构计划
 - [快速参考](QUICK_REFERENCE.md) - 常用命令和配置
 - [Docker 部署](DOCKER_DEPLOYMENT.md) - Docker 部署详细指南
+
+### 前端集成
+- [**lite.html**](services/nginx/html/lite.html) - 瘦前端演示页面，展示如何与后端 API 集成
 
 ---
 

@@ -1,4 +1,4 @@
-# GIBH-AGENT-V2 API 文档
+# Omics Agent API 文档
 
 **版本**: v2.0  
 **基础 URL**: `http://localhost:8028` (开发环境)  
@@ -10,11 +10,13 @@
 ## 📋 目录
 
 1. [通用说明](#通用说明)
-2. [API 端点列表](#api-端点列表)
+2. [核心 API 端点](#核心-api-端点)
 3. [详细接口文档](#详细接口文档)
-4. [数据结构定义](#数据结构定义)
-5. [错误处理](#错误处理)
-6. [使用示例](#使用示例)
+4. [SSE 流式响应格式](#sse-流式响应格式)
+5. [数据结构定义](#数据结构定义)
+6. [错误处理](#错误处理)
+7. [使用示例](#使用示例)
+8. [前端集成指南](#前端集成指南)
 
 ---
 
@@ -49,7 +51,8 @@ Content-Type: multipart/form-data
 {
   "status": "error",
   "error": "错误描述",
-  "message": "用户友好的错误消息"
+  "message": "用户友好的错误消息",
+  "detail": "详细错误信息（开发环境）"
 }
 ```
 
@@ -57,38 +60,78 @@ Content-Type: multipart/form-data
 
 - `200 OK`: 请求成功
 - `400 Bad Request`: 请求参数错误
+- `403 Forbidden`: 权限不足（如文件路径不安全）
 - `404 Not Found`: 资源不存在
-- `413 Payload Too Large`: 文件大小超限
+- `413 Payload Too Large`: 文件大小超限（默认 100MB）
 - `500 Internal Server Error`: 服务器内部错误
+- `503 Service Unavailable`: 服务不可用（如工具检索器未初始化）
 
 ---
 
-## API 端点列表
+## 核心 API 端点
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/` | 返回前端 HTML 页面 |
-| `POST` | `/api/upload` | 文件上传（支持多文件） |
-| `POST` | `/api/chat` | 聊天接口（支持流式响应） |
-| `POST` | `/api/execute` | 执行工作流 |
-| `GET` | `/api/logs/stream` | 实时日志流（SSE） |
-| `GET` | `/api/logs` | 获取历史日志 |
-| `GET` | `/api/workflow/status/{run_id}` | 查询工作流状态 |
+| 方法 | 路径 | 说明 | 响应类型 |
+|------|------|------|----------|
+| `GET` | `/` | 返回前端 HTML 页面 | HTML |
+| `GET` | `/api/health` | API 健康检查 | JSON |
+| `POST` | `/api/upload` | 文件上传（支持多文件） | JSON |
+| `POST` | `/api/chat` | 聊天接口（支持流式响应） | SSE / JSON |
+| `POST` | `/api/execute` | 执行工作流 | JSON |
+| `GET` | `/api/logs/stream` | 实时日志流（SSE） | SSE |
+| `GET` | `/api/logs` | 获取历史日志 | JSON |
+| `GET` | `/api/tools/search` | 语义搜索工具 | JSON |
+| `GET` | `/api/tools/list` | 列出所有工具 | JSON |
+| `GET` | `/api/tools/{tool_name}` | 获取工具 Schema | JSON |
+| `POST` | `/api/workflows/plan` | 规划工作流 | JSON |
+| `POST` | `/api/workflows/save` | 保存工作流 | JSON |
+| `GET` | `/api/workflows/list` | 列出用户工作流 | JSON |
+| `DELETE` | `/api/workflows/{workflow_id}` | 删除工作流 | JSON |
+| `GET` | `/api/jobs/history` | 获取任务历史 | JSON |
+| `GET` | `/api/workflow/status/{run_id}` | 查询工作流状态 | JSON |
 
 ---
 
 ## 详细接口文档
 
-### 1. 文件上传接口
+### 1. 健康检查接口
 
-**端点**: `POST /api/upload`
+#### `GET /api/health`
+
+**说明**: 检查 API 服务状态和组件初始化情况
+
+**请求参数**: 无
+
+**响应示例**:
+
+```json
+{
+  "status": "ok",
+  "service": "GIBH-AGENT-V2",
+  "agent_initialized": true,
+  "tool_retriever_initialized": true
+}
+```
+
+**响应字段说明**:
+- `status`: 服务状态（"ok" 表示正常）
+- `service`: 服务名称
+- `agent_initialized`: 智能体是否已初始化
+- `tool_retriever_initialized`: 工具检索器是否已初始化
+
+---
+
+### 2. 文件上传接口
+
+#### `POST /api/upload`
 
 **说明**: 上传一个或多个文件，支持 10x Genomics 数据（自动识别并分组）
 
 **请求格式**: `multipart/form-data`
 
 **请求参数**:
-- `files`: `File[]` - 文件列表（支持多文件上传，最多 20 个）
+- `files` (File[], 必需): 文件列表（支持多文件上传，最多 20 个）
+- `user_id` (string, 可选): 用户ID，默认 "guest"
+- `session_id` (string, 可选): 会话ID，未提供时自动生成（格式: `YYYYMMDD_HHMMSS`）
 
 **支持的文件类型**:
 - `.h5ad` - AnnData 格式（单细胞数据）
@@ -99,98 +142,61 @@ Content-Type: multipart/form-data
 
 **文件大小限制**: 默认 100MB（可通过环境变量 `MAX_FILE_SIZE` 配置）
 
-**响应格式**:
+**10x Genomics 数据自动识别**:
+- 如果上传的文件包含 `matrix.mtx`、`barcodes.tsv`、`features.tsv`（或 `genes.tsv`），系统会自动识别为 10x Genomics 数据
+- 10x 数据会被保存到独立的子目录中（格式: `10x_data_YYYYMMDD_HHMMSS`）
+- 返回的 `file_paths` 将指向该子目录，而不是单个文件
 
-#### 单个文件上传成功
+**成功响应** (200 OK):
 
 ```json
 {
   "status": "success",
-  "file_id": "example.csv",
-  "file_name": "example.csv",
-  "file_path": "/path/to/uploads/example.csv",
-  "file_size": 1024,
-  "metadata": {
-    "file_type": "csv",
-    "n_samples": 100,
-    "n_features": 50
-  },
-  "is_10x": false,
-  "file_paths": ["example.csv"],
+  "file_paths": [
+    "guest/20250128_120000/example.csv",
+    "guest/20250128_120000/10x_data_20250128_120000"
+  ],
   "file_info": [
     {
       "name": "example.csv",
-      "size": 1024,
-      "path": "example.csv"
+      "size": 1024000,
+      "path": "guest/20250128_120000/example.csv"
     }
   ],
-  "count": 1
-}
-```
-
-#### 多个文件上传成功
-
-```json
-{
-  "status": "success",
-  "file_paths": ["file1.csv", "file2.csv"],
-  "file_info": [
-    {
-      "name": "file1.csv",
-      "size": 1024,
-      "path": "file1.csv"
-    },
-    {
-      "name": "file2.csv",
-      "size": 2048,
-      "path": "file2.csv"
-    }
-  ],
-  "count": 2
-}
-```
-
-#### 10x Genomics 数据上传成功
-
-```json
-{
-  "status": "success",
+  "count": 2,
+  "user_id": "guest",
+  "session_id": "20250128_120000",
   "is_10x_data": true,
-  "group_dir": "10x_data_20241201_120000",
+  "group_dir": "guest/20250128_120000/10x_data_20250128_120000",
   "files": [
     {
-      "file_id": "10x_data_20241201_120000",
-      "file_name": "matrix.mtx",
-      "file_path": "/path/to/uploads/10x_data_20241201_120000/matrix.mtx",
-      "file_size": 1024,
-      "metadata": { ... },
-      "is_10x": true,
-      "group_dir": "10x_data_20241201_120000"
-    },
-    {
-      "file_id": "10x_data_20241201_120000",
-      "file_name": "barcodes.tsv",
-      "file_path": "/path/to/uploads/10x_data_20241201_120000/barcodes.tsv",
-      "file_size": 512,
-      "metadata": { ... },
-      "is_10x": true,
-      "group_dir": "10x_data_20241201_120000"
+      "file_id": "example.csv",
+      "file_name": "example.csv",
+      "file_path": "/app/uploads/guest/20250128_120000/example.csv",
+      "file_size": 1024000,
+      "metadata": {
+        "file_type": "csv",
+        "n_samples": 100,
+        "n_features": 50
+      },
+      "is_10x": false
     }
-  ],
-  "file_paths": ["10x_data_20241201_120000"],
-  "message": "10x数据已保存到: 10x_data_20241201_120000"
+  ]
 }
 ```
 
-#### 错误响应
+**响应字段说明**:
+- `status`: 操作状态（"success" 表示成功）
+- `file_paths`: 文件路径数组（相对路径，相对于 `/app/uploads`）
+- `file_info`: 文件信息数组，包含 `name`、`size`、`path`
+- `count`: 上传的文件数量
+- `user_id`: 用户ID
+- `session_id`: 会话ID
+- `is_10x_data`: 是否为 10x Genomics 数据（仅当检测到 10x 数据时存在）
+- `group_dir`: 10x 数据组目录路径（仅当检测到 10x 数据时存在）
+- `files`: 文件详细信息数组（向后兼容字段）
 
-```json
-{
-  "detail": "不允许的文件类型: .exe。允许的类型: .h5ad, .mtx, .tsv, .csv, .txt, .gz, .tar, .zip"
-}
-```
-
-**状态码**: `400 Bad Request`
+**错误响应** (400 Bad Request):
 
 ```json
 {
@@ -198,13 +204,50 @@ Content-Type: multipart/form-data
 }
 ```
 
-**状态码**: `413 Payload Too Large`
+**错误响应** (413 Payload Too Large):
+
+```json
+{
+  "detail": "文件 example.csv 超过最大大小限制 (100MB)"
+}
+```
+
+**错误响应** (403 Forbidden):
+
+```json
+{
+  "detail": "文件路径不安全：不允许访问基础目录外的文件"
+}
+```
+
+**前端集成示例**:
+
+```javascript
+const formData = new FormData();
+for (let file of fileInput.files) {
+    formData.append('files', file);
+}
+formData.append('user_id', 'guest');
+formData.append('session_id', '20250128_120000');
+
+const response = await fetch('/api/upload', {
+    method: 'POST',
+    body: formData
+});
+
+const result = await response.json();
+if (result.status === 'success') {
+    console.log('上传成功:', result.file_paths);
+    // 保存 file_paths 用于后续的聊天请求
+    uploadedFiles = result.file_paths;
+}
+```
 
 ---
 
-### 2. 聊天接口
+### 3. 聊天接口
 
-**端点**: `POST /api/chat`
+#### `POST /api/chat`
 
 **说明**: 处理用户查询，支持多种响应类型（流式/JSON）
 
@@ -215,17 +258,15 @@ Content-Type: multipart/form-data
 ```typescript
 interface ChatRequest {
   message: string;                    // 用户消息（可为空，如果有文件）
-  history?: Array<{                    // 对话历史（可选）
+  history?: Array<{                   // 对话历史（可选）
     role: "user" | "assistant";
     content: string;
   }>;
   uploaded_files?: Array<{             // 已上传的文件列表（可选）
-    file_name?: string;                 // 文件名（兼容字段）
-    file_path?: string;                 // 文件路径（兼容字段）
-    name?: string;                      // 文件名（新字段）
-    path?: string;                      // 文件路径（新字段）
+    name: string;                      // 文件名
+    path: string;                     // 文件路径（相对路径或绝对路径）
   }>;
-  workflow_data?: {                    // 工作流执行数据（可选）
+  workflow_data?: {                   // 工作流执行数据（可选）
     workflow_name: string;
     steps: Array<{
       step_id: string;
@@ -233,9 +274,12 @@ interface ChatRequest {
       name: string;
       params: Record<string, any>;
     }>;
-    file_paths: string[];              // 文件路径数组（必需）
+    file_paths: string[];             // 文件路径数组（必需）
   };
-  test_dataset_id?: string;            // 测试数据集 ID（可选）
+  test_dataset_id?: string;           // 测试数据集 ID（可选）
+  stream?: boolean;                    // 是否使用流式响应，默认 false
+  session_id?: string;                 // 会话ID（可选）
+  user_id?: string;                    // 用户ID（可选，默认 "guest"）
 }
 ```
 
@@ -244,25 +288,29 @@ interface ChatRequest {
 ```json
 {
   "message": "分析这个文件",
-  "history": [],
   "uploaded_files": [
     {
       "name": "example.csv",
-      "path": "example.csv"
+      "path": "guest/20250128_120000/example.csv"
     }
-  ]
+  ],
+  "stream": true,
+  "user_id": "guest",
+  "session_id": "20250128_120000"
 }
 ```
 
-**响应类型**: 根据 `Content-Type` 判断
+**响应类型**: 根据 `stream` 参数和 `Content-Type` 判断
 
-#### 2.1 JSON 响应（非流式）
+#### 3.1 JSON 响应（非流式，`stream: false`）
 
 **Content-Type**: `application/json`
 
 **响应类型**: 根据 `type` 字段判断
 
-##### 2.1.1 工作流配置响应
+##### 3.1.1 工作流配置响应
+
+当系统生成工作流计划时返回：
 
 ```json
 {
@@ -274,8 +322,6 @@ interface ChatRequest {
         "step_id": "inspect_data",
         "tool_id": "inspect_data",
         "name": "数据检查",
-        "step_name": "数据检查",
-        "desc": "检查数据文件的基本信息",
         "params": {
           "file_path": "example.csv"
         }
@@ -284,112 +330,23 @@ interface ChatRequest {
         "step_id": "preprocess_data",
         "tool_id": "preprocess_data",
         "name": "数据预处理",
-        "step_name": "数据预处理",
-        "desc": "数据预处理：处理缺失值、标准化、缩放",
         "params": {
           "file_path": "example.csv",
           "missing_threshold": "0.5",
-          "normalization": "log2",
-          "scale": "true"
+          "normalization": "log2"
         }
       }
     ]
   },
-  "file_paths": ["example.csv"],
-  "recommendation": {
-    "summary": "检测到数据包含 77 个样本。数值跨度较大 (0-10000+)。",
-    "params": {
-      "normalization": {
-        "value": "log2",
-        "reason": "数值跨度大，建议 Log 变换以符合正态分布"
-      },
-      "missing_threshold": {
-        "value": "0.5",
-        "reason": "标准质控阈值"
-      },
-      "scale": {
-        "value": true,
-        "reason": "标准化有助于后续分析"
-      },
-      "n_components": {
-        "value": "10",
-        "reason": "根据样本数推荐"
-      }
-    }
-  }
+  "file_paths": ["guest/20250128_120000/example.csv"],
+  "diagnosis_report": "数据质量评估报告...",
+  "recommendation": "推荐使用 log2 标准化..."
 }
 ```
 
-##### 2.1.2 工具配置响应
+##### 3.1.2 分析报告响应
 
-```json
-{
-  "type": "tool_config",
-  "reply": "请配置以下参数：",
-  "tool": {
-    "name": "inspect_data",
-    "description": "检查数据文件",
-    "parameters": [
-      {
-        "name": "file_path",
-        "type": "string",
-        "required": true,
-        "description": "文件路径"
-      }
-    ]
-  }
-}
-```
-
-##### 2.1.3 工作流启动响应
-
-```json
-{
-  "type": "workflow_started",
-  "reply": "工作流已启动，正在执行...",
-  "run_id": "run_20241201_120000"
-}
-```
-
-##### 2.1.4 数据选择器响应
-
-```json
-{
-  "type": "data_selector",
-  "reply": "请选择数据集：",
-  "datasets": [
-    {
-      "id": "pbmc_1k_v3",
-      "name": "PBMC 1k v3",
-      "description": "Peripheral Blood Mononuclear Cells",
-      "size": "1.2 GB"
-    }
-  ]
-}
-```
-
-##### 2.1.5 工具选择响应
-
-```json
-{
-  "type": "choice",
-  "reply": "请选择要使用的工具：",
-  "candidates": [
-    {
-      "name": "inspect_data",
-      "description": "检查数据文件",
-      "tool_id": "inspect_data"
-    },
-    {
-      "name": "preprocess_data",
-      "description": "预处理数据",
-      "tool_id": "preprocess_data"
-    }
-  ]
-}
-```
-
-##### 2.1.6 分析报告响应
+当工作流执行完成时返回：
 
 ```json
 {
@@ -405,6 +362,7 @@ interface ChatRequest {
         "name": "数据检查",
         "summary": "检查完成: 77 个样本, 50 个代谢物",
         "status": "success",
+        "plot": "/results/run_20250128_120000/inspect_plot.png",
         "step_result": {
           "step_name": "数据检查",
           "status": "success",
@@ -415,56 +373,37 @@ interface ChatRequest {
               "n_metabolites": 50,
               "missing_percentage": 2.5
             },
-            "preview": [ ... ]
+            "preview": [ ... ],
+            "images": ["/results/run_20250128_120000/inspect_plot.png"]
           }
         }
       }
     ],
     "steps_results": [ ... ],
-    "final_plot": "/results/run_20241201_120000/pca_plot.png",
-    "output_dir": "/path/to/results/run_20241201_120000",
-    "diagnosis": "## 数据质量评估\n\n数据质量良好，缺失值比例较低（2.5%）...\n\n## 主要发现\n\n..."
-  },
-  "diagnosis": "## 数据质量评估\n\n..."
+    "final_plot": "/results/run_20250128_120000/pca_plot.png",
+    "output_dir": "/app/results/run_20250128_120000",
+    "diagnosis": "## AI 专家分析报告\n\n..."
+  }
 }
 ```
 
-##### 2.1.7 错误响应
+##### 3.1.3 错误响应
 
 ```json
 {
   "type": "error",
-  "error": "智能体未初始化，请检查配置和日志。",
-  "message": "智能体初始化失败，请查看服务器日志获取详细信息"
+  "error": "错误描述",
+  "message": "用户友好的错误消息"
 }
 ```
 
-**状态码**: `500 Internal Server Error`
+#### 3.2 流式响应（SSE，`stream: true`）
 
-#### 2.2 流式响应（SSE）
+**Content-Type**: `text/event-stream`
 
-**Content-Type**: `text/event-stream` 或 `text/plain`
+**格式**: Server-Sent Events (SSE)
 
-**格式**: Server-Sent Events (SSE) 或纯文本流
-
-**流式内容可能包含**:
-
-1. **思考过程**（可选）:
-```
-<think>
-思考内容...
-</think>
-```
-
-2. **最终回答**:
-```
-最终回答内容...
-```
-
-3. **数据集 JSON**（测试数据选择时）:
-```
-<!-- DATASETS_JSON: [{"id":"pbmc_1k_v3","name":"PBMC 1k v3",...}] -->
-```
+**SSE 事件类型**: 详见 [SSE 流式响应格式](#sse-流式响应格式)
 
 **前端处理示例**:
 
@@ -474,36 +413,45 @@ const response = await fetch('/api/chat', {
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
     message: '分析这个文件',
-    uploaded_files: [{ name: 'example.csv', path: 'example.csv' }]
+    uploaded_files: [{ name: 'example.csv', path: 'example.csv' }],
+    stream: true
   })
 });
 
-const contentType = response.headers.get('content-type');
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+let buffer = '';
 
-if (contentType && contentType.includes('application/json')) {
-  // JSON 响应
-  const data = await response.json();
-  handleJsonResponse(data);
-} else {
-  // 流式响应
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
   
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    
-    const chunk = decoder.decode(value, { stream: true });
-    handleStreamChunk(chunk);
+  buffer += decoder.decode(value, { stream: true });
+  const lines = buffer.split('\n');
+  buffer = lines.pop() || '';
+  
+  for (const line of lines) {
+    if (line.startsWith('event: ')) {
+      const eventType = line.substring(7).trim();
+      console.log('事件类型:', eventType);
+    } else if (line.startsWith('data: ')) {
+      const dataStr = line.substring(6).trim();
+      try {
+        const data = JSON.parse(dataStr);
+        handleSSEEvent(eventType, data);
+      } catch (e) {
+        console.error('JSON 解析错误:', e);
+      }
+    }
   }
 }
 ```
 
 ---
 
-### 3. 执行工作流接口
+### 4. 执行工作流接口
 
-**端点**: `POST /api/execute`
+#### `POST /api/execute`
 
 **说明**: 直接执行工作流（不通过聊天接口）
 
@@ -554,13 +502,11 @@ interface ExecuteRequest {
       }
     ]
   },
-  "file_paths": ["example.csv"]
+  "file_paths": ["guest/20250128_120000/example.csv"]
 }
 ```
 
-**响应格式**:
-
-#### 成功响应
+**成功响应** (200 OK):
 
 ```json
 {
@@ -569,120 +515,88 @@ interface ExecuteRequest {
   "report_data": {
     "status": "success",
     "workflow_name": "Metabolomics Analysis Pipeline",
-    "steps_details": [
-      {
-        "step_id": "inspect_data",
-        "tool_id": "inspect_data",
-        "name": "数据检查",
-        "summary": "检查完成: 77 个样本, 50 个代谢物",
-        "status": "success",
-        "plot": "/results/run_20241201_120000/inspect_plot.png",
-        "step_result": {
-          "step_name": "数据检查",
-          "status": "success",
-          "logs": "检查完成: 77 个样本, 50 个代谢物",
-          "data": {
-            "summary": {
-              "n_samples": 77,
-              "n_metabolites": 50,
-              "missing_percentage": 2.5
-            },
-            "preview": [ ... ],
-            "images": ["/results/run_20241201_120000/inspect_plot.png"]
-          }
-        }
-      }
-    ],
+    "steps_details": [ ... ],
     "steps_results": [ ... ],
-    "final_plot": "/results/run_20241201_120000/pca_plot.png",
-    "output_dir": "/path/to/results/run_20241201_120000",
-    "diagnosis": "## 数据质量评估\n\n..."
-  }
+    "final_plot": "/results/run_20250128_120000/pca_plot.png",
+    "output_dir": "/app/results/run_20250128_120000",
+    "diagnosis": "## AI 专家分析报告\n\n..."
+  },
+  "reply": "✅ 工作流执行完成",
+  "thought": "[THOUGHT] 使用 ToolRegistry 动态执行"
 }
 ```
 
-#### 错误响应
+**错误响应** (500 Internal Server Error):
 
 ```json
 {
   "status": "error",
   "error": "ValueError: No input files provided",
-  "error_detail": "Traceback (most recent call last):\n...",
-  "message": "工作流执行失败: ValueError: No input files provided"
+  "message": "工作流执行失败: No input files provided"
 }
 ```
 
-**状态码**: `500 Internal Server Error`
-
 ---
 
-### 4. 实时日志流接口
+### 5. 日志流接口
 
-**端点**: `GET /api/logs/stream`
+#### `GET /api/logs/stream`
 
-**说明**: 使用 Server-Sent Events (SSE) 实时推送日志
+**说明**: 实时日志流（Server-Sent Events）
 
 **请求参数**: 无
 
 **响应格式**: `text/event-stream`
 
-**响应示例**:
+**SSE 事件格式**:
 
 ```
-data: {"timestamp": "2024-12-01T12:00:00", "level": "INFO", "message": "工作流执行开始"}
-
-data: {"timestamp": "2024-12-01T12:00:01", "level": "INFO", "message": "步骤 1/6: 数据检查"}
-
-data: {"timestamp": "2024-12-01T12:00:02", "level": "INFO", "message": "步骤 1 完成"}
+data: {"timestamp": "2025-01-28T12:00:00", "level": "INFO", "message": "日志内容", "module": "gibh_agent.core"}\n\n
 ```
 
-**前端处理示例**:
+**心跳事件** (保持连接):
+
+```
+data: {"type": "heartbeat", "timestamp": "2025-01-28T12:00:00"}\n\n
+```
+
+**前端集成示例**:
 
 ```javascript
 const eventSource = new EventSource('/api/logs/stream');
 
-eventSource.onmessage = (event) => {
-  const log = JSON.parse(event.data);
-  console.log(`[${log.level}] ${log.message}`);
+eventSource.onmessage = function(event) {
+  const logEntry = JSON.parse(event.data);
+  console.log(`[${logEntry.level}] ${logEntry.message}`);
 };
 
-eventSource.onerror = (error) => {
-  console.error('日志流连接错误:', error);
+eventSource.onerror = function(error) {
+  console.error('日志流错误:', error);
   eventSource.close();
 };
 ```
 
 ---
 
-### 5. 获取历史日志接口
+### 6. 获取历史日志接口
 
-**端点**: `GET /api/logs`
+#### `GET /api/logs`
 
-**说明**: 获取最近的历史日志
+**说明**: 获取历史日志
 
 **请求参数**:
-- `limit`: `number` (可选，默认 100) - 返回的日志条数
+- `limit` (int, 可选): 返回的日志条数，默认 100
 
-**请求示例**:
-
-```
-GET /api/logs?limit=50
-```
-
-**响应格式**:
+**响应示例**:
 
 ```json
 {
   "logs": [
     {
-      "timestamp": "2024-12-01T12:00:00",
+      "timestamp": "2025-01-28T12:00:00",
       "level": "INFO",
-      "message": "工作流执行开始"
-    },
-    {
-      "timestamp": "2024-12-01T12:00:01",
-      "level": "INFO",
-      "message": "步骤 1/6: 数据检查"
+      "message": "日志内容",
+      "module": "gibh_agent.core"
     }
   ],
   "total": 1000
@@ -691,194 +605,456 @@ GET /api/logs?limit=50
 
 ---
 
-### 6. 查询工作流状态接口
+### 7. 工具检索接口
 
-**端点**: `GET /api/workflow/status/{run_id}`
+#### `GET /api/tools/search`
 
-**说明**: 查询工作流执行状态（如果使用 Celery 异步执行）
+**说明**: 语义搜索工具（基于 ChromaDB + Embeddings）
 
-**路径参数**:
-- `run_id`: `string` - 工作流运行 ID
+**请求参数**:
+- `query` (string, 必需): 查询文本（自然语言）
+- `top_k` (int, 可选): 返回前 k 个最相关的工具，默认 5
+- `category` (string, 可选): 类别过滤器（如 "Metabolomics", "scRNA-seq"）
 
-**请求示例**:
-
-```
-GET /api/workflow/status/run_20241201_120000
-```
-
-**响应格式**:
-
-#### 运行中
+**响应示例**:
 
 ```json
 {
-  "status": "running",
-  "completed": false,
-  "steps_status": [],
-  "error": null
+  "status": "success",
+  "query": "数据预处理",
+  "count": 3,
+  "tools": [
+    {
+      "name": "preprocess_data",
+      "description": "数据预处理工具",
+      "category": "Metabolomics",
+      "parameters": { ... }
+    }
+  ]
 }
 ```
 
-#### 执行中（有进度）
+**错误响应** (503 Service Unavailable):
 
 ```json
 {
-  "status": "running",
-  "completed": false,
+  "detail": "工具检索器未初始化。请检查 Ollama 服务和依赖是否已安装。"
+}
+```
+
+---
+
+#### `GET /api/tools/list`
+
+**说明**: 列出所有已注册的工具
+
+**请求参数**: 无
+
+**响应示例**:
+
+```json
+{
+  "status": "success",
+  "count": 15,
+  "tools": [
+    "inspect_data",
+    "preprocess_data",
+    "pca_analysis",
+    ...
+  ]
+}
+```
+
+---
+
+#### `GET /api/tools/{tool_name}`
+
+**说明**: 获取特定工具的完整 Schema
+
+**路径参数**:
+- `tool_name` (string, 必需): 工具名称
+
+**响应示例**:
+
+```json
+{
+  "status": "success",
+  "tool": {
+    "name": "preprocess_data",
+    "description": "数据预处理工具",
+    "category": "Metabolomics",
+    "parameters": {
+      "file_path": {
+        "type": "string",
+        "description": "文件路径",
+        "required": true
+      },
+      "missing_threshold": {
+        "type": "string",
+        "description": "缺失值阈值",
+        "default": "0.5"
+      }
+    }
+  }
+}
+```
+
+**错误响应** (404 Not Found):
+
+```json
+{
+  "detail": "工具 'unknown_tool' 不存在"
+}
+```
+
+---
+
+### 8. 工作流管理接口
+
+#### `POST /api/workflows/plan`
+
+**说明**: 规划工作流（plan-first：可以在没有文件的情况下生成工作流）
+
+**请求格式**: `application/json`
+
+**请求体**:
+
+```typescript
+interface WorkflowPlanRequest {
+  query: string;                      // 用户查询
+  file_metadata?: Record<string, any>; // 文件元数据（可选）
+  user_id?: string;                    // 用户ID（可选）
+}
+```
+
+**响应示例**:
+
+```json
+{
+  "status": "success",
+  "workflow": {
+    "workflow_name": "Metabolomics Analysis Pipeline",
+    "steps": [ ... ]
+  },
+  "user_id": "guest"
+}
+```
+
+---
+
+#### `POST /api/workflows/save`
+
+**说明**: 保存工作流（书签）
+
+**请求格式**: `application/json`
+
+**请求体**:
+
+```typescript
+interface WorkflowSaveRequest {
+  name: string;                        // 工作流名称
+  workflow_json: Record<string, any>;  // 工作流 JSON
+  user_id?: string;                    // 用户ID（可选）
+}
+```
+
+**响应示例**:
+
+```json
+{
+  "status": "success",
+  "workflow_id": 123,
+  "message": "工作流 'My Workflow' 已保存"
+}
+```
+
+---
+
+#### `GET /api/workflows/list`
+
+**说明**: 列出用户的所有工作流（书签）
+
+**请求参数**:
+- `user_id` (string, 可选): 用户ID，默认 "guest"
+
+**响应示例**:
+
+```json
+{
+  "status": "success",
+  "workflows": [
+    {
+      "id": 123,
+      "name": "My Workflow",
+      "workflow_json": { ... },
+      "created_at": "2025-01-28T12:00:00"
+    }
+  ],
+  "count": 1
+}
+```
+
+---
+
+#### `DELETE /api/workflows/{workflow_id}`
+
+**说明**: 删除工作流
+
+**路径参数**:
+- `workflow_id` (int, 必需): 工作流ID
+
+**请求参数**:
+- `user_id` (string, 可选): 用户ID，默认 "guest"
+
+**响应示例**:
+
+```json
+{
+  "status": "success",
+  "message": "工作流 123 已删除"
+}
+```
+
+**错误响应** (404 Not Found):
+
+```json
+{
+  "detail": "工作流不存在或无权删除"
+}
+```
+
+---
+
+### 9. 任务历史接口
+
+#### `GET /api/jobs/history`
+
+**说明**: 获取任务执行历史
+
+**请求参数**:
+- `user_id` (string, 可选): 用户ID，默认 "guest"
+- `status` (string, 可选): 任务状态过滤（如 "success", "failed", "running"）
+- `limit` (int, 可选): 返回的任务数量，默认 50
+
+**响应示例**:
+
+```json
+{
+  "status": "success",
+  "jobs": [
+    {
+      "id": 456,
+      "user_id": "guest",
+      "workflow_name": "Metabolomics Analysis Pipeline",
+      "status": "success",
+      "created_at": "2025-01-28T12:00:00",
+      "completed_at": "2025-01-28T12:05:00"
+    }
+  ],
+  "count": 1
+}
+```
+
+---
+
+### 10. 工作流状态查询接口
+
+#### `GET /api/workflow/status/{run_id}`
+
+**说明**: 查询工作流状态（兼容旧架构，支持 Celery 异步任务）
+
+**路径参数**:
+- `run_id` (string, 必需): 运行ID（Celery 任务ID）
+
+**响应示例**:
+
+```json
+{
+  "status": "success",
+  "completed": true,
   "steps_status": [
     {
       "step_id": "inspect_data",
-      "status": "success",
-      "summary": "检查完成"
-    },
-    {
-      "step_id": "preprocess_data",
-      "status": "running",
-      "summary": "预处理中..."
+      "status": "success"
     }
   ],
   "error": null
 }
 ```
 
-#### 执行成功
+**状态值**:
+- `"running"`: 正在运行
+- `"success"`: 执行成功
+- `"failed"`: 执行失败
+- `"pending"`: 等待执行
 
-```json
-{
-  "status": "success",
-  "completed": true,
-  "steps_status": [ ... ],
-  "report_data": {
-    "status": "success",
-    "workflow_name": "Metabolomics Analysis Pipeline",
-    "steps_details": [ ... ],
-    "diagnosis": "..."
-  },
-  "error": null
-}
+---
+
+## SSE 流式响应格式
+
+当 `stream: true` 时，`/api/chat` 接口返回 Server-Sent Events (SSE) 格式的流式响应。
+
+### SSE 事件类型
+
+| 事件类型 | 说明 | 数据格式 |
+|---------|------|---------|
+| `status` | 状态更新 | `{ "content": "状态消息", "state": "状态值" }` |
+| `message` | 文本消息 | `{ "content": "消息内容" }` |
+| `workflow` | 工作流配置 | `{ "workflow_config": {...}, "template_mode": true/false }` |
+| `step_result` | 步骤执行结果 | `{ "report_data": {...} }` |
+| `diagnosis` | 诊断报告 | `{ "report_data": {...} }` |
+| `result` | 最终结果 | `{ "report_data": {...} }` 或 `{ "workflow_config": {...} }` |
+| `done` | 完成信号 | `{ "status": "success" }` |
+| `error` | 错误信息 | `{ "error": "错误描述", "message": "用户友好的错误消息" }` |
+
+### SSE 事件格式
+
+每个事件遵循标准 SSE 格式：
+
+```
+event: {event_type}
+data: {json_data}
+
 ```
 
-#### 执行失败
+### 状态值 (state)
 
-```json
-{
-  "status": "failed",
-  "completed": true,
-  "steps_status": [ ... ],
-  "error": "ValueError: No input files provided"
+`status` 事件中的 `state` 字段可能的值：
+
+- `"start"`: 开始处理
+- `"analyzing"`: 正在分析
+- `"thinking"`: 正在思考
+- `"running"`: 正在执行
+- `"rendering"`: 正在渲染
+- `"generating_report"`: 正在生成报告
+- `"completed"`: 执行完成
+- `"error"`: 发生错误
+- `"async_job_started"`: 异步作业已启动
+- `"waiting"`: 等待中
+
+### 前端处理示例
+
+```javascript
+async function handleSSEStream(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let currentEventType = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (line.startsWith('event: ')) {
+        currentEventType = line.substring(7).trim();
+      } else if (line.startsWith('data: ')) {
+        const dataStr = line.substring(6).trim();
+        try {
+          const data = JSON.parse(dataStr);
+          handleSSEEvent(currentEventType, data);
+        } catch (e) {
+          console.error('JSON 解析错误:', e, '数据:', dataStr);
+        }
+      }
+    }
+  }
+}
+
+function handleSSEEvent(eventType, data) {
+  switch (eventType) {
+    case 'status':
+      console.log(`[状态] ${data.state}: ${data.content}`);
+      updateStatusUI(data.state, data.content);
+      break;
+    case 'message':
+      console.log(`[消息] ${data.content}`);
+      appendMessage(data.content);
+      break;
+    case 'workflow':
+      console.log('[工作流]', data.workflow_config);
+      renderWorkflowCard(data.workflow_config);
+      break;
+    case 'step_result':
+      console.log('[步骤结果]', data.report_data);
+      renderStepResult(data.report_data);
+      break;
+    case 'diagnosis':
+      console.log('[诊断报告]', data.report_data);
+      renderDiagnosis(data.report_data);
+      break;
+    case 'result':
+      console.log('[最终结果]', data);
+      renderFinalResult(data);
+      break;
+    case 'done':
+      console.log('[完成]', data.status);
+      onStreamComplete(data.status);
+      break;
+    case 'error':
+      console.error('[错误]', data.error);
+      showError(data.message || data.error);
+      break;
+    default:
+      console.log(`[未知事件] ${eventType}:`, data);
+  }
 }
 ```
-
-#### 未找到
-
-```json
-{
-  "status": "not_found",
-  "message": "工作流未找到或未使用异步执行"
-}
-```
-
-**状态码**: `404 Not Found`
 
 ---
 
 ## 数据结构定义
 
-### 文件信息
+### 文件信息 (FileInfo)
 
 ```typescript
 interface FileInfo {
-  file_id?: string;           // 文件 ID（单个文件时）
-  file_name: string;           // 文件名
-  file_path: string;           // 文件路径（绝对路径）
-  file_size: number;          // 文件大小（字节）
-  metadata?: {                 // 文件元数据（可选）
-    file_type: string;         // 文件类型（csv, h5ad, etc.）
-    n_samples?: number;        // 样本数（如果可检测）
-    n_features?: number;       // 特征数（如果可检测）
-    [key: string]: any;        // 其他元数据字段
-  };
-  is_10x?: boolean;            // 是否为 10x Genomics 数据
-  group_dir?: string;          // 10x 数据组目录（如果是 10x 数据）
+  name: string;        // 文件名
+  size: number;        // 文件大小（字节）
+  path: string;        // 文件路径（相对路径）
 }
 ```
 
-### 工作流步骤
+### 工作流步骤 (WorkflowStep)
 
 ```typescript
 interface WorkflowStep {
-  step_id: string;             // 步骤 ID（唯一标识）
-  tool_id: string;             // 工具 ID
-  name: string;                 // 步骤名称（显示用）
-  step_name?: string;           // 步骤名称（兼容字段）
-  desc?: string;                // 步骤描述
-  params: Record<string, any>;  // 步骤参数（键值对）
+  step_id: string;                    // 步骤ID
+  tool_id: string;                    // 工具ID
+  name: string;                       // 步骤名称
+  params: Record<string, any>;        // 步骤参数
 }
 ```
 
-### 工作流配置
+### 工作流配置 (WorkflowConfig)
 
 ```typescript
 interface WorkflowConfig {
-  workflow_name: string;        // 工作流名称
-  steps: WorkflowStep[];        // 步骤列表
+  workflow_name: string;               // 工作流名称
+  steps: WorkflowStep[];               // 步骤列表
+  file_paths?: string[];                // 文件路径数组（可选）
 }
 ```
 
-### 步骤执行结果
+### 步骤结果 (StepResult)
 
 ```typescript
 interface StepResult {
-  step_name: string;            // 步骤名称
-  status: "success" | "error" | "running";  // 状态
-  logs: string;                 // 日志信息
-  data?: {                      // 步骤数据（可选）
-    summary?: Record<string, any>;  // 摘要信息
-    preview?: any[];            // 预览数据
-    images?: string[];           // 图片路径数组
-    [key: string]: any;         // 其他数据字段
-  };
-}
-```
-
-### 步骤详情
-
-```typescript
-interface StepDetail {
-  step_id: string;              // 步骤 ID
-  tool_id: string;              // 工具 ID
-  name: string;                 // 步骤名称
-  summary: string;              // 摘要
-  status: "success" | "error" | "running";  // 状态
-  plot?: string;                // 图片路径（如果有）
-  step_result: StepResult;      // 完整步骤结果
-}
-```
-
-### 分析报告
-
-```typescript
-interface AnalysisReport {
-  status: "success" | "error";  // 状态
-  workflow_name: string;         // 工作流名称
-  steps_details: StepDetail[];   // 步骤详情列表
-  steps_results?: StepResult[];  // 步骤结果列表（新格式）
-  final_plot?: string;           // 最终图片路径
-  output_dir: string;            // 输出目录
-  diagnosis?: string;             // AI 诊断报告（Markdown 格式）
-}
-```
-
-### AI 推荐
-
-```typescript
-interface Recommendation {
-  summary: string;               // 数据摘要
-  params: {                      // 参数推荐
-    [paramName: string]: {
-      value: string | number | boolean;  // 推荐值
-      reason: string;             // 推荐理由
-    };
+  step_id: string;                     // 步骤ID
+  tool_id: string;                     // 工具ID
+  name: string;                        // 步骤名称
+  summary: string;                     // 步骤摘要
+  status: "success" | "failed" | "warning";  // 步骤状态
+  plot?: string;                       // 图表路径（可选）
+  step_result: {
+    step_name: string;
+    status: string;
+    logs: string;
+    data: Record<string, any>;
   };
 }
 ```
@@ -889,48 +1065,54 @@ interface Recommendation {
 
 ### 错误响应格式
 
-所有错误响应遵循统一格式：
+所有错误响应遵循以下格式：
 
 ```json
 {
   "status": "error",
-  "error": "错误类型: 错误描述",
+  "error": "错误类型或代码",
   "message": "用户友好的错误消息",
-  "error_detail": "详细错误信息（可选，开发环境）"
+  "detail": "详细错误信息（仅开发环境）"
 }
 ```
 
 ### 常见错误码
 
-| HTTP 状态码 | 错误类型 | 说明 |
-|------------|---------|------|
-| `400` | `Bad Request` | 请求参数错误 |
-| `404` | `Not Found` | 资源不存在 |
-| `413` | `Payload Too Large` | 文件大小超限 |
-| `500` | `Internal Server Error` | 服务器内部错误 |
+| HTTP 状态码 | 错误类型 | 说明 | 解决方案 |
+|------------|---------|------|---------|
+| 400 | `BadRequest` | 请求参数错误 | 检查请求参数格式和必填字段 |
+| 403 | `Forbidden` | 文件路径不安全 | 确保文件路径在允许的目录内 |
+| 404 | `NotFound` | 资源不存在 | 检查资源ID或路径是否正确 |
+| 413 | `PayloadTooLarge` | 文件大小超限 | 减小文件大小或调整 `MAX_FILE_SIZE` 配置 |
+| 500 | `InternalServerError` | 服务器内部错误 | 查看服务器日志获取详细信息 |
+| 503 | `ServiceUnavailable` | 服务不可用 | 检查服务组件是否已初始化（如工具检索器） |
 
-### 错误处理示例
+### 错误处理最佳实践
 
-```javascript
-try {
-  const response = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestData)
-  });
-  
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.message || errorData.error);
-  }
-  
-  const data = await response.json();
-  // 处理成功响应
-} catch (error) {
-  console.error('请求失败:', error);
-  // 显示错误消息给用户
-}
-```
+1. **前端错误处理**:
+   ```javascript
+   try {
+     const response = await fetch('/api/chat', { ... });
+     if (!response.ok) {
+       const error = await response.json();
+       throw new Error(error.message || error.detail || '请求失败');
+     }
+     const data = await response.json();
+     // 处理成功响应
+   } catch (error) {
+     // 显示用户友好的错误消息
+     showError(error.message);
+   }
+   ```
+
+2. **流式响应错误处理**:
+   ```javascript
+   // 在 SSE 流中监听 error 事件
+   if (eventType === 'error') {
+     showError(data.message || data.error);
+     // 可以选择继续或中断流
+   }
+   ```
 
 ---
 
@@ -938,248 +1120,131 @@ try {
 
 ### 完整工作流示例
 
-#### 1. 上传文件
-
 ```javascript
-// 上传文件
+// 1. 上传文件
 const formData = new FormData();
 formData.append('files', fileInput.files[0]);
+formData.append('user_id', 'guest');
 
 const uploadResponse = await fetch('/api/upload', {
   method: 'POST',
   body: formData
 });
+const uploadResult = await uploadResponse.json();
 
-const uploadData = await uploadResponse.json();
-console.log('文件上传成功:', uploadData.file_paths);
-```
-
-#### 2. 生成工作流配置
-
-```javascript
-// 发送聊天请求，生成工作流配置
+// 2. 发送分析请求（流式）
 const chatResponse = await fetch('/api/chat', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
     message: '分析这个文件',
-    uploaded_files: [
-      {
-        name: uploadData.file_name,
-        path: uploadData.file_paths[0]
-      }
-    ]
+    uploaded_files: uploadResult.file_paths.map(path => ({
+      name: path.split('/').pop(),
+      path: path
+    })),
+    stream: true,
+    user_id: 'guest',
+    session_id: uploadResult.session_id
   })
 });
 
-const chatData = await chatResponse.json();
-
-if (chatData.type === 'workflow_config') {
-  console.log('工作流配置:', chatData.workflow_data);
-  console.log('AI 推荐:', chatData.recommendation);
-}
-```
-
-#### 3. 执行工作流
-
-```javascript
-// 方式1: 通过聊天接口执行（推荐）
-const executeResponse = await fetch('/api/chat', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    message: '执行工作流',
-    workflow_data: {
-      workflow_name: chatData.workflow_data.workflow_name,
-      steps: chatData.workflow_data.steps,
-      file_paths: chatData.file_paths
-    }
-  })
-});
-
-// 方式2: 直接调用执行接口
-const executeResponse = await fetch('/api/execute', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    workflow_data: chatData.workflow_data,
-    file_paths: chatData.file_paths
-  })
-});
-
-const executeData = await executeResponse.json();
-
-if (executeData.type === 'analysis_report') {
-  console.log('分析报告:', executeData.report_data);
-  console.log('AI 诊断:', executeData.report_data.diagnosis);
-}
-```
-
-#### 4. 处理流式响应
-
-```javascript
-const response = await fetch('/api/chat', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    message: '解释这个文件',
-    uploaded_files: [{ name: 'example.csv', path: 'example.csv' }]
-  })
-});
-
-const reader = response.body.getReader();
+// 3. 处理流式响应
+const reader = chatResponse.body.getReader();
 const decoder = new TextDecoder();
-let fullText = '';
-let thinkBuffer = '';
-let isThinking = false;
+let buffer = '';
 
 while (true) {
   const { done, value } = await reader.read();
   if (done) break;
   
-  const chunk = decoder.decode(value, { stream: true });
-  fullText += chunk;
-  
-  // 检测思考过程
-  if (chunk.includes('<think>')) {
-    isThinking = true;
-    // 显示思考过程 UI
-  }
-  
-  if (chunk.includes('</think>')) {
-    isThinking = false;
-    const parts = chunk.split('</think>');
-    thinkBuffer += parts[0].replace('<think>', '');
-    // 更新思考过程 UI
-  }
-  
-  if (isThinking) {
-    thinkBuffer += chunk.replace('<think>', '');
-    // 更新思考过程 UI
-  } else {
-    // 更新最终回答 UI
-  }
-}
-```
-
-### TypeScript 类型定义
-
-```typescript
-// 请求类型
-interface ChatRequest {
-  message: string;
-  history?: Array<{ role: string; content: string }>;
-  uploaded_files?: Array<{ name: string; path: string }>;
-  workflow_data?: {
-    workflow_name: string;
-    steps: WorkflowStep[];
-    file_paths: string[];
-  };
-  test_dataset_id?: string;
-}
-
-interface ExecuteRequest {
-  workflow_data: {
-    workflow_name: string;
-    steps: WorkflowStep[];
-  };
-  file_paths: string[];
-}
-
-// 响应类型
-type ChatResponse = 
-  | WorkflowConfigResponse
-  | ToolConfigResponse
-  | WorkflowStartedResponse
-  | DataSelectorResponse
-  | ChoiceResponse
-  | AnalysisReportResponse
-  | ErrorResponse
-  | StreamResponse;
-
-interface WorkflowConfigResponse {
-  type: 'workflow_config';
-  workflow_data: WorkflowConfig;
-  file_paths: string[];
-  diagnosis_report?: string;  // Markdown 格式的数据诊断报告（所有 Agent 统一生成）
-  recommendation?: Recommendation;  // 参数推荐（Metabolomics Agent 特有）
-}
-
-interface AnalysisReportResponse {
-  type: 'analysis_report';
-  status: 'success';
-  report_data: AnalysisReport;
-  diagnosis?: string;
-}
-
-interface ErrorResponse {
-  type: 'error';
-  error: string;
-  message: string;
+  buffer += decoder.decode(value, { stream: true });
+  // 解析 SSE 事件...
 }
 ```
 
 ---
 
-## 注意事项
+## 前端集成指南
 
-### 1. 文件路径
+### 1. 文件上传流程
 
-- **上传接口返回**: 相对路径（相对于 `UPLOAD_DIR`）
-- **聊天接口使用**: 相对路径或绝对路径均可
-- **结果图片路径**: 以 `/results/` 开头的 URL 路径（前端可直接使用）
+1. 用户选择文件
+2. 调用 `/api/upload` 上传文件
+3. 保存返回的 `file_paths` 和 `session_id`
+4. 在后续请求中使用这些路径
 
-### 2. 工作流执行
+### 2. 聊天流程
 
-- **推荐方式**: 通过 `/api/chat` 接口执行（自动处理文件路径）
-- **直接执行**: 使用 `/api/execute` 接口（需要确保文件路径正确）
+1. 构建请求体，包含 `message`、`uploaded_files`、`stream` 等字段
+2. 根据 `stream` 参数选择处理方式：
+   - `stream: true`: 使用 SSE 流式处理
+   - `stream: false`: 使用 JSON 响应
+3. 根据响应类型（`type` 字段）处理不同的响应：
+   - `workflow_config`: 显示工作流配置卡片
+   - `analysis_report`: 显示分析报告
+   - `error`: 显示错误消息
 
-### 3. 流式响应
+### 3. 工作流执行流程
 
-- **Content-Type**: `text/event-stream` 或 `text/plain`
-- **编码**: UTF-8
-- **格式**: SSE 或纯文本流
+1. 用户确认工作流配置
+2. 调用 `/api/execute` 或通过 `/api/chat` 发送 `workflow_data`
+3. 监听执行进度（流式响应）或等待完成（JSON 响应）
+4. 渲染执行结果和 AI 专家分析报告
 
-### 4. 错误处理
+### 4. 状态管理建议
 
-- **始终检查**: `response.ok` 或 `response.status`
-- **解析错误**: 使用 `response.json()` 获取错误详情
-- **用户提示**: 使用 `message` 字段显示给用户
+- 使用状态管理库（如 Redux、Vuex）管理：
+  - 已上传的文件列表
+  - 当前工作流配置
+  - 执行状态和结果
+  - 用户ID 和会话ID
 
-### 5. 文件大小限制
+### 5. 错误处理建议
 
-- **默认限制**: 100MB
-- **配置方式**: 环境变量 `MAX_FILE_SIZE`（字节）
-- **错误处理**: 413 状态码 + 错误消息
-
-### 6. 前端调试功能
-
-**调试侧边栏**:
-- **触发方式**: 
-  - 双击导航栏品牌 logo（"GIBH Qwen Agent"）
-  - 或点击导航栏右侧 🐛 图标按钮
-- **功能**: 自动捕获并美化显示所有 JSON 响应
-- **样式**: 深色主题，固定右侧，可折叠/展开
-
-**使用场景**:
-- 调试 API 响应
-- 查看完整 JSON 数据结构
-- 排查前端/后端数据不一致问题
+- 实现全局错误处理机制
+- 显示用户友好的错误消息
+- 记录错误日志用于调试
+- 提供重试机制
 
 ---
 
-## 更新日志
+## 附录
 
-### v2.0 (2024-12)
+### A. 环境变量配置
 
-- ✅ 新增 AI 推荐系统（`recommendation` 字段）
-- ✅ 新增 AI 诊断报告（`diagnosis` 字段）
-- ✅ 优化工作流配置生成性能（轻量级预览）
-- ✅ 新增调试可见性（前端调试面板 + 后端 JSON 监控）
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `UPLOAD_DIR` | 上传文件目录 | `/app/uploads` |
+| `RESULTS_DIR` | 结果输出目录 | `/app/results` |
+| `MAX_FILE_SIZE` | 最大文件大小（字节） | `104857600` (100MB) |
+| `ALLOWED_ORIGINS` | CORS 允许的来源 | `*` |
+| `SILICONFLOW_API_KEY` | SiliconFlow API Key | - |
+| `SILICONFLOW_MODEL` | SiliconFlow 模型名称 | - |
+| `OLLAMA_BASE_URL` | Ollama 服务地址 | `http://localhost:11434` |
+| `OLLAMA_EMBEDDING_MODEL` | Ollama Embedding 模型 | `nomic-embed-text` |
+| `CHROMA_PERSIST_DIR` | ChromaDB 持久化目录 | `./data/chroma_tools` |
+
+### B. 文件路径说明
+
+- **上传文件路径**: 相对于 `UPLOAD_DIR`，格式: `{user_id}/{session_id}/{filename}`
+- **结果文件路径**: 相对于 `RESULTS_DIR`，格式: `run_{timestamp}/{filename}`
+- **访问结果文件**: 通过 `/results/{path}` 静态文件服务访问
+
+### C. 多用户支持
+
+系统支持多用户隔离：
+- 每个用户有独立的文件目录: `{UPLOAD_DIR}/{user_id}/`
+- 每个会话有独立的子目录: `{UPLOAD_DIR}/{user_id}/{session_id}/`
+- 工作流和任务历史按用户隔离
+
+### D. 10x Genomics 数据特殊处理
+
+- 自动识别 `matrix.mtx`、`barcodes.tsv`、`features.tsv`（或 `genes.tsv`）
+- 自动分组保存到独立子目录
+- 返回的 `file_paths` 指向组目录，而不是单个文件
 
 ---
 
-**文档版本**: v2.1  
-**最后更新**: 2024年12月（更新前端调试功能说明）  
-**维护者**: GIBH-AGENT-V2 开发团队
-
+**文档版本**: v2.0  
+**最后更新**: 2025-01-28  
+**维护者**: Omics Agent Team
