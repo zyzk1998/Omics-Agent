@@ -351,7 +351,9 @@ Copyright © 2025 Omics Agent Team. All Rights Reserved.
 ## 🔗 相关文档
 
 ### 核心文档
-- [**API.md**](API.md) - 📚 **完整 API 接口文档**（前后端交接必备，包含所有接口的输入输出、错误处理和使用示例）
+- [**API 手册**](api/README.md) - 📚 **结构化 API 接口手册**（按功能模块组织，方便快速查找）
+- [**API.md**](API.md) - 📚 **完整 API 接口文档**（单文件版本，前后端交接必备）
+- [**How to Work**](whotowork.html) - 🎯 **全流程数据流向图**（工具<-->前端交互架构图和详细说明）
 - [架构重构总结](ARCHITECTURE_REFACTORING.md) - 🔥 Tool-RAG 动态工作流系统详细说明
 - [项目总结](PROJECT_SUMMARY.md) - 项目概述和架构说明
 
