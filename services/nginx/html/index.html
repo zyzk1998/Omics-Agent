@@ -630,6 +630,107 @@
         .llm-diagnosis { background: #f0f7ff; border-left: 4px solid #4d6bfe; padding: 15px; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333; }
 
         /* 🔥 FEATURE: DeepSeek-R1 Reasoning Box Styles */
+        /* 🔥 CRITICAL FIX: Advanced Thinking Box Styles for DeepSeek-R1 CoT */
+        .thinking-box {
+            margin: 15px 0;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            background: #f8f9fa;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+        
+        .thinking-box[open] {
+            background: #f0f7ff;
+            border-color: #4d6bfe;
+        }
+        
+        .thinking-summary {
+            padding: 12px 16px;
+            background: #f8f9fa;
+            cursor: pointer;
+            user-select: none;
+            font-weight: 500;
+            font-size: 14px;
+            color: #495057;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.2s ease;
+        }
+        
+        .thinking-summary:hover {
+            background: #e9ecef;
+        }
+        
+        .thinking-box[open] .thinking-summary {
+            background: #e3f2fd;
+            color: #1976d2;
+            border-bottom: 1px solid #bbdefb;
+        }
+        
+        .thinking-content {
+            padding: 16px;
+            background: #ffffff;
+            font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #333;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .thinking-content::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .thinking-content::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        
+        .thinking-content::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 3px;
+        }
+        
+        .thinking-content::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
+        /* Final Answer Styles */
+        .final-answer {
+            margin: 15px 0;
+            padding: 16px;
+            background: #ffffff;
+            border-radius: 8px;
+            border-left: 4px solid #4d6bfe;
+            line-height: 1.8;
+            color: #1f1f1f;
+        }
+        
+        .final-answer p {
+            margin: 0.5em 0;
+        }
+        
+        .final-answer code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+        
+        .final-answer pre {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+            border: 1px solid #e0e0e0;
+        }
+        
+        /* Legacy thought-box (for backward compatibility) */
         .thought-box {
             background-color: #f8f9fa;
             border-left: 3px solid #6c757d;
@@ -1564,9 +1665,16 @@
                                 break;
                                 
                             case 'message':
-                                messageBuffer += data.content || '';
-                                // 🔥 FEATURE: Stream parsing for <think> tags
-                                updateChatBubbleWithReasoning(messageBuffer);
+                                // 🔥 CRITICAL FIX: Handle delta tokens correctly
+                                // Backend now sends ONLY delta (new token), so we accumulate here
+                                const deltaContent = data.content || '';
+                                if (deltaContent) {
+                                    // Use advanced stream parser to handle <think> tags
+                                    const parsed = parseReasoningTagsStream(deltaContent);
+                                    if (parsed.hasNewContent) {
+                                        updateChatBubbleWithReasoning(parsed);
+                                    }
+                                }
                                 break;
                                 
                             case 'diagnosis':
@@ -1750,70 +1858,131 @@
                         return content || '处理中...';
                     }
                     
-                    // 🔥 FEATURE: State management for reasoning tags
-                    let isInReasoningMode = false;
-                    let reasoningContentBuffer = '';
-                    let finalAnswerBuffer = '';
-                    let thoughtBoxElement = null;
-                    let thoughtContentElement = null;
-                    let finalAnswerElement = null;
+                    // 🔥 CRITICAL FIX: Advanced Stream Parser for <think> tags
+                    // State management for reasoning tags
+                    let streamBuffer = '';  // Accumulated stream buffer
+                    let isInReasoningMode = false;  // Currently inside <think> tag
+                    let reasoningContentBuffer = '';  // Accumulated reasoning content
+                    let finalAnswerBuffer = '';  // Accumulated final answer
+                    let thoughtBoxElement = null;  // DOM element for thinking box
+                    let thoughtContentElement = null;  // DOM element for thinking content
+                    let finalAnswerElement = null;  // DOM element for final answer
                     
-                    // 🔥 FEATURE: Stream parser for <think> tags
-                    function parseReasoningTags(text) {
+                    // 🔥 CRITICAL FIX: Robust stream parser that handles split tags across chunks
+                    function parseReasoningTagsStream(deltaText) {
+                        // Add delta to buffer
+                        streamBuffer += deltaText;
+                        
                         const result = {
                             thinking: '',
                             answer: '',
-                            isComplete: false
+                            isComplete: false,
+                            hasNewContent: false
                         };
                         
-                        // Pattern 1: Complete tags <think>...</think>
-                        const completePattern = /<think>(.*?)<\/redacted_reasoning>/gs;
-                        const completeMatches = [...text.matchAll(completePattern)];
+                        // Handle case where tags might be split across chunks
+                        // Pattern 1: Complete <think>...</think> block
+                        // Support both <think> and <think> tags
+                        const completePattern = /<(?:think|redacted_reasoning)>(.*?)<\/(?:think|redacted_reasoning)>/gs;
+                        let match;
+                        let lastIndex = 0;
+                        let extractedThinking = '';
+                        let extractedAnswer = '';
                         
-                        if (completeMatches.length > 0) {
-                            result.thinking = completeMatches.map(m => m[1]).join('\n\n');
-                            result.answer = text.replace(completePattern, '').trim();
+                        while ((match = completePattern.exec(streamBuffer)) !== null) {
+                            // Extract thinking content
+                            extractedThinking += match[1] + '\n\n';
+                            // Extract answer content before and after the tag
+                            extractedAnswer += streamBuffer.substring(lastIndex, match.index);
+                            lastIndex = match.index + match[0].length;
                             result.isComplete = true;
+                        }
+                        
+                        // If we found complete tags, update buffers
+                        if (extractedThinking) {
+                            reasoningContentBuffer = extractedThinking.trim();
+                            finalAnswerBuffer += extractedAnswer;
+                            streamBuffer = streamBuffer.substring(lastIndex);
+                            result.thinking = reasoningContentBuffer;
+                            result.answer = finalAnswerBuffer;
+                            result.hasNewContent = true;
+                            isInReasoningMode = false;
                             return result;
                         }
                         
-                        // Pattern 2: Opening tag detected (streaming)
-                        const openingTagIndex = text.indexOf('<think>');
-                        const closingTagIndex = text.indexOf('</think>');
+                        // Pattern 2: Opening tag detected but not closed yet (streaming)
+                        // Support both <think> and <think> tags
+                        const openingTagPattern = /<(?:think|redacted_reasoning)>/;
+                        const closingTagPattern = /<\/(?:think|redacted_reasoning)>/;
+                        const openingTagMatch = streamBuffer.match(openingTagPattern);
+                        const closingTagMatch = streamBuffer.match(closingTagPattern);
+                        const openingTagIndex = openingTagMatch ? openingTagMatch.index : -1;
+                        const closingTagIndex = closingTagMatch ? closingTagMatch.index : -1;
+                        const openingTagLength = openingTagMatch ? openingTagMatch[0].length : 0;
+                        const closingTagLength = closingTagMatch ? closingTagMatch[0].length : 0;
                         
                         if (openingTagIndex !== -1 && closingTagIndex === -1) {
                             // We're inside reasoning tags, but haven't closed yet
-                            const beforeTag = text.substring(0, openingTagIndex);
-                            const afterTag = text.substring(openingTagIndex + '<think>'.length);
-                            result.thinking = afterTag;
-                            result.answer = beforeTag;
-                            result.isComplete = false;
+                            if (!isInReasoningMode) {
+                                // Just entered reasoning mode
+                                finalAnswerBuffer += streamBuffer.substring(0, openingTagIndex);
+                                streamBuffer = streamBuffer.substring(openingTagIndex + openingTagLength);
+                                isInReasoningMode = true;
+                            } else {
+                                // Already in reasoning mode, accumulate to thinking
+                                reasoningContentBuffer += streamBuffer;
+                                streamBuffer = '';
+                            }
+                            result.thinking = reasoningContentBuffer;
+                            result.answer = finalAnswerBuffer;
+                            result.hasNewContent = true;
                             return result;
                         }
                         
-                        if (openingTagIndex !== -1 && closingTagIndex !== -1) {
-                            // Complete reasoning block found
-                            result.thinking = text.substring(openingTagIndex + '<think>'.length, closingTagIndex);
-                            result.answer = text.substring(0, openingTagIndex) + text.substring(closingTagIndex + '</think>'.length);
+                        // Pattern 3: Closing tag detected (transition from thinking to answer)
+                        if (isInReasoningMode && closingTagIndex !== -1) {
+                            // Extract remaining thinking content before closing tag
+                            reasoningContentBuffer += streamBuffer.substring(0, closingTagIndex);
+                            streamBuffer = streamBuffer.substring(closingTagIndex + closingTagLength);
+                            isInReasoningMode = false;
+                            result.thinking = reasoningContentBuffer;
+                            result.answer = finalAnswerBuffer;
                             result.isComplete = true;
+                            result.hasNewContent = true;
                             return result;
                         }
                         
-                        // Pattern 3: Already closed, just answer content
-                        if (openingTagIndex === -1 && closingTagIndex !== -1) {
-                            result.answer = text.replace(/<\/redacted_reasoning>/g, '').trim();
-                            result.isComplete = true;
+                        // Pattern 4: No tags, just regular content
+                        if (!isInReasoningMode) {
+                            // Regular answer content
+                            finalAnswerBuffer += streamBuffer;
+                            streamBuffer = '';
+                            result.answer = finalAnswerBuffer;
+                            result.hasNewContent = true;
+                            return result;
+                        } else {
+                            // Still in reasoning mode, accumulate to thinking
+                            reasoningContentBuffer += streamBuffer;
+                            streamBuffer = '';
+                            result.thinking = reasoningContentBuffer;
+                            result.answer = finalAnswerBuffer;
+                            result.hasNewContent = true;
                             return result;
                         }
-                        
-                        // Pattern 4: No tags found
-                        result.answer = text;
-                        result.isComplete = true;
-                        return result;
                     }
                     
-                    // 🔥 FEATURE: Update chat bubble with reasoning support
-                    function updateChatBubbleWithReasoning(text) {
+                    // 🔥 LEGACY: Keep old function for backward compatibility (but use new stream parser)
+                    function parseReasoningTags(text) {
+                        // Reset state and use stream parser
+                        streamBuffer = text;
+                        isInReasoningMode = false;
+                        reasoningContentBuffer = '';
+                        finalAnswerBuffer = '';
+                        return parseReasoningTagsStream('');
+                    }
+                    
+                    // 🔥 CRITICAL FIX: Update chat bubble with reasoning support (using parsed object)
+                    function updateChatBubbleWithReasoning(parsed) {
                         const textZoneRef = window.currentMessageZones?.textZone || aiContentDiv;
                         
                         if (!textZoneRef) {
@@ -1827,21 +1996,18 @@
                             spinner.remove();
                         }
                         
-                        // Parse reasoning tags
-                        const parsed = parseReasoningTags(text);
-                        
-                        // Initialize thought box if needed
+                        // Initialize thought box if needed (when thinking content appears)
                         if (!thoughtBoxElement && parsed.thinking) {
                             thoughtBoxElement = document.createElement('details');
-                            thoughtBoxElement.className = 'thought-box';
+                            thoughtBoxElement.className = 'thinking-box';
                             thoughtBoxElement.open = true; // Open by default
                             
                             const summary = document.createElement('summary');
-                            summary.className = 'thought-summary';
-                            summary.innerHTML = '<i class="bi bi-lightbulb"></i> 💡 深度思考中...';
+                            summary.className = 'thinking-summary';
+                            summary.innerHTML = '<i class="bi bi-lightbulb"></i> 💭 DeepSeek 正在思考...';
                             
                             thoughtContentElement = document.createElement('div');
-                            thoughtContentElement.className = 'thought-content';
+                            thoughtContentElement.className = 'thinking-content';
                             
                             thoughtBoxElement.appendChild(summary);
                             thoughtBoxElement.appendChild(thoughtContentElement);
@@ -1854,10 +2020,10 @@
                             }
                         }
                         
-                        // Update thinking content
-                        if (parsed.thinking && thoughtContentElement) {
-                            reasoningContentBuffer = parsed.thinking;
-                            thoughtContentElement.textContent = reasoningContentBuffer;
+                        // Update thinking content (streaming)
+                        if (parsed.thinking !== undefined && thoughtContentElement) {
+                            // Update thinking content in real-time
+                            thoughtContentElement.textContent = parsed.thinking;
                             
                             // Update summary text if reasoning is complete
                             if (parsed.isComplete && thoughtBoxElement) {
@@ -1868,9 +2034,8 @@
                             }
                         }
                         
-                        // Update final answer
-                        if (parsed.answer) {
-                            finalAnswerBuffer = parsed.answer;
+                        // Update final answer (streaming)
+                        if (parsed.answer !== undefined) {
                             if (!finalAnswerElement) {
                                 finalAnswerElement = document.createElement('div');
                                 finalAnswerElement.className = 'final-answer';
@@ -1878,10 +2043,11 @@
                             }
                             
                             try {
-                                finalAnswerElement.innerHTML = safeMarkedParse(finalAnswerBuffer);
+                                // Use markdown parser for final answer
+                                finalAnswerElement.innerHTML = safeMarkedParse(parsed.answer);
                             } catch (e) {
                                 console.error('❌ [SSE] Markdown 解析错误:', e);
-                                finalAnswerElement.innerHTML = escapeHtml(finalAnswerBuffer);
+                                finalAnswerElement.textContent = parsed.answer;
                             }
                         }
                         
@@ -1988,37 +2154,39 @@
                         let reportTitle = "💡 AI 专家分析报告";
                         let reportIcon = "bi-lightbulb";
                         
-                        // Check if this is pre-analysis (data diagnosis) or post-analysis
-                        if (fullData) {
-                            const status = fullData.status || fullData.report_data?.status || '';
-                        // 计划阶段（数据诊断）显示"数据诊断报告"
-                        // 🔥 TASK 4 FIX: 修复标题冗余问题 - 只显示一个标题
-                        if (status === 'data_ready' || status === 'template_ready' || diagnosisMessage.includes('数据体检') || diagnosisMessage.includes('数据概况') || diagnosisMessage.includes('数据诊断')) {
-                            // 检查是否已经存在"数据诊断报告"标题，如果存在则使用"数据体检报告"
-                            const existingTitles = expertSection.querySelectorAll('h6');
-                            let hasDataDiagnosisTitle = false;
-                            for (const existingTitle of existingTitles) {
-                                const titleText = existingTitle.textContent || '';
-                                if (titleText.includes('数据诊断报告')) {
-                                    hasDataDiagnosisTitle = true;
-                                    break;
-                                }
-                            }
-                            // 如果已存在"数据诊断报告"标题，使用"数据体检报告"（避免重复）
-                            reportTitle = hasDataDiagnosisTitle ? "📊 数据体检报告" : "📊 数据诊断报告";
-                            reportIcon = "bi-clipboard-check";
-                        }
-                        }
-                        
-                        // 🔥 修复：检查是否已存在相同类型的报告，避免重复渲染（在确定reportTitle之后）
+                        // 🔥 TASK 2 FIX: 修复标题冗余问题 - 统一使用"数据诊断报告"，并检查是否已存在
+                        // 检查是否已经存在"数据诊断报告"或"数据体检报告"标题
                         const existingTitles = expertSection.querySelectorAll('h6');
+                        let hasDataDiagnosisTitle = false;
                         for (const existingTitle of existingTitles) {
                             const titleText = existingTitle.textContent || '';
-                            // 如果是数据诊断报告，且当前也要渲染数据诊断报告，则跳过
-                            if (titleText.includes('数据诊断报告') && reportTitle.includes('数据诊断报告')) {
-                                console.log('ℹ️ [renderDiagnosisCard] 数据诊断报告已存在，跳过重复渲染');
-                                return;
+                            // 检查是否已存在数据诊断相关的标题
+                            if (titleText.includes('数据诊断报告') || titleText.includes('数据体检报告')) {
+                                hasDataDiagnosisTitle = true;
+                                console.log('ℹ️ [renderDiagnosisCard] 检测到已存在数据诊断报告标题，跳过重复渲染');
+                                break;
                             }
+                        }
+                        
+                        // 如果已存在数据诊断报告，直接返回，不重复渲染
+                        if (hasDataDiagnosisTitle) {
+                            console.log('ℹ️ [renderDiagnosisCard] 数据诊断报告已存在，跳过重复渲染');
+                            return;
+                        }
+                        
+                        // 统一使用"数据诊断报告"作为标题
+                        if (fullData) {
+                            const status = fullData.status || fullData.report_data?.status || '';
+                            // 计划阶段（数据诊断）显示"数据诊断报告"
+                            if (status === 'data_ready' || status === 'template_ready' || diagnosisMessage.includes('数据体检') || diagnosisMessage.includes('数据概况') || diagnosisMessage.includes('数据诊断')) {
+                                reportTitle = "📊 数据诊断报告";  // 🔥 TASK 2 FIX: 统一使用"数据诊断报告"
+                                reportIcon = "bi-clipboard-check";
+                            }
+                        }
+                        
+                        // 🔥 修复：检查是否已存在AI专家分析报告，避免重复渲染
+                        for (const existingTitle of existingTitles) {
+                            const titleText = existingTitle.textContent || '';
                             // 如果是AI专家分析报告，且当前也要渲染AI专家分析报告，则跳过
                             if (titleText.includes('AI 专家分析报告') && reportTitle.includes('AI 专家分析报告')) {
                                 console.log('ℹ️ [renderDiagnosisCard] AI专家分析报告已存在，跳过重复渲染');

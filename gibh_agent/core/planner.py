@@ -1046,6 +1046,15 @@ Return ONLY a JSON object:
 - Domain name MUST be exactly "Metabolomics" or "RNA" (case-sensitive)
 - Mode MUST be exactly "EXECUTION" or "PLANNING" (case-sensitive)"""
 
+        # 🔥 TASK 3 FIX: 增强用户查询和文件格式的关联
+        query_lower = user_query.lower()
+        rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "cell ranger", "fastq", "测序", "sequencing"]
+        metabolomics_keywords = ["metabolomics", "metabolite", "代谢组", "代谢物", "代谢"]
+        
+        # 检测用户查询中的领域关键词
+        has_rna_keyword = any(kw in query_lower for kw in rna_keywords)
+        has_metabolomics_keyword = any(kw in query_lower for kw in metabolomics_keywords)
+        
         user_prompt = f"""**User Query:**
 {user_query}
 
@@ -1055,12 +1064,26 @@ File Uploaded: {has_file} ({'True' if has_file else 'False'})
 **File Metadata (if available):**
 {json.dumps(file_metadata, ensure_ascii=False, indent=2) if file_metadata else "No file metadata available"}
 
+**CRITICAL ROUTING RULES (User Intent + File Format):**
+1. **FASTQ files** (file_type="fastq" or extension=".fastq"/".fq") MUST route to "RNA" domain, regardless of query.
+2. **H5AD/10x files** (file_type="h5ad" or "10x_mtx") MUST route to "RNA" domain, regardless of query.
+3. **CSV/Tabular files** (file_type="tabular" or extension=".csv") MUST route to "Metabolomics" domain, unless user explicitly mentions RNA analysis.
+4. **User Query Keywords:**
+   - If query contains RNA keywords ({', '.join(rna_keywords[:5])}): Prefer "RNA" domain
+   - If query contains Metabolomics keywords ({', '.join(metabolomics_keywords[:3])}): Prefer "Metabolomics" domain
+5. **Priority Order:**
+   - File format > User query keywords > LLM inference
+   - If file_type="fastq" → ALWAYS "RNA"
+   - If file_type="h5ad" or "10x_mtx" → ALWAYS "RNA"
+   - If file_type="tabular" or extension=".csv" → Prefer "Metabolomics" (unless user explicitly mentions RNA)
+
 **Task:**
 Classify the intent and return JSON only. Remember:
 - If File=False: mode MUST be "PLANNING"
 - If File=True + Action words: mode = "EXECUTION"
 - If File=True + Inquiry words: mode = "PLANNING"
-- If File=True + Vague: mode = "EXECUTION" (default)"""
+- If File=True + Vague: mode = "EXECUTION" (default)
+- **CRITICAL**: File format takes precedence over LLM inference for domain classification."""
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -1086,60 +1109,72 @@ Classify the intent and return JSON only. Remember:
             mode = intent_result.get("mode", "PLANNING")  # 🔥 NEW: Extract mode
             target_steps = intent_result.get("target_steps", [])
             
-            # 🔥 CRITICAL: File-type-based fallback for domain classification
-            # If file metadata exists, use file extension to override LLM decision if needed
+            # 🔥 TASK 3 FIX: 增强文件格式和用户查询的关联路由（优先级：文件格式 > 用户查询关键词 > LLM推理）
             logger.info(f"🔍 [SOPPlanner] 意图分类后检查: domain_name={domain_name}, file_metadata exists={file_metadata is not None}")
+            
+            # 检测用户查询中的领域关键词
+            query_lower = user_query.lower()
+            rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "cell ranger", "fastq", "测序", "sequencing"]
+            metabolomics_keywords = ["metabolomics", "metabolite", "代谢组", "代谢物", "代谢"]
+            has_rna_keyword = any(kw in query_lower for kw in rna_keywords)
+            has_metabolomics_keyword = any(kw in query_lower for kw in metabolomics_keywords)
+            
             if file_metadata:
                 file_path = file_metadata.get("file_path", "")
                 file_type = file_metadata.get("file_type", "")
                 logger.info(f"🔍 [SOPPlanner] 文件元数据: file_path={file_path}, file_type={file_type}")
                 
-                # Check file extension
+                # 🔥 TASK 3 FIX: 文件格式优先路由（最高优先级）
+                # 1. FASTQ文件 → 强制路由到RNA
+                if file_type == "fastq" or (file_path and any(ext in file_path.lower() for ext in [".fastq", ".fq", "fastq"])):
+                    if domain_name != "RNA":
+                        logger.warning(f"⚠️ [SOPPlanner] 检测到FASTQ文件，强制覆盖域名: {domain_name} → RNA")
+                        domain_name = "RNA"
+                    else:
+                        logger.info(f"✅ [SOPPlanner] FASTQ文件已正确分类为 RNA")
+                
+                # 2. H5AD/10x文件 → 强制路由到RNA
+                elif file_type in ["h5ad", "10x_mtx", "anndata"] or (file_path and ".h5ad" in file_path.lower()):
+                    if domain_name != "RNA":
+                        logger.warning(f"⚠️ [SOPPlanner] 检测到{file_type}文件，强制覆盖域名: {domain_name} → RNA")
+                        domain_name = "RNA"
+                    else:
+                        logger.info(f"✅ [SOPPlanner] {file_type}文件已正确分类为 RNA")
+                
+                # 3. CSV/Tabular文件 → 优先路由到Metabolomics（除非用户明确提到RNA）
+                elif file_type == "tabular" or (file_path and file_path.lower().endswith(".csv")):
+                    if domain_name == "RNA" and not has_rna_keyword:
+                        # 如果LLM分类为RNA但用户查询中没有RNA关键词，强制覆盖为Metabolomics
+                        logger.warning(f"⚠️ [SOPPlanner] 检测到CSV/Tabular文件且用户未明确提到RNA，强制覆盖域名: {domain_name} → Metabolomics")
+                        domain_name = "Metabolomics"
+                    elif domain_name == "Metabolomics":
+                        logger.info(f"✅ [SOPPlanner] CSV/Tabular文件已正确分类为 Metabolomics")
+                
+                # 4. 检查文件扩展名（作为补充）
                 if file_path:
                     file_ext = file_path.lower().split('.')[-1] if '.' in file_path else ""
                     logger.info(f"🔍 [SOPPlanner] 文件扩展名: {file_ext}")
                     
-                    # CSV files are strongly associated with Metabolomics
-                    if file_ext == "csv":
-                        if domain_name == "RNA":
-                            logger.warning(f"⚠️ LLM 将 CSV 文件分类为 RNA，强制覆盖为 Metabolomics")
-                            domain_name = "Metabolomics"
-                        else:
-                            logger.info(f"✅ CSV 文件已正确分类为 {domain_name}")
-                    
-                    # H5AD files are strongly associated with RNA
-                    if file_ext == "h5ad" and domain_name == "Metabolomics":
-                        logger.warning(f"⚠️ LLM 将 H5AD 文件分类为 Metabolomics，强制覆盖为 RNA")
-                        domain_name = "RNA"
-                    
-                    # FASTQ files are strongly associated with RNA
-                    if file_ext in ["fastq", "fq"] and domain_name == "Metabolomics":
-                        logger.warning(f"⚠️ LLM 将 FASTQ 文件分类为 Metabolomics，强制覆盖为 RNA")
-                        domain_name = "RNA"
-                else:
-                    logger.warning(f"⚠️ [SOPPlanner] 文件元数据中没有 file_path")
-                
-                # 🔥 TASK 2 FIX: Check file_type from metadata (more reliable than extension for directories)
-                if file_type == "fastq":
-                    if domain_name == "Metabolomics":
-                        logger.warning(f"⚠️ LLM 将 FASTQ 目录分类为 Metabolomics，强制覆盖为 RNA")
-                        domain_name = "RNA"
-                    else:
-                        logger.info(f"✅ FASTQ 目录已正确分类为 {domain_name}")
-                elif file_type == "tabular":
-                    if domain_name == "RNA":
-                        logger.warning(f"⚠️ LLM 将 tabular 文件分类为 RNA，强制覆盖为 Metabolomics")
+                    if file_ext == "csv" and domain_name == "RNA" and not has_rna_keyword:
+                        logger.warning(f"⚠️ [SOPPlanner] CSV扩展名检测，强制覆盖域名: {domain_name} → Metabolomics")
                         domain_name = "Metabolomics"
-                    else:
-                        logger.info(f"✅ tabular 文件已正确分类为 {domain_name}")
-                elif file_type == "10x_mtx" or file_type == "anndata":
-                    if domain_name == "Metabolomics":
-                        logger.warning(f"⚠️ LLM 将 {file_type} 文件分类为 Metabolomics，强制覆盖为 RNA")
+                    elif file_ext in ["fastq", "fq"] and domain_name == "Metabolomics":
+                        logger.warning(f"⚠️ [SOPPlanner] FASTQ扩展名检测，强制覆盖域名: {domain_name} → RNA")
                         domain_name = "RNA"
-                    else:
-                        logger.info(f"✅ {file_type} 文件已正确分类为 {domain_name}")
+                    elif file_ext == "h5ad" and domain_name == "Metabolomics":
+                        logger.warning(f"⚠️ [SOPPlanner] H5AD扩展名检测，强制覆盖域名: {domain_name} → RNA")
+                        domain_name = "RNA"
             else:
-                logger.warning(f"⚠️ [SOPPlanner] 没有文件元数据，无法进行文件类型检查")
+                logger.warning(f"⚠️ [SOPPlanner] 没有文件元数据，使用用户查询关键词进行路由")
+                # 如果没有文件，使用用户查询关键词进行路由
+                if has_rna_keyword and not has_metabolomics_keyword:
+                    if domain_name != "RNA":
+                        logger.info(f"ℹ️ [SOPPlanner] 用户查询包含RNA关键词，调整域名: {domain_name} → RNA")
+                        domain_name = "RNA"
+                elif has_metabolomics_keyword and not has_rna_keyword:
+                    if domain_name != "Metabolomics":
+                        logger.info(f"ℹ️ [SOPPlanner] 用户查询包含代谢组关键词，调整域名: {domain_name} → Metabolomics")
+                        domain_name = "Metabolomics"
             
             # 验证域名
             if domain_name not in ["Metabolomics", "RNA"]:

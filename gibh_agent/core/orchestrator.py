@@ -221,14 +221,15 @@ class AgentOrchestrator:
                                 if content:
                                     messages.append({"role": role, "content": content})
                     
-                    message_buffer = ""
+                    # 🔥 CRITICAL FIX: Stream Delta tokens only (not accumulated text)
+                    # This prevents the "stutter" bug where frontend accumulates already-accumulated text
                     async for chunk in llm_client.astream(messages, temperature=0.7, max_tokens=1000):
                         if chunk.choices and len(chunk.choices) > 0:
                             delta = chunk.choices[0].delta
                             if delta and delta.content:
-                                message_buffer += delta.content
+                                # 🔥 FIX: Send ONLY the delta (new token), not accumulated text
                                 yield self._format_sse("message", {
-                                    "content": message_buffer
+                                    "content": delta.content  # Only delta, not accumulated!
                                 })
                                 await asyncio.sleep(0.01)
                     
@@ -973,14 +974,9 @@ class AgentOrchestrator:
                     # 检测是否包含 cellranger 步骤
                     has_cellranger_step = any("cellranger" in step.lower() for step in target_steps)
                     
-                    # 🔥 TASK 2 & 3: 如果用户意图包含 RNA 分析，询问是否使用测试数据（根据工作流步骤推荐对应数据）
+                    # 🔥 TASK 1 FIX: 如果用户意图包含 RNA 分析，询问是否使用测试数据，但同时生成工作流卡片（预览模式）
                     if is_rna_domain and (has_cellranger_intent or has_cellranger_step or is_full_workflow or len(target_steps) > 0):
-                        logger.info("🔍 [Orchestrator] 检测到 RNA 分析意图，询问是否使用测试数据")
-                        yield self._format_sse("status", {
-                            "content": "检测到您想要进行 RNA 分析，但未上传文件...",
-                            "state": "running"
-                        })
-                        await asyncio.sleep(0.01)
+                        logger.info("🔍 [Orchestrator] 检测到 RNA 分析意图，询问是否使用测试数据，同时生成工作流卡片")
                         
                         # 🔥 TASK 3: 根据工作流步骤推荐对应的测试数据
                         from ..core.test_data_manager import TestDataManager
@@ -1001,7 +997,7 @@ class AgentOrchestrator:
                             message = "检测到您想要进行 RNA 分析，但未上传文件。"
                             question = "是否使用测试数据进行分析？"
                         
-                        # 发送测试数据询问
+                        # 🔥 TASK 1 FIX: 先发送测试数据询问（但不return，继续生成工作流卡片）
                         test_data_question = {
                             "type": "test_data_question",
                             "message": message,
@@ -1021,8 +1017,7 @@ class AgentOrchestrator:
                             "test_data_question": test_data_question
                         })
                         await asyncio.sleep(0.01)
-                        yield self._format_sse("done", {"status": "test_data_question"})
-                        return  # 等待用户确认
+                        # 🔥 TASK 1 FIX: 不return，继续生成工作流卡片
                     
                     yield self._format_sse("status", {
                         "content": "未检测到文件，进入方案预览模式...",
@@ -1148,73 +1143,86 @@ class AgentOrchestrator:
                         logger.info(f"✅ [Orchestrator] Path A: 文件检查完成: {file_path}")
                         
                         if file_metadata and file_metadata.get("status") == "success":
-                            # Extract statistics
+                            # 🔥 TASK 2 FIX: 调用agent的诊断方法生成真正的诊断报告，而不是使用模板
+                            diagnosis_message = None
+                            recommendation_data = None
+                            
+                            # 尝试从缓存加载诊断结果
+                            from ..core.diagnosis_cache import DiagnosisCache
+                            cache = DiagnosisCache()
+                            cached_diagnosis = cache.get_cached_diagnosis(file_path)
+                            
+                            if cached_diagnosis:
+                                logger.info(f"✅ [Orchestrator] 从缓存加载诊断结果: {file_path}")
+                                diagnosis_message = cached_diagnosis.get("diagnosis_report")
+                                recommendation_data = cached_diagnosis.get("recommendation")
+                            else:
+                                # 调用agent的诊断方法生成诊断报告
+                                try:
+                                    # 获取对应的agent实例
+                                    agent_instance = None
+                                    if hasattr(self.agent, 'agents') and self.agent.agents:
+                                        if domain_name == "RNA":
+                                            agent_instance = self.agent.agents.get("RNA")
+                                        elif domain_name == "Metabolomics":
+                                            agent_instance = self.agent.agents.get("Metabolomics")
+                                    
+                                    if agent_instance and hasattr(agent_instance, '_perform_data_diagnosis'):
+                                        logger.info(f"🔍 [Orchestrator] 调用agent诊断方法生成诊断报告: {domain_name}")
+                                        
+                                        # 确定组学类型
+                                        omics_type = "Metabolomics" if domain_name == "Metabolomics" else "scRNA"
+                                        
+                                        # 尝试加载数据预览（用于更准确的诊断）
+                                        dataframe = None
+                                        try:
+                                            import pandas as pd
+                                            head_data = file_metadata.get("head", {})
+                                            if head_data and isinstance(head_data, dict) and "json" in head_data:
+                                                dataframe = pd.DataFrame(head_data["json"])
+                                        except Exception as e:
+                                            logger.debug(f"无法构建数据预览: {e}")
+                                        
+                                        # 调用诊断方法
+                                        diagnosis_message = await agent_instance._perform_data_diagnosis(
+                                            file_metadata=file_metadata,
+                                            omics_type=omics_type,
+                                            dataframe=dataframe
+                                        )
+                                        
+                                        # 从agent的context中获取参数推荐
+                                        if hasattr(agent_instance, 'context') and "parameter_recommendation" in agent_instance.context:
+                                            recommendation_data = agent_instance.context.get("parameter_recommendation")
+                                        
+                                        logger.info(f"✅ [Orchestrator] 诊断报告生成成功，长度: {len(diagnosis_message) if diagnosis_message else 0}")
+                                    else:
+                                        logger.warning(f"⚠️ [Orchestrator] 无法获取agent实例或诊断方法，使用轻量级诊断")
+                                        # 回退到轻量级诊断
+                                        diagnosis_message = self._generate_lightweight_diagnosis(file_metadata, domain_name)
+                                except Exception as diag_err:
+                                    logger.error(f"❌ [Orchestrator] 诊断报告生成失败: {diag_err}", exc_info=True)
+                                    # 回退到轻量级诊断
+                                    diagnosis_message = self._generate_lightweight_diagnosis(file_metadata, domain_name)
+                            
+                            # 如果诊断报告为空，使用轻量级诊断
+                            if not diagnosis_message:
+                                diagnosis_message = self._generate_lightweight_diagnosis(file_metadata, domain_name)
+                            
+                            # Extract statistics for SSE event
                             n_samples = file_metadata.get("n_samples") or file_metadata.get("n_obs") or file_metadata.get("shape", {}).get("rows", 0)
                             n_features = file_metadata.get("n_features") or file_metadata.get("n_vars") or file_metadata.get("shape", {}).get("cols", 0)
                             
-                            # Build diagnosis message
-                            if domain_name == "Metabolomics":
-                                diagnosis_message = f"""### 📊 数据体检报告
-
-**数据规模**:
-- **样本数**: {n_samples} 个
-- **代谢物数**: {n_features} 个
-
-**数据特征**:
-- 文件类型: {file_metadata.get('file_type', '未知')}
-- 文件大小: {file_metadata.get('file_size_mb', 'N/A')} MB
-
-**数据质量**:
-- 缺失值率: {file_metadata.get('missing_rate', 'N/A')}%
-- 数据范围: {file_metadata.get('data_range', {}).get('min', 'N/A')} ~ {file_metadata.get('data_range', {}).get('max', 'N/A')}
-
-**下一步**: 已为您规划分析流程，请确认执行。"""
-                            else:  # RNA
-                                # 🔥 TASK 1 FIX: 对于FASTQ文件，显示轻量级诊断信息
-                                file_type = file_metadata.get('file_type', '未知')
-                                if file_type == "fastq":
-                                    # FASTQ文件的轻量级诊断
-                                    diagnosis_info = file_metadata.get("diagnosis_info", {})
-                                    file_count = diagnosis_info.get("file_count", 0)
-                                    total_size_gb = diagnosis_info.get("total_size_gb", 0)
-                                    has_paired_end = diagnosis_info.get("has_paired_end", False)
-                                    has_index = diagnosis_info.get("has_index", False)
-                                    
-                                    diagnosis_message = f"""### 📊 数据体检报告
-
-**数据规模**:
-- **FASTQ文件数**: {file_count} 个
-- **总大小**: {total_size_gb:.2f} GB
-
-**数据特征**:
-- 文件类型: FASTQ 目录
-- 配对端数据: {'是' if has_paired_end else '否'}
-- 索引文件: {'是' if has_index else '否'}
-- 10x格式: {'是' if diagnosis_info.get('is_10x_format', False) else '否'}
-
-**数据质量**: FASTQ 原始数据，需要先进行 Cell Ranger 计数处理。
-
-**下一步**: 已为您规划分析流程（包含 Cell Ranger 步骤），请确认执行。"""
-                                else:
-                                    # 非FASTQ文件的诊断
-                                    diagnosis_message = f"""### 📊 数据体检报告
-
-**数据规模**:
-- **细胞数**: {n_samples} 个
-- **基因数**: {n_features} 个
-
-**数据特征**:
-- 文件类型: {file_type}
-- 稀疏度: {file_metadata.get('sparsity', 'N/A')}
-
-**数据质量**: 数据已就绪，可以开始分析。
-
-**下一步**: 已为您规划分析流程，请确认执行。"""
-                            
-                            # 🔥 TASK 2 & 3 FIX: 添加参数推荐到诊断事件
-                            recommendation_data = None
-                            if hasattr(self.agent, 'context') and "parameter_recommendation" in self.agent.context:
-                                recommendation_data = self.agent.context.get("parameter_recommendation")
+                            # 🔥 TASK 2 FIX: 确保诊断报告标题统一（只使用"数据诊断报告"）
+                            # 移除可能存在的重复标题
+                            if diagnosis_message:
+                                # 移除所有可能的标题变体
+                                diagnosis_message = diagnosis_message.replace("### 📊 数据体检报告", "")
+                                diagnosis_message = diagnosis_message.replace("### 📊 数据诊断报告", "")
+                                diagnosis_message = diagnosis_message.replace("## 📊 数据体检报告", "")
+                                diagnosis_message = diagnosis_message.replace("## 📊 数据诊断报告", "")
+                                # 确保以"数据诊断报告"开头
+                                if not diagnosis_message.strip().startswith("#"):
+                                    diagnosis_message = f"### 📊 数据诊断报告\n\n{diagnosis_message.strip()}"
                             
                             yield self._format_sse("diagnosis", {
                                 "message": diagnosis_message,
@@ -1222,7 +1230,8 @@ class AgentOrchestrator:
                                 "n_features": n_features,
                                 "file_type": file_metadata.get('file_type'),
                                 "status": "data_ready",
-                                "recommendation": recommendation_data  # 🔥 TASK 3: 添加参数推荐
+                                "recommendation": recommendation_data,  # 🔥 TASK 3: 添加参数推荐
+                                "diagnosis_report": diagnosis_message  # 🔥 TASK 2: 添加完整诊断报告
                             })
                             await asyncio.sleep(0.01)
                     except Exception as e:
@@ -1460,6 +1469,77 @@ class AgentOrchestrator:
             return "分析完成"
         
         return "\n".join(summary_parts)
+    
+    def _generate_lightweight_diagnosis(self, file_metadata: Dict[str, Any], domain_name: str) -> str:
+        """
+        生成轻量级诊断报告（回退方案）
+        
+        Args:
+            file_metadata: 文件元数据
+            domain_name: 域名（RNA 或 Metabolomics）
+            
+        Returns:
+            诊断报告字符串
+        """
+        n_samples = file_metadata.get("n_samples") or file_metadata.get("n_obs") or file_metadata.get("shape", {}).get("rows", 0)
+        n_features = file_metadata.get("n_features") or file_metadata.get("n_vars") or file_metadata.get("shape", {}).get("cols", 0)
+        file_type = file_metadata.get('file_type', '未知')
+        
+        if domain_name == "Metabolomics":
+            return f"""### 📊 数据诊断报告
+
+**数据规模**:
+- **样本数**: {n_samples} 个
+- **代谢物数**: {n_features} 个
+
+**数据特征**:
+- 文件类型: {file_type}
+- 文件大小: {file_metadata.get('file_size_mb', 'N/A')} MB
+
+**数据质量**:
+- 缺失值率: {file_metadata.get('missing_rate', 'N/A')}%
+- 数据范围: {file_metadata.get('data_range', {}).get('min', 'N/A')} ~ {file_metadata.get('data_range', {}).get('max', 'N/A')}
+
+**下一步**: 已为您规划分析流程，请确认执行。"""
+        else:  # RNA
+            if file_type == "fastq":
+                # FASTQ文件的轻量级诊断
+                diagnosis_info = file_metadata.get("diagnosis_info", {})
+                file_count = diagnosis_info.get("file_count", 0)
+                total_size_gb = diagnosis_info.get("total_size_gb", 0)
+                has_paired_end = diagnosis_info.get("has_paired_end", False)
+                has_index = diagnosis_info.get("has_index", False)
+                
+                return f"""### 📊 数据诊断报告
+
+**数据规模**:
+- **FASTQ文件数**: {file_count} 个
+- **总大小**: {total_size_gb:.2f} GB
+
+**数据特征**:
+- 文件类型: FASTQ 目录
+- 配对端数据: {'是' if has_paired_end else '否'}
+- 索引文件: {'是' if has_index else '否'}
+- 10x格式: {'是' if diagnosis_info.get('is_10x_format', False) else '否'}
+
+**数据质量**: FASTQ 原始数据，需要先进行 Cell Ranger 计数处理。
+
+**下一步**: 已为您规划分析流程（包含 Cell Ranger 步骤），请确认执行。"""
+            else:
+                # 非FASTQ文件的诊断
+                return f"""### 📊 数据诊断报告
+
+**数据规模**:
+- **细胞数**: {n_samples} 个
+- **基因数**: {n_features} 个
+
+**数据特征**:
+- 文件类型: {file_type}
+- 稀疏度: {file_metadata.get('sparsity', 'N/A')}
+
+**数据质量**: 数据已就绪，可以开始分析。
+
+**下一步**: 已为您规划分析流程，请确认执行。"""
     
     def _format_sse(self, event_type: str, data: Dict[str, Any]) -> str:
         """

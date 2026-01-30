@@ -81,3 +81,15 @@ GIBH-AGENT-V2.pub
 debug.log
 *.swp
 
+# 临时测试输出
+frontend_rna_test_*.log
+frontend_rna_test_*.txt
+frontend_rna_test_output.txt
+*测试问题总结.txt
+
+# 缓存目录
+cache/
+.diagnosis_cache/
+
+# 归档目录（可选，如果不想提交归档）
+# _archive/
