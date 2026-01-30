@@ -403,9 +403,47 @@ interface ChatRequest {
 
 **格式**: Server-Sent Events (SSE)
 
+**🔥 CRITICAL: Delta Streaming Protocol**
+
+**重要**: 服务器发送的是 **Delta**（增量）token，而不是累积文本。客户端必须**追加**新内容到缓冲区。
+
+**Delta 流式协议说明**:
+- 每个 `message` 事件只包含**新的 token**（增量部分）
+- 客户端必须使用 `+=` 操作符将新内容追加到现有缓冲区
+- 示例：
+  ```
+  event: message
+  data: {"content": "Ap"}
+  
+  event: message
+  data: {"content": "ple"}  // 只包含新 token，不是 "Apple"
+  ```
+- 客户端处理方式：
+  ```javascript
+  let messageBuffer = '';
+  
+  // 收到 Delta token
+  messageBuffer += data.content;  // ✅ 正确：追加
+  // messageBuffer = data.content;  // ❌ 错误：替换
+  ```
+
+**DeepSeek Chain of Thought (CoT) 支持**:
+
+当使用 DeepSeek-R1 等支持思考过程的模型时，响应可能包含 `<think>...</think>` 标签：
+
+```
+event: message
+data: {"content": "<think>思考过程内容</think>最终答案"}
+```
+
+**客户端处理建议**:
+1. 解析 `<think>` 标签，将思考过程和最终答案分离
+2. 在 UI 中分别显示思考过程（可折叠）和最终答案
+3. 支持标签跨多个 SSE chunk 的情况（标签可能被分割）
+
 **SSE 事件类型**: 详见 [SSE 流式响应格式](#sse-流式响应格式)
 
-**前端处理示例**:
+**前端处理示例（Delta Streaming）**:
 
 ```javascript
 const response = await fetch('/api/chat', {
@@ -420,30 +458,63 @@ const response = await fetch('/api/chat', {
 
 const reader = response.body.getReader();
 const decoder = new TextDecoder();
-let buffer = '';
+let sseBuffer = '';  // SSE 解析缓冲区
+let messageBuffer = '';  // 消息内容缓冲区（累积 Delta）
+let reasoningBuffer = '';  // 思考过程缓冲区
+let isInReasoning = false;  // 是否在思考标签内
 
 while (true) {
   const { done, value } = await reader.read();
   if (done) break;
   
-  buffer += decoder.decode(value, { stream: true });
-  const lines = buffer.split('\n');
-  buffer = lines.pop() || '';
+  sseBuffer += decoder.decode(value, { stream: true });
+  const lines = sseBuffer.split('\n');
+  sseBuffer = lines.pop() || '';  // 保留不完整的行
+  
+  let currentEventType = null;
   
   for (const line of lines) {
     if (line.startsWith('event: ')) {
-      const eventType = line.substring(7).trim();
-      console.log('事件类型:', eventType);
+      currentEventType = line.substring(7).trim();
     } else if (line.startsWith('data: ')) {
       const dataStr = line.substring(6).trim();
       try {
         const data = JSON.parse(dataStr);
-        handleSSEEvent(eventType, data);
+        
+        // 🔥 CRITICAL: 处理 Delta token
+        if (currentEventType === 'message' && data.content) {
+          // 服务器发送的是 Delta，必须追加
+          messageBuffer += data.content;
+          
+          // 解析 Chain of Thought 标签
+          const parsed = parseReasoningTags(messageBuffer);
+          if (parsed.reasoning) {
+            reasoningBuffer = parsed.reasoning;
+            messageBuffer = parsed.answer;
+          }
+          
+          // 更新 UI
+          updateChatUI(reasoningBuffer, messageBuffer);
+        } else {
+          handleSSEEvent(currentEventType, data);
+        }
       } catch (e) {
-        console.error('JSON 解析错误:', e);
+        console.error('JSON 解析错误:', e, '数据:', dataStr);
       }
     }
   }
+}
+
+// 解析思考标签的辅助函数
+function parseReasoningTags(content) {
+  const reasoningMatch = content.match(/<think>(.*?)<\/redacted_reasoning>/s);
+  if (reasoningMatch) {
+    return {
+      reasoning: reasoningMatch[1],
+      answer: content.replace(reasoningMatch[0], '').trim()
+    };
+  }
+  return { reasoning: null, answer: content };
 }
 ```
 
@@ -899,13 +970,15 @@ interface WorkflowSaveRequest {
 | 事件类型 | 说明 | 数据格式 |
 |---------|------|---------|
 | `status` | 状态更新 | `{ "content": "状态消息", "state": "状态值" }` |
-| `message` | 文本消息 | `{ "content": "消息内容" }` |
+| `message` | 文本消息（**Delta token**） | `{ "content": "增量内容" }` ⚠️ **只包含新 token，客户端必须追加** |
 | `workflow` | 工作流配置 | `{ "workflow_config": {...}, "template_mode": true/false }` |
 | `step_result` | 步骤执行结果 | `{ "report_data": {...} }` |
 | `diagnosis` | 诊断报告 | `{ "report_data": {...} }` |
 | `result` | 最终结果 | `{ "report_data": {...} }` 或 `{ "workflow_config": {...} }` |
 | `done` | 完成信号 | `{ "status": "success" }` |
 | `error` | 错误信息 | `{ "error": "错误描述", "message": "用户友好的错误消息" }` |
+
+**⚠️ 重要提示**: `message` 事件中的 `content` 字段只包含**增量 token**，不是累积文本。客户端必须使用 `buffer += data.content` 来累积内容。
 
 ### SSE 事件格式
 
@@ -932,22 +1005,27 @@ data: {json_data}
 - `"async_job_started"`: 异步作业已启动
 - `"waiting"`: 等待中
 
-### 前端处理示例
+### 前端处理示例（Delta Streaming + CoT）
 
 ```javascript
 async function handleSSEStream(response) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  let buffer = '';
+  let sseBuffer = '';  // SSE 解析缓冲区
   let currentEventType = null;
+  
+  // 🔥 Delta Streaming: 消息内容缓冲区
+  let messageBuffer = '';  // 累积的消息内容
+  let reasoningBuffer = '';  // 累积的思考过程
+  let isInReasoning = false;  // 是否在思考标签内
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+    sseBuffer += decoder.decode(value, { stream: true });
+    const lines = sseBuffer.split('\n');
+    sseBuffer = lines.pop() || '';  // 保留不完整的行
 
     for (const line of lines) {
       if (line.startsWith('event: ')) {
@@ -971,10 +1049,28 @@ function handleSSEEvent(eventType, data) {
       console.log(`[状态] ${data.state}: ${data.content}`);
       updateStatusUI(data.state, data.content);
       break;
+      
     case 'message':
-      console.log(`[消息] ${data.content}`);
-      appendMessage(data.content);
+      // 🔥 CRITICAL: Delta Streaming - 必须追加，不能替换
+      if (data.content) {
+        messageBuffer += data.content;  // ✅ 追加 Delta token
+        
+        // 解析 Chain of Thought 标签（支持跨 chunk）
+        const parsed = parseReasoningTagsStream(messageBuffer);
+        if (parsed.reasoning) {
+          reasoningBuffer = parsed.reasoning;
+          messageBuffer = parsed.answer;
+        }
+        
+        // 更新 UI（分别显示思考过程和最终答案）
+        updateChatBubbleWithReasoning({
+          thinking: reasoningBuffer,
+          answer: messageBuffer,
+          isComplete: parsed.isComplete
+        });
+      }
       break;
+      
     case 'workflow':
       console.log('[工作流]', data.workflow_config);
       renderWorkflowCard(data.workflow_config);
@@ -1003,6 +1099,86 @@ function handleSSEEvent(eventType, data) {
       console.log(`[未知事件] ${eventType}:`, data);
   }
 }
+
+// 🔥 解析思考标签的流式解析器（支持跨 chunk）
+function parseReasoningTagsStream(content) {
+  const THINK_START = '<think>';
+  const THINK_END = '</think>';
+  
+  const startIndex = content.indexOf(THINK_START);
+  const endIndex = content.indexOf(THINK_END);
+  
+  if (startIndex !== -1 && endIndex !== -1) {
+    // 完整的思考标签
+    const reasoning = content.substring(
+      startIndex + THINK_START.length,
+      endIndex
+    );
+    const answer = content.substring(endIndex + THINK_END.length).trim();
+    return {
+      reasoning: reasoning,
+      answer: answer,
+      isComplete: true
+    };
+  } else if (startIndex !== -1) {
+    // 思考标签开始但未结束（跨 chunk）
+    const reasoning = content.substring(startIndex + THINK_START.length);
+    return {
+      reasoning: reasoning,
+      answer: '',
+      isComplete: false
+    };
+  } else {
+    // 没有思考标签
+    return {
+      reasoning: null,
+      answer: content,
+      isComplete: true
+    };
+  }
+}
+
+// 更新聊天气泡（支持思考过程 UI）
+function updateChatBubbleWithReasoning(parsed) {
+  // 显示思考过程（可折叠）
+  if (parsed.thinking) {
+    updateThinkingBox(parsed.thinking, parsed.isComplete);
+  }
+  
+  // 显示最终答案
+  if (parsed.answer) {
+    appendMessage(parsed.answer);
+  }
+}
+```
+
+**Delta Streaming 示例**:
+
+```
+event: message
+data: {"content": "Ap"}
+
+event: message
+data: {"content": "ple"}  // 只包含新 token "ple"，不是 "Apple"
+
+event: message
+data: {"content": " is"}
+
+event: message
+data: {"content": " a"}
+
+event: message
+data: {"content": " fruit"}
+```
+
+客户端处理：
+```javascript
+let buffer = '';
+buffer += "Ap";      // buffer = "Ap"
+buffer += "ple";     // buffer = "Apple"
+buffer += " is";     // buffer = "Apple is"
+buffer += " a";      // buffer = "Apple is a"
+buffer += " fruit";  // buffer = "Apple is a fruit"
 ```
 
 ---

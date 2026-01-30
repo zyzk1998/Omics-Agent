@@ -223,15 +223,39 @@ class AgentOrchestrator:
                     
                     # 🔥 CRITICAL FIX: Stream Delta tokens only (not accumulated text)
                     # This prevents the "stutter" bug where frontend accumulates already-accumulated text
+                    # DEFENSIVE FIX: Track accumulated content to detect if LLM provider returns accumulated text
+                    accumulated_content = ""
                     async for chunk in llm_client.astream(messages, temperature=0.7, max_tokens=1000):
                         if chunk.choices and len(chunk.choices) > 0:
                             delta = chunk.choices[0].delta
                             if delta and delta.content:
+                                current_content = delta.content
+                                
+                                # 🔥 DEFENSIVE FIX: Detect if LLM provider returns accumulated text
+                                # If current_content starts with accumulated_content, it's accumulated text
+                                # We need to calculate the delta manually
+                                if current_content.startswith(accumulated_content) and len(current_content) > len(accumulated_content):
+                                    # LLM provider returns accumulated text, calculate delta
+                                    delta_content = current_content[len(accumulated_content):]
+                                    accumulated_content = current_content
+                                    
+                                    # Log warning on first detection
+                                    if len(accumulated_content) == len(current_content) and len(delta_content) > 0:
+                                        logger.warning(
+                                            f"⚠️ [Orchestrator] 检测到 LLM 提供商返回累积文本，已自动修复为增量模式。"
+                                            f"原始: {repr(current_content[:50])}, 增量: {repr(delta_content[:50])}"
+                                        )
+                                else:
+                                    # LLM provider returns delta text (standard behavior)
+                                    delta_content = current_content
+                                    accumulated_content += current_content
+                                
                                 # 🔥 FIX: Send ONLY the delta (new token), not accumulated text
-                                yield self._format_sse("message", {
-                                    "content": delta.content  # Only delta, not accumulated!
-                                })
-                                await asyncio.sleep(0.01)
+                                if delta_content:  # Only send if there's new content
+                                    yield self._format_sse("message", {
+                                        "content": delta_content  # Only delta, not accumulated!
+                                    })
+                                    await asyncio.sleep(0.01)
                     
                     yield self._format_sse("status", {
                         "content": "回答完成",

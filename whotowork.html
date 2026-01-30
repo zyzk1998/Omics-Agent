@@ -47,77 +47,192 @@
             border-radius: 8px;
             padding: 40px;
             margin: 40px 0;
-            overflow-x: auto;
         }
         
         .flow-container {
-            min-width: 1200px;
-            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 100%;
+            margin: 0 auto;
         }
         
-        .flow-layer {
-            margin-bottom: 40px;
-            position: relative;
-        }
-        
-        .layer-title {
-            font-size: 18px;
-            font-weight: 600;
-            color: #495057;
-            margin-bottom: 20px;
-            padding: 10px;
-            background: #e9ecef;
-            border-radius: 6px;
-            border-left: 4px solid #667eea;
-        }
-        
-        .component-box {
-            display: inline-block;
+        .flow-step-card {
             background: white;
             border: 2px solid #667eea;
-            border-radius: 8px;
-            padding: 15px 20px;
-            margin: 10px;
-            min-width: 150px;
+            border-radius: 12px;
+            padding: 20px 30px;
+            margin: 15px 0;
+            min-width: 300px;
+            max-width: 600px;
             text-align: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
             transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
         }
         
-        .component-box:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        .flow-step-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.15);
         }
         
-        .component-title {
-            font-weight: 600;
-            color: #667eea;
-            margin-bottom: 8px;
-            font-size: 14px;
+        .flow-step-card.user-layer {
+            border-color: #4CAF50;
+            background: linear-gradient(135deg, #e8f5e9 0%, #ffffff 100%);
         }
         
-        .component-desc {
-            font-size: 12px;
+        .flow-step-card.api-layer {
+            border-color: #2196F3;
+            background: linear-gradient(135deg, #e3f2fd 0%, #ffffff 100%);
+        }
+        
+        .flow-step-card.orchestrator-layer {
+            border-color: #9C27B0;
+            background: linear-gradient(135deg, #f3e5f5 0%, #ffffff 100%);
+        }
+        
+        .flow-step-card.agent-layer {
+            border-color: #FF9800;
+            background: linear-gradient(135deg, #fff3e0 0%, #ffffff 100%);
+        }
+        
+        .flow-step-card.tool-layer {
+            border-color: #F44336;
+            background: linear-gradient(135deg, #ffebee 0%, #ffffff 100%);
+        }
+        
+        .flow-step-card.result-layer {
+            border-color: #00BCD4;
+            background: linear-gradient(135deg, #e0f7fa 0%, #ffffff 100%);
+        }
+        
+        .step-title {
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        
+        .step-desc {
+            font-size: 13px;
             color: #666;
+            line-height: 1.6;
+            margin-top: 8px;
         }
         
-        .arrow {
-            stroke: #667eea;
-            stroke-width: 2;
-            fill: none;
-            marker-end: url(#arrowhead);
+        .step-components {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 12px;
+        }
+        
+        .component-tag {
+            background: rgba(102, 126, 234, 0.1);
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 12px;
+            color: #667eea;
+            font-weight: 500;
+        }
+        
+        .flow-arrow {
+            font-size: 32px;
+            color: #667eea;
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        
+        .flow-arrow::before {
+            content: '↓';
+            font-weight: bold;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
         }
         
         .arrow-label {
-            font-size: 11px;
-            fill: #495057;
+            position: absolute;
             background: white;
-            padding: 2px 4px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #495057;
+            border: 1px solid #dee2e6;
+            white-space: nowrap;
+            margin-left: 60px;
         }
         
-        .data-flow {
-            position: absolute;
-            pointer-events: none;
+        .download-section {
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 30px;
+            margin: 40px 0;
+            text-align: center;
+        }
+        
+        .download-section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 24px;
+            border: none;
+            padding: 0;
+        }
+        
+        .architecture-image {
+            max-width: 100%;
+            height: auto;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            margin: 20px 0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        .download-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 15px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .download-btn:hover {
+            background: #5568d3;
+        }
+        
+        .download-btn:active {
+            transform: scale(0.98);
+        }
+        
+        .image-placeholder {
+            background: #e9ecef;
+            border: 2px dashed #adb5bd;
+            border-radius: 8px;
+            padding: 60px 20px;
+            color: #6c757d;
+            font-size: 14px;
+            margin: 20px 0;
         }
         
         .flow-step {
@@ -217,6 +332,14 @@
             .flow-diagram {
                 page-break-inside: avoid;
             }
+            
+            .download-section {
+                page-break-inside: avoid;
+            }
+            
+            .flow-step-card {
+                page-break-inside: avoid;
+            }
         }
     </style>
 </head>
@@ -230,192 +353,213 @@
         <!-- 流程图 -->
         <div class="flow-diagram">
             <div class="flow-container">
-                <!-- SVG 定义 -->
-                <svg width="100%" height="100%" style="position: absolute; top: 0; left: 0; pointer-events: none;">
-                    <defs>
-                        <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-                            <polygon points="0 0, 10 3, 0 6" fill="#667eea" />
-                        </marker>
-                    </defs>
-                    
-                    <!-- 数据流箭头 -->
-                    <!-- Frontend -> API Server -->
-                    <line x1="200" y1="100" x2="200" y2="200" class="arrow" />
-                    <text x="210" y="150" class="arrow-label">HTTP POST</text>
-                    
-                    <!-- API Server -> Orchestrator -->
-                    <line x1="200" y1="250" x2="200" y2="350" class="arrow" />
-                    <text x="210" y="300" class="arrow-label">stream_process()</text>
-                    
-                    <!-- Orchestrator -> Router Agent -->
-                    <line x1="200" y1="400" x2="100" y2="500" class="arrow" />
-                    <text x="120" y="450" class="arrow-label">路由决策</text>
-                    
-                    <!-- Orchestrator -> Planner -->
-                    <line x1="200" y1="400" x2="300" y2="500" class="arrow" />
-                    <text x="280" y="450" class="arrow-label">工作流规划</text>
-                    
-                    <!-- Planner -> Tool Retriever -->
-                    <line x1="300" y1="550" x2="400" y2="600" class="arrow" />
-                    <text x="320" y="580" class="arrow-label">语义检索</text>
-                    
-                    <!-- Planner -> LLM -->
-                    <line x1="300" y1="550" x2="500" y2="600" class="arrow" />
-                    <text x="380" y="580" class="arrow-label">LLM 规划</text>
-                    
-                    <!-- Orchestrator -> Domain Agent -->
-                    <line x1="200" y1="400" x2="200" y2="700" class="arrow" />
-                    <text x="210" y="550" class="arrow-label">执行工作流</text>
-                    
-                    <!-- Domain Agent -> Executor -->
-                    <line x1="200" y1="750" x2="200" y2="850" class="arrow" />
-                    <text x="210" y="800" class="arrow-label">execute_workflow()</text>
-                    
-                    <!-- Executor -> Tools -->
-                    <line x1="200" y1="900" x2="100" y2="1000" class="arrow" />
-                    <line x1="200" y1="900" x2="200" y2="1000" class="arrow" />
-                    <line x1="200" y1="900" x2="300" y2="1000" class="arrow" />
-                    <text x="150" y="950" class="arrow-label">工具调用</text>
-                    
-                    <!-- Tools -> Results -->
-                    <line x1="100" y1="1050" x2="200" y2="1100" class="arrow" />
-                    <line x1="200" y1="1050" x2="200" y2="1100" class="arrow" />
-                    <line x1="300" y1="1050" x2="200" y2="1100" class="arrow" />
-                    <text x="150" y="1080" class="arrow-label">结果聚合</text>
-                    
-                    <!-- Results -> AI Report Generator -->
-                    <line x1="200" y1="1150" x2="200" y2="1250" class="arrow" />
-                    <text x="210" y="1200" class="arrow-label">生成报告</text>
-                    
-                    <!-- AI Report -> SSE Stream -->
-                    <line x1="200" y1="1300" x2="200" y2="1400" class="arrow" />
-                    <text x="210" y="1350" class="arrow-label">SSE 流式输出</text>
-                    
-                    <!-- SSE Stream -> Frontend -->
-                    <line x1="200" y1="1450" x2="200" y2="1550" class="arrow" />
-                    <text x="210" y="1500" class="arrow-label">实时渲染</text>
-                </svg>
-                
-                <!-- 前端层 -->
-                <div class="flow-layer" style="margin-top: 0;">
-                    <div class="layer-title">🌐 前端层 (Frontend Layer)</div>
-                    <div class="component-box" style="margin-left: 150px;">
-                        <div class="component-title">Web UI</div>
-                        <div class="component-desc">HTML + Bootstrap<br/>Markdown 渲染<br/>实时更新</div>
+                <!-- 1. 用户层 -->
+                <div class="flow-step-card user-layer">
+                    <div class="step-title">🌐 用户层 (User Layer)</div>
+                    <div class="step-desc">用户在 Web UI 中上传文件或输入查询</div>
+                    <div class="step-components">
+                        <span class="component-tag">Web UI</span>
+                        <span class="component-tag">文件上传</span>
+                        <span class="component-tag">查询输入</span>
                     </div>
                 </div>
                 
-                <!-- API 服务层 -->
-                <div class="flow-layer" style="margin-top: 50px;">
-                    <div class="layer-title">🔌 API 服务层 (API Service Layer)</div>
-                    <div class="component-box" style="margin-left: 150px;">
-                        <div class="component-title">FastAPI Server</div>
-                        <div class="component-desc">/api/chat<br/>/api/upload<br/>/api/execute</div>
+                <div class="flow-arrow">
+                    <span class="arrow-label">HTTP POST</span>
+                </div>
+                
+                <!-- 2. API 服务层 -->
+                <div class="flow-step-card api-layer">
+                    <div class="step-title">🔌 API 服务层 (API Service Layer)</div>
+                    <div class="step-desc">FastAPI 服务器接收请求并路由到编排器</div>
+                    <div class="step-components">
+                        <span class="component-tag">/api/chat</span>
+                        <span class="component-tag">/api/upload</span>
+                        <span class="component-tag">/api/execute</span>
                     </div>
                 </div>
                 
-                <!-- 编排层 -->
-                <div class="flow-layer" style="margin-top: 50px;">
-                    <div class="layer-title">🎯 编排层 (Orchestration Layer)</div>
-                    <div class="component-box" style="margin-left: 150px;">
-                        <div class="component-title">AgentOrchestrator</div>
-                        <div class="component-desc">意图分类<br/>流程编排<br/>SSE 流式输出</div>
+                <div class="flow-arrow">
+                    <span class="arrow-label">stream_process()</span>
+                </div>
+                
+                <!-- 3. 编排层 -->
+                <div class="flow-step-card orchestrator-layer">
+                    <div class="step-title">🎯 编排层 (Orchestration Layer)</div>
+                    <div class="step-desc">AgentOrchestrator 进行意图分类和流程编排</div>
+                    <div class="step-components">
+                        <span class="component-tag">意图分类</span>
+                        <span class="component-tag">流程编排</span>
+                        <span class="component-tag">SSE 流式输出</span>
                     </div>
                 </div>
                 
-                <!-- 智能体层 -->
-                <div class="flow-layer" style="margin-top: 50px;">
-                    <div class="layer-title">🤖 智能体层 (Agent Layer)</div>
-                    <div class="component-box" style="margin-left: 50px;">
-                        <div class="component-title">Router Agent</div>
-                        <div class="component-desc">组学类型识别<br/>智能路由</div>
-                    </div>
-                    <div class="component-box">
-                        <div class="component-title">Workflow Planner</div>
-                        <div class="component-desc">动态工作流规划<br/>LLM 驱动</div>
-                    </div>
-                    <div class="component-box">
-                        <div class="component-title">Domain Agents</div>
-                        <div class="component-desc">RNA Agent<br/>Metabolomics Agent</div>
+                <div class="flow-arrow">
+                    <span class="arrow-label">路由决策</span>
+                </div>
+                
+                <!-- 4. 智能体层 -->
+                <div class="flow-step-card agent-layer">
+                    <div class="step-title">🤖 智能体层 (Agent Layer)</div>
+                    <div class="step-desc">Router Agent、Workflow Planner 和 Domain Agents 协同工作</div>
+                    <div class="step-components">
+                        <span class="component-tag">Router Agent</span>
+                        <span class="component-tag">Workflow Planner</span>
+                        <span class="component-tag">RNA Agent</span>
+                        <span class="component-tag">Metabolomics Agent</span>
                     </div>
                 </div>
                 
-                <!-- 工具检索层 -->
-                <div class="flow-layer" style="margin-top: 50px;">
-                    <div class="layer-title">🔍 工具检索层 (Tool Retrieval Layer)</div>
-                    <div class="component-box" style="margin-left: 350px;">
-                        <div class="component-title">Tool Retriever</div>
-                        <div class="component-desc">ChromaDB<br/>语义检索<br/>Embeddings</div>
-                    </div>
-                    <div class="component-box">
-                        <div class="component-title">LLM Client</div>
-                        <div class="component-desc">DeepSeek-V3.2<br/>工作流规划<br/>参数推荐</div>
+                <div class="flow-arrow">
+                    <span class="arrow-label">工具检索 & LLM 规划</span>
+                </div>
+                
+                <!-- 5. 工具检索层 -->
+                <div class="flow-step-card agent-layer">
+                    <div class="step-title">🔍 工具检索层 (Tool Retrieval Layer)</div>
+                    <div class="step-desc">Tool Retriever 进行语义检索，LLM Client 生成工作流</div>
+                    <div class="step-components">
+                        <span class="component-tag">Tool Retriever</span>
+                        <span class="component-tag">ChromaDB</span>
+                        <span class="component-tag">LLM Client</span>
+                        <span class="component-tag">DeepSeek-V3.2</span>
                     </div>
                 </div>
                 
-                <!-- 执行层 -->
-                <div class="flow-layer" style="margin-top: 50px;">
-                    <div class="layer-title">⚙️ 执行层 (Execution Layer)</div>
-                    <div class="component-box" style="margin-left: 150px;">
-                        <div class="component-title">WorkflowExecutor</div>
-                        <div class="component-desc">通用执行引擎<br/>参数验证<br/>数据流处理</div>
+                <div class="flow-arrow">
+                    <span class="arrow-label">execute_workflow()</span>
+                </div>
+                
+                <!-- 6. 执行层 -->
+                <div class="flow-step-card tool-layer">
+                    <div class="step-title">⚙️ 执行层 (Execution Layer)</div>
+                    <div class="step-desc">WorkflowExecutor 执行工作流，调用各种工具</div>
+                    <div class="step-components">
+                        <span class="component-tag">WorkflowExecutor</span>
+                        <span class="component-tag">参数验证</span>
+                        <span class="component-tag">数据流处理</span>
                     </div>
                 </div>
                 
-                <!-- 工具层 -->
-                <div class="flow-layer" style="margin-top: 50px;">
-                    <div class="layer-title">🛠️ 工具层 (Tool Layer)</div>
-                    <div class="component-box" style="margin-left: 50px;">
-                        <div class="component-title">File Inspector</div>
-                        <div class="component-desc">文件检查<br/>元数据生成</div>
-                    </div>
-                    <div class="component-box">
-                        <div class="component-title">Analysis Tools</div>
-                        <div class="component-desc">预处理<br/>统计分析<br/>可视化</div>
-                    </div>
-                    <div class="component-box">
-                        <div class="component-title">Domain Tools</div>
-                        <div class="component-desc">Scanpy<br/>Cell Ranger<br/>Metabolomics</div>
+                <div class="flow-arrow">
+                    <span class="arrow-label">工具调用</span>
+                </div>
+                
+                <!-- 7. 工具层 -->
+                <div class="flow-step-card tool-layer">
+                    <div class="step-title">🛠️ 工具层 (Tool Layer)</div>
+                    <div class="step-desc">File Inspector、Analysis Tools 和 Domain Tools 执行具体分析</div>
+                    <div class="step-components">
+                        <span class="component-tag">File Inspector</span>
+                        <span class="component-tag">Analysis Tools</span>
+                        <span class="component-tag">Scanpy</span>
+                        <span class="component-tag">Cell Ranger</span>
+                        <span class="component-tag">Metabolomics Tools</span>
                     </div>
                 </div>
                 
-                <!-- 结果聚合层 -->
-                <div class="flow-layer" style="margin-top: 50px;">
-                    <div class="layer-title">📊 结果聚合层 (Result Aggregation Layer)</div>
-                    <div class="component-box" style="margin-left: 150px;">
-                        <div class="component-title">Result Collector</div>
-                        <div class="component-desc">步骤结果聚合<br/>数据格式化<br/>图表路径处理</div>
+                <div class="flow-arrow">
+                    <span class="arrow-label">结果聚合</span>
+                </div>
+                
+                <!-- 8. 结果聚合层 -->
+                <div class="flow-step-card result-layer">
+                    <div class="step-title">📊 结果聚合层 (Result Aggregation Layer)</div>
+                    <div class="step-desc">Result Collector 聚合步骤结果并格式化数据</div>
+                    <div class="step-components">
+                        <span class="component-tag">Result Collector</span>
+                        <span class="component-tag">数据格式化</span>
+                        <span class="component-tag">图表路径处理</span>
                     </div>
                 </div>
                 
-                <!-- AI 报告生成层 -->
-                <div class="flow-layer" style="margin-top: 50px;">
-                    <div class="layer-title">📝 AI 报告生成层 (AI Report Generation Layer)</div>
-                    <div class="component-box" style="margin-left: 150px;">
-                        <div class="component-title">AI Expert Report</div>
-                        <div class="component-desc">LLM 分析<br/>关键指标提取<br/>Markdown 生成</div>
+                <div class="flow-arrow">
+                    <span class="arrow-label">生成报告</span>
+                </div>
+                
+                <!-- 9. AI 报告生成层 -->
+                <div class="flow-step-card result-layer">
+                    <div class="step-title">📝 AI 报告生成层 (AI Report Generation Layer)</div>
+                    <div class="step-desc">AI Expert Report 生成 Markdown 格式的分析报告</div>
+                    <div class="step-components">
+                        <span class="component-tag">AI Expert Report</span>
+                        <span class="component-tag">关键指标提取</span>
+                        <span class="component-tag">Markdown 生成</span>
                     </div>
                 </div>
                 
-                <!-- SSE 流式输出层 -->
-                <div class="flow-layer" style="margin-top: 50px;">
-                    <div class="layer-title">📡 SSE 流式输出层 (SSE Streaming Layer)</div>
-                    <div class="component-box" style="margin-left: 150px;">
-                        <div class="component-title">SSE Event Stream</div>
-                        <div class="component-desc">status<br/>workflow<br/>step_result<br/>diagnosis<br/>result</div>
+                <div class="flow-arrow">
+                    <span class="arrow-label">SSE 流式输出</span>
+                </div>
+                
+                <!-- 10. SSE 流式输出层 -->
+                <div class="flow-step-card api-layer">
+                    <div class="step-title">📡 SSE 流式输出层 (SSE Streaming Layer)</div>
+                    <div class="step-desc">通过 Server-Sent Events 实时推送分析进度和结果</div>
+                    <div class="step-components">
+                        <span class="component-tag">status</span>
+                        <span class="component-tag">workflow</span>
+                        <span class="component-tag">step_result</span>
+                        <span class="component-tag">diagnosis</span>
+                        <span class="component-tag">result</span>
                     </div>
                 </div>
                 
-                <!-- 前端渲染层 -->
-                <div class="flow-layer" style="margin-top: 50px;">
-                    <div class="layer-title">🎨 前端渲染层 (Frontend Rendering Layer)</div>
-                    <div class="component-box" style="margin-left: 150px;">
-                        <div class="component-title">Real-time Render</div>
-                        <div class="component-desc">工作流卡片<br/>执行步骤<br/>分析报告<br/>AI 诊断</div>
+                <div class="flow-arrow">
+                    <span class="arrow-label">实时渲染</span>
+                </div>
+                
+                <!-- 11. 前端渲染层 -->
+                <div class="flow-step-card user-layer">
+                    <div class="step-title">🎨 前端渲染层 (Frontend Rendering Layer)</div>
+                    <div class="step-desc">前端实时解析 SSE 事件并渲染工作流卡片、步骤结果和 AI 报告</div>
+                    <div class="step-components">
+                        <span class="component-tag">工作流卡片</span>
+                        <span class="component-tag">执行步骤</span>
+                        <span class="component-tag">分析报告</span>
+                        <span class="component-tag">AI 诊断</span>
                     </div>
                 </div>
             </div>
         </div>
+        
+        <!-- 可下载架构图部分 -->
+        <div class="download-section">
+            <h2>📥 Download Architecture</h2>
+            <p style="color: #666; margin-bottom: 20px;">下载高分辨率架构图用于演示和文档</p>
+            
+            <div id="architecture-image-container">
+                <img src="assets/architecture_v2.png" 
+                     alt="Omics Agent Architecture Diagram" 
+                     class="architecture-image"
+                     onerror="this.style.display='none'; document.getElementById('image-placeholder').style.display='block';">
+                <div id="image-placeholder" class="image-placeholder" style="display: none;">
+                    <p>📷 架构图文件未找到</p>
+                    <p style="font-size: 12px; margin-top: 10px;">请将架构图放置在 <code>assets/architecture_v2.png</code></p>
+                </div>
+            </div>
+            
+            <button class="download-btn" onclick="downloadArchitecture()">
+                <span>⬇️</span>
+                <span>Download High-Res PNG</span>
+            </button>
+        </div>
+        
+        <script>
+            function downloadArchitecture() {
+                const img = document.querySelector('.architecture-image');
+                if (img && img.src && !img.src.includes('placeholder')) {
+                    const link = document.createElement('a');
+                    link.href = img.src;
+                    link.download = 'omics_agent_architecture_v2.png';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                } else {
+                    alert('架构图文件未找到。请确保 assets/architecture_v2.png 文件存在。');
+                }
+            }
+        </script>
         
         <!-- 详细流程说明 -->
         <div class="section">
