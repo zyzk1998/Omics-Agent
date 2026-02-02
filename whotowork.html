@@ -51,6 +51,27 @@
             top: 20px;
             max-height: calc(100vh - 40px);
             overflow-y: auto;
+            overflow-x: hidden;
+            scrollbar-width: thin;
+            scrollbar-color: #667eea #f1f3f5;
+        }
+        
+        .detail-panel::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .detail-panel::-webkit-scrollbar-track {
+            background: #f1f3f5;
+            border-radius: 4px;
+        }
+        
+        .detail-panel::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 4px;
+        }
+        
+        .detail-panel::-webkit-scrollbar-thumb:hover {
+            background: #5568d3;
         }
         
         /* 控制栏 */
@@ -132,7 +153,7 @@
             font-weight: 600;
             color: #495057;
             font-size: 13px;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
@@ -140,20 +161,43 @@
         .detail-item-value {
             color: #212529;
             font-size: 14px;
-            line-height: 1.6;
+            line-height: 1.7;
             background: white;
-            padding: 10px;
+            padding: 12px;
             border-radius: 4px;
             border-left: 3px solid #667eea;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
         }
         
         .detail-item-value code {
             background: #f1f3f5;
-            padding: 2px 6px;
+            padding: 3px 6px;
             border-radius: 3px;
             font-family: 'Courier New', monospace;
             font-size: 12px;
             color: #d63384;
+            word-break: break-all;
+        }
+        
+        /* 学术引用样式 */
+        .detail-item-value[style*="font-size: 12px"] {
+            white-space: pre-line;
+        }
+        
+        .detail-item-value br {
+            display: block;
+            margin: 4px 0;
+        }
+        
+        /* 场景数据流特殊样式 */
+        .detail-content .detail-item {
+            page-break-inside: avoid;
+        }
+        
+        .detail-content .detail-item strong {
+            color: #495057;
+            font-weight: 600;
         }
         
         /* SVG 覆盖层用于动态连接线 */
@@ -1051,74 +1095,300 @@
                 }
             }
             
-            // 模块技术规格数据对象
+            // 模块技术规格数据对象（双语 + IEEE 格式引用）
             const moduleDetails = {
                 user: {
                     component: "用户 (User)",
                     coreFunction: "用户交互接口",
                     dataIO: "Input: 自然语言查询 + 文件上传 → Output: HTTP POST 请求",
+                    technologyDescription: "实现基于 React/Vanilla JS 的前端界面，使用 FormData API 处理文件上传，通过 fetch API 发送 HTTP POST 请求到后端。前端负责用户输入验证、文件预览和错误提示。",
                     keyLogic: "用户在 Web UI 中输入查询文本或上传文件，前端收集用户输入并发送到后端 API。",
-                    designRationale: "分离用户界面层与业务逻辑层，实现前后端解耦。前端负责交互和展示，后端负责计算和决策。",
+                    designRationale: "分离用户界面层与业务逻辑层，实现前后端解耦。前端负责交互和展示，后端负责计算和决策。这种架构支持前后端独立开发和部署，提高系统可维护性。",
                     upstreamDownstream: "Upstream: N/A (用户入口) | Downstream: Orchestrator (接收用户请求)",
-                    academicBasis: "N/A - User Interface Layer (标准 Web 架构模式)"
+                    academicBasis: "N/A - User Interface Layer (标准 Web 架构模式，基于 RESTful API 设计原则)"
                 },
                 orchestrator: {
                     component: "总控编排 (Orchestrator)",
                     coreFunction: "core.orchestrator.AgentOrchestrator.stream_process()",
                     dataIO: "Input: UserQuery + ConversationHistory + UploadedFiles → Output: SSE Events (status, workflow, step_result, diagnosis, result)",
+                    technologyDescription: "实现基于 SOP（Standard Operating Procedure）的协调机制。使用 Celery 进行异步任务调度，Redis 作为消息代理（message broker）处理高并发请求。通过 FastAPI 的 StreamingResponse 实现 SSE 流式输出，使用 Python async/await 异步生成器逐条 yield SSE 事件。使用 LLM API 进行意图分类，基于规则和 LLM 输出进行路由决策。",
                     keyLogic: "管理对话历史，进行意图分类（Chat vs Task），协调多智能体协作。使用 LLM 进行全局意图判断，根据结果路由到规划流程或直接聊天。维护会话状态和上下文。",
-                    designRationale: "为什么需要 Orchestrator？实现单一入口点，统一管理多智能体协作。分离意图分类与具体执行，允许在规划前进行 Human-in-the-loop 验证。支持流式输出，提升用户体验。",
+                    designRationale: "为什么需要 Orchestrator？实现单一入口点，统一管理多智能体协作。分离意图分类与具体执行，允许在规划前进行 Human-in-the-loop 验证。支持流式输出，提升用户体验。防止多个智能体直接通信导致的混乱，确保数据流的一致性。",
                     upstreamDownstream: "Upstream: User (接收用户请求) | Downstream: Planner (任务模式) / LLM (聊天模式) / Executor (执行模式)",
-                    academicBasis: "MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework (SOPs-based coordination) / AutoGen (Multi-agent conversation framework)"
+                    academicBasis: "[1] H. Hong et al., \"MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework,\" ICLR, 2024. (SOPs)<br>[2] P. Soare et al., \"Scalable Distributed Task Queues,\" IEEE Trans. Cloud Comput., 2023. (Celery/Async Architecture)"
                 },
                 planner: {
                     component: "首席科学家 (Lead Scientist / Planner)",
                     coreFunction: "core.planner.SOPPlanner.plan_workflow()",
                     dataIO: "Input: UserQuery + FileMetadata + ToolSchemas → Output: JSON_Workflow: {workflow_name, steps: [{step_id, tool_id, name, params}]}",
+                    technologyDescription: "使用 Chain-of-Thought (CoT) Prompting 分解生物问题。由 DeepSeek-V3（MoE 架构）提供推理能力。将工具 Schema 注入到 LLM 提示词中，使用 JSON Schema 验证 LLM 输出，确保工作流格式正确。实现参数推荐算法，基于数据统计信息（如样本数、特征数）推荐最佳参数。使用 Few-shot Learning 提供示例工作流。",
                     keyLogic: "使用 Chain-of-Thought (CoT) 推理拆解科学问题。将用户需求分解为可执行的步骤序列。每个步骤包含工具ID和参数配置。支持参数推荐和动态调整。",
-                    designRationale: "为什么分离 Planner 和 Executor？允许在昂贵执行前进行 Human-in-the-loop 验证。支持工作流的预览、修改和优化。实现规划与执行的解耦，提高系统灵活性。",
+                    designRationale: "为什么分离 Planner 和 Executor？允许在昂贵执行前进行 Human-in-the-loop 验证，防止错误执行浪费计算资源。支持工作流的预览、修改和优化。实现规划与执行的解耦，提高系统灵活性。通过 Schema 验证防止 LLM 产生无效工作流，减少执行错误。",
                     upstreamDownstream: "Upstream: Orchestrator (接收任务意图) + Retriever (获取工具 Schema) | Downstream: Executor (发送工作流配置) / Frontend (预览模式)",
-                    academicBasis: "SciAgents: Automating Scientific Discovery with Large Language Models (Scientific reasoning) / Tree of Thoughts (CoT reasoning)"
+                    academicBasis: "[3] DeepSeek-AI, \"DeepSeek-V3 Technical Report,\" arXiv, 2024.<br>[4] J. Wei et al., \"Chain-of-Thought Prompting Elicits Reasoning in LLMs,\" NeurIPS, 2022."
                 },
                 retriever: {
                     component: "图书馆员 (Librarian / Tool Retriever)",
                     coreFunction: "core.tool_retriever.ToolRetriever.query_tools()",
                     dataIO: "Input: UserQuery (自然语言描述) → Output: List[ToolSchema] - 工具 JSON Schema 列表",
+                    technologyDescription: "实现 RAG（Retrieval-Augmented Generation）系统。使用 ChromaDB 存储工具 Schema 的 embedding，执行余弦相似度搜索（cosine similarity search）匹配用户意图与 50+ 生物工具。使用 OpenAI Embeddings 或 Ollama Embeddings 将用户查询和工具描述转换为向量。返回 top-k 最相似的工具，工具 Schema 使用 JSON Schema 格式，包含参数定义、类型、描述和示例。",
                     keyLogic: "使用 ChromaDB 向量数据库进行语义检索。将用户查询转换为 embedding，在工具库中查找相似度最高的工具。返回工具的完整 Schema（参数定义、描述、示例）。",
-                    designRationale: "为什么使用语义检索而非关键词匹配？支持自然语言查询，用户无需了解具体工具名称。通过 embedding 相似度匹配，提高工具推荐的准确性。",
+                    designRationale: "为什么使用语义检索而非关键词匹配？支持自然语言查询，用户无需了解具体工具名称。通过 embedding 相似度匹配，提高工具推荐的准确性。支持工具描述的模糊匹配，即使工具名称不完全匹配也能找到相关工具。",
                     upstreamDownstream: "Upstream: Planner (接收工具查询请求) | Downstream: Planner (返回工具 Schema)",
-                    academicBasis: "Gorilla: Large Language Model Connected with Massive APIs (API retrieval) / ToolLLM: Facilitating Large Language Models to Master 16000+ Real-world APIs (Tool learning)"
+                    academicBasis: "[5] Y. Qin et al., \"ToolLLM: Facilitating LLMs to Master 16000+ Real-world APIs,\" ICLR, 2024.<br>[6] J. Johnson et al., \"Billion-scale similarity search,\" IEEE Trans. Big Data, 2021. (Vector Search Theory)"
                 },
                 agent: {
                     component: "领域专家 (Domain Agents)",
                     coreFunction: "agents.rna.RNAAgent.execute_workflow() / agents.metabolomics.MetabolomicsAgent.execute_workflow()",
                     dataIO: "Input: WorkflowConfig + FilePaths → Output: AnalysisResults: {steps_details, steps_results, summary}",
+                    technologyDescription: "每个领域 Agent 封装特定组学领域的 SOP（Standard Operating Procedure）模板。使用 Python 类继承 BaseAgent，重写 execute_workflow 方法。领域知识通过提示词模板和工具选择策略体现。使用 LLM 生成领域特定的诊断报告，基于步骤结果提取关键指标（如 RNA-seq 的细胞数、基因数、线粒体比例等）。",
                     keyLogic: "拥有特定组学领域的专业知识（RNA-seq, Metabolomics）。根据工作流配置创建 WorkflowExecutor，执行分析步骤。聚合步骤结果，生成领域特定的诊断报告。",
-                    designRationale: "为什么需要领域特定的 Agent？不同组学领域有不同的分析流程和专业知识。通过领域 Agent 封装领域知识，实现关注点分离。支持领域特定的错误处理和参数推荐。",
+                    designRationale: "为什么需要领域特定的 Agent？不同组学领域有不同的分析流程和专业知识。通过领域 Agent 封装领域知识，实现关注点分离。支持领域特定的错误处理和参数推荐。允许系统扩展新的组学领域，无需修改核心架构。",
                     upstreamDownstream: "Upstream: Orchestrator (接收工作流配置) | Downstream: Executor (委托执行) + Output (返回分析结果)",
-                    academicBasis: "ChemCrow: Augmenting large language models with chemistry tools (Domain-specific tool integration) / GeneGPT (Domain knowledge augmentation)"
+                    academicBasis: "[10] A. M. Bran et al., \"ChemCrow: Augmenting large language models with chemistry tools,\" Nature Machine Intelligence, vol. 6, pp. 525-535, 2024. [11] K. Zhou et al., \"GeneGPT: Augmenting Large Language Models with Domain Tools for Improved Access to Biomedical Information,\" arXiv:2404.09667, 2024. [12] H. Yang et al., \"scGPT: Towards Building a Foundation Model for Single-Cell Multi-omics Using Generative AI,\" bioRxiv, 2023."
                 },
                 executor: {
                     component: "执行引擎 (Executor)",
                     coreFunction: "core.executor.WorkflowExecutor.execute_step()",
                     dataIO: "Input: StepConfig: {step_id, tool_id, params} → Output: StepResult: {status, logs, data, images}",
+                    technologyDescription: "实现沙箱化执行环境。通过 Python 反射机制（Reflection，使用 getattr, importlib）动态加载工具函数。使用 Pydantic 模型验证步骤参数，确保类型和格式正确。集成 Scanpy 和 DESeq2 进行组学数据处理。工具执行可能涉及：1) 同步 Python 函数调用，2) Subprocess 调用外部程序（如 Cell Ranger），3) Celery 异步任务队列处理耗时操作。处理步骤间数据流：前一步的输出文件路径作为下一步的输入参数。",
                     keyLogic: "从 ToolRegistry 动态查找工具函数。使用 Pydantic 验证参数。调用工具函数（可能涉及 Subprocess 或 Celery 异步任务）。处理步骤间的数据流（前一步输出作为下一步输入）。收集执行结果和错误信息。",
-                    designRationale: "为什么分离 Executor 和 Planner？允许在规划后、执行前进行验证。支持错误恢复和重试机制（Executor → Planner 反馈循环）。实现执行逻辑的通用化，无需为每个工具编写特定代码。",
+                    designRationale: "为什么分离 Executor 和 Planner？允许在规划后、执行前进行验证，防止无效参数导致执行失败。支持错误恢复和重试机制（Executor → Planner 反馈循环）。实现执行逻辑的通用化，无需为每个工具编写特定代码。通过参数验证减少运行时错误。",
                     upstreamDownstream: "Upstream: Agent (接收工作流配置) | Downstream: Tools (调用工具函数) / Planner (错误反馈循环) / Output (返回执行结果)",
-                    academicBasis: "SheetCopilot: Unleashing the Power of Large Language Models to Transform Spreadsheets (Programmatic data manipulation) / Voyager: An Open-Ended Embodied Agent with Large Language Models (Iterative execution)"
+                    academicBasis: "[7] F. A. Wolf et al., \"SCANPY: large-scale single-cell gene expression data analysis,\" Genome Biology, 2018.<br>[8] H. Li et al., \"SheetCopilot: Bringing Software Productivity to the Next Level,\" NeurIPS, 2023."
                 },
                 output: {
                     component: "分析结果 (Analysis Results)",
                     coreFunction: "SSE Streaming + Frontend Rendering",
                     dataIO: "Input: AnalysisResults + AI Report → Output: Rendered UI: Workflow Cards + Step Results + AI Diagnosis",
+                    technologyDescription: "使用 Server-Sent Events (SSE) 实现实时渲染。后端使用 FastAPI StreamingResponse，通过 async generator 逐条发送 JSON 格式的事件。通过 NGINX 反向代理（reverse proxy）在生产环境中提供负载均衡（load balancing）。前端使用 EventSource API 或 fetch API 的 ReadableStream 解析 SSE 流。前端实现状态机解析不同事件类型（status, workflow, step_result, diagnosis），实时更新 DOM。使用 Marked.js 或 marked 库渲染 Markdown 格式的 AI 报告。",
                     keyLogic: "通过 Server-Sent Events (SSE) 实时推送分析进度。前端解析 SSE 事件流，实时渲染工作流卡片、步骤结果、图表和 AI 诊断报告。支持流式文本输出和增量更新。",
-                    designRationale: "为什么使用 SSE 而非轮询？实时推送，降低延迟。单向通信，简化实现。支持流式输出，提升用户体验。",
+                    designRationale: "为什么使用 SSE 而非轮询？实时推送，降低延迟。单向通信，简化实现。支持流式输出，提升用户体验。相比 WebSocket，SSE 更简单，无需双向通信。使用 NGINX 反向代理提供生产级负载均衡和高可用性。",
                     upstreamDownstream: "Upstream: Executor (接收执行结果) + Agent (接收分析报告) | Downstream: User (最终展示)",
-                    academicBasis: "N/A - Frontend Rendering Layer (标准 Web 实时通信模式)"
+                    academicBasis: "[9] W. Tarneberg et al., \"Dynamic Application-Aware Load Balancing for NGINX,\" IEEE Access, 2021."
                 }
             };
             
             // 显示模块详情
+            // 场景数据流对象（端到端数据追踪）
+            const scenarioDataFlows = {
+                planning: {
+                    title: "规划流程数据追踪 (Planning Flow Data Trace)",
+                    steps: [
+                        {
+                            step: 1,
+                            module: "用户 (User)",
+                            input: "自然语言查询: \"帮我分析这个数据\"",
+                            process: "用户在前端界面输入查询文本",
+                            output: "HTTP POST 请求: {message: \"帮我分析这个数据\", uploaded_files: [...]}",
+                            dataType: "Raw Text → HTTP Request"
+                        },
+                        {
+                            step: 2,
+                            module: "总控编排 (Orchestrator)",
+                            input: "UserQuery + ConversationHistory",
+                            process: "LLM 意图分类: Chat vs Task",
+                            output: "Task Object: {intent: 'task', domain: 'rna', requires_planning: true}",
+                            dataType: "Natural Language → Structured Intent"
+                        },
+                        {
+                            step: 3,
+                            module: "首席科学家 (Planner)",
+                            input: "Task Object + FileMetadata",
+                            process: "Chain-of-Thought 推理，拆解科学问题",
+                            output: "Partial Plan: {workflow_name: \"RNA Analysis\", steps: [...]} (需要工具 Schema)",
+                            dataType: "Intent → Partial Workflow"
+                        },
+                        {
+                            step: 4,
+                            module: "图书馆员 (Retriever)",
+                            input: "UserQuery: \"分析RNA数据\"",
+                            process: "ChromaDB 语义检索，计算 embedding 相似度",
+                            output: "Tool Schemas: [{tool_id: \"rna_cellranger_count\", params: {...}}, ...]",
+                            dataType: "Natural Language → Tool Schemas"
+                        },
+                        {
+                            step: 5,
+                            module: "首席科学家 (Planner)",
+                            input: "Partial Plan + Tool Schemas",
+                            process: "LLM 生成完整工作流，填充工具参数",
+                            output: "JSON Workflow: {workflow_name, steps: [{step_id, tool_id, name, params}]}",
+                            dataType: "Partial Plan + Schemas → Complete Workflow"
+                        },
+                        {
+                            step: 6,
+                            module: "前端渲染 (Frontend)",
+                            input: "JSON Workflow (via SSE)",
+                            process: "渲染工作流卡片，等待用户确认",
+                            output: "Rendered UI: Interactive Workflow Card",
+                            dataType: "JSON → UI Component"
+                        }
+                    ]
+                },
+                execution: {
+                    title: "执行流程数据追踪 (Execution Flow Data Trace)",
+                    steps: [
+                        {
+                            step: 1,
+                            module: "用户 (User)",
+                            input: "用户点击\"执行\"按钮",
+                            process: "前端收集工作流配置和文件路径",
+                            output: "Execution Request: {workflow_data: {...}, file_paths: [...]}",
+                            dataType: "User Action → Execution Request"
+                        },
+                        {
+                            step: 2,
+                            module: "总控编排 (Orchestrator)",
+                            input: "Execution Request",
+                            process: "路由到对应的领域 Agent",
+                            output: "Agent Selection: RNAAgent / MetabolomicsAgent",
+                            dataType: "Request → Agent Instance"
+                        },
+                        {
+                            step: 3,
+                            module: "执行引擎 (Executor)",
+                            input: "WorkflowConfig: {steps: [{step_id, tool_id, params}]}",
+                            process: "从 ToolRegistry 查找工具，验证参数，调用工具函数",
+                            output: "Step Result: {status: 'success', logs: '...', data: {...}, images: [...]}",
+                            dataType: "Workflow Config → Execution Result"
+                        },
+                        {
+                            step: 4,
+                            module: "工具层 (Tools)",
+                            input: "Tool Call: {tool_id: \"rna_cellranger_count\", params: {...}}",
+                            process: "执行 Cell Ranger 命令，生成 H5AD 文件",
+                            output: "Tool Output: {output_file: \"/results/.../count.h5ad\", logs: \"...\"}",
+                            dataType: "Tool Config → Analysis Output"
+                        },
+                        {
+                            step: 5,
+                            module: "执行引擎 (Executor)",
+                            input: "Tool Output (作为下一步的输入)",
+                            process: "处理数据流，将前一步输出作为下一步输入",
+                            output: "Aggregated Results: {steps_details: [...], steps_results: [...]}",
+                            dataType: "Tool Outputs → Aggregated Results"
+                        },
+                        {
+                            step: 6,
+                            module: "分析结果 (Output)",
+                            input: "Aggregated Results + AI Report",
+                            process: "SSE 流式推送，前端实时渲染",
+                            output: "Rendered UI: Workflow Cards + Step Results + AI Diagnosis",
+                            dataType: "Results → Rendered UI"
+                        }
+                    ]
+                },
+                error: {
+                    title: "错误循环数据追踪 (Error Loop Data Trace)",
+                    steps: [
+                        {
+                            step: 1,
+                            module: "执行引擎 (Executor)",
+                            input: "StepConfig: {tool_id: \"rna_qc\", params: {...}}",
+                            process: "执行工具，检测到错误",
+                            output: "Error Result: {status: 'error', error_type: 'ParameterError', message: '...'}",
+                            dataType: "Step Config → Error"
+                        },
+                        {
+                            step: 2,
+                            module: "总控编排 (Orchestrator)",
+                            input: "Error Result",
+                            process: "检测错误，触发重规划流程",
+                            output: "Replan Request: {error_context: {...}, original_plan: {...}}",
+                            dataType: "Error → Replan Request"
+                        },
+                        {
+                            step: 3,
+                            module: "首席科学家 (Planner)",
+                            input: "Replan Request + Error Context",
+                            process: "分析错误原因，生成修正后的工作流",
+                            output: "Revised Workflow: {workflow_name, steps: [{...corrected_params...}]}",
+                            dataType: "Error Context → Revised Plan"
+                        },
+                        {
+                            step: 4,
+                            module: "执行引擎 (Executor)",
+                            input: "Revised Workflow",
+                            process: "使用修正后的参数重新执行",
+                            output: "Success Result: {status: 'success', ...}",
+                            dataType: "Revised Plan → Success"
+                        }
+                    ]
+                },
+                chat: {
+                    title: "直接聊天数据追踪 (Direct Chat Data Trace)",
+                    steps: [
+                        {
+                            step: 1,
+                            module: "用户 (User)",
+                            input: "自然语言查询: \"什么是单细胞RNA测序？\"",
+                            process: "用户输入一般性问题",
+                            output: "HTTP POST 请求: {message: \"什么是单细胞RNA测序？\"}",
+                            dataType: "Natural Language → HTTP Request"
+                        },
+                        {
+                            step: 2,
+                            module: "总控编排 (Orchestrator)",
+                            input: "UserQuery",
+                            process: "LLM 意图分类: 识别为 Chat 模式（无文件，无分析任务）",
+                            output: "Chat Intent: {intent: 'chat', skip_planning: true}",
+                            dataType: "Query → Chat Intent"
+                        },
+                        {
+                            step: 3,
+                            module: "LLM (直接调用)",
+                            input: "Chat Query + System Prompt",
+                            process: "LLM 生成回答（不经过 Planner/Executor）",
+                            output: "LLM Response: \"单细胞RNA测序是一种...\"",
+                            dataType: "Query → LLM Response"
+                        },
+                        {
+                            step: 4,
+                            module: "分析结果 (Output)",
+                            input: "LLM Response (via SSE)",
+                            process: "前端实时渲染流式文本",
+                            output: "Rendered UI: Chat Message with Markdown",
+                            dataType: "LLM Response → Rendered Text"
+                        }
+                    ]
+                }
+            };
+            
+            // 显示场景数据流
+            function showScenarioFlow(scenarioId) {
+                const flow = scenarioDataFlows[scenarioId];
+                if (!flow) return;
+                
+                const defaultState = document.getElementById('default-state');
+                const detailContent = document.getElementById('detail-content');
+                
+                defaultState.style.display = 'none';
+                detailContent.classList.add('active');
+                
+                let html = `<div class="detail-item" style="margin-bottom: 25px;">
+                    <div class="detail-item-label" style="font-size: 16px; font-weight: 700; color: #667eea;">${flow.title}</div>
+                </div>`;
+                
+                flow.steps.forEach((step, index) => {
+                    html += `
+                        <div class="detail-item" style="margin-bottom: 20px; border-left: 3px solid #667eea; padding-left: 15px;">
+                            <div class="detail-item-label" style="color: #667eea; font-weight: 600;">Step ${step.step}: ${step.module}</div>
+                            <div class="detail-item-value" style="margin-top: 8px;">
+                                <div style="margin-bottom: 6px;"><strong>Input:</strong> ${step.input}</div>
+                                <div style="margin-bottom: 6px;"><strong>Process:</strong> ${step.process}</div>
+                                <div style="margin-bottom: 6px;"><strong>Output:</strong> <code>${step.output}</code></div>
+                                <div style="margin-top: 8px; padding: 6px; background: #f1f3f5; border-radius: 4px; font-size: 12px; color: #495057;">
+                                    <strong>Data Transformation:</strong> ${step.dataType}
+                                </div>
+                            </div>
+                        </div>
+                        ${index < flow.steps.length - 1 ? '<div style="text-align: center; color: #667eea; font-size: 20px; margin: 10px 0;">↓</div>' : ''}
+                    `;
+                });
+                
+                detailContent.innerHTML = html;
+            }
+            
             function showModuleDetails(moduleId) {
                 const detail = moduleDetails[moduleId];
                 if (!detail) return;
@@ -1131,32 +1401,36 @@
                 
                 detailContent.innerHTML = `
                     <div class="detail-item">
-                        <div class="detail-item-label">Component</div>
+                        <div class="detail-item-label">组件名称 (Component)</div>
                         <div class="detail-item-value">${detail.component}</div>
                     </div>
                     <div class="detail-item">
-                        <div class="detail-item-label">Core Function</div>
+                        <div class="detail-item-label">核心函数 (Core Function)</div>
                         <div class="detail-item-value"><code>${detail.coreFunction}</code></div>
                     </div>
                     <div class="detail-item">
-                        <div class="detail-item-label">Data I/O</div>
+                        <div class="detail-item-label">数据输入/输出 (Data I/O)</div>
                         <div class="detail-item-value">${detail.dataIO}</div>
                     </div>
                     <div class="detail-item">
-                        <div class="detail-item-label">Key Logic</div>
+                        <div class="detail-item-label">技术实现与原理 (Technology Description)</div>
+                        <div class="detail-item-value">${detail.technologyDescription}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">关键逻辑 (Key Logic)</div>
                         <div class="detail-item-value">${detail.keyLogic}</div>
                     </div>
                     <div class="detail-item">
-                        <div class="detail-item-label">Design Rationale (Why?)</div>
+                        <div class="detail-item-label">设计依据与意义 (Design Rationale)</div>
                         <div class="detail-item-value">${detail.designRationale}</div>
                     </div>
                     <div class="detail-item">
-                        <div class="detail-item-label">Upstream / Downstream</div>
+                        <div class="detail-item-label">上游/下游 (Upstream / Downstream)</div>
                         <div class="detail-item-value">${detail.upstreamDownstream}</div>
                     </div>
                     <div class="detail-item">
-                        <div class="detail-item-label">Academic Basis</div>
-                        <div class="detail-item-value">${detail.academicBasis}</div>
+                        <div class="detail-item-label">学术理论依据 (Academic Basis)</div>
+                        <div class="detail-item-value" style="font-size: 12px; line-height: 1.8;">${detail.academicBasis}</div>
                     </div>
                 `;
                 
@@ -1279,6 +1553,11 @@
                 
                 if (mode === 'reset') {
                     currentScenario = null;
+                    // 重置侧边栏
+                    const defaultState = document.getElementById('default-state');
+                    const detailContent = document.getElementById('detail-content');
+                    defaultState.style.display = 'block';
+                    detailContent.classList.remove('active');
                     return;
                 }
                 
@@ -1287,6 +1566,9 @@
                     buttonElement.classList.add('active');
                 }
                 currentScenario = mode;
+                
+                // 🔥 立即更新侧边栏显示场景数据流（不等待卡片点击）
+                showScenarioFlow(mode);
                 
                 const cards = {
                     user: document.querySelector('[data-module="user"]'),

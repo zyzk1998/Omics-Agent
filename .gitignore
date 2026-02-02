@@ -91,5 +91,33 @@ frontend_rna_test_output.txt
 cache/
 .diagnosis_cache/
 
-# 归档目录（可选，如果不想提交归档）
-# _archive/
+# 调试文档（临时开发文档）
+*_SUMMARY.md
+DEBUG_*.md
+FIX_*.md
+*_SUMMARY.txt
+IMPLEMENTATION_SUMMARY.md
+COMPLETION_SUMMARY.md
+README_debug_*.md
+test_integration_report.md
+
+# 临时脚本（保留正式测试在 tests/ 目录）
+scripts/debug_*.py
+scripts/test_*.py
+scripts/verify_*.py
+scripts/simulate_*.py
+scripts/temp_*.py
+
+# 临时文本文件（保留 requirements.txt）
+*.txt
+!requirements.txt
+!README.txt
+
+# 日志文件
+*.log
+logs/
+debug_logs/
+
+# 归档目录（本地开发历史，不提交到公共仓库）
+_archive/
+_legacy_archive/
