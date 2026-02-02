@@ -20,12 +20,14 @@
         }
         
         .container {
-            max-width: 1800px;
+            max-width: 95%;
+            width: 95%;
             margin: 0 auto;
             background: white;
-            border-radius: 12px;
-            padding: 20px;
+            border-radius: 16px;
+            padding: 32px;
             box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            border: 3px solid rgba(255,255,255,0.8);
         }
         
         /* Master-Detail 布局 */
@@ -43,6 +45,7 @@
         
         .detail-panel {
             flex: 0 0 35%;
+            min-width: 380px;
             background: #f8f9fa;
             border: 2px solid #dee2e6;
             border-radius: 8px;
@@ -180,6 +183,63 @@
             word-break: break-all;
         }
         
+        /* Synapse Inspector - 参数映射表 */
+        .param-mapping-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            margin-top: 8px;
+        }
+        
+        .param-mapping-table th,
+        .param-mapping-table td {
+            border: 1px solid #dee2e6;
+            padding: 10px 12px;
+            text-align: left;
+        }
+        
+        .param-mapping-table th {
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+            width: 35%;
+        }
+        
+        .param-mapping-table tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+        
+        .param-mapping-table tr:hover {
+            background: #e9ecef;
+        }
+        
+        /* 打字机效果代码块 */
+        .typewriter-code {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            background: #1e1e1e;
+            color: #9cdcfe;
+            padding: 14px 16px;
+            border-radius: 6px;
+            border-left: 4px solid #4CAF50;
+            white-space: pre-wrap;
+            overflow: hidden;
+            border-right: 1px solid #333;
+        }
+        
+        .typewriter-code .cursor {
+            display: inline-block;
+            width: 8px;
+            height: 14px;
+            background: #4CAF50;
+            animation: blink 0.8s step-end infinite;
+            vertical-align: text-bottom;
+        }
+        
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+        
         /* 学术引用样式 */
         .detail-item-value[style*="font-size: 12px"] {
             white-space: pre-line;
@@ -188,6 +248,26 @@
         .detail-item-value br {
             display: block;
             margin: 4px 0;
+        }
+        
+        /* LLM Logic 部分特殊样式（浅紫色背景） */
+        .detail-item-value.llm-logic-section {
+            background: linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 100%) !important;
+            border-left: 4px solid #9333ea !important;
+            padding: 15px !important;
+            border-radius: 6px !important;
+            box-shadow: 0 2px 4px rgba(147, 51, 234, 0.1);
+        }
+        
+        .detail-item-value.llm-logic-section strong {
+            color: #7c3aed;
+            font-weight: 700;
+        }
+        
+        .detail-item-value.llm-logic-section code {
+            background: rgba(147, 51, 234, 0.1) !important;
+            color: #6b21a8 !important;
+            border: 1px solid rgba(147, 51, 234, 0.2);
         }
         
         /* 场景数据流特殊样式 */
@@ -200,7 +280,7 @@
             font-weight: 600;
         }
         
-        /* SVG 覆盖层用于动态连接线 */
+        /* SVG 覆盖层 - pointer-events: none 让空白区域点击穿透到卡片，path 保持 stroke 可点击 */
         .svg-overlay {
             position: absolute;
             top: 0;
@@ -212,54 +292,84 @@
             overflow: visible;
         }
         
-        .svg-overlay path {
-            stroke: #ff6b35;
-            stroke-width: 3;
+        /* 基底路径：加粗便于点击 */
+        .svg-overlay path.synapse-base {
             fill: none;
-            stroke-dasharray: 10,5;
-            opacity: 0;
-            transition: opacity 0.3s;
+            stroke-width: 4;
+            opacity: 0.3;
+            pointer-events: stroke;
+            cursor: pointer;
+            transition: stroke-width 0.2s, opacity 0.2s;
         }
         
-        .svg-overlay path.active {
-            opacity: 1;
-            animation: flowAnimation 2s linear infinite;
+        .svg-overlay path.synapse-base:hover {
+            stroke-width: 6;
+            opacity: 0.5;
         }
         
-        .svg-overlay path.flow-anim {
-            stroke-dasharray: 10,5;
+        /* 控制流 - 蓝色 */
+        .svg-overlay path.synapse-base.synapse-control { stroke: #2196F3; }
+        .svg-overlay path.synapse-pulse.synapse-control {
+            stroke: #2196F3;
+            filter: drop-shadow(0 0 6px #2196F3) drop-shadow(0 0 12px rgba(33, 150, 243, 0.6));
+        }
+        
+        /* 数据流 - 绿色 */
+        .svg-overlay path.synapse-base.synapse-data { stroke: #4CAF50; }
+        .svg-overlay path.synapse-pulse.synapse-data {
+            stroke: #4CAF50;
+            filter: drop-shadow(0 0 6px #4CAF50) drop-shadow(0 0 12px rgba(76, 175, 80, 0.6));
+        }
+        
+        /* 错误/修正循环 - 红色 */
+        .svg-overlay path.synapse-base.synapse-error { stroke: #F44336; }
+        .svg-overlay path.synapse-pulse.synapse-error {
+            stroke: #F44336;
+            filter: drop-shadow(0 0 6px #F44336) drop-shadow(0 0 12px rgba(244, 67, 54, 0.6));
+        }
+        
+        /* LLM 调用 - 紫色虚线 */
+        .svg-overlay path.synapse-base.synapse-llm {
+            stroke: #9333ea;
+            stroke-dasharray: 8, 6;
+        }
+        .svg-overlay path.synapse-pulse.synapse-llm {
+            stroke: #9333ea;
+            stroke-dasharray: 8, 6;
+            filter: drop-shadow(0 0 6px #9333ea) drop-shadow(0 0 12px rgba(147, 51, 234, 0.5));
+        }
+        
+        /* 脉冲：沿路径移动的光点 */
+        .svg-overlay path.synapse-pulse {
+            fill: none;
+            stroke-width: 5;
+            stroke-dasharray: 12, 1000;
             stroke-dashoffset: 0;
-            animation: flowAnimation 2s linear infinite;
-        }
-        
-        @keyframes flowAnimation {
-            0% {
-                stroke-dashoffset: 0;
-            }
-            100% {
-                stroke-dashoffset: -15;
-            }
-        }
-        
-        /* 数据包动画（沿路径移动的点） */
-        .svg-overlay circle {
-            fill: #ff6b35;
-            r: 4;
-            opacity: 0;
-        }
-        
-        .svg-overlay circle.active {
             opacity: 1;
-            animation: moveAlongPath 2s linear infinite;
+            pointer-events: none;
+            animation: synapsePulse 2s ease-in-out infinite;
         }
         
-        @keyframes moveAlongPath {
-            0% {
-                offset-distance: 0%;
-            }
-            100% {
-                offset-distance: 100%;
-            }
+        @keyframes synapsePulse {
+            0% { stroke-dashoffset: 0; }
+            100% { stroke-dashoffset: -1012; }
+        }
+        
+        /* 浮动标签 */
+        .svg-overlay .synapse-label {
+            font-size: 11px;
+            font-weight: 600;
+            fill: #333;
+            text-anchor: middle;
+            dominant-baseline: middle;
+            pointer-events: none;
+            paint-order: stroke;
+            stroke: white;
+            stroke-width: 3px;
+        }
+        
+        .synapse-label-group {
+            pointer-events: none;
         }
         
         /* 高亮和暗淡效果 */
@@ -276,6 +386,7 @@
         
         .flow-step-card.clickable {
             cursor: pointer;
+            pointer-events: auto;
         }
         
         .flow-step-card.clickable:hover {
@@ -297,25 +408,27 @@
         }
         
         .flow-diagram {
-            background: #f8f9fa;
-            border: 2px solid #dee2e6;
-            border-radius: 8px;
-            padding: 40px;
+            background: linear-gradient(180deg, #f8f9fa 0%, #e9ecef 100%);
+            border: 4px solid #dee2e6;
+            border-radius: 12px;
+            padding: 48px 56px;
             margin: 0;
             overflow-x: auto;
             position: relative;
+            box-shadow: inset 0 2px 8px rgba(0,0,0,0.04);
         }
         
-        /* CSS Grid 2D 流程图布局 */
+        /* CSS Grid 2D 流程图布局 (4列：主流程 + LLM 服务) */
         .flow-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: 1fr 1fr 1fr 280px;
             grid-template-rows: auto;
             gap: 30px 20px;
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
             position: relative;
             padding: 20px 0;
+            pointer-events: auto;
         }
         
         /* 连接线 - 使用伪元素创建视觉连接 */
@@ -492,29 +605,27 @@
             position: relative;
         }
         
-        .flow-step-card.brain-layer::before {
-            content: '🧠';
-            position: absolute;
-            top: -15px;
-            right: -15px;
-            font-size: 32px;
-            background: white;
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-            border: 3px solid #FF6B35;
-        }
-        
         .flow-step-card.router-planner {
             grid-column: 1 / 2;
         }
         
         .flow-step-card.tool-retriever {
             grid-column: 2 / 3;
+        }
+        
+        /* LLM 服务层 - 右侧浮动，跨 Orchestrator~Executor */
+        .flow-step-card.llm-layer {
+            grid-column: 4 / 5;
+            grid-row: 2 / 6;
+            border-color: #9333ea;
+            background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
+            border-style: dashed;
+            border-width: 3px;
+        }
+        
+        .flow-step-card.llm-layer::after,
+        .flow-step-card.llm-layer::before {
+            display: none;
         }
         
         /* 执行层 */
@@ -551,7 +662,7 @@
         
         /* 领域智能体层 */
         .flow-step-card.agent-layer {
-            grid-column: 2 / 3;
+            grid-column: 1 / -1;
             border-color: #FF9800;
             background: linear-gradient(135deg, #fff3e0 0%, #ffffff 100%);
         }
@@ -609,7 +720,7 @@
         /* 响应式设计 */
         @media (max-width: 1200px) {
             .flow-grid {
-                grid-template-columns: repeat(2, 1fr);
+                grid-template-columns: 1fr 1fr 200px;
             }
             
             .flow-step-card.user-layer,
@@ -627,6 +738,11 @@
             .flow-step-card.tool-retriever {
                 grid-column: 2 / 3;
             }
+            
+            .flow-step-card.llm-layer {
+                grid-column: 3 / 4;
+                grid-row: 2 / 6;
+            }
         }
         
         @media (max-width: 768px) {
@@ -636,72 +752,13 @@
             
             .flow-step-card {
                 grid-column: 1 / -1 !important;
+                grid-row: auto !important;
             }
             
             .academic-badge {
                 font-size: 9px;
                 padding: 3px 8px;
             }
-        }
-        
-        .download-section {
-            background: #f8f9fa;
-            border: 2px solid #dee2e6;
-            border-radius: 8px;
-            padding: 30px;
-            margin: 40px 0;
-            text-align: center;
-        }
-        
-        .download-section h2 {
-            color: #333;
-            margin-bottom: 20px;
-            font-size: 24px;
-            border: none;
-            padding: 0;
-        }
-        
-        .architecture-image {
-            max-width: 100%;
-            height: auto;
-            border: 2px solid #dee2e6;
-            border-radius: 8px;
-            margin: 20px 0;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
-        
-        .download-btn {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background 0.2s;
-            margin-top: 15px;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .download-btn:hover {
-            background: #5568d3;
-        }
-        
-        .download-btn:active {
-            transform: scale(0.98);
-        }
-        
-        .image-placeholder {
-            background: #e9ecef;
-            border: 2px dashed #adb5bd;
-            border-radius: 8px;
-            padding: 60px 20px;
-            color: #6c757d;
-            font-size: 14px;
-            margin: 20px 0;
         }
         
         .flow-step {
@@ -783,6 +840,39 @@
             background: #5568d3;
         }
         
+        /* Code Pop-up Modal */
+        .code-modal {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(30, 30, 30, 0.95);
+            backdrop-filter: blur(8px);
+            color: #00ff00;
+            font-family: 'Courier New', Consolas, monospace;
+            font-size: 13px;
+            z-index: 1000;
+            padding: 24px;
+            border-radius: 8px;
+            max-width: 80%;
+            max-height: 80%;
+            overflow: auto;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            border: 1px solid rgba(0, 255, 0, 0.3);
+            cursor: pointer;
+        }
+        
+        .code-modal.active {
+            display: block;
+        }
+        
+        .code-modal pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
         @media print {
             /* 页面设置 */
             @page {
@@ -804,8 +894,7 @@
             
             /* 隐藏 UI 元素 */
             .print-btn,
-            .download-btn,
-            .download-section,
+            .code-modal,
             .control-bar,
             .detail-panel {
                 display: none !important;
@@ -929,6 +1018,11 @@
 <body>
     <button class="print-btn" onclick="window.print()">🖨️ 打印/导出 PDF</button>
     
+    <!-- Code Pop-up Modal (点击连接线显示，点击任意处关闭) -->
+    <div class="code-modal" id="code-modal" onclick="event.stopPropagation()">
+        <pre id="code-modal-content"></pre>
+    </div>
+    
     <div class="container">
         <h1>🚀 Omics Agent - Interactive Architecture Dashboard</h1>
         <p class="subtitle">交互式白盒架构仪表板：从用户需求到分析结果的完整流程</p>
@@ -970,7 +1064,6 @@
                                 <span class="component-tag">任务分发</span>
                                 <span class="component-tag">流程协调</span>
                             </div>
-                            <div class="academic-badge">MetaGPT: Meta Programming for Multi-Agent Collaboration</div>
                         </div>
                         
                         <!-- 第3行: 大脑层 (并排) -->
@@ -982,7 +1075,6 @@
                                 <span class="component-tag">科学推理</span>
                                 <span class="component-tag">步骤生成</span>
                             </div>
-                            <div class="academic-badge">SciAgents: Automating Scientific Discovery</div>
                         </div>
                         
                         <div class="flow-step-card brain-layer tool-retriever clickable" data-module="retriever" onclick="showModuleDetails('retriever')">
@@ -993,7 +1085,17 @@
                                 <span class="component-tag">ChromaDB</span>
                                 <span class="component-tag">语义检索</span>
                             </div>
-                            <div class="academic-badge">Gorilla: LLM Connected with Massive APIs</div>
+                        </div>
+                        
+                        <!-- LLM 服务节点 (右侧浮动，跨行) -->
+                        <div class="flow-step-card llm-layer clickable" data-module="llm" onclick="showModuleDetails('llm')">
+                            <div class="step-title">⚡ DeepSeek-R1</div>
+                            <div class="step-desc">大语言模型推理引擎</div>
+                            <div class="step-components">
+                                <span class="component-tag">意图分类</span>
+                                <span class="component-tag">工作流规划</span>
+                                <span class="component-tag">诊断报告</span>
+                            </div>
                         </div>
                         
                         <!-- 第4行: 领域专家 (全宽) -->
@@ -1005,7 +1107,6 @@
                                 <span class="component-tag">Metabolomics Agent</span>
                                 <span class="component-tag">领域知识</span>
                             </div>
-                            <div class="academic-badge">ChemCrow: Augmenting LLMs with Domain Tools</div>
                         </div>
                         
                         <!-- 第5行: 执行引擎 (全宽) -->
@@ -1018,7 +1119,6 @@
                                 <span class="component-tag">工具调用</span>
                                 <span class="component-tag">结果生成</span>
                             </div>
-                            <div class="academic-badge">SheetCopilot: Programmatic Data Manipulation</div>
                         </div>
                         
                         <!-- 第6行: 最终输出 (全宽) -->
@@ -1045,7 +1145,7 @@
             <div class="detail-panel">
                 <h2>🔬 System Anatomy & Logic Trace<br><span style="font-size: 14px; color: #666;">系统解剖与逻辑追踪</span></h2>
                 <div class="default-state" id="default-state">
-                    Select a module to view internal logic and design rationale.
+                    Select a module or click a connection line to inspect data flow and parameter mapping.
                 </div>
                 <div class="detail-content" id="detail-content">
                     <!-- 内容将通过 JavaScript 动态填充 -->
@@ -1053,48 +1153,7 @@
             </div>
         </div>
         
-        <!-- 可下载架构图部分 -->
-        <!-- TODO: Take a screenshot of this HTML diagram and save as assets/architecture_v2.png -->
-        <div class="download-section">
-            <h2>📥 Download Architecture</h2>
-            <p style="color: #666; margin-bottom: 20px;">下载高分辨率架构图用于演示和文档</p>
-            <p style="color: #ff9800; font-size: 13px; margin-bottom: 15px; padding: 10px; background: #fff3cd; border-radius: 6px;">
-                <strong>📸 提示：</strong>请对上面的 HTML 架构图进行截图，保存为 <code>assets/architecture_v2.png</code> 以修复缺失的图片。
-            </p>
-            
-            <div id="architecture-image-container">
-                <img src="assets/architecture_v2.png" 
-                     alt="Architecture Diagram Snapshot - Omics Agent System Design" 
-                     class="architecture-image"
-                     onerror="this.style.display='none'; document.getElementById('image-placeholder').style.display='block';">
-                <div id="image-placeholder" class="image-placeholder" style="display: block;">
-                    <p>📷 架构图文件未找到</p>
-                    <p style="font-size: 12px; margin-top: 10px;">请对上面的 HTML 架构图进行截图，保存为 <code>assets/architecture_v2.png</code></p>
-                    <p style="font-size: 11px; margin-top: 8px; color: #999;">或者使用浏览器的打印功能导出为 PDF/PNG</p>
-                </div>
-            </div>
-            
-            <button class="download-btn" onclick="downloadArchitecture()">
-                <span>⬇️</span>
-                <span>Download High-Res PNG</span>
-            </button>
-        </div>
-        
         <script>
-            function downloadArchitecture() {
-                const img = document.querySelector('.architecture-image');
-                if (img && img.src && !img.src.includes('placeholder')) {
-                    const link = document.createElement('a');
-                    link.href = img.src;
-                    link.download = 'omics_agent_architecture_v2.png';
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                } else {
-                    alert('架构图文件未找到。请确保 assets/architecture_v2.png 文件存在。');
-                }
-            }
-            
             // 模块技术规格数据对象（双语 + IEEE 格式引用）
             const moduleDetails = {
                 user: {
@@ -1105,6 +1164,7 @@
                     keyLogic: "用户在 Web UI 中输入查询文本或上传文件，前端收集用户输入并发送到后端 API。",
                     designRationale: "分离用户界面层与业务逻辑层，实现前后端解耦。前端负责交互和展示，后端负责计算和决策。这种架构支持前后端独立开发和部署，提高系统可维护性。",
                     upstreamDownstream: "Upstream: N/A (用户入口) | Downstream: Orchestrator (接收用户请求)",
+                    llmLogic: "N/A - User Interface Layer（不直接调用 LLM API）",
                     academicBasis: "N/A - User Interface Layer (标准 Web 架构模式，基于 RESTful API 设计原则)"
                 },
                 orchestrator: {
@@ -1115,17 +1175,19 @@
                     keyLogic: "管理对话历史，进行意图分类（Chat vs Task），协调多智能体协作。使用 LLM 进行全局意图判断，根据结果路由到规划流程或直接聊天。维护会话状态和上下文。",
                     designRationale: "为什么需要 Orchestrator？实现单一入口点，统一管理多智能体协作。分离意图分类与具体执行，允许在规划前进行 Human-in-the-loop 验证。支持流式输出，提升用户体验。防止多个智能体直接通信导致的混乱，确保数据流的一致性。",
                     upstreamDownstream: "Upstream: User (接收用户请求) | Downstream: Planner (任务模式) / LLM (聊天模式) / Executor (执行模式)",
+                    llmLogic: "<strong>触发点:</strong> <code>_classify_global_intent()</code> → <code>llm_client.achat(messages, temperature=0.1, max_tokens=50)</code><br><br><strong>Prompt 策略:</strong> Zero-shot Classification。System Prompt: \"你是一个意图分类助手。只返回JSON格式的意图类型。\" User Prompt: 包含用户查询和分类规则（聊天 vs 任务）。<br><br><strong>上下文窗口:</strong> UserQuery（原始文本）+ 关键词规则（task_keywords: [\"分析\", \"处理\", \"运行\", \"执行\"]）。如果关键词匹配则直接返回，否则调用 LLM。<br><br><strong>输出解析:</strong> 1) 移除 Markdown 代码块（```json），2) JSON.parse() 提取 <code>{\"type\": \"chat\" | \"task\"}</code>，3) 如果解析失败，检查响应文本中是否包含 \"task\" 关键词作为后备方案。",
                     academicBasis: "[1] H. Hong et al., \"MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework,\" ICLR, 2024. (SOPs)<br>[2] P. Soare et al., \"Scalable Distributed Task Queues,\" IEEE Trans. Cloud Comput., 2023. (Celery/Async Architecture)"
                 },
                 planner: {
                     component: "首席科学家 (Lead Scientist / Planner)",
                     coreFunction: "core.planner.SOPPlanner.plan_workflow()",
                     dataIO: "Input: UserQuery + FileMetadata + ToolSchemas → Output: JSON_Workflow: {workflow_name, steps: [{step_id, tool_id, name, params}]}",
-                    technologyDescription: "使用 Chain-of-Thought (CoT) Prompting 分解生物问题。由 DeepSeek-V3（MoE 架构）提供推理能力。将工具 Schema 注入到 LLM 提示词中，使用 JSON Schema 验证 LLM 输出，确保工作流格式正确。实现参数推荐算法，基于数据统计信息（如样本数、特征数）推荐最佳参数。使用 Few-shot Learning 提供示例工作流。",
+                    technologyDescription: "使用 Chain-of-Thought (CoT) Prompting 分解生物问题。由 deepseek-R1（MoE 架构）提供推理能力。将工具 Schema 注入到 LLM 提示词中，使用 JSON Schema 验证 LLM 输出，确保工作流格式正确。实现参数推荐算法，基于数据统计信息（如样本数、特征数）推荐最佳参数。使用 Few-shot Learning 提供示例工作流。",
                     keyLogic: "使用 Chain-of-Thought (CoT) 推理拆解科学问题。将用户需求分解为可执行的步骤序列。每个步骤包含工具ID和参数配置。支持参数推荐和动态调整。",
                     designRationale: "为什么分离 Planner 和 Executor？允许在昂贵执行前进行 Human-in-the-loop 验证，防止错误执行浪费计算资源。支持工作流的预览、修改和优化。实现规划与执行的解耦，提高系统灵活性。通过 Schema 验证防止 LLM 产生无效工作流，减少执行错误。",
                     upstreamDownstream: "Upstream: Orchestrator (接收任务意图) + Retriever (获取工具 Schema) | Downstream: Executor (发送工作流配置) / Frontend (预览模式)",
-                    academicBasis: "[3] DeepSeek-AI, \"DeepSeek-V3 Technical Report,\" arXiv, 2024.<br>[4] J. Wei et al., \"Chain-of-Thought Prompting Elicits Reasoning in LLMs,\" NeurIPS, 2022."
+                    llmLogic: "<strong>触发点:</strong> <code>generate_plan()</code> → <code>_classify_intent()</code> → <code>llm_client.achat(messages, temperature=0.1)</code><br><br><strong>Prompt 策略:</strong> Chain-of-Thought (CoT) + Few-shot Learning。System Prompt 注入：1) 领域分类规则（Metabolomics vs RNA），2) 可用步骤列表（从 WorkflowRegistry 获取），3) 模式分类规则（PLANNING vs EXECUTION）。User Prompt 包含：UserQuery + FileMetadata（是否有文件）+ 目标步骤列表。<br><br><strong>上下文窗口:</strong> UserQuery + FileMetadata（has_file: bool）+ ToolSchemas（从 Retriever 获取的 top-k 工具 JSON Schema）+ WorkflowRegistry 的 DAG 依赖关系（作为 System Prompt 的一部分）。<br><br><strong>输出解析:</strong> 1) JSON.parse() 提取 <code>{\"domain_name\": \"Metabolomics\" | \"RNA\", \"mode\": \"EXECUTION\" | \"PLANNING\", \"target_steps\": [...]}</code>，2) 使用 Pydantic 模型验证格式，3) 如果 target_steps 为空数组，则使用完整工作流（从 WorkflowRegistry 获取所有步骤）。",
+                    academicBasis: "[3] DeepSeek-AI, \"deepseek-R1 Technical Report,\" arXiv, 2024.<br>[4] J. Wei et al., \"Chain-of-Thought Prompting Elicits Reasoning in LLMs,\" NeurIPS, 2022."
                 },
                 retriever: {
                     component: "图书馆员 (Librarian / Tool Retriever)",
@@ -1135,6 +1197,7 @@
                     keyLogic: "使用 ChromaDB 向量数据库进行语义检索。将用户查询转换为 embedding，在工具库中查找相似度最高的工具。返回工具的完整 Schema（参数定义、描述、示例）。",
                     designRationale: "为什么使用语义检索而非关键词匹配？支持自然语言查询，用户无需了解具体工具名称。通过 embedding 相似度匹配，提高工具推荐的准确性。支持工具描述的模糊匹配，即使工具名称不完全匹配也能找到相关工具。",
                     upstreamDownstream: "Upstream: Planner (接收工具查询请求) | Downstream: Planner (返回工具 Schema)",
+                    llmLogic: "<strong>触发点:</strong> <code>query_tools()</code> → <code>embedding_model.embed_query(query_text)</code><br><br><strong>API 类型:</strong> Embeddings API（非 Chat API）。使用 OpenAI Embeddings 或 Ollama Embeddings 模型（如 <code>nomic-embed-text</code>）。<br><br><strong>输入:</strong> UserQuery（自然语言文本，例如 \"分析单细胞RNA数据\"）。<br><br><strong>输出:</strong> Vector Float List（例如 768 维或 1536 维的浮点数数组）。<br><br><strong>处理流程:</strong> 1) 将查询文本转换为 embedding 向量，2) 在 ChromaDB 中计算与所有工具描述的余弦相似度（cosine similarity），3) 返回 top-k（默认 k=10）最相似的工具 Schema。注意：此模块不使用 Chat API，而是使用 Embeddings API 进行语义相似度计算。",
                     academicBasis: "[5] Y. Qin et al., \"ToolLLM: Facilitating LLMs to Master 16000+ Real-world APIs,\" ICLR, 2024.<br>[6] J. Johnson et al., \"Billion-scale similarity search,\" IEEE Trans. Big Data, 2021. (Vector Search Theory)"
                 },
                 agent: {
@@ -1145,6 +1208,7 @@
                     keyLogic: "拥有特定组学领域的专业知识（RNA-seq, Metabolomics）。根据工作流配置创建 WorkflowExecutor，执行分析步骤。聚合步骤结果，生成领域特定的诊断报告。",
                     designRationale: "为什么需要领域特定的 Agent？不同组学领域有不同的分析流程和专业知识。通过领域 Agent 封装领域知识，实现关注点分离。支持领域特定的错误处理和参数推荐。允许系统扩展新的组学领域，无需修改核心架构。",
                     upstreamDownstream: "Upstream: Orchestrator (接收工作流配置) | Downstream: Executor (委托执行) + Output (返回分析结果)",
+                    llmLogic: "<strong>触发点:</strong> <code>_detect_intent_with_llm()</code> → <code>llm_client.achat(messages)</code> 和 <code>generate_diagnosis_report()</code> → <code>llm_client.achat(messages)</code><br><br><strong>Prompt 策略:</strong> 1) 意图检测：Zero-shot Classification，System Prompt: \"You are an intent classification assistant. Return JSON only.\" 2) 诊断报告生成：Few-shot Learning，System Prompt 包含领域特定的诊断模板（例如 RNA-seq 的细胞数、基因数、线粒体比例等指标提取规则）。<br><br><strong>上下文窗口:</strong> 1) 意图检测：UserQuery + UploadedFiles（文件名列表），2) 诊断报告：StepsResults（JSON 格式的步骤执行结果）+ 领域特定的指标提取规则（作为 System Prompt 的一部分）。<br><br><strong>输出解析:</strong> 1) 意图检测：JSON.parse() 提取 <code>{\"intent\": \"explain_file\" | \"run_workflow\" | \"chat\", \"reasoning\": \"...\"}</code>，2) 诊断报告：Markdown 格式的文本，包含关键指标（细胞数、基因数等）和诊断建议。",
                     academicBasis: "[10] A. M. Bran et al., \"ChemCrow: Augmenting large language models with chemistry tools,\" Nature Machine Intelligence, vol. 6, pp. 525-535, 2024. [11] K. Zhou et al., \"GeneGPT: Augmenting Large Language Models with Domain Tools for Improved Access to Biomedical Information,\" arXiv:2404.09667, 2024. [12] H. Yang et al., \"scGPT: Towards Building a Foundation Model for Single-Cell Multi-omics Using Generative AI,\" bioRxiv, 2023."
                 },
                 executor: {
@@ -1155,7 +1219,19 @@
                     keyLogic: "从 ToolRegistry 动态查找工具函数。使用 Pydantic 验证参数。调用工具函数（可能涉及 Subprocess 或 Celery 异步任务）。处理步骤间的数据流（前一步输出作为下一步输入）。收集执行结果和错误信息。",
                     designRationale: "为什么分离 Executor 和 Planner？允许在规划后、执行前进行验证，防止无效参数导致执行失败。支持错误恢复和重试机制（Executor → Planner 反馈循环）。实现执行逻辑的通用化，无需为每个工具编写特定代码。通过参数验证减少运行时错误。",
                     upstreamDownstream: "Upstream: Agent (接收工作流配置) | Downstream: Tools (调用工具函数) / Planner (错误反馈循环) / Output (返回执行结果)",
+                    llmLogic: "<strong>触发点:</strong> Executor 本身不直接调用 LLM API。但在错误恢复场景中，错误信息会反馈给 Planner，Planner 使用 LLM 生成修正后的工作流。<br><br><strong>间接 LLM 使用:</strong> 当执行失败时，Executor 返回 ErrorResult，Orchestrator 触发重规划流程，Planner 使用 LLM 分析错误原因并生成修正后的工作流（参见 Planner 的 llmLogic）。<br><br><strong>代码生成场景（未来扩展）:</strong> 如果工具需要动态代码生成，Executor 可能调用 LLM 生成 Python 代码块。输入：Step description + Dataframe .head()（数据预览），输出：Python Code block（使用正则表达式提取 ```python 代码块）。",
                     academicBasis: "[7] F. A. Wolf et al., \"SCANPY: large-scale single-cell gene expression data analysis,\" Genome Biology, 2018.<br>[8] H. Li et al., \"SheetCopilot: Bringing Software Productivity to the Next Level,\" NeurIPS, 2023."
+                },
+                llm: {
+                    component: "大语言模型服务 (LLM Service)",
+                    coreFunction: "llm_client.achat() / llm_client.astream()",
+                    dataIO: "Input: List[Message] + temperature, max_tokens → Output: JSON / Stream",
+                    technologyDescription: "deepseek-R1 (MoE 架构) 提供推理能力。Orchestrator 用于意图分类；Planner 用于工作流规划与错误修正；Agent 用于诊断报告生成。通过统一 LLM Client 封装 API 调用。",
+                    keyLogic: "意图分类 (Zero-shot)、工作流规划 (CoT + Few-shot)、错误分析、诊断报告生成。",
+                    designRationale: "LLM 是系统的推理引擎，但作为外部服务不参与数据流主路径，故以虚线连接表示「调用关系」。",
+                    upstreamDownstream: "Upstream: Orchestrator (意图分类) | Planner (规划/修正) | Agent (诊断) | Downstream: 各模块接收 LLM 响应",
+                    llmLogic: "本模块即为 LLM 服务本身。被 Orchestrator、Planner、Agent 调用。",
+                    academicBasis: "deepseek-R1 Technical Report, arXiv 2024."
                 },
                 output: {
                     component: "分析结果 (Analysis Results)",
@@ -1165,9 +1241,259 @@
                     keyLogic: "通过 Server-Sent Events (SSE) 实时推送分析进度。前端解析 SSE 事件流，实时渲染工作流卡片、步骤结果、图表和 AI 诊断报告。支持流式文本输出和增量更新。",
                     designRationale: "为什么使用 SSE 而非轮询？实时推送，降低延迟。单向通信，简化实现。支持流式输出，提升用户体验。相比 WebSocket，SSE 更简单，无需双向通信。使用 NGINX 反向代理提供生产级负载均衡和高可用性。",
                     upstreamDownstream: "Upstream: Executor (接收执行结果) + Agent (接收分析报告) | Downstream: User (最终展示)",
+                    llmLogic: "N/A - Output Layer（不直接调用 LLM API，仅渲染 LLM 生成的诊断报告）",
                     academicBasis: "[9] W. Tarneberg et al., \"Dynamic Application-Aware Load Balancing for NGINX,\" IEEE Access, 2021."
                 }
             };
+            
+            // Synapse Inspector 数据规格（含 human_desc, function_sig, payload_preview, param_mapping）
+            const dataFlowSpecs = {
+                'user-orch': {
+                    source: 'User', target: 'Orchestrator', sourceZh: '用户', targetZh: '编排器',
+                    human_desc: 'The user sends their message and uploaded files to the Orchestrator via the chat API.',
+                    function_sig: 'POST /api/chat(request: ChatRequest) -> StreamingResponse',
+                    payload_preview: '{"message":"Analyze this","uploaded_files":[{"name":"example.h5ad","path":"..."}],"stream":true}',
+                    param_mapping: {
+                        'message': 'Natural language query from the user (e.g., "Analyze this data")',
+                        'uploaded_files': 'List of file references with name and server path after upload',
+                        'stream': 'When true, enables SSE streaming for real-time updates',
+                        'user_id': 'Identifies the user session for multi-tenant isolation',
+                        'session_id': 'Correlates requests within a single conversation'
+                    }
+                },
+                'orch-planner': {
+                    source: 'Orchestrator', target: 'Planner', sourceZh: '编排器', targetZh: '规划器',
+                    human_desc: 'The Orchestrator forwards the classified task intent and conversation history to the Planner.',
+                    function_sig: 'planner.plan_workflow(query: str, history: List[Message], file_metadata: FileMetadata) -> WorkflowSchema',
+                    payload_preview: '{"query":"分析RNA数据","history":[...],"file_metadata":{"has_file":true,"file_type":"h5ad"}}',
+                    param_mapping: {
+                        'query': 'User\'s original natural language request',
+                        'history': 'Previous messages in the conversation for context',
+                        'file_metadata': 'Metadata about uploaded files (type, sample count) for planning'
+                    }
+                },
+                'planner-retriever': {
+                    source: 'Planner', target: 'Retriever', sourceZh: '规划器', targetZh: '检索器',
+                    human_desc: 'The Planner asks the Retriever for relevant tools based on the user\'s query.',
+                    function_sig: 'retriever.query_tools(text: str, top_k: int = 5) -> List[ToolDef]',
+                    payload_preview: '{"query":"分析RNA-seq数据","top_k":5}',
+                    param_mapping: {
+                        'text': 'Natural language description of the task for semantic search',
+                        'top_k': 'Retrieves top 5 most relevant tools by embedding similarity',
+                        'threshold': 'Filters out low-confidence matches (optional)'
+                    }
+                },
+                'retriever-planner': {
+                    source: 'Retriever', target: 'Planner', sourceZh: '检索器', targetZh: '规划器',
+                    human_desc: 'The Retriever returns the tool schemas so the Planner can build a valid workflow.',
+                    function_sig: 'List[ToolDef] (return value)',
+                    payload_preview: '[{"tool_id":"rna_qc","params":{...},"description":"..."}]',
+                    param_mapping: {
+                        'tool_id': 'Unique identifier for the tool in the registry',
+                        'params': 'JSON Schema of expected parameters',
+                        'description': 'Human-readable tool description for LLM context'
+                    }
+                },
+                'planner-output': {
+                    source: 'Planner', target: 'Output', sourceZh: '规划器', targetZh: '输出',
+                    human_desc: 'The Planner sends the generated workflow to the frontend for user confirmation.',
+                    function_sig: 'SSE event: workflow',
+                    payload_preview: '{"type":"workflow","workflow_config":{"workflow_name":"RNA-seq","steps":[...]}}',
+                    param_mapping: {
+                        'workflow_name': 'Human-readable pipeline name',
+                        'steps': 'Ordered list of step configs (step_id, tool_id, params)'
+                    }
+                },
+                'orch-executor': {
+                    source: 'Orchestrator', target: 'Executor', sourceZh: '编排器', targetZh: '执行器',
+                    human_desc: 'The Orchestrator routes the approved workflow to the Executor (via Agent).',
+                    function_sig: 'agent.execute_workflow(workflow_config: WorkflowSchema, file_paths: List[str])',
+                    payload_preview: '{"workflow_config":{...},"file_paths":["/data/xxx.h5ad"]}',
+                    param_mapping: {
+                        'workflow_config': 'Validated workflow with steps and parameters',
+                        'file_paths': 'Server paths to user-uploaded data files'
+                    }
+                },
+                'orch-agent': {
+                    source: 'Orchestrator', target: 'Agent', sourceZh: '编排器', targetZh: '领域智能体',
+                    human_desc: 'The Orchestrator delegates to a domain-specific Agent (RNA, Metabolomics).',
+                    function_sig: 'agent.execute_workflow(workflow_config: WorkflowSchema, file_paths: List[str]) -> AnalysisResult',
+                    payload_preview: '{"workflow_config":{...},"file_paths":["/data/session_xxx/sample.h5ad"]}',
+                    param_mapping: {
+                        'workflow_config': 'Complete workflow schema with steps',
+                        'file_paths': 'Paths to uploaded files for analysis'
+                    }
+                },
+                'agent-executor': {
+                    source: 'Agent', target: 'Executor', sourceZh: '领域智能体', targetZh: '执行器',
+                    human_desc: 'The Agent passes each step to the Executor for tool invocation.',
+                    function_sig: 'executor.execute_step(step: StepConfig) -> StepResult',
+                    payload_preview: '{"step_id":"rna_qc","tool_id":"rna_qc","params":{"min_genes":200}}',
+                    param_mapping: {
+                        'step_id': 'Unique ID for this step in the workflow',
+                        'tool_id': 'Registry key to look up the tool function',
+                        'params': 'Validated parameters for the tool call'
+                    }
+                },
+                'executor-tools': {
+                    source: 'Executor', target: 'Tools', sourceZh: '执行器', targetZh: '工具库',
+                    human_desc: 'The Executor invokes the actual tool function with the validated parameters.',
+                    function_sig: 'tool_fn(**params) -> ResultObject',
+                    payload_preview: '{"file_path":"/data/xxx.h5ad","min_genes":200}',
+                    param_mapping: {
+                        'file_path': 'Path to input data file (e.g., H5AD)',
+                        'min_genes': 'Minimum genes per cell to retain (QC filter)',
+                        'min_cells': 'Minimum cells per gene to retain'
+                    }
+                },
+                'executor-output': {
+                    source: 'Executor', target: 'Output', sourceZh: '执行器', targetZh: '输出',
+                    human_desc: 'The Executor streams each step result to the frontend via SSE.',
+                    function_sig: 'SSE event: step_result',
+                    payload_preview: '{"type":"step_result","report_data":{"step_id":"rna_qc","status":"success","data":{...}}}',
+                    param_mapping: {
+                        'step_id': 'Identifies which step produced this result',
+                        'status': 'success | error',
+                        'data': 'Step output (logs, images, summary)'
+                    }
+                },
+                'executor-planner': {
+                    source: 'Executor', target: 'Planner', sourceZh: '执行器', targetZh: '规划器',
+                    human_desc: 'When execution fails, the Executor sends the error context back to the Planner for correction.',
+                    function_sig: 'ReplanRequest(error_context: ErrorContext, original_plan: WorkflowSchema)',
+                    payload_preview: '{"error_type":"ParameterError","message":"...","original_plan":{...}}',
+                    param_mapping: {
+                        'error_type': 'Exception class (e.g., ParameterError, FileNotFoundError)',
+                        'message': 'Human-readable error description',
+                        'original_plan': 'The workflow that failed, for LLM to analyze'
+                    }
+                },
+                'planner-executor': {
+                    source: 'Planner', target: 'Executor', sourceZh: '规划器', targetZh: '执行器',
+                    human_desc: 'The Planner sends the corrected workflow back to the Executor for retry.',
+                    function_sig: 'Revised WorkflowSchema',
+                    payload_preview: '{"workflow_name":"RNA-seq","steps":[{"step_id":"rna_qc","params":{"min_genes":300}}]}',
+                    param_mapping: {
+                        'corrected_params': 'LLM-generated parameter fixes based on error analysis'
+                    }
+                },
+                'orch-output': {
+                    source: 'Orchestrator', target: 'Output', sourceZh: '编排器', targetZh: '输出',
+                    human_desc: 'In chat mode, the Orchestrator streams the LLM response directly to the user.',
+                    function_sig: 'llm.astream(messages) -> AsyncIterator[ChatChunk]',
+                    payload_preview: '{"type":"chat","content":"单细胞RNA测序是一种..."}',
+                    param_mapping: {
+                        'type': 'Event type: "chat" for direct LLM output',
+                        'content': 'Streamed text chunk from the LLM'
+                    }
+                }
+            };
+            
+            // Code Pop-up Modal：点击连接线显示伪代码，再次点击关闭
+            function showCodeModal(connectionId) {
+                const spec = dataFlowSpecs[connectionId];
+                if (!spec) return;
+                const modal = document.getElementById('code-modal');
+                const content = document.getElementById('code-modal-content');
+                if (!modal || !content) return;
+                let text = `# ${spec.sourceZh} → ${spec.targetZh}\n\n`;
+                text += `// ${spec.human_desc || ''}\n\n`;
+                text += `${spec.function_sig || ''}\n\n`;
+                text += `// Payload Preview\n`;
+                text += spec.payload_preview || '';
+                content.textContent = text;
+                modal.classList.add('active');
+            }
+            
+            function closeCodeModal() {
+                const modal = document.getElementById('code-modal');
+                if (modal) modal.classList.remove('active');
+            }
+            
+            document.addEventListener('click', function(e) {
+                const modal = document.getElementById('code-modal');
+                if (modal && modal.classList.contains('active') && !modal.contains(e.target)) {
+                    closeCodeModal();
+                }
+            });
+            
+            // Synapse Inspector：点击连接线时显示结构化解剖（侧边栏，保留供其他入口使用）
+            function showDataFlow(connectionId) {
+                const spec = dataFlowSpecs[connectionId];
+                if (!spec) return;
+                
+                const defaultState = document.getElementById('default-state');
+                const detailContent = document.getElementById('detail-content');
+                
+                defaultState.style.display = 'none';
+                detailContent.classList.add('active');
+                
+                let paramRows = '';
+                if (spec.param_mapping) {
+                    for (const [key, meaning] of Object.entries(spec.param_mapping)) {
+                        paramRows += `<tr><td><code>${key}</code></td><td>${meaning}</td></tr>`;
+                    }
+                }
+                
+                detailContent.innerHTML = `
+                    <div class="detail-item" style="margin-bottom: 20px;">
+                        <div class="detail-item-label">🔬 Synapse Inspector</div>
+                        <div class="detail-item-value" style="font-size: 15px; font-weight: 600;">
+                            ${spec.sourceZh} (${spec.source}) → ${spec.targetZh} (${spec.target})
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">Human Description</div>
+                        <div class="detail-item-value">${spec.human_desc || '-'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">Function Signature</div>
+                        <div class="detail-item-value"><code>${spec.function_sig || '-'}</code></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">Payload Preview</div>
+                        <div class="detail-item-value typewriter-code" id="typewriter-block"><span class="cursor"></span></div>
+                    </div>
+                    ${paramRows ? `
+                    <div class="detail-item">
+                        <div class="detail-item-label">Parameter Mapping (参数含义)</div>
+                        <div class="detail-item-value">
+                            <table class="param-mapping-table">
+                                <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+                                <tbody>${paramRows}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                    ` : ''}
+                `;
+                
+                typewriterEffect(document.getElementById('typewriter-block'), spec.payload_preview || '', 18);
+            }
+            
+            function escapeHtml(s) {
+                const div = document.createElement('div');
+                div.textContent = s;
+                return div.innerHTML;
+            }
+            
+            function typewriterEffect(container, text, speed) {
+                if (!container) return;
+                container.innerHTML = '';
+                let i = 0;
+                const cursor = document.createElement('span');
+                cursor.className = 'cursor';
+                container.appendChild(cursor);
+                const interval = setInterval(() => {
+                    if (i < text.length) {
+                        const span = document.createElement('span');
+                        span.textContent = text[i];
+                        container.insertBefore(span, cursor);
+                        i++;
+                    } else {
+                        clearInterval(interval);
+                    }
+                }, speed);
+            }
             
             // 显示模块详情
             // 场景数据流对象（端到端数据追踪）
@@ -1187,36 +1513,68 @@
                             step: 2,
                             module: "总控编排 (Orchestrator)",
                             input: "UserQuery + ConversationHistory",
-                            process: "LLM 意图分类: Chat vs Task",
-                            output: "Task Object: {intent: 'task', domain: 'rna', requires_planning: true}",
-                            dataType: "Natural Language → Structured Intent"
+                            process: "调用关键词规则检查（task_keywords）",
+                            output: "Rule Check Result: 如果匹配关键词则直接返回，否则进入 LLM 分类",
+                            dataType: "Query → Rule Check"
                         },
                         {
                             step: 3,
-                            module: "首席科学家 (Planner)",
-                            input: "Task Object + FileMetadata",
-                            process: "Chain-of-Thought 推理，拆解科学问题",
-                            output: "Partial Plan: {workflow_name: \"RNA Analysis\", steps: [...]} (需要工具 Schema)",
-                            dataType: "Intent → Partial Workflow"
+                            module: "🤖 LLM API (Intent Classification)",
+                            input: "UserQuery + System Prompt: \"你是一个意图分类助手。只返回JSON格式的意图类型。\"",
+                            process: "llm_client.achat(messages, temperature=0.1, max_tokens=50)",
+                            output: "LLM Response: {\"type\": \"task\"} (JSON 格式)",
+                            dataType: "Natural Language → LLM API → JSON Response"
                         },
                         {
                             step: 4,
-                            module: "图书馆员 (Retriever)",
-                            input: "UserQuery: \"分析RNA数据\"",
-                            process: "ChromaDB 语义检索，计算 embedding 相似度",
-                            output: "Tool Schemas: [{tool_id: \"rna_cellranger_count\", params: {...}}, ...]",
-                            dataType: "Natural Language → Tool Schemas"
+                            module: "总控编排 (Orchestrator)",
+                            input: "LLM JSON Response",
+                            process: "解析 JSON，提取 intent 类型，移除 Markdown 代码块",
+                            output: "Task Object: {intent: 'task', domain: 'rna', requires_planning: true}",
+                            dataType: "LLM Response → Structured Intent"
                         },
                         {
                             step: 5,
                             module: "首席科学家 (Planner)",
-                            input: "Partial Plan + Tool Schemas",
-                            process: "LLM 生成完整工作流，填充工具参数",
-                            output: "JSON Workflow: {workflow_name, steps: [{step_id, tool_id, name, params}]}",
-                            dataType: "Partial Plan + Schemas → Complete Workflow"
+                            input: "Task Object + FileMetadata",
+                            process: "准备 LLM 调用上下文（需要工具 Schema）",
+                            output: "Planning Context: {user_query, file_metadata, needs_tools: true}",
+                            dataType: "Intent → Planning Context"
                         },
                         {
                             step: 6,
+                            module: "图书馆员 (Retriever)",
+                            input: "UserQuery: \"分析RNA数据\"",
+                            process: "Embeddings API: embedding_model.embed_query(query_text)",
+                            output: "Query Vector: [0.123, -0.456, ...] (768 维浮点数数组)",
+                            dataType: "Natural Language → Embedding Vector"
+                        },
+                        {
+                            step: 7,
+                            module: "图书馆员 (Retriever)",
+                            input: "Query Vector + ChromaDB Tool Embeddings",
+                            process: "余弦相似度搜索（cosine similarity），返回 top-k 工具",
+                            output: "Tool Schemas: [{tool_id: \"rna_cellranger_count\", params: {...}}, ...]",
+                            dataType: "Vector Similarity → Tool Schemas"
+                        },
+                        {
+                            step: 8,
+                            module: "🤖 LLM API (Workflow Generation)",
+                            input: "UserQuery + ToolSchemas + System Prompt (CoT + Few-shot)",
+                            process: "llm_client.achat(messages, temperature=0.1) - Chain-of-Thought 推理",
+                            output: "LLM Response: {\"domain_name\": \"RNA\", \"mode\": \"PLANNING\", \"target_steps\": [...]}",
+                            dataType: "Context + Schemas → LLM API → JSON Plan"
+                        },
+                        {
+                            step: 9,
+                            module: "首席科学家 (Planner)",
+                            input: "LLM JSON Response + WorkflowRegistry DAG",
+                            process: "解析 JSON，使用 Pydantic 验证，填充完整工作流参数",
+                            output: "JSON Workflow: {workflow_name, steps: [{step_id, tool_id, name, params}]}",
+                            dataType: "LLM Response + DAG → Complete Workflow"
+                        },
+                        {
+                            step: 10,
                             module: "前端渲染 (Frontend)",
                             input: "JSON Workflow (via SSE)",
                             process: "渲染工作流卡片，等待用户确认",
@@ -1240,9 +1598,17 @@
                             step: 2,
                             module: "总控编排 (Orchestrator)",
                             input: "Execution Request",
-                            process: "路由到对应的领域 Agent",
+                            process: "路由到对应的领域 Agent（基于 workflow domain_name）",
                             output: "Agent Selection: RNAAgent / MetabolomicsAgent",
                             dataType: "Request → Agent Instance"
+                        },
+                        {
+                            step: 2.5,
+                            module: "🤖 LLM API (Agent Intent Detection)",
+                            input: "UserQuery + UploadedFiles + System Prompt (Intent Classification)",
+                            process: "agent._detect_intent_with_llm() → llm_client.achat(messages)",
+                            output: "LLM Response: {\"intent\": \"run_workflow\", \"reasoning\": \"...\"}",
+                            dataType: "Query + Files → LLM API → Intent JSON"
                         },
                         {
                             step: 3,
@@ -1299,14 +1665,22 @@
                         },
                         {
                             step: 3,
-                            module: "首席科学家 (Planner)",
-                            input: "Replan Request + Error Context",
-                            process: "分析错误原因，生成修正后的工作流",
-                            output: "Revised Workflow: {workflow_name, steps: [{...corrected_params...}]}",
-                            dataType: "Error Context → Revised Plan"
+                            module: "🤖 LLM API (Error Analysis & Replanning)",
+                            input: "Error Context + Original Plan + System Prompt (Error Recovery)",
+                            process: "planner.generate_plan() → llm_client.achat(messages) - 分析错误并生成修正方案",
+                            output: "LLM Response: {\"domain_name\": \"RNA\", \"mode\": \"EXECUTION\", \"target_steps\": [...], \"corrected_params\": {...}}",
+                            dataType: "Error Context → LLM API → Revised Plan JSON"
                         },
                         {
                             step: 4,
+                            module: "首席科学家 (Planner)",
+                            input: "LLM Revised Plan JSON",
+                            process: "解析 JSON，使用 Pydantic 验证，应用修正后的参数",
+                            output: "Revised Workflow: {workflow_name, steps: [{...corrected_params...}]}",
+                            dataType: "LLM Response → Validated Revised Plan"
+                        },
+                        {
+                            step: 5,
                             module: "执行引擎 (Executor)",
                             input: "Revised Workflow",
                             process: "使用修正后的参数重新执行",
@@ -1330,17 +1704,17 @@
                             step: 2,
                             module: "总控编排 (Orchestrator)",
                             input: "UserQuery",
-                            process: "LLM 意图分类: 识别为 Chat 模式（无文件，无分析任务）",
-                            output: "Chat Intent: {intent: 'chat', skip_planning: true}",
-                            dataType: "Query → Chat Intent"
+                            process: "调用关键词规则检查，如果匹配 task_keywords 则进入任务模式，否则进入聊天模式",
+                            output: "Intent Check: {intent: 'chat', skip_planning: true}",
+                            dataType: "Query → Intent Check"
                         },
                         {
                             step: 3,
-                            module: "LLM (直接调用)",
-                            input: "Chat Query + System Prompt",
-                            process: "LLM 生成回答（不经过 Planner/Executor）",
-                            output: "LLM Response: \"单细胞RNA测序是一种...\"",
-                            dataType: "Query → LLM Response"
+                            module: "🤖 LLM API (Chat Response)",
+                            input: "Chat Query + System Prompt: \"You are a helpful bioinformatics assistant.\"",
+                            process: "agent.chat() → llm_client.astream(messages) - 流式生成回答",
+                            output: "LLM Stream: \"单细胞RNA测序是一种...\" (逐块流式输出)",
+                            dataType: "Query → LLM API Stream → Text Response"
                         },
                         {
                             step: 4,
@@ -1370,14 +1744,20 @@
                 </div>`;
                 
                 flow.steps.forEach((step, index) => {
+                    // 检查是否是 LLM API 调用步骤
+                    const isLLMCall = step.module.includes('🤖 LLM API') || step.module.includes('LLM API');
+                    const borderColor = isLLMCall ? '#9333ea' : '#667eea';
+                    const bgColor = isLLMCall ? 'linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 100%)' : '#f1f3f5';
+                    const textColor = isLLMCall ? '#7c3aed' : '#495057';
+                    
                     html += `
-                        <div class="detail-item" style="margin-bottom: 20px; border-left: 3px solid #667eea; padding-left: 15px;">
-                            <div class="detail-item-label" style="color: #667eea; font-weight: 600;">Step ${step.step}: ${step.module}</div>
+                        <div class="detail-item" style="margin-bottom: 20px; border-left: 3px solid ${borderColor}; padding-left: 15px; ${isLLMCall ? 'background: linear-gradient(135deg, rgba(243, 232, 255, 0.3) 0%, rgba(233, 213, 255, 0.3) 100%); border-radius: 6px; padding: 15px;' : ''}">
+                            <div class="detail-item-label" style="color: ${borderColor}; font-weight: 600;">Step ${step.step}: ${step.module}</div>
                             <div class="detail-item-value" style="margin-top: 8px;">
                                 <div style="margin-bottom: 6px;"><strong>Input:</strong> ${step.input}</div>
                                 <div style="margin-bottom: 6px;"><strong>Process:</strong> ${step.process}</div>
                                 <div style="margin-bottom: 6px;"><strong>Output:</strong> <code>${step.output}</code></div>
-                                <div style="margin-top: 8px; padding: 6px; background: #f1f3f5; border-radius: 4px; font-size: 12px; color: #495057;">
+                                <div style="margin-top: 8px; padding: 6px; background: ${bgColor}; border-radius: 4px; font-size: 12px; color: ${textColor}; border: ${isLLMCall ? '1px solid rgba(147, 51, 234, 0.2)' : 'none'};">
                                     <strong>Data Transformation:</strong> ${step.dataType}
                                 </div>
                             </div>
@@ -1429,6 +1809,10 @@
                         <div class="detail-item-value">${detail.upstreamDownstream}</div>
                     </div>
                     <div class="detail-item">
+                        <div class="detail-item-label">🤖 LLM 调用与交互机制 (LLM Integration Logic)</div>
+                        <div class="detail-item-value llm-logic-section" style="font-size: 13px; line-height: 1.8;">${detail.llmLogic || "N/A - 此模块不直接调用 LLM API"}</div>
+                    </div>
+                    <div class="detail-item">
                         <div class="detail-item-label">学术理论依据 (Academic Basis)</div>
                         <div class="detail-item-value" style="font-size: 12px; line-height: 1.8;">${detail.academicBasis}</div>
                     </div>
@@ -1445,57 +1829,111 @@
             let currentScenario = null;
             let animationTimeout = null;
             
-            // 辅助函数：绘制 SVG 连接线
-            function drawConnection(startElem, endElem, color = '#ff6b35', delay = 0) {
+            // 计算三次贝塞尔曲线在 t 处的点
+            function bezierPoint(t, p0, p1, p2, p3) {
+                const u = 1 - t, u2 = u*u, u3 = u2*u, t2 = t*t, t3 = t2*t;
+                return {
+                    x: u3*p0.x + 3*u2*t*p1.x + 3*u*t2*p2.x + t3*p3.x,
+                    y: u3*p0.y + 3*u2*t*p1.y + 3*u*t2*p2.y + t3*p3.y
+                };
+            }
+            
+            // 绘制 Bio-Synapse 有机曲线（贝塞尔 + 脉冲 + 浮动标签）
+            function drawSynapse(startId, endId, type, label, connectionId, delay = 0) {
                 return new Promise((resolve) => {
                     setTimeout(() => {
                         const svg = document.getElementById('flow-svg');
                         if (!svg) return resolve();
                         
+                        const startElem = document.querySelector(`[data-module="${startId}"]`);
+                        const endElem = document.querySelector(`[data-module="${endId}"]`);
+                        if (!startElem || !endElem) return resolve();
+                        
                         const startPos = getCardCenter(startElem);
                         const endPos = getCardCenter(endElem);
-                        
                         if (!startPos || !endPos) return resolve();
                         
-                        // 计算控制点（用于贝塞尔曲线）
                         const dx = endPos.x - startPos.x;
                         const dy = endPos.y - startPos.y;
                         const midX = (startPos.x + endPos.x) / 2;
                         const midY = (startPos.y + endPos.y) / 2;
                         
-                        // 创建路径
-                        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                        const pathId = `path-${Date.now()}-${Math.random()}`;
-                        path.setAttribute('id', pathId);
-                        
-                        // 根据方向选择路径类型
+                        let d;
+                        let labelX, labelY;
                         if (Math.abs(dy) > Math.abs(dx)) {
-                            // 垂直连接
-                            path.setAttribute('d', `M ${startPos.x} ${startPos.y} L ${endPos.x} ${endPos.y}`);
+                            const c1x = startPos.x + dx * 0.2;
+                            const c1y = startPos.y + dy * 0.3;
+                            const c2x = endPos.x - dx * 0.2;
+                            const c2y = endPos.y - dy * 0.3;
+                            d = `M ${startPos.x} ${startPos.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endPos.x} ${endPos.y}`;
+                            const mid = bezierPoint(0.5, startPos, {x:c1x,y:c1y}, {x:c2x,y:c2y}, endPos);
+                            labelX = mid.x; labelY = mid.y;
                         } else {
-                            // 水平或斜向连接，使用贝塞尔曲线
-                            const controlY = midY - (Math.abs(dx) * 0.3);
-                            path.setAttribute('d', `M ${startPos.x} ${startPos.y} Q ${midX} ${controlY} ${endPos.x} ${endPos.y}`);
+                            const c1x = midX - dy * 0.25;
+                            const c1y = midY + dx * 0.25;
+                            const c2x = midX + dy * 0.25;
+                            const c2y = midY - dx * 0.25;
+                            d = `M ${startPos.x} ${startPos.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endPos.x} ${endPos.y}`;
+                            const mid = bezierPoint(0.5, startPos, {x:c1x,y:c1y}, {x:c2x,y:c2y}, endPos);
+                            labelX = mid.x; labelY = mid.y;
                         }
                         
-                        path.setAttribute('stroke', color);
-                        path.setAttribute('stroke-width', '3');
-                        path.setAttribute('fill', 'none');
-                        path.setAttribute('marker-end', 'url(#arrowhead)');
-                        path.setAttribute('class', 'flow-anim');
-                        path.style.opacity = '0';
+                        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                        g.dataset.connectionId = connectionId || '';
                         
-                        svg.appendChild(path);
+                        const basePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                        basePath.setAttribute('d', d);
+                        basePath.setAttribute('class', `synapse-base synapse-${type}`);
+                        basePath.setAttribute('marker-end', `url(#arrowhead-${type})`);
+                        if (connectionId && dataFlowSpecs[connectionId]) {
+                            basePath.addEventListener('click', (e) => { e.stopPropagation(); showCodeModal(connectionId); });
+                        }
+                        g.appendChild(basePath);
                         
-                        // 动画：路径淡入
+                        const pulsePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                        pulsePath.setAttribute('d', d);
+                        pulsePath.setAttribute('class', `synapse-pulse synapse-${type}`);
+                        pulsePath.setAttribute('marker-end', `url(#arrowhead-${type})`);
+                        g.appendChild(pulsePath);
+                        
+                        if (label) {
+                            const labelG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                            labelG.setAttribute('class', 'synapse-label-group');
+                            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                            text.setAttribute('class', 'synapse-label');
+                            text.setAttribute('x', labelX);
+                            text.setAttribute('y', labelY);
+                            text.textContent = label;
+                            labelG.appendChild(text);
+                            g.appendChild(labelG);
+                        }
+                        
+                        g.style.opacity = '0';
+                        svg.appendChild(g);
                         requestAnimationFrame(() => {
-                            path.style.transition = 'opacity 0.5s';
-                            path.style.opacity = '1';
+                            g.style.transition = 'opacity 0.5s';
+                            g.style.opacity = '1';
                         });
                         
                         resolve();
                     }, delay);
                 });
+            }
+            
+            // 兼容旧调用：drawConnection(startElem, endElem, ..., connectionId) -> 转为 drawSynapse
+            function drawConnection(startElem, endElem, color, delay, connectionId) {
+                const startId = startElem?.dataset?.module;
+                const endId = endElem?.dataset?.module;
+                if (!startId || !endId) return Promise.resolve();
+                const typeMap = { 'user-orch':'control', 'orch-output':'control', 'orch-planner':'control', 'orch-executor':'control', 'orch-agent':'control',
+                    'planner-retriever':'data', 'retriever-planner':'data', 'planner-output':'data', 'agent-executor':'data', 'executor-tools':'data', 'executor-output':'data',
+                    'executor-planner':'error', 'planner-executor':'error' };
+                const labelMap = { 'user-orch':'发送意图', 'orch-planner':'下发规划任务', 'planner-retriever':'工具检索', 'retriever-planner':'返回工具定义',
+                    'planner-output':'推送工作流配置', 'orch-executor':'执行指令', 'executor-output':'步骤结果', 'executor-planner':'上报执行错误',
+                    'planner-executor':'修正方案', 'orch-output':'流式对话', 'orch-agent':'任务委派', 'agent-executor':'执行步骤', 'executor-tools':'调用工具' };
+                const type = typeMap[connectionId] || 'control';
+                const label = labelMap[connectionId] || '';
+                return drawSynapse(startId, endId, type, label, connectionId, delay);
             }
             
             // 获取卡片中心位置
@@ -1511,8 +1949,8 @@
                 };
             }
             
-            // 顺序高亮模块
-            async function highlightModuleSequence(modules, delay = 500) {
+            // 顺序高亮模块（connectionIds: 每条边的连接ID数组，长度=modules.length-1）
+            async function highlightModuleSequence(modules, delay = 500, connectionIds = []) {
                 for (let i = 0; i < modules.length; i++) {
                     const module = modules[i];
                     if (module.card) {
@@ -1522,9 +1960,9 @@
                         }
                     }
                     
-                    // 如果不是最后一个，绘制连接线
                     if (i < modules.length - 1 && modules[i + 1]) {
-                        await drawConnection(module.card, modules[i + 1].card, module.color || '#ff6b35', delay);
+                        const connId = connectionIds[i] || null;
+                        await drawConnection(module.card, modules[i + 1].card, '#00f2ff', delay, connId);
                     }
                     
                     await new Promise(resolve => setTimeout(resolve, delay));
@@ -1577,7 +2015,8 @@
                     retriever: document.querySelector('[data-module="retriever"]'),
                     agent: document.querySelector('[data-module="agent"]'),
                     executor: document.querySelector('[data-module="executor"]'),
-                    output: document.querySelector('[data-module="output"]')
+                    output: document.querySelector('[data-module="output"]'),
+                    llm: document.querySelector('[data-module="llm"]')
                 };
                 
                 // 暗淡非活动模块
@@ -1594,31 +2033,32 @@
                         { card: cards.planner, color: '#FF6B35' },
                         { card: cards.output, color: '#4CAF50' }
                     );
+                    const connIds = ['user-orch', 'orch-planner', 'planner-retriever', 'retriever-planner', 'planner-output'];
                     [cards.agent, cards.executor].forEach(card => {
                         if (card) card.classList.add('dimmed');
                     });
                     
-                    // 顺序动画
-                    highlightModuleSequence(activeCards, 600);
+                    highlightModuleSequence(activeCards, 600, connIds);
+                    drawSynapse('orchestrator', 'llm', 'llm', '意图分类', null, 800);
+                    drawSynapse('planner', 'llm', 'llm', '工作流规划', null, 2400);
                     
                 } else if (mode === 'execution') {
-                    // 执行流程：User -> Orchestrator -> Executor <-> Tools -> Executor -> Output
+                    // 执行流程：User -> Orchestrator -> Executor -> Output
                     activeCards.push(
                         { card: cards.user, color: '#4CAF50' },
                         { card: cards.orchestrator, color: '#9C27B0' },
                         { card: cards.executor, color: '#F44336' },
-                        { card: cards.executor, color: '#F44336' }, // 工具调用（自循环表示）
                         { card: cards.output, color: '#4CAF50' }
                     );
+                    const connIds = ['user-orch', 'orch-executor', 'executor-output'];
                     [cards.planner, cards.retriever, cards.agent].forEach(card => {
                         if (card) card.classList.add('dimmed');
                     });
                     
-                    // 顺序动画
-                    highlightModuleSequence(activeCards, 600);
+                    highlightModuleSequence(activeCards, 600, connIds);
+                    drawSynapse('agent', 'llm', 'llm', '诊断报告', null, 1200);
                     
                 } else if (mode === 'error') {
-                    // 错误循环：Executor -> (Error) -> Planner -> (New Plan) -> Executor
                     [cards.executor, cards.planner].forEach(card => {
                         if (card) card.classList.add('active-flow');
                     });
@@ -1626,56 +2066,24 @@
                         if (card) card.classList.add('dimmed');
                     });
                     
-                    // 绘制错误循环路径（Executor -> Planner -> Executor）
-                    const execPos = getCardCenter(cards.executor);
-                    const planPos = getCardCenter(cards.planner);
-                    
-                    if (execPos && planPos) {
-                        // 使用贝塞尔曲线绘制循环路径
-                        const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                        const midX = (execPos.x + planPos.x) / 2;
-                        const midY = Math.min(execPos.y, planPos.y) - 80;
-                        
-                        // Executor -> Planner (向上)
-                        path1.setAttribute('d', `M ${execPos.x} ${execPos.y} Q ${midX} ${midY} ${planPos.x} ${planPos.y}`);
-                        path1.setAttribute('class', 'active flow-anim');
-                        path1.setAttribute('marker-end', 'url(#arrowhead)');
-                        path1.style.opacity = '0';
-                        svg.appendChild(path1);
-                        requestAnimationFrame(() => {
-                            path1.style.transition = 'opacity 0.5s';
-                            path1.style.opacity = '1';
-                        });
-                        
-                        // Planner -> Executor (向下，形成循环)
-                        const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                        const midY2 = Math.max(execPos.y, planPos.y) + 80;
-                        path2.setAttribute('d', `M ${planPos.x} ${planPos.y} Q ${midX} ${midY2} ${execPos.x} ${execPos.y}`);
-                        path2.setAttribute('class', 'active flow-anim');
-                        path2.setAttribute('marker-end', 'url(#arrowhead)');
-                        path2.style.opacity = '0';
-                        svg.appendChild(path2);
-                        setTimeout(() => {
-                            requestAnimationFrame(() => {
-                                path2.style.transition = 'opacity 0.5s';
-                                path2.style.opacity = '1';
-                            });
-                        }, 500);
-                    }
+                    drawSynapse('executor', 'planner', 'error', '上报执行错误', 'executor-planner', 0);
+                    drawSynapse('planner', 'executor', 'error', '修正方案', 'planner-executor', 500);
+                    drawSynapse('planner', 'llm', 'llm', '错误分析', null, 1000);
                     
                 } else if (mode === 'chat') {
-                    // 直接聊天：User -> Orchestrator -> LLM (跳过 Planner)
+                    // 直接聊天：User -> Orchestrator -> Output
                     activeCards.push(
                         { card: cards.user, color: '#4CAF50' },
                         { card: cards.orchestrator, color: '#9C27B0' },
                         { card: cards.output, color: '#4CAF50' }
                     );
+                    const connIds = ['user-orch', 'orch-output'];
                     [cards.planner, cards.retriever, cards.agent, cards.executor].forEach(card => {
                         if (card) card.classList.add('dimmed');
                     });
                     
-                    // 顺序动画
-                    highlightModuleSequence(activeCards, 600);
+                    highlightModuleSequence(activeCards, 600, connIds);
+                    drawSynapse('orchestrator', 'llm', 'llm', '流式对话', null, 800);
                 }
             }
             
@@ -1691,21 +2099,27 @@
                     svg.setAttribute('height', rect.height);
                 }
                 
-                // 创建箭头标记
+                // 创建箭头标记（control=蓝, data=绿, error=红）
                 if (!svg.querySelector('defs')) {
                     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-                    const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
-                    marker.setAttribute('id', 'arrowhead');
-                    marker.setAttribute('markerWidth', '10');
-                    marker.setAttribute('markerHeight', '10');
-                    marker.setAttribute('refX', '9');
-                    marker.setAttribute('refY', '3');
-                    marker.setAttribute('orient', 'auto');
-                    const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-                    polygon.setAttribute('points', '0 0, 10 3, 0 6');
-                    polygon.setAttribute('fill', '#ff6b35');
-                    marker.appendChild(polygon);
-                    defs.appendChild(marker);
+                    const addMarker = (id, fill) => {
+                        const m = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+                        m.setAttribute('id', id);
+                        m.setAttribute('markerWidth', '10');
+                        m.setAttribute('markerHeight', '10');
+                        m.setAttribute('refX', '9');
+                        m.setAttribute('refY', '3');
+                        m.setAttribute('orient', 'auto');
+                        const p = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                        p.setAttribute('points', '0 0, 10 3, 0 6');
+                        p.setAttribute('fill', fill);
+                        m.appendChild(p);
+                        defs.appendChild(m);
+                    };
+                    addMarker('arrowhead-control', '#2196F3');
+                    addMarker('arrowhead-data', '#4CAF50');
+                    addMarker('arrowhead-error', '#F44336');
+                    addMarker('arrowhead-llm', '#9333ea');
                     svg.appendChild(defs);
                 }
             }
