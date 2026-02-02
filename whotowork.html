@@ -16,15 +16,226 @@
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             padding: 20px;
             line-height: 1.6;
+            margin: 0;
         }
         
         .container {
-            max-width: 1400px;
+            max-width: 1800px;
             margin: 0 auto;
             background: white;
             border-radius: 12px;
-            padding: 40px;
+            padding: 20px;
             box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        
+        /* Master-Detail 布局 */
+        .main-layout {
+            display: flex;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .diagram-section {
+            flex: 0 0 65%;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .detail-panel {
+            flex: 0 0 35%;
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            position: sticky;
+            top: 20px;
+            max-height: calc(100vh - 40px);
+            overflow-y: auto;
+        }
+        
+        /* 控制栏 */
+        .control-bar {
+            background: #ffffff;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .control-bar h3 {
+            margin: 0;
+            font-size: 14px;
+            color: #495057;
+            font-weight: 600;
+            margin-right: 10px;
+        }
+        
+        .scenario-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .scenario-btn:hover {
+            background: #5568d3;
+            transform: translateY(-1px);
+        }
+        
+        .scenario-btn.active {
+            background: #764ba2;
+            box-shadow: 0 2px 8px rgba(118, 75, 162, 0.3);
+        }
+        
+        .scenario-btn:active {
+            transform: translateY(0);
+        }
+        
+        /* 侧边栏样式 */
+        .detail-panel h2 {
+            color: #333;
+            font-size: 20px;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        
+        .detail-panel .default-state {
+            color: #6c757d;
+            font-style: italic;
+            text-align: center;
+            padding: 40px 20px;
+        }
+        
+        .detail-content {
+            display: none;
+        }
+        
+        .detail-content.active {
+            display: block;
+        }
+        
+        .detail-item {
+            margin-bottom: 20px;
+        }
+        
+        .detail-item-label {
+            font-weight: 600;
+            color: #495057;
+            font-size: 13px;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .detail-item-value {
+            color: #212529;
+            font-size: 14px;
+            line-height: 1.6;
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+            border-left: 3px solid #667eea;
+        }
+        
+        .detail-item-value code {
+            background: #f1f3f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #d63384;
+        }
+        
+        /* SVG 覆盖层用于动态连接线 */
+        .svg-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+            overflow: visible;
+        }
+        
+        .svg-overlay path {
+            stroke: #ff6b35;
+            stroke-width: 3;
+            fill: none;
+            stroke-dasharray: 10,5;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        
+        .svg-overlay path.active {
+            opacity: 1;
+            animation: flowAnimation 2s linear infinite;
+        }
+        
+        .svg-overlay path.flow-anim {
+            stroke-dasharray: 10,5;
+            stroke-dashoffset: 0;
+            animation: flowAnimation 2s linear infinite;
+        }
+        
+        @keyframes flowAnimation {
+            0% {
+                stroke-dashoffset: 0;
+            }
+            100% {
+                stroke-dashoffset: -15;
+            }
+        }
+        
+        /* 数据包动画（沿路径移动的点） */
+        .svg-overlay circle {
+            fill: #ff6b35;
+            r: 4;
+            opacity: 0;
+        }
+        
+        .svg-overlay circle.active {
+            opacity: 1;
+            animation: moveAlongPath 2s linear infinite;
+        }
+        
+        @keyframes moveAlongPath {
+            0% {
+                offset-distance: 0%;
+            }
+            100% {
+                offset-distance: 100%;
+            }
+        }
+        
+        /* 高亮和暗淡效果 */
+        .flow-step-card.dimmed {
+            opacity: 0.3;
+            filter: grayscale(0.7);
+        }
+        
+        .flow-step-card.active-flow {
+            border-width: 5px;
+            box-shadow: 0 0 20px rgba(102, 126, 234, 0.5);
+            transform: scale(1.05);
+        }
+        
+        .flow-step-card.clickable {
+            cursor: pointer;
+        }
+        
+        .flow-step-card.clickable:hover {
+            border-width: 4px;
         }
         
         h1 {
@@ -46,133 +257,347 @@
             border: 2px solid #dee2e6;
             border-radius: 8px;
             padding: 40px;
-            margin: 40px 0;
-        }
-        
-        .flow-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            max-width: 100%;
-            margin: 0 auto;
-        }
-        
-        .flow-step-card {
-            background: white;
-            border: 2px solid #667eea;
-            border-radius: 12px;
-            padding: 20px 30px;
-            margin: 15px 0;
-            min-width: 300px;
-            max-width: 600px;
-            text-align: center;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            transition: transform 0.2s, box-shadow 0.2s;
+            margin: 0;
+            overflow-x: auto;
             position: relative;
         }
         
-        .flow-step-card:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+        /* CSS Grid 2D 流程图布局 */
+        .flow-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: auto;
+            gap: 30px 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+            position: relative;
+            padding: 20px 0;
         }
         
+        /* 连接线 - 使用伪元素创建视觉连接 */
+        .flow-step-card::after {
+            content: '';
+            position: absolute;
+            width: 3px;
+            height: 30px;
+            background: linear-gradient(to bottom, #667eea, #764ba2);
+            bottom: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1;
+            opacity: 0.6;
+        }
+        
+        /* 全宽卡片显示向下的连接线 */
+        .flow-step-card.user-layer::after,
+        .flow-step-card.orchestrator-layer::after,
+        .flow-step-card.agent-layer::after,
+        .flow-step-card.executor-layer::after {
+            display: block;
+        }
+        
+        /* 最终输出层不显示连接线 */
+        .flow-step-card.output-layer::after {
+            display: none;
+        }
+        
+        /* 并排卡片（大脑层）不显示向下的连接线，显示水平连接 */
+        .flow-step-card.router-planner::after {
+            display: none;
+        }
+        
+        .flow-step-card.tool-retriever::after {
+            display: none;
+        }
+        
+        /* 连接线箭头 */
+        .flow-step-card::before {
+            content: '';
+            position: absolute;
+            width: 0;
+            height: 0;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-top: 8px solid #667eea;
+            bottom: -38px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 2;
+            opacity: 0.8;
+        }
+        
+        .flow-step-card.user-layer::before,
+        .flow-step-card.orchestrator-layer::before,
+        .flow-step-card.agent-layer::before,
+        .flow-step-card.executor-layer::before {
+            display: block;
+        }
+        
+        .flow-step-card.router-planner::before,
+        .flow-step-card.tool-retriever::before,
+        .flow-step-card.output-layer::before {
+            display: none;
+        }
+        
+        /* 水平连接线（用于并排卡片 - 大脑层） */
+        .flow-step-card.router-planner::after {
+            content: '';
+            display: block;
+            position: absolute;
+            width: 20px;
+            height: 3px;
+            background: linear-gradient(to right, #667eea, #764ba2);
+            right: -20px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 1;
+            opacity: 0.6;
+        }
+        
+        .flow-step-card.router-planner::before {
+            content: '';
+            display: block;
+            position: absolute;
+            width: 0;
+            height: 0;
+            border-top: 6px solid transparent;
+            border-bottom: 6px solid transparent;
+            border-left: 8px solid #667eea;
+            right: -28px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 2;
+            opacity: 0.8;
+        }
+        
+        /* 流程卡片基础样式 */
+        .flow-step-card {
+            background: white;
+            border: 3px solid #667eea;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            position: relative;
+            z-index: 2;
+            min-height: 140px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        
+        .flow-step-card:hover {
+            transform: translateY(-5px) scale(1.02);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+            border-width: 4px;
+        }
+        
+        /* 学术论文引用徽章 */
+        .academic-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 12px;
+            margin-top: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+            letter-spacing: 0.3px;
+            line-height: 1.4;
+        }
+        
+        .academic-badge::before {
+            content: '📄 ';
+            font-size: 11px;
+        }
+        
+        .academic-badge.small {
+            font-size: 9px;
+            padding: 3px 8px;
+        }
+        
+        /* 用户层 - 顶部全宽 */
         .flow-step-card.user-layer {
+            grid-column: 1 / -1;
             border-color: #4CAF50;
             background: linear-gradient(135deg, #e8f5e9 0%, #ffffff 100%);
         }
         
+        /* API 层 */
         .flow-step-card.api-layer {
+            grid-column: 1 / -1;
             border-color: #2196F3;
             background: linear-gradient(135deg, #e3f2fd 0%, #ffffff 100%);
         }
         
+        /* 编排层 */
         .flow-step-card.orchestrator-layer {
+            grid-column: 1 / -1;
             border-color: #9C27B0;
             background: linear-gradient(135deg, #f3e5f5 0%, #ffffff 100%);
+            border-width: 4px;
         }
         
-        .flow-step-card.agent-layer {
-            border-color: #FF9800;
-            background: linear-gradient(135deg, #fff3e0 0%, #ffffff 100%);
+        /* 核心逻辑层 - 并排显示 */
+        .flow-step-card.brain-layer {
+            border-color: #FF6B35;
+            background: linear-gradient(135deg, #fff5f0 0%, #ffffff 100%);
+            border-width: 4px;
+            position: relative;
         }
         
-        .flow-step-card.tool-layer {
+        .flow-step-card.brain-layer::before {
+            content: '🧠';
+            position: absolute;
+            top: -15px;
+            right: -15px;
+            font-size: 32px;
+            background: white;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            border: 3px solid #FF6B35;
+        }
+        
+        .flow-step-card.router-planner {
+            grid-column: 1 / 2;
+        }
+        
+        .flow-step-card.tool-retriever {
+            grid-column: 2 / 3;
+        }
+        
+        /* 执行层 */
+        .flow-step-card.executor-layer {
+            grid-column: 1 / -1;
             border-color: #F44336;
             background: linear-gradient(135deg, #ffebee 0%, #ffffff 100%);
         }
         
+        /* 工具层 - 图书馆样式 */
+        .flow-step-card.tool-layer {
+            grid-column: 1 / 2;
+            border-color: #F44336;
+            background: 
+                repeating-linear-gradient(
+                    0deg,
+                    transparent,
+                    transparent 20px,
+                    rgba(244, 67, 54, 0.1) 20px,
+                    rgba(244, 67, 54, 0.1) 22px
+                ),
+                linear-gradient(135deg, #ffebee 0%, #ffffff 100%);
+            position: relative;
+        }
+        
+        .flow-step-card.tool-layer::after {
+            content: '📚';
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 24px;
+            opacity: 0.3;
+        }
+        
+        /* 领域智能体层 */
+        .flow-step-card.agent-layer {
+            grid-column: 2 / 3;
+            border-color: #FF9800;
+            background: linear-gradient(135deg, #fff3e0 0%, #ffffff 100%);
+        }
+        
+        /* 结果层 */
         .flow-step-card.result-layer {
+            grid-column: 3 / 4;
             border-color: #00BCD4;
             background: linear-gradient(135deg, #e0f7fa 0%, #ffffff 100%);
+        }
+        
+        /* 最终输出层 */
+        .flow-step-card.output-layer {
+            grid-column: 1 / -1;
+            border-color: #4CAF50;
+            background: linear-gradient(135deg, #e8f5e9 0%, #ffffff 100%);
         }
         
         .step-title {
             font-weight: 700;
             color: #333;
-            margin-bottom: 10px;
-            font-size: 18px;
+            margin-bottom: 8px;
+            font-size: 16px;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
+            gap: 6px;
         }
         
         .step-desc {
-            font-size: 13px;
+            font-size: 12px;
             color: #666;
-            line-height: 1.6;
-            margin-top: 8px;
+            line-height: 1.5;
+            margin-top: 6px;
         }
         
         .step-components {
             display: flex;
             flex-wrap: wrap;
             justify-content: center;
-            gap: 10px;
-            margin-top: 12px;
+            gap: 6px;
+            margin-top: 10px;
         }
         
         .component-tag {
             background: rgba(102, 126, 234, 0.1);
             border: 1px solid rgba(102, 126, 234, 0.3);
-            border-radius: 6px;
-            padding: 6px 12px;
-            font-size: 12px;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 11px;
             color: #667eea;
             font-weight: 500;
         }
         
-        .flow-arrow {
-            font-size: 32px;
-            color: #667eea;
-            margin: 10px 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
+        /* 响应式设计 */
+        @media (max-width: 1200px) {
+            .flow-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .flow-step-card.user-layer,
+            .flow-step-card.orchestrator-layer,
+            .flow-step-card.agent-layer,
+            .flow-step-card.executor-layer,
+            .flow-step-card.output-layer {
+                grid-column: 1 / -1;
+            }
+            
+            .flow-step-card.router-planner {
+                grid-column: 1 / 2;
+            }
+            
+            .flow-step-card.tool-retriever {
+                grid-column: 2 / 3;
+            }
         }
         
-        .flow-arrow::before {
-            content: '↓';
-            font-weight: bold;
-            animation: pulse 2s ease-in-out infinite;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 0.6; }
-            50% { opacity: 1; }
-        }
-        
-        .arrow-label {
-            position: absolute;
-            background: white;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            color: #495057;
-            border: 1px solid #dee2e6;
-            white-space: nowrap;
-            margin-left: 60px;
+        @media (max-width: 768px) {
+            .flow-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .flow-step-card {
+                grid-column: 1 / -1 !important;
+            }
+            
+            .academic-badge {
+                font-size: 9px;
+                padding: 3px 8px;
+            }
         }
         
         .download-section {
@@ -315,30 +740,144 @@
         }
         
         @media print {
+            /* 页面设置 */
+            @page {
+                size: A4 landscape;
+                margin: 1cm;
+            }
+            
+            /* 强制打印背景颜色 */
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            
             body {
-                background: white;
+                background: white !important;
                 padding: 0;
+                margin: 0;
             }
             
-            .print-btn {
-                display: none;
+            /* 隐藏 UI 元素 */
+            .print-btn,
+            .download-btn,
+            .download-section,
+            .control-bar,
+            .detail-panel {
+                display: none !important;
             }
             
+            /* 容器样式 */
             .container {
-                box-shadow: none;
-                padding: 20px;
+                box-shadow: none !important;
+                padding: 20px !important;
+                background: white !important;
+                border-radius: 0 !important;
             }
             
+            /* Master-Detail 布局在打印时变为单列 */
+            .main-layout {
+                display: block !important;
+            }
+            
+            .diagram-section {
+                width: 100% !important;
+            }
+            
+            /* 隐藏 SVG 覆盖层 */
+            .svg-overlay {
+                display: none !important;
+            }
+            
+            /* 流程图样式 */
             .flow-diagram {
-                page-break-inside: avoid;
+                page-break-inside: avoid !important;
+                background: #f8f9fa !important;
+                border: 2px solid #dee2e6 !important;
+                padding: 30px !important;
+                margin: 20px 0 !important;
             }
             
-            .download-section {
-                page-break-inside: avoid;
+            .flow-grid {
+                gap: 25px 15px !important;
             }
             
+            /* 卡片样式 - 确保背景和边框打印 */
             .flow-step-card {
-                page-break-inside: avoid;
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+                background: white !important;
+                border: 3px solid !important;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.1) !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            
+            /* 确保渐变背景打印 */
+            .flow-step-card.user-layer {
+                background: linear-gradient(135deg, #e8f5e9 0%, #ffffff 100%) !important;
+                border-color: #4CAF50 !important;
+            }
+            
+            .flow-step-card.orchestrator-layer {
+                background: linear-gradient(135deg, #f3e5f5 0%, #ffffff 100%) !important;
+                border-color: #9C27B0 !important;
+            }
+            
+            .flow-step-card.brain-layer {
+                background: linear-gradient(135deg, #fff5f0 0%, #ffffff 100%) !important;
+                border-color: #FF6B35 !important;
+            }
+            
+            .flow-step-card.agent-layer {
+                background: linear-gradient(135deg, #fff3e0 0%, #ffffff 100%) !important;
+                border-color: #FF9800 !important;
+            }
+            
+            .flow-step-card.executor-layer {
+                background: linear-gradient(135deg, #ffebee 0%, #ffffff 100%) !important;
+                border-color: #F44336 !important;
+            }
+            
+            /* 学术徽章样式 */
+            .academic-badge {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+                color: white !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            
+            /* 连接线 */
+            .flow-step-card::after,
+            .flow-step-card::before {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            
+            /* 标题和文本 */
+            h1, h2, h3 {
+                color: #333 !important;
+                page-break-after: avoid !important;
+            }
+            
+            .section {
+                page-break-inside: avoid !important;
+            }
+            
+            /* 代码块 */
+            .code-block {
+                background: #1e1e1e !important;
+                color: #d4d4d4 !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            
+            /* 数据格式框 */
+            .data-format {
+                background: #e7f3ff !important;
+                border-left: 4px solid #2196F3 !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
             }
         }
     </style>
@@ -347,195 +886,147 @@
     <button class="print-btn" onclick="window.print()">🖨️ 打印/导出 PDF</button>
     
     <div class="container">
-        <h1>🚀 Omics Agent - How to Work</h1>
-        <p class="subtitle">全流程数据流向与工具交互架构图</p>
+        <h1>🚀 Omics Agent - Interactive Architecture Dashboard</h1>
+        <p class="subtitle">交互式白盒架构仪表板：从用户需求到分析结果的完整流程</p>
         
-        <!-- 流程图 -->
-        <div class="flow-diagram">
-            <div class="flow-container">
-                <!-- 1. 用户层 -->
-                <div class="flow-step-card user-layer">
-                    <div class="step-title">🌐 用户层 (User Layer)</div>
-                    <div class="step-desc">用户在 Web UI 中上传文件或输入查询</div>
-                    <div class="step-components">
-                        <span class="component-tag">Web UI</span>
-                        <span class="component-tag">文件上传</span>
-                        <span class="component-tag">查询输入</span>
+        <!-- Master-Detail 布局 -->
+        <div class="main-layout">
+            <!-- 主区域：架构图 -->
+            <div class="diagram-section">
+                <!-- 控制栏：场景模式 -->
+                <div class="control-bar">
+                    <h3>📊 场景模式 (Scenario Mode):</h3>
+                    <button class="scenario-btn" onclick="renderScenario('planning', this)">规划流程 (Planning Flow)</button>
+                    <button class="scenario-btn" onclick="renderScenario('execution', this)">执行流程 (Execution Flow)</button>
+                    <button class="scenario-btn" onclick="renderScenario('error', this)">错误循环 (Error Loop)</button>
+                    <button class="scenario-btn" onclick="renderScenario('chat', this)">直接聊天 (Direct Chat)</button>
+                    <button class="scenario-btn" onclick="renderScenario('reset', this)">重置 (Reset)</button>
+                </div>
+                
+                <!-- 流程图 - 数字实验室类比 (CSS Grid 2D 布局) -->
+                <div class="flow-diagram">
+                    <div class="flow-grid">
+                        <!-- 第1行: 用户 (全宽) -->
+                        <div class="flow-step-card user-layer clickable" data-module="user" onclick="showModuleDetails('user')">
+                            <div class="step-title">👩‍🔬 用户 (User)</div>
+                            <div class="step-desc">提出需求："帮我分析这个数据"</div>
+                            <div class="step-components">
+                                <span class="component-tag">Web UI</span>
+                                <span class="component-tag">文件上传</span>
+                                <span class="component-tag">自然语言查询</span>
+                            </div>
+                        </div>
+                        
+                        <!-- 第2行: 总控编排 (全宽) -->
+                        <div class="flow-step-card orchestrator-layer clickable" data-module="orchestrator" onclick="showModuleDetails('orchestrator')">
+                            <div class="step-title">🤖 总控编排 (Orchestrator)</div>
+                            <div class="step-desc">负责理解意图，分发任务，协调对话流程</div>
+                            <div class="step-components">
+                                <span class="component-tag">意图分类</span>
+                                <span class="component-tag">任务分发</span>
+                                <span class="component-tag">流程协调</span>
+                            </div>
+                            <div class="academic-badge">MetaGPT: Meta Programming for Multi-Agent Collaboration</div>
+                        </div>
+                        
+                        <!-- 第3行: 大脑层 (并排) -->
+                        <div class="flow-step-card brain-layer router-planner clickable" data-module="planner" onclick="showModuleDetails('planner')">
+                            <div class="step-title">🧠 首席科学家 (Lead Scientist)</div>
+                            <div class="step-desc">拆解科学问题，生成实验步骤，规划分析流程</div>
+                            <div class="step-components">
+                                <span class="component-tag">Workflow Planner</span>
+                                <span class="component-tag">科学推理</span>
+                                <span class="component-tag">步骤生成</span>
+                            </div>
+                            <div class="academic-badge">SciAgents: Automating Scientific Discovery</div>
+                        </div>
+                        
+                        <div class="flow-step-card brain-layer tool-retriever clickable" data-module="retriever" onclick="showModuleDetails('retriever')">
+                            <div class="step-title">📚 图书馆员 (Librarian)</div>
+                            <div class="step-desc">在工具库中寻找合适的工具，语义检索匹配</div>
+                            <div class="step-components">
+                                <span class="component-tag">Tool Retriever</span>
+                                <span class="component-tag">ChromaDB</span>
+                                <span class="component-tag">语义检索</span>
+                            </div>
+                            <div class="academic-badge">Gorilla: LLM Connected with Massive APIs</div>
+                        </div>
+                        
+                        <!-- 第4行: 领域专家 (全宽) -->
+                        <div class="flow-step-card agent-layer clickable" data-module="agent" onclick="showModuleDetails('agent')">
+                            <div class="step-title">🧬 领域专家 (Domain Agents)</div>
+                            <div class="step-desc">拥有 RNA/代谢组学的专业知识，执行领域特定分析</div>
+                            <div class="step-components">
+                                <span class="component-tag">RNA Agent</span>
+                                <span class="component-tag">Metabolomics Agent</span>
+                                <span class="component-tag">领域知识</span>
+                            </div>
+                            <div class="academic-badge">ChemCrow: Augmenting LLMs with Domain Tools</div>
+                        </div>
+                        
+                        <!-- 第5行: 执行引擎 (全宽) -->
+                        <div class="flow-step-card executor-layer clickable" data-module="executor" onclick="showModuleDetails('executor')">
+                            <div class="step-title">🦾 执行引擎 (Executor)</div>
+                            <div class="step-desc">编写代码，操作软件，生成图表，执行具体分析步骤</div>
+                            <div class="step-components">
+                                <span class="component-tag">WorkflowExecutor</span>
+                                <span class="component-tag">参数验证</span>
+                                <span class="component-tag">工具调用</span>
+                                <span class="component-tag">结果生成</span>
+                            </div>
+                            <div class="academic-badge">SheetCopilot: Programmatic Data Manipulation</div>
+                        </div>
+                        
+                        <!-- 第6行: 最终输出 (全宽) -->
+                        <div class="flow-step-card output-layer clickable" data-module="output" onclick="showModuleDetails('output')">
+                            <div class="step-title">📊 分析结果 (Analysis Results)</div>
+                            <div class="step-desc">通过 Server-Sent Events 实时推送分析进度和结果，前端实时渲染</div>
+                            <div class="step-components">
+                                <span class="component-tag">SSE 流式输出</span>
+                                <span class="component-tag">工作流卡片</span>
+                                <span class="component-tag">步骤结果</span>
+                                <span class="component-tag">AI 诊断报告</span>
+                            </div>
+                        </div>
                     </div>
+                    
+                    <!-- SVG 覆盖层用于动态连接线 -->
+                    <svg class="svg-overlay" id="flow-svg">
+                        <!-- 动态路径将通过 JavaScript 添加 -->
+                    </svg>
                 </div>
-                
-                <div class="flow-arrow">
-                    <span class="arrow-label">HTTP POST</span>
+            </div>
+            
+            <!-- 侧边栏：系统解剖与逻辑追踪面板 -->
+            <div class="detail-panel">
+                <h2>🔬 System Anatomy & Logic Trace<br><span style="font-size: 14px; color: #666;">系统解剖与逻辑追踪</span></h2>
+                <div class="default-state" id="default-state">
+                    Select a module to view internal logic and design rationale.
                 </div>
-                
-                <!-- 2. API 服务层 -->
-                <div class="flow-step-card api-layer">
-                    <div class="step-title">🔌 API 服务层 (API Service Layer)</div>
-                    <div class="step-desc">FastAPI 服务器接收请求并路由到编排器</div>
-                    <div class="step-components">
-                        <span class="component-tag">/api/chat</span>
-                        <span class="component-tag">/api/upload</span>
-                        <span class="component-tag">/api/execute</span>
-                    </div>
-                </div>
-                
-                <div class="flow-arrow">
-                    <span class="arrow-label">stream_process()</span>
-                </div>
-                
-                <!-- 3. 编排层 -->
-                <div class="flow-step-card orchestrator-layer">
-                    <div class="step-title">🎯 编排层 (Orchestration Layer)</div>
-                    <div class="step-desc">AgentOrchestrator 进行意图分类和流程编排</div>
-                    <div class="step-components">
-                        <span class="component-tag">意图分类</span>
-                        <span class="component-tag">流程编排</span>
-                        <span class="component-tag">SSE 流式输出</span>
-                    </div>
-                </div>
-                
-                <div class="flow-arrow">
-                    <span class="arrow-label">路由决策</span>
-                </div>
-                
-                <!-- 4. 智能体层 -->
-                <div class="flow-step-card agent-layer">
-                    <div class="step-title">🤖 智能体层 (Agent Layer)</div>
-                    <div class="step-desc">Router Agent、Workflow Planner 和 Domain Agents 协同工作</div>
-                    <div class="step-components">
-                        <span class="component-tag">Router Agent</span>
-                        <span class="component-tag">Workflow Planner</span>
-                        <span class="component-tag">RNA Agent</span>
-                        <span class="component-tag">Metabolomics Agent</span>
-                    </div>
-                </div>
-                
-                <div class="flow-arrow">
-                    <span class="arrow-label">工具检索 & LLM 规划</span>
-                </div>
-                
-                <!-- 5. 工具检索层 -->
-                <div class="flow-step-card agent-layer">
-                    <div class="step-title">🔍 工具检索层 (Tool Retrieval Layer)</div>
-                    <div class="step-desc">Tool Retriever 进行语义检索，LLM Client 生成工作流</div>
-                    <div class="step-components">
-                        <span class="component-tag">Tool Retriever</span>
-                        <span class="component-tag">ChromaDB</span>
-                        <span class="component-tag">LLM Client</span>
-                        <span class="component-tag">DeepSeek-V3.2</span>
-                    </div>
-                </div>
-                
-                <div class="flow-arrow">
-                    <span class="arrow-label">execute_workflow()</span>
-                </div>
-                
-                <!-- 6. 执行层 -->
-                <div class="flow-step-card tool-layer">
-                    <div class="step-title">⚙️ 执行层 (Execution Layer)</div>
-                    <div class="step-desc">WorkflowExecutor 执行工作流，调用各种工具</div>
-                    <div class="step-components">
-                        <span class="component-tag">WorkflowExecutor</span>
-                        <span class="component-tag">参数验证</span>
-                        <span class="component-tag">数据流处理</span>
-                    </div>
-                </div>
-                
-                <div class="flow-arrow">
-                    <span class="arrow-label">工具调用</span>
-                </div>
-                
-                <!-- 7. 工具层 -->
-                <div class="flow-step-card tool-layer">
-                    <div class="step-title">🛠️ 工具层 (Tool Layer)</div>
-                    <div class="step-desc">File Inspector、Analysis Tools 和 Domain Tools 执行具体分析</div>
-                    <div class="step-components">
-                        <span class="component-tag">File Inspector</span>
-                        <span class="component-tag">Analysis Tools</span>
-                        <span class="component-tag">Scanpy</span>
-                        <span class="component-tag">Cell Ranger</span>
-                        <span class="component-tag">Metabolomics Tools</span>
-                    </div>
-                </div>
-                
-                <div class="flow-arrow">
-                    <span class="arrow-label">结果聚合</span>
-                </div>
-                
-                <!-- 8. 结果聚合层 -->
-                <div class="flow-step-card result-layer">
-                    <div class="step-title">📊 结果聚合层 (Result Aggregation Layer)</div>
-                    <div class="step-desc">Result Collector 聚合步骤结果并格式化数据</div>
-                    <div class="step-components">
-                        <span class="component-tag">Result Collector</span>
-                        <span class="component-tag">数据格式化</span>
-                        <span class="component-tag">图表路径处理</span>
-                    </div>
-                </div>
-                
-                <div class="flow-arrow">
-                    <span class="arrow-label">生成报告</span>
-                </div>
-                
-                <!-- 9. AI 报告生成层 -->
-                <div class="flow-step-card result-layer">
-                    <div class="step-title">📝 AI 报告生成层 (AI Report Generation Layer)</div>
-                    <div class="step-desc">AI Expert Report 生成 Markdown 格式的分析报告</div>
-                    <div class="step-components">
-                        <span class="component-tag">AI Expert Report</span>
-                        <span class="component-tag">关键指标提取</span>
-                        <span class="component-tag">Markdown 生成</span>
-                    </div>
-                </div>
-                
-                <div class="flow-arrow">
-                    <span class="arrow-label">SSE 流式输出</span>
-                </div>
-                
-                <!-- 10. SSE 流式输出层 -->
-                <div class="flow-step-card api-layer">
-                    <div class="step-title">📡 SSE 流式输出层 (SSE Streaming Layer)</div>
-                    <div class="step-desc">通过 Server-Sent Events 实时推送分析进度和结果</div>
-                    <div class="step-components">
-                        <span class="component-tag">status</span>
-                        <span class="component-tag">workflow</span>
-                        <span class="component-tag">step_result</span>
-                        <span class="component-tag">diagnosis</span>
-                        <span class="component-tag">result</span>
-                    </div>
-                </div>
-                
-                <div class="flow-arrow">
-                    <span class="arrow-label">实时渲染</span>
-                </div>
-                
-                <!-- 11. 前端渲染层 -->
-                <div class="flow-step-card user-layer">
-                    <div class="step-title">🎨 前端渲染层 (Frontend Rendering Layer)</div>
-                    <div class="step-desc">前端实时解析 SSE 事件并渲染工作流卡片、步骤结果和 AI 报告</div>
-                    <div class="step-components">
-                        <span class="component-tag">工作流卡片</span>
-                        <span class="component-tag">执行步骤</span>
-                        <span class="component-tag">分析报告</span>
-                        <span class="component-tag">AI 诊断</span>
-                    </div>
+                <div class="detail-content" id="detail-content">
+                    <!-- 内容将通过 JavaScript 动态填充 -->
                 </div>
             </div>
         </div>
         
         <!-- 可下载架构图部分 -->
+        <!-- TODO: Take a screenshot of this HTML diagram and save as assets/architecture_v2.png -->
         <div class="download-section">
             <h2>📥 Download Architecture</h2>
             <p style="color: #666; margin-bottom: 20px;">下载高分辨率架构图用于演示和文档</p>
+            <p style="color: #ff9800; font-size: 13px; margin-bottom: 15px; padding: 10px; background: #fff3cd; border-radius: 6px;">
+                <strong>📸 提示：</strong>请对上面的 HTML 架构图进行截图，保存为 <code>assets/architecture_v2.png</code> 以修复缺失的图片。
+            </p>
             
             <div id="architecture-image-container">
                 <img src="assets/architecture_v2.png" 
-                     alt="Omics Agent Architecture Diagram" 
+                     alt="Architecture Diagram Snapshot - Omics Agent System Design" 
                      class="architecture-image"
                      onerror="this.style.display='none'; document.getElementById('image-placeholder').style.display='block';">
-                <div id="image-placeholder" class="image-placeholder" style="display: none;">
+                <div id="image-placeholder" class="image-placeholder" style="display: block;">
                     <p>📷 架构图文件未找到</p>
-                    <p style="font-size: 12px; margin-top: 10px;">请将架构图放置在 <code>assets/architecture_v2.png</code></p>
+                    <p style="font-size: 12px; margin-top: 10px;">请对上面的 HTML 架构图进行截图，保存为 <code>assets/architecture_v2.png</code></p>
+                    <p style="font-size: 11px; margin-top: 8px; color: #999;">或者使用浏览器的打印功能导出为 PDF/PNG</p>
                 </div>
             </div>
             
@@ -559,6 +1050,389 @@
                     alert('架构图文件未找到。请确保 assets/architecture_v2.png 文件存在。');
                 }
             }
+            
+            // 模块技术规格数据对象
+            const moduleDetails = {
+                user: {
+                    component: "用户 (User)",
+                    coreFunction: "用户交互接口",
+                    dataIO: "Input: 自然语言查询 + 文件上传 → Output: HTTP POST 请求",
+                    keyLogic: "用户在 Web UI 中输入查询文本或上传文件，前端收集用户输入并发送到后端 API。",
+                    designRationale: "分离用户界面层与业务逻辑层，实现前后端解耦。前端负责交互和展示，后端负责计算和决策。",
+                    upstreamDownstream: "Upstream: N/A (用户入口) | Downstream: Orchestrator (接收用户请求)",
+                    academicBasis: "N/A - User Interface Layer (标准 Web 架构模式)"
+                },
+                orchestrator: {
+                    component: "总控编排 (Orchestrator)",
+                    coreFunction: "core.orchestrator.AgentOrchestrator.stream_process()",
+                    dataIO: "Input: UserQuery + ConversationHistory + UploadedFiles → Output: SSE Events (status, workflow, step_result, diagnosis, result)",
+                    keyLogic: "管理对话历史，进行意图分类（Chat vs Task），协调多智能体协作。使用 LLM 进行全局意图判断，根据结果路由到规划流程或直接聊天。维护会话状态和上下文。",
+                    designRationale: "为什么需要 Orchestrator？实现单一入口点，统一管理多智能体协作。分离意图分类与具体执行，允许在规划前进行 Human-in-the-loop 验证。支持流式输出，提升用户体验。",
+                    upstreamDownstream: "Upstream: User (接收用户请求) | Downstream: Planner (任务模式) / LLM (聊天模式) / Executor (执行模式)",
+                    academicBasis: "MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework (SOPs-based coordination) / AutoGen (Multi-agent conversation framework)"
+                },
+                planner: {
+                    component: "首席科学家 (Lead Scientist / Planner)",
+                    coreFunction: "core.planner.SOPPlanner.plan_workflow()",
+                    dataIO: "Input: UserQuery + FileMetadata + ToolSchemas → Output: JSON_Workflow: {workflow_name, steps: [{step_id, tool_id, name, params}]}",
+                    keyLogic: "使用 Chain-of-Thought (CoT) 推理拆解科学问题。将用户需求分解为可执行的步骤序列。每个步骤包含工具ID和参数配置。支持参数推荐和动态调整。",
+                    designRationale: "为什么分离 Planner 和 Executor？允许在昂贵执行前进行 Human-in-the-loop 验证。支持工作流的预览、修改和优化。实现规划与执行的解耦，提高系统灵活性。",
+                    upstreamDownstream: "Upstream: Orchestrator (接收任务意图) + Retriever (获取工具 Schema) | Downstream: Executor (发送工作流配置) / Frontend (预览模式)",
+                    academicBasis: "SciAgents: Automating Scientific Discovery with Large Language Models (Scientific reasoning) / Tree of Thoughts (CoT reasoning)"
+                },
+                retriever: {
+                    component: "图书馆员 (Librarian / Tool Retriever)",
+                    coreFunction: "core.tool_retriever.ToolRetriever.query_tools()",
+                    dataIO: "Input: UserQuery (自然语言描述) → Output: List[ToolSchema] - 工具 JSON Schema 列表",
+                    keyLogic: "使用 ChromaDB 向量数据库进行语义检索。将用户查询转换为 embedding，在工具库中查找相似度最高的工具。返回工具的完整 Schema（参数定义、描述、示例）。",
+                    designRationale: "为什么使用语义检索而非关键词匹配？支持自然语言查询，用户无需了解具体工具名称。通过 embedding 相似度匹配，提高工具推荐的准确性。",
+                    upstreamDownstream: "Upstream: Planner (接收工具查询请求) | Downstream: Planner (返回工具 Schema)",
+                    academicBasis: "Gorilla: Large Language Model Connected with Massive APIs (API retrieval) / ToolLLM: Facilitating Large Language Models to Master 16000+ Real-world APIs (Tool learning)"
+                },
+                agent: {
+                    component: "领域专家 (Domain Agents)",
+                    coreFunction: "agents.rna.RNAAgent.execute_workflow() / agents.metabolomics.MetabolomicsAgent.execute_workflow()",
+                    dataIO: "Input: WorkflowConfig + FilePaths → Output: AnalysisResults: {steps_details, steps_results, summary}",
+                    keyLogic: "拥有特定组学领域的专业知识（RNA-seq, Metabolomics）。根据工作流配置创建 WorkflowExecutor，执行分析步骤。聚合步骤结果，生成领域特定的诊断报告。",
+                    designRationale: "为什么需要领域特定的 Agent？不同组学领域有不同的分析流程和专业知识。通过领域 Agent 封装领域知识，实现关注点分离。支持领域特定的错误处理和参数推荐。",
+                    upstreamDownstream: "Upstream: Orchestrator (接收工作流配置) | Downstream: Executor (委托执行) + Output (返回分析结果)",
+                    academicBasis: "ChemCrow: Augmenting large language models with chemistry tools (Domain-specific tool integration) / GeneGPT (Domain knowledge augmentation)"
+                },
+                executor: {
+                    component: "执行引擎 (Executor)",
+                    coreFunction: "core.executor.WorkflowExecutor.execute_step()",
+                    dataIO: "Input: StepConfig: {step_id, tool_id, params} → Output: StepResult: {status, logs, data, images}",
+                    keyLogic: "从 ToolRegistry 动态查找工具函数。使用 Pydantic 验证参数。调用工具函数（可能涉及 Subprocess 或 Celery 异步任务）。处理步骤间的数据流（前一步输出作为下一步输入）。收集执行结果和错误信息。",
+                    designRationale: "为什么分离 Executor 和 Planner？允许在规划后、执行前进行验证。支持错误恢复和重试机制（Executor → Planner 反馈循环）。实现执行逻辑的通用化，无需为每个工具编写特定代码。",
+                    upstreamDownstream: "Upstream: Agent (接收工作流配置) | Downstream: Tools (调用工具函数) / Planner (错误反馈循环) / Output (返回执行结果)",
+                    academicBasis: "SheetCopilot: Unleashing the Power of Large Language Models to Transform Spreadsheets (Programmatic data manipulation) / Voyager: An Open-Ended Embodied Agent with Large Language Models (Iterative execution)"
+                },
+                output: {
+                    component: "分析结果 (Analysis Results)",
+                    coreFunction: "SSE Streaming + Frontend Rendering",
+                    dataIO: "Input: AnalysisResults + AI Report → Output: Rendered UI: Workflow Cards + Step Results + AI Diagnosis",
+                    keyLogic: "通过 Server-Sent Events (SSE) 实时推送分析进度。前端解析 SSE 事件流，实时渲染工作流卡片、步骤结果、图表和 AI 诊断报告。支持流式文本输出和增量更新。",
+                    designRationale: "为什么使用 SSE 而非轮询？实时推送，降低延迟。单向通信，简化实现。支持流式输出，提升用户体验。",
+                    upstreamDownstream: "Upstream: Executor (接收执行结果) + Agent (接收分析报告) | Downstream: User (最终展示)",
+                    academicBasis: "N/A - Frontend Rendering Layer (标准 Web 实时通信模式)"
+                }
+            };
+            
+            // 显示模块详情
+            function showModuleDetails(moduleId) {
+                const detail = moduleDetails[moduleId];
+                if (!detail) return;
+                
+                const defaultState = document.getElementById('default-state');
+                const detailContent = document.getElementById('detail-content');
+                
+                defaultState.style.display = 'none';
+                detailContent.classList.add('active');
+                
+                detailContent.innerHTML = `
+                    <div class="detail-item">
+                        <div class="detail-item-label">Component</div>
+                        <div class="detail-item-value">${detail.component}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">Core Function</div>
+                        <div class="detail-item-value"><code>${detail.coreFunction}</code></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">Data I/O</div>
+                        <div class="detail-item-value">${detail.dataIO}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">Key Logic</div>
+                        <div class="detail-item-value">${detail.keyLogic}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">Design Rationale (Why?)</div>
+                        <div class="detail-item-value">${detail.designRationale}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">Upstream / Downstream</div>
+                        <div class="detail-item-value">${detail.upstreamDownstream}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">Academic Basis</div>
+                        <div class="detail-item-value">${detail.academicBasis}</div>
+                    </div>
+                `;
+                
+                // 高亮选中的卡片
+                document.querySelectorAll('.flow-step-card').forEach(card => {
+                    card.classList.remove('active-flow');
+                });
+                document.querySelector(`[data-module="${moduleId}"]`).classList.add('active-flow');
+            }
+            
+            // 场景模式渲染
+            let currentScenario = null;
+            let animationTimeout = null;
+            
+            // 辅助函数：绘制 SVG 连接线
+            function drawConnection(startElem, endElem, color = '#ff6b35', delay = 0) {
+                return new Promise((resolve) => {
+                    setTimeout(() => {
+                        const svg = document.getElementById('flow-svg');
+                        if (!svg) return resolve();
+                        
+                        const startPos = getCardCenter(startElem);
+                        const endPos = getCardCenter(endElem);
+                        
+                        if (!startPos || !endPos) return resolve();
+                        
+                        // 计算控制点（用于贝塞尔曲线）
+                        const dx = endPos.x - startPos.x;
+                        const dy = endPos.y - startPos.y;
+                        const midX = (startPos.x + endPos.x) / 2;
+                        const midY = (startPos.y + endPos.y) / 2;
+                        
+                        // 创建路径
+                        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                        const pathId = `path-${Date.now()}-${Math.random()}`;
+                        path.setAttribute('id', pathId);
+                        
+                        // 根据方向选择路径类型
+                        if (Math.abs(dy) > Math.abs(dx)) {
+                            // 垂直连接
+                            path.setAttribute('d', `M ${startPos.x} ${startPos.y} L ${endPos.x} ${endPos.y}`);
+                        } else {
+                            // 水平或斜向连接，使用贝塞尔曲线
+                            const controlY = midY - (Math.abs(dx) * 0.3);
+                            path.setAttribute('d', `M ${startPos.x} ${startPos.y} Q ${midX} ${controlY} ${endPos.x} ${endPos.y}`);
+                        }
+                        
+                        path.setAttribute('stroke', color);
+                        path.setAttribute('stroke-width', '3');
+                        path.setAttribute('fill', 'none');
+                        path.setAttribute('marker-end', 'url(#arrowhead)');
+                        path.setAttribute('class', 'flow-anim');
+                        path.style.opacity = '0';
+                        
+                        svg.appendChild(path);
+                        
+                        // 动画：路径淡入
+                        requestAnimationFrame(() => {
+                            path.style.transition = 'opacity 0.5s';
+                            path.style.opacity = '1';
+                        });
+                        
+                        resolve();
+                    }, delay);
+                });
+            }
+            
+            // 获取卡片中心位置
+            function getCardCenter(card) {
+                if (!card) return null;
+                const rect = card.getBoundingClientRect();
+                const diagramRect = document.querySelector('.flow-diagram');
+                if (!diagramRect) return null;
+                const diagramRectBounds = diagramRect.getBoundingClientRect();
+                return {
+                    x: rect.left - diagramRectBounds.left + rect.width / 2,
+                    y: rect.top - diagramRectBounds.top + rect.height / 2
+                };
+            }
+            
+            // 顺序高亮模块
+            async function highlightModuleSequence(modules, delay = 500) {
+                for (let i = 0; i < modules.length; i++) {
+                    const module = modules[i];
+                    if (module.card) {
+                        module.card.classList.add('active-flow');
+                        if (module.card.scrollIntoView) {
+                            module.card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        }
+                    }
+                    
+                    // 如果不是最后一个，绘制连接线
+                    if (i < modules.length - 1 && modules[i + 1]) {
+                        await drawConnection(module.card, modules[i + 1].card, module.color || '#ff6b35', delay);
+                    }
+                    
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+            
+            function renderScenario(mode, buttonElement) {
+                // 清除之前的动画
+                if (animationTimeout) {
+                    clearTimeout(animationTimeout);
+                }
+                
+                // 重置所有状态
+                document.querySelectorAll('.flow-step-card').forEach(card => {
+                    card.classList.remove('active-flow', 'dimmed');
+                });
+                document.querySelectorAll('.scenario-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                
+                // 清除 SVG 路径（保留 defs）
+                const svg = document.getElementById('flow-svg');
+                const defs = svg.querySelector('defs');
+                svg.innerHTML = '';
+                if (defs) svg.appendChild(defs);
+                
+                if (mode === 'reset') {
+                    currentScenario = null;
+                    return;
+                }
+                
+                // 激活当前按钮
+                if (buttonElement) {
+                    buttonElement.classList.add('active');
+                }
+                currentScenario = mode;
+                
+                const cards = {
+                    user: document.querySelector('[data-module="user"]'),
+                    orchestrator: document.querySelector('[data-module="orchestrator"]'),
+                    planner: document.querySelector('[data-module="planner"]'),
+                    retriever: document.querySelector('[data-module="retriever"]'),
+                    agent: document.querySelector('[data-module="agent"]'),
+                    executor: document.querySelector('[data-module="executor"]'),
+                    output: document.querySelector('[data-module="output"]')
+                };
+                
+                // 暗淡非活动模块
+                const allCards = Object.values(cards).filter(c => c);
+                const activeCards = [];
+                
+                if (mode === 'planning') {
+                    // 规划流程：User -> Orchestrator -> Planner <-> Retriever -> Planner -> Frontend
+                    activeCards.push(
+                        { card: cards.user, color: '#4CAF50' },
+                        { card: cards.orchestrator, color: '#9C27B0' },
+                        { card: cards.planner, color: '#FF6B35' },
+                        { card: cards.retriever, color: '#FF6B35' },
+                        { card: cards.planner, color: '#FF6B35' },
+                        { card: cards.output, color: '#4CAF50' }
+                    );
+                    [cards.agent, cards.executor].forEach(card => {
+                        if (card) card.classList.add('dimmed');
+                    });
+                    
+                    // 顺序动画
+                    highlightModuleSequence(activeCards, 600);
+                    
+                } else if (mode === 'execution') {
+                    // 执行流程：User -> Orchestrator -> Executor <-> Tools -> Executor -> Output
+                    activeCards.push(
+                        { card: cards.user, color: '#4CAF50' },
+                        { card: cards.orchestrator, color: '#9C27B0' },
+                        { card: cards.executor, color: '#F44336' },
+                        { card: cards.executor, color: '#F44336' }, // 工具调用（自循环表示）
+                        { card: cards.output, color: '#4CAF50' }
+                    );
+                    [cards.planner, cards.retriever, cards.agent].forEach(card => {
+                        if (card) card.classList.add('dimmed');
+                    });
+                    
+                    // 顺序动画
+                    highlightModuleSequence(activeCards, 600);
+                    
+                } else if (mode === 'error') {
+                    // 错误循环：Executor -> (Error) -> Planner -> (New Plan) -> Executor
+                    [cards.executor, cards.planner].forEach(card => {
+                        if (card) card.classList.add('active-flow');
+                    });
+                    [cards.user, cards.orchestrator, cards.retriever, cards.agent, cards.output].forEach(card => {
+                        if (card) card.classList.add('dimmed');
+                    });
+                    
+                    // 绘制错误循环路径（Executor -> Planner -> Executor）
+                    const execPos = getCardCenter(cards.executor);
+                    const planPos = getCardCenter(cards.planner);
+                    
+                    if (execPos && planPos) {
+                        // 使用贝塞尔曲线绘制循环路径
+                        const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                        const midX = (execPos.x + planPos.x) / 2;
+                        const midY = Math.min(execPos.y, planPos.y) - 80;
+                        
+                        // Executor -> Planner (向上)
+                        path1.setAttribute('d', `M ${execPos.x} ${execPos.y} Q ${midX} ${midY} ${planPos.x} ${planPos.y}`);
+                        path1.setAttribute('class', 'active flow-anim');
+                        path1.setAttribute('marker-end', 'url(#arrowhead)');
+                        path1.style.opacity = '0';
+                        svg.appendChild(path1);
+                        requestAnimationFrame(() => {
+                            path1.style.transition = 'opacity 0.5s';
+                            path1.style.opacity = '1';
+                        });
+                        
+                        // Planner -> Executor (向下，形成循环)
+                        const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                        const midY2 = Math.max(execPos.y, planPos.y) + 80;
+                        path2.setAttribute('d', `M ${planPos.x} ${planPos.y} Q ${midX} ${midY2} ${execPos.x} ${execPos.y}`);
+                        path2.setAttribute('class', 'active flow-anim');
+                        path2.setAttribute('marker-end', 'url(#arrowhead)');
+                        path2.style.opacity = '0';
+                        svg.appendChild(path2);
+                        setTimeout(() => {
+                            requestAnimationFrame(() => {
+                                path2.style.transition = 'opacity 0.5s';
+                                path2.style.opacity = '1';
+                            });
+                        }, 500);
+                    }
+                    
+                } else if (mode === 'chat') {
+                    // 直接聊天：User -> Orchestrator -> LLM (跳过 Planner)
+                    activeCards.push(
+                        { card: cards.user, color: '#4CAF50' },
+                        { card: cards.orchestrator, color: '#9C27B0' },
+                        { card: cards.output, color: '#4CAF50' }
+                    );
+                    [cards.planner, cards.retriever, cards.agent, cards.executor].forEach(card => {
+                        if (card) card.classList.add('dimmed');
+                    });
+                    
+                    // 顺序动画
+                    highlightModuleSequence(activeCards, 600);
+                }
+            }
+            
+            // 初始化 SVG 箭头标记和大小
+            function initSVG() {
+                const svg = document.getElementById('flow-svg');
+                const diagram = document.querySelector('.flow-diagram');
+                
+                // 设置 SVG 大小
+                if (diagram && svg) {
+                    const rect = diagram.getBoundingClientRect();
+                    svg.setAttribute('width', rect.width);
+                    svg.setAttribute('height', rect.height);
+                }
+                
+                // 创建箭头标记
+                if (!svg.querySelector('defs')) {
+                    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+                    const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+                    marker.setAttribute('id', 'arrowhead');
+                    marker.setAttribute('markerWidth', '10');
+                    marker.setAttribute('markerHeight', '10');
+                    marker.setAttribute('refX', '9');
+                    marker.setAttribute('refY', '3');
+                    marker.setAttribute('orient', 'auto');
+                    const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                    polygon.setAttribute('points', '0 0, 10 3, 0 6');
+                    polygon.setAttribute('fill', '#ff6b35');
+                    marker.appendChild(polygon);
+                    defs.appendChild(marker);
+                    svg.appendChild(defs);
+                }
+            }
+            
+            // 页面加载时初始化
+            document.addEventListener('DOMContentLoaded', initSVG);
+            
+            // 窗口大小改变时重新初始化
+            window.addEventListener('resize', initSVG);
         </script>
         
         <!-- 详细流程说明 -->
@@ -918,4 +1792,6 @@ data: {"status": "success"}</div>
         </div>
     </div>
 </body>
+</html>
+
 </html>
