@@ -44,6 +44,7 @@ class WorkflowRegistry:
         """自动注册所有工作流"""
         from .metabolomics import MetabolomicsWorkflow
         from .rna import RNAWorkflow
+        from .spatial_workflow import SpatialWorkflow
         
         # 注册代谢组学工作流
         metabolomics = MetabolomicsWorkflow()
@@ -52,6 +53,10 @@ class WorkflowRegistry:
         # 注册 RNA 工作流
         rna = RNAWorkflow()
         self.register(rna)
+        
+        # 注册空间转录组工作流
+        spatial = SpatialWorkflow()
+        self.register(spatial)
         
         logger.info(f"✅ [WorkflowRegistry] 已注册 {len(self._workflows)} 个工作流: {list(self._workflows.keys())}")
     

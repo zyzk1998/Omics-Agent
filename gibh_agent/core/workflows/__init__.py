@@ -12,11 +12,13 @@ from .base import BaseWorkflow
 from .registry import WorkflowRegistry
 from .metabolomics import MetabolomicsWorkflow
 from .rna import RNAWorkflow
+from .spatial_workflow import SpatialWorkflow
 
 __all__ = [
     "BaseWorkflow",
     "WorkflowRegistry",
     "MetabolomicsWorkflow",
     "RNAWorkflow",
+    "SpatialWorkflow",
 ]
 

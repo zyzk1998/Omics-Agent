@@ -104,6 +104,7 @@ test_integration_report.md
 # 临时脚本（保留正式测试在 tests/ 目录）
 scripts/debug_*.py
 scripts/test_*.py
+!scripts/test_spatial_brain.py
 scripts/verify_*.py
 scripts/simulate_*.py
 scripts/temp_*.py
@@ -121,3 +122,13 @@ debug_logs/
 # 归档目录（本地开发历史，不提交到公共仓库）
 _archive/
 _legacy_archive/
+
+# 虚拟环境（多版本）
+.venv-vsdx/
+.venv*/
+
+# 前端依赖
+node_modules/
+
+# 基准测试输出（可选提交）
+benchmark_results/

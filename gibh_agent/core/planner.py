@@ -563,7 +563,7 @@ class SOPPlanner:
             # 🔥 URGENT: 如果没有文件且查询是规划类（"Plan", "预览", "show me"），默认使用完整 SOP
             if not target_steps:
                 query_lower = user_query.lower()
-                vague_keywords = ["analyze this", "full analysis", "完整分析", "全部", "all", "complete"]
+                vague_keywords = ["analyze this", "full analysis", "完整分析", "全部", "all", "complete", "help me analyze", "帮我分析"]
                 planning_keywords = ["plan", "预览", "show me", "显示", "生成", "规划", "workflow", "流程"]
                 
                 if any(kw in query_lower for kw in vague_keywords):
@@ -725,11 +725,13 @@ class SOPPlanner:
             return result
         
         except Exception as e:
-            logger.error(f"❌ [SOPPlanner] 工作流规划失败: {e}", exc_info=True)
+            import traceback
+            tb = traceback.format_exc()
+            logger.error("❌ [SOPPlanner] 工作流规划失败 | 根因: %s | traceback:\n%s", e, tb, exc_info=False)
             return {
                 "type": "error",
                 "error": str(e),
-                "message": f"工作流规划失败: {str(e)}"
+                "message": f"工作流规划失败: {str(e)}",
             }
     
     async def _analyze_user_intent(
@@ -760,24 +762,33 @@ class SOPPlanner:
 
 Your task is to select the *Target Steps* the user explicitly asked for from the available toolset.
 
+**CRITICAL - User Intent Priority (MUST FOLLOW):**
+1. If the user asks for a SPECIFIC analysis (e.g., "PCA", "主成分分析", "Do PCA only"), return ONLY that step's ID. Prerequisites (e.g., inspect_data, preprocess_data) will be added automatically by the system. Do NOT return the full pipeline.
+2. If the user asks for multiple specific steps, return ONLY those steps.
+3. Return empty list [] ONLY when the user's query is genuinely VAGUE (e.g., "Analyze this file", "Full analysis", "完整分析", "Help me analyze", "全部分析").
+4. **Execution Mode**: When a file is uploaded, STILL respect the user's specific request. Do NOT default to full workflow just because a file exists. If they asked for "PCA only", return ["pca_analysis"].
+
 **Rules:**
-1. If the user asks for a specific step (e.g., "Do PCA only", "Just do PCA"), return ONLY that step.
-2. If the user asks for multiple specific steps (e.g., "Do PCA and differential analysis"), return those steps.
-3. If the user's query is vague (e.g., "Analyze this", "Full analysis", "完整分析"), return an empty list [] (which means full workflow).
-4. Return ONLY a JSON array of tool_ids, no explanations.
+- Specific request (PCA, 主成分, volcano, 火山图, pathway, 通路) -> Return ONLY those step IDs
+- Vague request (analyze, 分析, full, 完整, all, 全部) -> Return []
+- Return ONLY a JSON array of tool_ids from the available steps, no explanations.
 
 **Output Format:**
 Return ONLY a JSON array:
 ["step1", "step2", ...]  // Empty array [] means full workflow
 
-**Example:**
-- User: "Do PCA only." -> ["pca_analysis"]
-- User: "I want PCA." -> ["pca_analysis"]
-- User: "Just do PCA." -> ["pca_analysis"]
-- User: "Do PCA and differential analysis." -> ["pca_analysis", "differential_analysis"]
-- User: "Analyze this." -> []
-- User: "Full analysis." -> []
-- User: "完整分析" -> []"""
+**Examples (Partial = return specific steps):**
+- "Do PCA only." -> ["pca_analysis"]
+- "我要做代谢组主成分分析" -> ["pca_analysis"]
+- "Run PCA on this file." -> ["pca_analysis"]
+- "Just PCA." -> ["pca_analysis"]
+- "PCA and volcano" -> ["pca_analysis", "visualize_volcano"]
+
+**Examples (Vague = return []):**
+- "Analyze this." -> []
+- "Full analysis." -> []
+- "完整分析" -> []
+- "Help me analyze this file." -> []"""
 
         user_prompt = f"""**User Query:**
 {user_query}
@@ -842,15 +853,15 @@ Return ONLY a JSON array (e.g., ["pca_analysis"] or [] for full workflow)."""
         """
         query_lower = user_query.lower()
         
-        # 检查是否包含特定步骤的关键词
+        # 检查是否包含特定步骤的关键词（用于 LLM 失败时的回退）
         step_keywords = {
-            "pca_analysis": ["pca", "主成分", "principal component"],
-            "differential_analysis": ["differential", "差异", "diff"],
-            "metabolomics_plsda": ["plsda", "pls-da", "pls da"],
+            "pca_analysis": ["pca", "主成分", "主成分分析", "principal component"],
+            "differential_analysis": ["differential", "差异", "diff", "差异分析"],
+            "metabolomics_plsda": ["plsda", "pls-da", "pls da", "监督分析"],
             "visualize_volcano": ["volcano", "火山图"],
-            "metabolomics_pathway_enrichment": ["pathway", "通路", "enrichment", "富集"],
+            "metabolomics_pathway_enrichment": ["pathway", "通路", "enrichment", "富集", "通路富集"],
             "preprocess_data": ["preprocess", "预处理"],
-            "inspect_data": ["inspect", "检查"]
+            "inspect_data": ["inspect", "检查", "数据检查"]
         }
         
         matched_steps = []
@@ -1011,13 +1022,14 @@ Return ONLY a JSON array (e.g., ["pca_analysis"] or [] for full workflow)."""
         system_prompt = """You are an Intent Classifier for Bioinformatics Workflows.
 
 Your task is to classify user queries into:
-1. Domain Name: "Metabolomics" or "RNA" (strictly one of these two)
+1. Domain Name: "Metabolomics", "RNA", or "Spatial" (strictly one of these three)
 2. Mode: "EXECUTION" or "PLANNING" (determines if user wants to run or preview)
-3. Target Steps: List of specific steps the user wants (e.g., ["pca_analysis", "differential_analysis"])
+3. Target Steps: List of specific steps the user wants (e.g., ["pca_analysis"], ["spatial_autocorr", "plot_genes"])
 
 **Available Domains:**
 - Metabolomics: For metabolite data analysis (CSV files with metabolite measurements)
 - RNA: For single-cell RNA-seq analysis (H5AD files, FASTQ files)
+- Spatial: For spatial transcriptomics / 10x Visium (Visium directories, spatial coordinates, spots, Moran's I, SVGs)
 
 **Available Steps (Metabolomics):**
 - inspect_data, preprocess_data, pca_analysis, metabolomics_plsda, differential_analysis, visualize_volcano, metabolomics_pathway_enrichment
@@ -1025,36 +1037,45 @@ Your task is to classify user queries into:
 **Available Steps (RNA):**
 - rna_qc_filter, rna_normalize, rna_pca, rna_clustering, rna_find_markers, etc.
 
+**Available Steps (Spatial):**
+- load_data, qc_norm, dimensionality_reduction, clustering, spatial_neighbors, spatial_autocorr, plot_clusters, plot_genes
+
 **Mode Classification Rules (CRITICAL):**
 1. IF File is **False** (no file uploaded): ALWAYS return "PLANNING".
 2. IF File is **True** (file uploaded):
    - Query implies ACTION ("analyze", "run", "do", "start", "执行", "分析", "运行", "开始"): -> Return "EXECUTION"
    - Query implies INQUIRY ("show me the plan", "what steps?", "preview", "预览", "显示", "查看"): -> Return "PLANNING"
-   - Query is VAGUE ("metabolomics", "RNA", "代谢组", "转录组"): -> Default to "EXECUTION" (Assume user wants to run the file they just uploaded)
+   - Query is VAGUE ("metabolomics", "RNA", "Spatial", "代谢组", "转录组", "空间"): -> Default to "EXECUTION"
 
 **Output Format:**
 Return ONLY a JSON object:
 {
-  "domain_name": "Metabolomics" | "RNA",
+  "domain_name": "Metabolomics" | "RNA" | "Spatial",
   "mode": "EXECUTION" | "PLANNING",
   "target_steps": ["step1", "step2", ...]  // Empty array [] means full workflow
 }
 
+**Few-Shot Example (Spatial):**
+- User: "Analyze spatial autocorrelation." -> {"domain_name": "Spatial", "mode": "EXECUTION" or "PLANNING" (depends on file), "target_steps": ["spatial_autocorr", "plot_genes"]}
+- User: "Show me the spatial workflow." (no file) -> {"domain_name": "Spatial", "mode": "PLANNING", "target_steps": []}
+
 **Rules:**
-- If user asks for "PCA" or "主成分分析", target_steps should include "pca_analysis" (Metabolomics) or "rna_pca" (RNA)
-- If user asks for "full analysis" or "完整分析", use empty array []
-- Domain name MUST be exactly "Metabolomics" or "RNA" (case-sensitive)
+- **User Intent Priority**: If user asks for specific analysis (e.g., "PCA", "spatial autocorrelation"), target_steps MUST include only those steps. Do NOT return full pipeline.
+- If user asks for "full analysis" or "完整分析" or "analyze this file" (vague), use empty array []
+- Domain name MUST be exactly "Metabolomics", "RNA", or "Spatial" (case-sensitive)
 - Mode MUST be exactly "EXECUTION" or "PLANNING" (case-sensitive)"""
 
         # 🔥 TASK 3 FIX: 增强用户查询和文件格式的关联
         query_lower = user_query.lower()
         rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "cell ranger", "fastq", "测序", "sequencing"]
         metabolomics_keywords = ["metabolomics", "metabolite", "代谢组", "代谢物", "代谢"]
-        
+        spatial_keywords = ["visium", "spatial", "slice", "spot", "moran", "spatial transcriptomics", "空间转录组", "空间组学"]
+
         # 检测用户查询中的领域关键词
         has_rna_keyword = any(kw in query_lower for kw in rna_keywords)
         has_metabolomics_keyword = any(kw in query_lower for kw in metabolomics_keywords)
-        
+        has_spatial_keyword = any(kw in query_lower for kw in spatial_keywords)
+
         user_prompt = f"""**User Query:**
 {user_query}
 
@@ -1065,17 +1086,15 @@ File Uploaded: {has_file} ({'True' if has_file else 'False'})
 {json.dumps(file_metadata, ensure_ascii=False, indent=2) if file_metadata else "No file metadata available"}
 
 **CRITICAL ROUTING RULES (User Intent + File Format):**
-1. **FASTQ files** (file_type="fastq" or extension=".fastq"/".fq") MUST route to "RNA" domain, regardless of query.
-2. **H5AD/10x files** (file_type="h5ad" or "10x_mtx") MUST route to "RNA" domain, regardless of query.
-3. **CSV/Tabular files** (file_type="tabular" or extension=".csv") MUST route to "Metabolomics" domain, unless user explicitly mentions RNA analysis.
-4. **User Query Keywords:**
+1. **Visium/Spatial files** (file_type="visium" or domain="Spatial") MUST route to "Spatial" domain.
+2. **FASTQ files** (file_type="fastq" or extension=".fastq"/".fq") MUST route to "RNA" domain, regardless of query.
+3. **H5AD/10x files** (file_type="h5ad" or "10x_mtx"): If file_type is "visium" or domain is "Spatial" → "Spatial"; else → "RNA".
+4. **CSV/Tabular files** (file_type="tabular" or extension=".csv") MUST route to "Metabolomics" domain, unless user explicitly mentions RNA.
+5. **User Query Keywords:**
+   - If query contains Spatial keywords (visium, spatial, slice, spot, moran): Prefer "Spatial" domain
    - If query contains RNA keywords ({', '.join(rna_keywords[:5])}): Prefer "RNA" domain
    - If query contains Metabolomics keywords ({', '.join(metabolomics_keywords[:3])}): Prefer "Metabolomics" domain
-5. **Priority Order:**
-   - File format > User query keywords > LLM inference
-   - If file_type="fastq" → ALWAYS "RNA"
-   - If file_type="h5ad" or "10x_mtx" → ALWAYS "RNA"
-   - If file_type="tabular" or extension=".csv" → Prefer "Metabolomics" (unless user explicitly mentions RNA)
+6. **Priority Order:** File format (visium → Spatial) > User query keywords > LLM inference
 
 **Task:**
 Classify the intent and return JSON only. Remember:
@@ -1122,11 +1141,19 @@ Classify the intent and return JSON only. Remember:
             if file_metadata:
                 file_path = file_metadata.get("file_path", "")
                 file_type = file_metadata.get("file_type", "")
-                logger.info(f"🔍 [SOPPlanner] 文件元数据: file_path={file_path}, file_type={file_type}")
+                file_domain = file_metadata.get("domain", "")
+                logger.info(f"🔍 [SOPPlanner] 文件元数据: file_path={file_path}, file_type={file_type}, domain={file_domain}")
                 
+                # 🔥 Spatial: Visium / domain=Spatial → Spatial
+                if file_type == "visium" or file_domain == "Spatial":
+                    if domain_name != "Spatial":
+                        logger.warning(f"⚠️ [SOPPlanner] 检测到 Visium/Spatial 文件，强制覆盖域名: {domain_name} → Spatial")
+                        domain_name = "Spatial"
+                    else:
+                        logger.info("✅ [SOPPlanner] Visium/Spatial 文件已正确分类为 Spatial")
                 # 🔥 TASK 3 FIX: 文件格式优先路由（最高优先级）
                 # 1. FASTQ文件 → 强制路由到RNA
-                if file_type == "fastq" or (file_path and any(ext in file_path.lower() for ext in [".fastq", ".fq", "fastq"])):
+                elif file_type == "fastq" or (file_path and any(ext in file_path.lower() for ext in [".fastq", ".fq", "fastq"])):
                     if domain_name != "RNA":
                         logger.warning(f"⚠️ [SOPPlanner] 检测到FASTQ文件，强制覆盖域名: {domain_name} → RNA")
                         domain_name = "RNA"
@@ -1167,17 +1194,21 @@ Classify the intent and return JSON only. Remember:
             else:
                 logger.warning(f"⚠️ [SOPPlanner] 没有文件元数据，使用用户查询关键词进行路由")
                 # 如果没有文件，使用用户查询关键词进行路由
-                if has_rna_keyword and not has_metabolomics_keyword:
+                if has_spatial_keyword and not has_rna_keyword and not has_metabolomics_keyword:
+                    if domain_name != "Spatial":
+                        logger.info(f"ℹ️ [SOPPlanner] 用户查询包含空间组学关键词，调整域名: {domain_name} → Spatial")
+                        domain_name = "Spatial"
+                elif has_rna_keyword and not has_metabolomics_keyword and not has_spatial_keyword:
                     if domain_name != "RNA":
                         logger.info(f"ℹ️ [SOPPlanner] 用户查询包含RNA关键词，调整域名: {domain_name} → RNA")
                         domain_name = "RNA"
-                elif has_metabolomics_keyword and not has_rna_keyword:
+                elif has_metabolomics_keyword and not has_rna_keyword and not has_spatial_keyword:
                     if domain_name != "Metabolomics":
                         logger.info(f"ℹ️ [SOPPlanner] 用户查询包含代谢组关键词，调整域名: {domain_name} → Metabolomics")
                         domain_name = "Metabolomics"
             
-            # 验证域名
-            if domain_name not in ["Metabolomics", "RNA"]:
+            # 验证域名（支持 Spatial）
+            if domain_name not in ["Metabolomics", "RNA", "Spatial"]:
                 logger.warning(f"⚠️ LLM 返回了无效的域名: {domain_name}，使用默认值 Metabolomics")
                 domain_name = "Metabolomics"
             
@@ -1223,20 +1254,24 @@ Classify the intent and return JSON only. Remember:
         """
         query_lower = user_query.lower()
         domain_name = "Metabolomics"  # 默认值
-        
+        spatial_keywords_fallback = ["visium", "spatial", "slice", "spot", "moran", "空间转录组", "空间组学"]
+
         # 🔥 STRATEGIC FIX: Content-Aware Routing - 基于文件内容
         if file_metadata:
             file_path = file_metadata.get("file_path", "")
             file_type = file_metadata.get("file_type", "")
+            file_domain = file_metadata.get("domain", "")
             columns = file_metadata.get("columns", [])
-            feature_columns = file_metadata.get("feature_columns", [])
-            metadata_columns = file_metadata.get("metadata_columns", [])
-            
-            # 策略1: 检查文件类型（最可靠）
-            if file_type == "anndata" or file_path.lower().endswith(('.h5ad', '.h5', '.loom')):
+            # Visium/Spatial 优先
+            if file_type == "visium" or file_domain == "Spatial":
+                domain_name = "Spatial"
+                logger.info("✅ [SOPPlanner] Fallback: 检测到 Visium/Spatial 文件，使用 Spatial 域名")
+            elif file_type == "anndata" or (file_path and file_path.lower().endswith(('.h5ad', '.h5', '.loom'))):
                 logger.info("✅ [SOPPlanner] 检测到 RNA 文件类型（anndata/h5ad），使用 RNA 域名")
                 domain_name = "RNA"
-            elif file_type == "tabular" or file_path.lower().endswith('.csv'):
+            elif file_type == "tabular" or (file_path and file_path.lower().endswith('.csv')):
+                feature_columns = file_metadata.get("feature_columns", [])
+                metadata_columns = file_metadata.get("metadata_columns", [])
                 # 策略2: 检查列名模式（内容感知）
                 # RNA 特征：包含 "gene", "barcode", "cell", "UMAP", "tSNE", "cluster" 等
                 # Metabolomics 特征：包含 "Metabolite", "Compound", "m/z", "RT" 等，或数值列很多
@@ -1281,15 +1316,24 @@ Classify the intent and return JSON only. Remember:
                     else:
                         # 最后使用关键词匹配
                         rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger"]
-                        domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
+                        if any(kw in query_lower for kw in spatial_keywords_fallback):
+                            domain_name = "Spatial"
+                        else:
+                            domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
             else:
                 # 未知文件类型，使用关键词匹配
                 rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "h5ad"]
-                domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
+                if any(kw in query_lower for kw in spatial_keywords_fallback):
+                    domain_name = "Spatial"
+                else:
+                    domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
         else:
-            # No file metadata - check RNA keywords
+            # No file metadata - check query keywords
             rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "h5ad"]
-            domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
+            if any(kw in query_lower for kw in spatial_keywords_fallback):
+                domain_name = "Spatial"
+            else:
+                domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
         
         # 🔥 CRITICAL: Determine mode based on query and file presence
         # Action keywords

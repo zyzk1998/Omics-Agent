@@ -587,6 +587,94 @@ class TenXDirectoryHandler(BaseFileHandler):
             }
 
 
+@register_inspector(priority=9)
+class Archive10xHandler(BaseFileHandler):
+    """
+    10x / Cell Ranger 压缩包检查器（优先级：9）
+    
+    委托 core.rna_utils.load_10x_from_tarball 解压并加载，与执行阶段共用同一套逻辑，
+    保证 Inspector 能读则 Executor 一定能读。persist_h5ad=True 以便执行阶段直接使用 .h5ad，避免重复解压。
+    """
+    
+    def can_handle(self, path: Path) -> bool:
+        """仅处理文件且为支持的压缩格式（Cell Ranger 常用）"""
+        if not path.is_file():
+            return False
+        name = path.name.lower()
+        return name.endswith(".tar.gz") or name.endswith(".zip")
+    
+    def inspect(self, path: Path) -> Dict[str, Any]:
+        """
+        使用共享的 load_10x_from_tarball 解压并加载 10x 数据，持久化为 .h5ad 供执行阶段使用。
+        返回与 TenXDirectoryHandler 兼容的元数据结构。
+        """
+        try:
+            from .rna_utils import load_10x_from_tarball
+            adata, output_base_dir = load_10x_from_tarball(
+                str(path.resolve()),
+                var_names="gene_symbols",
+                persist_h5ad=True,
+            )
+            n_cells = adata.n_obs
+            n_genes = adata.n_vars
+            name = path.name.lower()
+            if name.endswith(".tar.gz"):
+                stem = path.name[:-7]
+            elif name.endswith(".zip"):
+                stem = path.name[:-4]
+            else:
+                stem = path.stem
+            persisted_h5ad = Path(output_base_dir) / f"{stem}.h5ad"
+            file_path = str(persisted_h5ad.resolve())
+            columns = list(adata.var_names[:20]) if hasattr(adata, "var_names") else []
+            try:
+                feature_types = list(adata.var["feature_types"].astype(str).unique()) if "feature_types" in adata.var.columns else ["Gene Expression"]
+            except Exception:
+                feature_types = ["Gene Expression"]
+            preview = {
+                "n_cells": n_cells,
+                "n_genes": n_genes,
+                "feature_types": feature_types,
+                "sample_genes": columns[:10],
+            }
+            result = {
+                "status": "success",
+                "success": True,
+                "file_path": file_path,
+                "file_type": "anndata",
+                "shape": {"rows": n_cells, "cols": n_genes},
+                "n_obs": n_cells,
+                "n_vars": n_genes,
+                "n_samples": n_cells,
+                "n_features": n_genes,
+                "columns": columns[:20] if columns else None,
+                "head": {
+                    "markdown": f"10x Genomics 数据（来自压缩包）\n- 细胞数: {n_cells}\n- 基因数: {n_genes}\n- 数据路径: {file_path}",
+                    "json": preview,
+                },
+                "feature_types": feature_types,
+                "data": {
+                    "summary": {
+                        "n_samples": n_cells,
+                        "n_features": n_genes,
+                        "feature_types": feature_types,
+                    }
+                },
+                "unpacked_from": str(path.resolve()),
+            }
+            logger.info("✅ [Archive10xHandler] 通过 load_10x_from_tarball 完成体检，持久化: %s", file_path)
+            return result
+        except Exception as e:
+            logger.exception("❌ [Archive10xHandler] 解压或识别失败: %s", path)
+            return {
+                "status": "error",
+                "success": False,
+                "error": f"压缩包处理失败: {str(e)}",
+                "file_type": "unknown",
+                "file_path": str(path.resolve()),
+            }
+
+
 @register_inspector(priority=8)
 class FastqDirectoryHandler(BaseFileHandler):
     """
@@ -1195,3 +1283,14 @@ class FileInspector:
             "file_type": "unknown",
             "file_path": str(path.resolve())
         }
+
+
+# ============================================
+# Extended handlers (Spatial Visium before generic 10x)
+# ============================================
+try:
+    from .file_handlers.extended_handlers import SpatialVisiumHandler
+    _registry.register(20, SpatialVisiumHandler)
+    logger.info("✅ [FileInspector] Registered SpatialVisiumHandler (priority=20)")
+except ImportError as e:
+    logger.debug("SpatialVisiumHandler not loaded: %s", e)

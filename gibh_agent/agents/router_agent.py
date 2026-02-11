@@ -44,7 +44,8 @@ class RouterAgent(BaseAgent):
         ],
         "spatial_omics": [
             "spatial", "visium", "st", "spatial transcriptomics",
-            "空间转录组"
+            "slice", "spot", "moran", "moran's i", "spatial autocorrelation",
+            "空间转录组", "空间", "切片", "spot", "莫兰"
         ],
         "imaging": [
             "image", "microscopy", "histology", "病理", "影像"
@@ -207,6 +208,22 @@ class RouterAgent(BaseAgent):
         
         logger.debug(f"📁 检测到的文件类型: {file_types}")
         
+        # Spatial Omics quick-route (additive; do not break RNA/Metabolomics)
+        spatial_keywords = [
+            "visium", "spatial transcriptomics", "spatial omics",
+            "slice", "spot", "moran", "moran's i", "spatial autocorrelation",
+            "空间转录组", "空间转录", "空间组学"
+        ]
+        if any(kw in query_lower for kw in spatial_keywords):
+            logger.info("✅ 快速路由: 查询包含空间组学关键词 → spatial_agent")
+            return {
+                "modality": "spatial_omics",
+                "intent": self._detect_intent(query),
+                "confidence": 0.92,
+                "routing": "spatial_agent",
+                "reasoning": "Query contains spatial/Visium keywords"
+            }
+
         # 🔧 修复：优先检查查询中的代谢组关键词（即使没有文件）
         metabolomics_keywords = [
             "代谢组", "代谢物", "代谢组学", "代谢组分析", "代谢分析",

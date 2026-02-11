@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from gibh_agent import create_agent
 from gibh_agent.core.file_inspector import FileInspector
 from gibh_agent.core.orchestrator import AgentOrchestrator
+from gibh_agent.core.file_handlers.structure_normalizer import normalize_session_directory
 
 # 配置日志
 logging.basicConfig(
@@ -1403,6 +1404,19 @@ async def upload_file(
                     "is_10x": True,
                     "group_dir": str(tenx_dir.relative_to(UPLOAD_DIR))
                 })
+                
+                # 🔒 Async signing (anti-regression: do not block 200 on failure)
+                try:
+                    from gibh_agent.core.tasks import sign_uploaded_file_task
+                    sign_uploaded_file_task.delay(str(file_path))
+                except Exception as e:
+                    logger.warning("⚠️ 签名任务入队失败（文件已保存，不影响上传）: %s", e)
+            
+            # SpatialStructureNormalizer: reorganize loose spatial archives into spatial/ before inspection
+            try:
+                normalize_session_directory(Path(tenx_dir))
+            except Exception as e:
+                logger.warning("⚠️ 目录结构规范化失败（不影响上传）: %s", e)
             
             # 返回10x目录路径（而不是单个文件路径）
             file_paths = [str(tenx_dir.relative_to(UPLOAD_DIR))]
@@ -1475,6 +1489,19 @@ async def upload_file(
                 "metadata": metadata,
                 "is_10x": False
             })
+            
+            # 🔒 Async signing (anti-regression: do not block 200 on failure)
+            try:
+                from gibh_agent.core.tasks import sign_uploaded_file_task
+                sign_uploaded_file_task.delay(str(file_path))
+            except Exception as e:
+                logger.warning("⚠️ 签名任务入队失败（文件已保存，不影响上传）: %s", e)
+        
+        # SpatialStructureNormalizer: reorganize loose spatial.tar.gz + .h5 into Visium layout (spatial/ + matrix)
+        try:
+            normalize_session_directory(Path(user_dir))
+        except Exception as e:
+            logger.warning("⚠️ 目录结构规范化失败（不影响上传）: %s", e)
         
         # 🔥 统一返回格式：始终返回 file_paths 数组和 file_info 数组（用于前端发送聊天请求）
         # 注意：使用相对路径，因为前端需要相对于 UPLOAD_DIR 的路径

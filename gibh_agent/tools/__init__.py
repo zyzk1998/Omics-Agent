@@ -58,10 +58,38 @@ def load_all_tools():
     }
 
 
+# 显式导入 7 大组学原子工具模块（保证被注册并纳入 ChromaDB）
+def _import_atomic_omics_tools():
+    """Import atomic tool modules for 7 omics modalities (Genomics, Transcriptomics, Epigenomics, Proteomics, Metabolomics, Spatial, Radiomics)."""
+    modules = [
+        "genomics_tools",
+        "transcriptomics_tools",
+        "epigenomics_tools",
+        "proteomics_tools",
+        "metabolomics_tools",
+        "radiomics_tools",
+    ]
+    for name in modules:
+        try:
+            importlib.import_module(f".{name}", package=__name__)
+            logger.info("✅ 已加载原子工具模块: %s", name)
+        except ImportError as e:
+            logger.warning("⚠️ 可选原子工具模块未加载（可能缺少依赖）: %s - %s", name, e)
+
+
 # 自动加载所有工具（当模块被导入时）
 # 注意：这会在导入时立即执行，确保工具被注册
 try:
     load_all_tools()
+    _import_atomic_omics_tools()
 except Exception as e:
     logger.error(f"❌ 自动加载工具失败: {e}", exc_info=True)
+
+# Step 2 (Additive only): Explicitly ensure 5 NEW modality modules are loaded.
+# Genomics, Epigenomics, Proteomics, Spatial, Radiomics. Do not remove existing imports above.
+for _mod in ["genomics_tools", "epigenomics_tools", "proteomics_tools", "radiomics_tools"]:
+    try:
+        importlib.import_module(f".{_mod}", package=__name__)
+    except ImportError:
+        pass
 
