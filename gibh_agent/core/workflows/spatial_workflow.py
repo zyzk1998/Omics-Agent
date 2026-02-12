@@ -164,6 +164,8 @@ class SpatialWorkflow(BaseWorkflow):
 
         file_path = (file_metadata or {}).get("file_path")
         placeholder = "<PENDING_UPLOAD>" if not file_path else file_path
+        # 步骤依赖：用于 h5ad_path 链（qc_norm 用 load_data 输出，以此类推）
+        step_deps = self.get_steps_dag()
 
         steps = []
         for step_id in resolved_steps:
@@ -174,7 +176,10 @@ class SpatialWorkflow(BaseWorkflow):
             if step_id == "load_data":
                 params["data_dir"] = placeholder
             else:
-                params["h5ad_path"] = placeholder
+                deps = step_deps.get(step_id, [])
+                # 取最后一个依赖作为 h5ad 来源（如 qc_norm -> load_data, clustering -> dimensionality_reduction）
+                dep = deps[-1] if deps else "load_data"
+                params["h5ad_path"] = f"<{dep}>"
 
             step_config = {
                 "id": step_id,

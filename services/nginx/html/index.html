@@ -265,6 +265,41 @@
             width: 100%;
         }
 
+        /* 跟进建议：垂直排列，左对齐，芯片样式 */
+        .suggestions-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: flex-start;
+            margin-top: 10px;
+            width: 100%;
+            order: 4;
+            animation: suggestionFadeIn 0.3s ease;
+        }
+        @keyframes suggestionFadeIn {
+            from { opacity: 0; transform: translateY(-4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .suggestion-chip {
+            display: inline-block;
+            padding: 8px 14px;
+            background: #eef2ff;
+            color: var(--primary-color, #4f46e5);
+            border-radius: 20px;
+            font-size: 14px;
+            cursor: pointer;
+            border: 1px solid #c7d2fe;
+            transition: background 0.2s, transform 0.15s;
+        }
+        .suggestion-chip:hover {
+            background: #c7d2fe;
+            transform: translateY(-1px);
+        }
+        .suggestion-chip-icon {
+            margin-right: 4px;
+            opacity: 0.9;
+        }
+
         .bubble { font-size: 15px; line-height: 1.6; color: #374151; position: relative; }
         .message-row.user .bubble {
             background-color: #f4f4f4;
@@ -1371,8 +1406,22 @@
             console.log('🚀 [sendMessage] 最终 filesToSend:', filesToSend);
             console.log('🚀 [sendMessage] 文件详情:', filesToSend.map(f => ({ name: f.name, path: f.path })));
             
+            // 🔥 INTENT CONSISTENCY: 仅上传文件无文字时，继承上次查询或使用默认意图（确保后端能推断 recommended_steps）
+            if (!text && filesToSend.length > 0) {
+                text = window.lastSentQuery || '请分析这个文件';
+                if (window.lastSentQuery) {
+                    console.log('✅ [sendMessage] 空消息+文件：继承上次意图:', window.lastSentQuery);
+                } else {
+                    console.log('ℹ️ [sendMessage] 空消息+文件：使用默认意图:', text);
+                }
+            }
+            
             // 显示用户消息
             if (!selectedTool && !workflowData && !useHistoryFiles) {
+                // 🔥 INTENT CONSISTENCY: 在清空输入前保存用户查询，供模板上传后重新发送时使用
+                if (text) {
+                    window.lastSentQuery = text;
+                }
                 // 🔥 Task 2: 显示文件卡片
                 // 🔥 CRITICAL: 使用 filesToSend（可能是 filesOverride 或全局 uploadedFiles）
                 const filesToShow = filesToSend.length > 0 ? filesToSend : uploadedFiles;
@@ -1623,6 +1672,21 @@
                         return div.innerHTML;
                     }
                     
+                    // 🔥 格式感知：仅将可展示图片用 <img> 渲染；仅 .nii/.dcm/.h5/.csv 等显示「不可预览」徽章
+                    function isDisplayableImage(path) {
+                        if (!path || typeof path !== 'string') return false;
+                        const p = path.toLowerCase();
+                        // 明确不可预览：影像/数据文件
+                        if (p.endsWith('.nii.gz') || p.endsWith('.nii') || p.endsWith('.dcm') || p.endsWith('.h5') || p.endsWith('.h5ad') || p.endsWith('.csv')) return false;
+                        // 图片扩展名一律按可展示处理（含 results/ 下 spatial 等）
+                        return /\.(png|jpe?g|gif|bmp|webp|svg)$/i.test(p);
+                    }
+                    function isNonPreviewableBadge(path) {
+                        if (!path || typeof path !== 'string') return false;
+                        const p = path.toLowerCase();
+                        return p.endsWith('.nii.gz') || p.endsWith('.nii') || p.endsWith('.dcm') || p.endsWith('.h5') || p.endsWith('.h5ad') || p.endsWith('.csv');
+                    }
+                    
                     // 🔥 辅助函数：更新调试面板（原始数据）
                     function updateDebugPanel(rawText) {
                         if (debugPanel) {
@@ -1685,6 +1749,11 @@
                                 } else {
                                     renderDiagnosisCard(data, data);
                                 }
+                                // 🔥 DRY: Render follow-up suggestions from diagnosis/report (no raw block reaches frontend)
+                                const diagnosisSuggestions = (data.report_data && data.report_data.suggestions) || data.suggestions;
+                                if (Array.isArray(diagnosisSuggestions) && diagnosisSuggestions.length > 0) {
+                                    renderSuggestions(diagnosisSuggestions);
+                                }
                                 break;
                                 
                             case 'step_result':
@@ -1733,14 +1802,19 @@
                                         renderDiagnosisCard(data.diagnosis_report, data);
                                     }
                                     // 🔥 CRITICAL FIX: 只在没有单独的 'workflow' 事件时才渲染
-                                    // 如果后端已经发送了 'workflow' 事件，这里不应该再渲染
+                                    // 传递完整 data 以包含 recommended_steps（意图驱动预选）
                                     if (data.workflow_config && !data._workflow_already_rendered) {
-                                        renderWorkflowCard(data.workflow_config);
+                                        renderWorkflowCard(data);
                                         data._workflow_already_rendered = true; // 标记已渲染
                                     }
                                 }
                                 break;
                                 
+                            case 'suggestions':
+                                // 动态跟进建议：在当前 AI 消息下方渲染垂直芯片，点击即填入并发送
+                                renderSuggestions(data);
+                                break;
+
                             case 'done':
                                 // 🔥 TASK 2: 隐藏等待气泡
                                 hideWaitingBubble();
@@ -1760,6 +1834,36 @@
                         }
                         
                         return false; // 继续处理
+                    }
+
+                    function renderSuggestions(list) {
+                        if (!Array.isArray(list) || list.length === 0) return;
+                        const cardZoneRef = window.currentMessageZones?.cardZone;
+                        const textZoneRef = window.currentMessageZones?.textZone;
+                        const messageContent = (cardZoneRef || textZoneRef)?.closest('.message-content');
+                        if (!messageContent) return;
+                        let container = messageContent.querySelector('.suggestions-container');
+                        if (!container) {
+                            container = document.createElement('div');
+                            container.className = 'suggestions-container';
+                            messageContent.appendChild(container);
+                        }
+                        container.innerHTML = '';
+                        list.forEach(function (text) {
+                            const btn = document.createElement('button');
+                            btn.type = 'button';
+                            btn.className = 'suggestion-chip';
+                            btn.innerHTML = '<span class="suggestion-chip-icon" aria-hidden="true">💡</span> ' + (String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
+                            btn.addEventListener('click', function () {
+                                const input = document.getElementById('userInput');
+                                if (input) {
+                                    input.value = text;
+                                    if (typeof checkInput === 'function') checkInput();
+                                    if (typeof sendMessage === 'function') sendMessage();
+                                }
+                            });
+                            container.appendChild(btn);
+                        });
                     }
                     
                     // 🔥 UI/UX OVERHAUL: 更新内联执行记录
@@ -2082,7 +2186,8 @@
                         }
                     }
                     
-                    // 🔥 TASK 3: Unified Report - Render diagnosis in expert insight section
+                    // 🔥 TASK 3: Unified Report - Render diagnosis (Singleton ID: #diagnosis-section-content)
+                    // Title appears EXACTLY ONCE in card header; no duplicate headers in body.
                     function renderDiagnosisCard(diagnosisData, fullData = null) {
                         const cardZoneRef = window.currentMessageZones?.cardZone || aiContentDiv;
                         
@@ -2091,132 +2196,51 @@
                             return;
                         }
                         
-                        // 🔥 TASK 4: Check if template mode - hide diagnosis during execution phase
+                        // Template mode: skip rendering
                         const hasRealStats = diagnosisData && (
                             diagnosisData.n_samples !== undefined || 
                             diagnosisData.n_features !== undefined ||
                             diagnosisData.n_cells !== undefined ||
                             diagnosisData.n_genes !== undefined
                         );
-                        
                         const isTemplateMode = diagnosisData && (
                             diagnosisData.template_mode || 
                             diagnosisData.status === 'template_ready'
                         ) && !hasRealStats;
-                        
-                        // 🔥 TASK 4: Hide template mode diagnosis during execution
                         if (isTemplateMode) {
                             console.log('ℹ️ [renderDiagnosisCard] 模板模式诊断，跳过渲染');
                             return;
                         }
                         
-                        // 🔥 REQUIREMENT 1: Find or create unified report container (prevent duplicates)
-                        let reportContainer = cardZoneRef.querySelector('.unified-report-container');
-                        if (!reportContainer) {
-                            // Create unified report container if it doesn't exist
-                            reportContainer = document.createElement('div');
-                            reportContainer.className = 'unified-report-container mt-3';
-                            reportContainer.innerHTML = `
-                                <div class="card border-0 shadow-sm">
-                                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                                        <h5 class="mb-0">
-                                            <i class="bi bi-file-earmark-text"></i> 📊 数据诊断报告
-                                        </h5>
-                                        <!-- 🔥 修复：数据诊断报告无打印按钮 -->
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="execution-results-section"></div>
-                                        <div class="expert-insight-section mt-4"></div>
-                                    </div>
-                                </div>
-                            `;
-                            cardZoneRef.appendChild(reportContainer);
-                        }
-                        
-                        const expertSection = reportContainer.querySelector('.expert-insight-section');
-                        if (!expertSection) {
-                            console.error('❌ [renderDiagnosisCard] 专家洞察区域不存在');
-                            return;
-                        }
-                        
-                        // 检查是否为结构化诊断数据
+                        // Extract diagnosis message and integrity flag
                         let diagnosisMessage = '';
                         if (typeof diagnosisData === 'string') {
                             diagnosisMessage = diagnosisData;
                         } else if (diagnosisData && diagnosisData.message) {
                             diagnosisMessage = diagnosisData.message;
                         } else {
-                            diagnosisMessage = JSON.stringify(diagnosisData, null, 2);
+                            diagnosisMessage = diagnosisData ? JSON.stringify(diagnosisData, null, 2) : '';
                         }
+                        const integrityVerified = (diagnosisData && diagnosisData.integrity_status === 'verified') ||
+                            (fullData && (fullData.integrity_status === 'verified' || (fullData.report_data && fullData.report_data.integrity_status === 'verified')));
                         
-                        // 🔥 修复：先确定报告类型，然后再进行重复检查
-                        // 🔥 REQUIREMENT 1: Dynamic Titles based on status (prevent confusion)
-                        let reportTitle = "💡 AI 专家分析报告";
-                        let reportIcon = "bi-lightbulb";
-                        
-                        // 🔥 TASK 2 FIX: 修复标题冗余问题 - 统一使用"数据诊断报告"，并检查是否已存在
-                        // 检查是否已经存在"数据诊断报告"或"数据体检报告"标题
-                        const existingTitles = expertSection.querySelectorAll('h6');
-                        let hasDataDiagnosisTitle = false;
-                        for (const existingTitle of existingTitles) {
-                            const titleText = existingTitle.textContent || '';
-                            // 检查是否已存在数据诊断相关的标题
-                            if (titleText.includes('数据诊断报告') || titleText.includes('数据体检报告')) {
-                                hasDataDiagnosisTitle = true;
-                                console.log('ℹ️ [renderDiagnosisCard] 检测到已存在数据诊断报告标题，跳过重复渲染');
-                                break;
-                            }
-                        }
-                        
-                        // 如果已存在数据诊断报告，直接返回，不重复渲染
-                        if (hasDataDiagnosisTitle) {
-                            console.log('ℹ️ [renderDiagnosisCard] 数据诊断报告已存在，跳过重复渲染');
-                            return;
-                        }
-                        
-                        // 统一使用"数据诊断报告"作为标题
-                        if (fullData) {
-                            const status = fullData.status || fullData.report_data?.status || '';
-                            // 计划阶段（数据诊断）显示"数据诊断报告"
-                            if (status === 'data_ready' || status === 'template_ready' || diagnosisMessage.includes('数据体检') || diagnosisMessage.includes('数据概况') || diagnosisMessage.includes('数据诊断')) {
-                                reportTitle = "📊 数据诊断报告";  // 🔥 TASK 2 FIX: 统一使用"数据诊断报告"
-                                reportIcon = "bi-clipboard-check";
-                            }
-                        }
-                        
-                        // 🔥 修复：检查是否已存在AI专家分析报告，避免重复渲染
-                        for (const existingTitle of existingTitles) {
-                            const titleText = existingTitle.textContent || '';
-                            // 如果是AI专家分析报告，且当前也要渲染AI专家分析报告，则跳过
-                            if (titleText.includes('AI 专家分析报告') && reportTitle.includes('AI 专家分析报告')) {
-                                console.log('ℹ️ [renderDiagnosisCard] AI专家分析报告已存在，跳过重复渲染');
-                                return;
-                            }
-                        }
-                        
-                        // 🔥 Phase 4: Extract reasoning content from <think> tags (DeepSeek-R1 format)
+                        // Extract thinking content (<think> tags)
                         let thinkingContent = '';
                         let reportContent = diagnosisMessage;
-                        
-                        // Match various thinking tag formats (DeepSeek-R1 uses <think>...</think>)
                         const thinkPatterns = [
-                            /<think>(.*?)<\/think>/gs,  // DeepSeek-R1 standard format
-                            /<think>(.*?)<\/redacted_reasoning>/gs,  // Alternative format
-                            /<reasoning>(.*?)<\/reasoning>/gs  // Generic format
+                            /<think>(.*?)<\/think>/gs,
+                            /<think>(.*?)<\/redacted_reasoning>/gs,
+                            /<reasoning>(.*?)<\/reasoning>/gs
                         ];
-                        
                         for (const pattern of thinkPatterns) {
                             const matches = [...diagnosisMessage.matchAll(pattern)];
                             if (matches && matches.length > 0) {
-                                // Extract all thinking content
                                 thinkingContent = matches.map(m => m[1]).join('\n\n');
-                                // Remove thinking tags from report content
                                 reportContent = diagnosisMessage.replace(pattern, '').trim();
                                 break;
                             }
                         }
                         
-                        // 🔥 Phase 4: Build HTML with collapsible thinking section
                         let thinkingHtml = '';
                         if (thinkingContent) {
                             const thinkingId = `thinking-${Date.now()}`;
@@ -2234,22 +2258,66 @@
                             `;
                         }
                         
-                        // 🔥 修复：追加到expert insight section，而不是替换，使数据诊断报告和AI专家分析报告能够共存
-                        const diagnosisHtml = `
-                            <div class="diagnosis-report-item" style="margin-bottom: 30px;">
-                                <h6 class="mb-3">
-                                    <i class="bi ${reportIcon}"></i> ${reportTitle}
-                                </h6>
-                                ${thinkingHtml}
-                                <div class="expert-report-content" style="font-size: 14px; line-height: 1.8; color: #333; background: #f0f7ff; padding: 20px; border-radius: 8px; border-left: 4px solid #4d6bfe;">
-                                    ${safeMarkedParse(reportContent)}
-                                </div>
+                        const integrityBadge = integrityVerified
+                            ? '<p class="mb-2 small text-success"><i class="bi bi-shield-check"></i> 数据完整性校验通过</p>'
+                            : '';
+                        
+                        const bodyHtml = `
+                            ${integrityBadge}
+                            ${thinkingHtml}
+                            <div class="expert-report-content" style="font-size: 14px; line-height: 1.8; color: #333; background: #f0f7ff; padding: 20px; border-radius: 8px; border-left: 4px solid #4d6bfe;">
+                                ${safeMarkedParse(reportContent)}
                             </div>
                         `;
                         
-                        // 追加而不是替换，使多个报告能够共存
-                        expertSection.insertAdjacentHTML('beforeend', diagnosisHtml);
-                        console.log(`✅ [renderDiagnosisCard] ${reportTitle}已渲染到统一报告容器${thinkingContent ? ' (包含思考过程)' : ''}`);
+                        // Singleton: find unified-report-container, then #diagnosis-section-content
+                        let reportContainer = cardZoneRef.querySelector('.unified-report-container');
+                        let contentEl = reportContainer ? reportContainer.querySelector('#diagnosis-section-content') : null;
+                        
+                        if (contentEl) {
+                            // UPDATE existing content only (no new title)
+                            contentEl.innerHTML = bodyHtml;
+                            console.log('✅ [renderDiagnosisCard] 已更新诊断内容 (diagnosis-section-content)');
+                            return;
+                        }
+                        
+                        // CREATE section once: card with single header + diagnosis-section-content
+                        if (!reportContainer) {
+                            reportContainer = document.createElement('div');
+                            reportContainer.className = 'unified-report-container mt-3';
+                            reportContainer.innerHTML = `
+                                <div class="card border-0 shadow-sm">
+                                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0">
+                                            <i class="bi bi-file-earmark-text"></i> 📊 数据诊断报告
+                                        </h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="execution-results-section"></div>
+                                        <div class="expert-insight-section mt-4">
+                                            <div id="diagnosis-section-content"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                            cardZoneRef.appendChild(reportContainer);
+                        } else {
+                            // Container exists but no #diagnosis-section-content (e.g. created by renderExecutionSteps)
+                            const expertSection = reportContainer.querySelector('.expert-insight-section');
+                            if (expertSection) {
+                                contentEl = document.createElement('div');
+                                contentEl.id = 'diagnosis-section-content';
+                                expertSection.appendChild(contentEl);
+                            }
+                        }
+                        
+                        contentEl = reportContainer.querySelector('#diagnosis-section-content');
+                        if (contentEl) {
+                            contentEl.innerHTML = bodyHtml;
+                            console.log('✅ [renderDiagnosisCard] 已渲染诊断报告（标题仅显示一次）');
+                        } else {
+                            console.error('❌ [renderDiagnosisCard] 无法创建或找到 #diagnosis-section-content');
+                        }
                     }
                     
                     // 🔥 TASK 3: Unified Report Container - Create or update single report card
@@ -2308,6 +2376,16 @@
                             const stepStatus = step.status || 'pending';
                             const stepError = step.error || step.message || '';
                             const stepId = `step-${index}-${accordionId}`;
+                            
+                            // 🔥 Error transparency: log full traceback to console for debugging
+                            if (stepStatus === 'error') {
+                                const tb = step.traceback || step.debug_info || '';
+                                if (tb) {
+                                    console.error('❌ Step Failed:', stepName, '\nTraceback:\n', tb);
+                                } else {
+                                    console.error('❌ Step Failed:', stepName, '\nError:', stepError);
+                                }
+                            }
                             
                             // 状态图标和颜色
                             let statusIcon = '⚪'; // 默认：待执行
@@ -2375,52 +2453,87 @@
                                     `;
                                 }
                                 
-                                // Render plot image
+                                // Render plot / result file: .png/.jpg/.svg 等一律 <img>；仅 .nii/.dcm/.h5/.csv 显示「不可预览」徽章
                                 if (plotPath) {
-                                    // Normalize image path
-                                    let imageUrl = plotPath;
-                                    if (!imageUrl.startsWith('/')) {
-                                        // Remove /app/results prefix if present
-                                        imageUrl = imageUrl.replace(/^\/app\/results\//, '').replace(/^\/app\//, '');
-                                        imageUrl = imageUrl.replace(/^results\//, '');
-                                        imageUrl = imageUrl.startsWith('/') ? imageUrl : `/results/${imageUrl}`;
-                                    }
-                                    
-                                    resultContentHtml += `
-                                        <div class="mt-2">
-                                            <img src="${imageUrl}" 
-                                                 class="img-fluid rounded shadow-sm" 
-                                                 alt="${stepName} 结果图" 
-                                                 style="max-width: 100%; height: auto; cursor: pointer;"
-                                                 onclick="openLightbox(this.src)"
-                                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                                            <p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${imageUrl}</p>
-                                        </div>
-                                    `;
-                                }
-                                
-                                // Render images array
-                                if (images && images.length > 0) {
-                                    images.forEach((imgPath, idx) => {
-                                        // Normalize image path
-                                        let imageUrl = imgPath;
+                                    if (isDisplayableImage(plotPath)) {
+                                        let imageUrl = plotPath;
+                                        imageUrl = imageUrl.replace(/^\/app\/results\//, '').replace(/^\/app\/uploads\//, '').replace(/^\/app\//, '');
+                                        if (imageUrl.startsWith('results/')) imageUrl = imageUrl.replace(/^results\//, '');
+                                        if (imageUrl.startsWith('uploads/')) imageUrl = imageUrl.replace(/^uploads\//, '');
                                         if (!imageUrl.startsWith('/')) {
-                                            imageUrl = imageUrl.replace(/^\/app\/results\//, '').replace(/^\/app\//, '');
-                                            imageUrl = imageUrl.replace(/^results\//, '');
-                                            imageUrl = imageUrl.startsWith('/') ? imageUrl : `/results/${imageUrl}`;
+                                            imageUrl = (plotPath && plotPath.indexOf('uploads') !== -1) ? `/uploads/${imageUrl}` : `/results/${imageUrl}`;
                                         }
-                                        
                                         resultContentHtml += `
                                             <div class="mt-2">
                                                 <img src="${imageUrl}" 
                                                      class="img-fluid rounded shadow-sm" 
-                                                     alt="${stepName} 结果图 ${idx + 1}" 
+                                                     alt="${stepName} 结果图" 
                                                      style="max-width: 100%; height: auto; cursor: pointer;"
                                                      onclick="openLightbox(this.src)"
                                                      onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
                                                 <p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${imageUrl}</p>
                                             </div>
                                         `;
+                                    } else if (isNonPreviewableBadge(plotPath)) {
+                                        resultContentHtml += `
+                                            <div class="mt-2">
+                                                <div class="alert alert-light border d-flex align-items-center" role="alert">
+                                                    <i class="bi bi-file-earmark-medical text-secondary me-2"></i>
+                                                    <span>3D 影像/数据文件（不可预览）</span>
+                                                    <code class="ms-2 small text-muted">${escapeHtml(plotPath.split(/[/\\]/).pop() || plotPath)}</code>
+                                                </div>
+                                            </div>
+                                        `;
+                                    } else {
+                                        resultContentHtml += `
+                                            <div class="mt-2">
+                                                <span class="badge bg-secondary">结果文件</span>
+                                                <code class="ms-2 small text-muted">${escapeHtml(plotPath.split(/[/\\]/).pop() || plotPath)}</code>
+                                            </div>
+                                        `;
+                                    }
+                                }
+                                
+                                // Render images array: .png/.jpg/.svg 一律 <img>，仅 .nii/.dcm/.h5/.csv 显示不可预览徽章
+                                if (images && images.length > 0) {
+                                    images.forEach((imgPath, idx) => {
+                                        if (isDisplayableImage(imgPath)) {
+                                            let imageUrl = imgPath;
+                                            imageUrl = imageUrl.replace(/^\/app\/results\//, '').replace(/^\/app\/uploads\//, '').replace(/^\/app\//, '');
+                                            if (imageUrl.startsWith('results/')) imageUrl = imageUrl.replace(/^results\//, '');
+                                            if (imageUrl.startsWith('uploads/')) imageUrl = imageUrl.replace(/^uploads\//, '');
+                                            if (!imageUrl.startsWith('/')) {
+                                                imageUrl = (imgPath && imgPath.indexOf('uploads') !== -1) ? `/uploads/${imageUrl}` : `/results/${imageUrl}`;
+                                            }
+                                            resultContentHtml += `
+                                                <div class="mt-2">
+                                                    <img src="${imageUrl}" 
+                                                         class="img-fluid rounded shadow-sm" 
+                                                         alt="${stepName} 结果图 ${idx + 1}" 
+                                                         style="max-width: 100%; height: auto; cursor: pointer;"
+                                                         onclick="openLightbox(this.src)"
+                                                         onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                                                    <p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${imageUrl}</p>
+                                                </div>
+                                            `;
+                                        } else if (isNonPreviewableBadge(imgPath)) {
+                                            resultContentHtml += `
+                                                <div class="mt-2">
+                                                    <div class="alert alert-light border d-flex align-items-center" role="alert">
+                                                        <i class="bi bi-file-earmark-medical text-secondary me-2"></i>
+                                                        <span>数据文件（不可预览）</span>
+                                                        <code class="ms-2 small text-muted">${escapeHtml(String(imgPath).split(/[/\\]/).pop() || imgPath)}</code>
+                                                    </div>
+                                                </div>
+                                            `;
+                                        } else {
+                                            resultContentHtml += `
+                                                <div class="mt-2">
+                                                    <span class="badge bg-secondary">结果文件</span>
+                                                    <code class="ms-2 small text-muted">${escapeHtml(String(imgPath).split(/[/\\]/).pop() || imgPath)}</code>
+                                                </div>
+                                            `;
+                                        }
                                     });
                                 }
                                 
@@ -2508,6 +2621,12 @@
                                                             <details class="mt-2">
                                                                 <summary class="small text-muted" style="cursor: pointer;">查看技术细节</summary>
                                                                 <pre class="small mt-2 p-2 bg-light rounded" style="max-height: 200px; overflow-y: auto; font-size: 11px;">${escapeHtml(step.technical_details)}</pre>
+                                                            </details>
+                                                        ` : ''}
+                                                        ${(step.traceback || step.debug_info) ? `
+                                                            <details class="mt-2">
+                                                                <summary class="small text-muted" style="cursor: pointer;">完整 Traceback（调试用）</summary>
+                                                                <pre class="small mt-2 p-2 bg-dark text-light rounded" style="max-height: 300px; overflow-y: auto; font-size: 10px; white-space: pre-wrap;">${escapeHtml(step.traceback || step.debug_info)}</pre>
                                                             </details>
                                                         ` : ''}
                                                     </div>
@@ -2676,6 +2795,8 @@
                         if (!window.workflowCache) {
                             window.workflowCache = {};
                         }
+                        // 🔥 INTENT CONSISTENCY: 使用 lastSentQuery（发送时保存），确保上传后重新发送时与用户意图一致
+                        const originalQueryForCache = window.lastSentQuery || userInput.value.trim() || '继续分析';
                         // 🔥 TASK 2 & 3 FIX: 确保缓存包含推荐和诊断数据
                         window.workflowCache[formId] = {
                             workflowData: {
@@ -2683,7 +2804,7 @@
                                 recommendation: workflowData.recommendation || null,
                                 diagnosis_report: workflowData.diagnosis_report || null
                             },
-                            originalQuery: userInput.value.trim() || '继续分析'
+                            originalQuery: originalQueryForCache
                         };
                         
                         let formHtml = `<div class="alert alert-success mt-3 params-form" id="${workflowCardId}" data-form-id="${formId}" style="border-left: 4px solid #28a745;">
@@ -2694,7 +2815,7 @@
                         
                         // 🔥 Task 1: Template Mode - Upload Button
                         if (isTemplateMode) {
-                            const originalQuery = userInput.value.trim() || '继续分析';
+                            const originalQuery = window.lastSentQuery || userInput.value.trim() || '继续分析';
                             const workflowId = formId;
                             
                             formHtml += `
@@ -2747,13 +2868,27 @@
                             formHtml += `<p class="text-muted">请确认或修改每一步的参数：</p>
                                 <div class="accordion" id="acc-${formId}">`;
                             
+                            // 🔥 INTENT-DRIVEN PRE-SELECTION: recommended_steps 空=全选，非空=仅勾选列表内
+                            // 支持顶层 + workflow_config 内（后端双写）
+                            const recommendedSteps = workflowData.recommended_steps || workflowData.recommended_step_ids || 
+                                workflowData.workflow_config?.recommended_steps || workflowData.workflow_data?.recommended_steps || [];
+                            if (recommendedSteps.length > 0) {
+                                console.log(`✅ [renderWorkflowCard] 意图预选: recommended_steps=${JSON.stringify(recommendedSteps)}`);
+                            }
                             workflowSteps.forEach((step, index) => {
                                 const stepId = `step-${index}-${formId}`;
                                 const stepName = step.name || step.step_name || step.id || step.tool_id || `步骤 ${index + 1}`;
                                 const toolId = step.tool_id || step.tool || '';
                                 const stepDesc = step.desc || step.description || step.SOP规则 || '';
                                 const stepParams = step.params || {};
-                                const isSelected = step.selected !== false; // Default to selected
+                                // 🔥 防回退: step_id / id / tool_id 兼容（后端 generate_template 统一用 step_id）
+                                const stepIdForCheck = step.step_id || step.id || toolId;
+                                let isSelected = true;  // 默认全选
+                                if (recommendedSteps && recommendedSteps.length > 0) {
+                                    isSelected = recommendedSteps.includes(stepIdForCheck);
+                                } else if (step.selected === false) {
+                                    isSelected = false;  // 兼容后端显式 selected
+                                }
                                 
                                 formHtml += `<div class="accordion-item">
                                     <h2 class="accordion-header d-flex align-items-center">
@@ -4247,28 +4382,50 @@
                     imagePath = keyStep.data.images[0];
                 }
                 
-                // 标准化图片路径
-                if (imagePath) {
-                    // 移除 Docker 内部路径，确保以 /results/ 开头
+                if (imagePath && isDisplayableImage(imagePath)) {
                     let normalizedPath = imagePath.replace(/^\/app\/results\//, '').replace(/^\/app\//, '');
                     normalizedPath = normalizedPath.replace(/^results\//, '');
                     if (!normalizedPath.startsWith('/results/')) {
                         normalizedPath = '/results/' + normalizedPath;
                     }
-                    imagePath = normalizedPath;
-                }
-
-                keyPlotHtml = `
+                    keyPlotHtml = `
                     <div class="report-section">
                         <h6>3. ${plotTitle}</h6>
                         <div class="card border-0 shadow-sm">
                             <div class="card-body text-center">
-                                <img src="${imagePath}" style="max-width:95%; border-radius:8px; cursor:zoom-in;" onclick="openLightbox(this.src)" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                                <p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${imagePath}</p>
+                                <img src="${normalizedPath}" style="max-width:95%; border-radius:8px; cursor:zoom-in;" onclick="openLightbox(this.src)" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                                <p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${normalizedPath}</p>
                                 ${keyStep.summary ? `<p class="mt-2 text-secondary">${keyStep.summary}</p>` : ''}
                             </div>
                         </div>
                     </div>`;
+                } else if (imagePath) {
+                    keyPlotHtml = `
+                    <div class="report-section">
+                        <h6>3. ${plotTitle}</h6>
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <div class="alert alert-light border d-flex align-items-center" role="alert">
+                                    <i class="bi bi-file-earmark-medical text-secondary me-2"></i>
+                                    <span>3D 影像/数据文件（不可预览）</span>
+                                    <code class="ms-2 small text-muted">${escapeHtml(String(imagePath).split(/[/\\]/).pop() || imagePath)}</code>
+                                </div>
+                                ${keyStep.summary ? `<p class="mt-2 text-secondary">${keyStep.summary}</p>` : ''}
+                            </div>
+                        </div>
+                    </div>`;
+                } else {
+                    keyPlotHtml = `
+                    <div class="report-section">
+                        <h6>3. ${plotTitle}</h6>
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body text-center text-muted">
+                                <i class="bi bi-image"></i> 无图片预览
+                                ${keyStep.summary ? `<p class="mt-2 text-secondary">${keyStep.summary}</p>` : ''}
+                            </div>
+                        </div>
+                    </div>`;
+                }
             } else {
                 // 全程无图 (纯预处理)
                 keyPlotHtml = `
@@ -4308,7 +4465,7 @@
                         contentHtml += `<div class="alert alert-info mb-3"><strong>📋 摘要：</strong>${step.summary}</div>`;
                     }
                     
-                    // 2. 处理图片路径（支持多种格式）
+                    // 2. 处理图片路径（格式感知：仅可展示图片用 <img>，数据文件用徽章）
                     let imagePath = null;
                     if (step.data && step.data.image) {
                         imagePath = step.data.image;
@@ -4318,23 +4475,19 @@
                         imagePath = step.data.images[0];
                     }
                     
-                    // 修复图片路径：移除 Docker 内部路径，确保以 /results/ 开头
                     if (imagePath) {
-                        // 移除 /app/results 前缀
-                        let normalizedPath = imagePath.replace(/^\/app\/results\//, '').replace(/^\/app\//, '');
-                        // 移除 results/ 前缀（如果存在）
-                        normalizedPath = normalizedPath.replace(/^results\//, '');
-                        // 确保以 /results/ 开头
-                        if (!normalizedPath.startsWith('/results/')) {
-                            normalizedPath = '/results/' + normalizedPath;
-                        }
-                        
-                        // 如果该步骤的图已经被作为 Key Plot 展示了，这里就不重复展示大图
-                    const isKeyPlot = keyStep && keyStep.name === step.name;
+                        const isKeyPlot = keyStep && keyStep.name === step.name;
                         if (isKeyPlot) {
                             contentHtml += `<div class="mt-2 small text-muted"><i class="bi bi-image"></i> 图片已在下方"最终结果"区域展示</div>`;
-                        } else {
+                        } else if (isDisplayableImage(imagePath)) {
+                            let normalizedPath = imagePath.replace(/^\/app\/results\//, '').replace(/^\/app\//, '');
+                            normalizedPath = normalizedPath.replace(/^results\//, '');
+                            if (!normalizedPath.startsWith('/results/')) {
+                                normalizedPath = '/results/' + normalizedPath;
+                            }
                             contentHtml += `<div class="mt-2 mb-3"><img src="${normalizedPath}" class="img-fluid rounded border" style="max-width:100%; cursor:zoom-in;" onclick="openLightbox(this.src)" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"><p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${normalizedPath}</p></div>`;
+                        } else {
+                            contentHtml += `<div class="mt-2 mb-3"><div class="alert alert-light border d-flex align-items-center" role="alert"><i class="bi bi-file-earmark-medical text-secondary me-2"></i><span>3D 影像/数据文件（不可预览）</span><code class="ms-2 small text-muted">${escapeHtml(String(imagePath).split(/[/\\]/).pop() || imagePath)}</code></div></div>`;
                         }
                     }
                     
@@ -4505,8 +4658,8 @@
             
             // 🔥 ARCHITECTURAL FIX: 如果是模板模式，显示蓝色上传按钮
             if (isTemplateMode) {
-                // 保存原始查询以便上传后重新发送
-                const originalQuery = userInput.value.trim() || '继续分析';
+                // 🔥 INTENT CONSISTENCY: 使用 lastSentQuery（发送时保存），确保上传后重新发送时与用户意图一致
+                const originalQuery = window.lastSentQuery || userInput.value.trim() || '继续分析';
                 const workflowId = formId;
                 
                 // 🔥 CRITICAL FIX: 使用全局缓存存储工作流数据

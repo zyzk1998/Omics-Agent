@@ -172,6 +172,7 @@ PERSONA_RULE = """
   - Avoid numbered lists in first messages
   - End with a question to keep conversation flowing
   - Never say "My workflow includes 1, 2, 3..."—just help naturally
+- **Follow-up suggestions**: At the very end of your response, generate 1 or 2 relevant follow-up questions the user might ask next, as a hidden JSON block. Format strictly: <<<SUGGESTIONS>>>["Question 1", "Question 2"]<<<END_SUGGESTIONS>>>. Do not output this block if the conversation is ending (e.g., goodbye).
 """
 
 EXPERT_ROLES = {
@@ -341,6 +342,7 @@ Example:
 - Be specific with numbers and reasoning
 - Focus on data-driven recommendations
 - Use Chinese for all content
+- At the very end of your response, generate 1 or 2 follow-up questions as a hidden block: <<<SUGGESTIONS>>>["Question 1", "Question 2"]<<<END_SUGGESTIONS>>>. Omit this block if the reply is a closing (e.g., goodbye).
 """
 
 # RNA 报告模板（单独定义，因为包含动态占位符）
@@ -375,6 +377,7 @@ Please write a **Final Analysis Report** in Simplified Chinese (简体中文).
 - Be concise but informative
 - Focus on biological insights
 - Use Chinese for all content
+- At the very end, add 1 or 2 follow-up questions as a hidden block: <<<SUGGESTIONS>>>["Question 1", "Question 2"]<<<END_SUGGESTIONS>>>. Omit if the report is a closing.
 """
 
 

@@ -9,6 +9,7 @@ from openai import AuthenticationError, APIError
 from ..core.llm_client import LLMClient
 from ..core.prompt_manager import PromptManager, DATA_DIAGNOSIS_PROMPT
 from ..core.data_diagnostician import DataDiagnostician
+from ..core.stream_utils import strip_suggestions_from_text
 
 logger = logging.getLogger(__name__)
 
@@ -417,9 +418,10 @@ class BaseAgent(ABC):
                 return None
             
             stats = diagnosis_result.get("stats", {})
-            logger.info(f"✅ [DataDiagnostician] 统计计算完成: {len(stats)} 个指标")
-            
-            # Step 2: 构建 LLM Prompt
+            omics_type = diagnosis_result.get("omics_type") or ""
+            logger.info(f"✅ [DataDiagnostician] 统计计算完成: {len(stats)} 个指标, omics_type={omics_type}")
+
+            # Step 2: 构建 LLM Prompt（按领域选择模板，Radiomics 使用影像专用模板）
             # 将统计事实格式化为 JSON 字符串
             import json
             try:
@@ -474,30 +476,52 @@ class BaseAgent(ABC):
                 logger.warning(f"⚠️ 提取文件预览失败: {head_err}")
                 head_preview = "无法提取数据预览"
             
-            # 使用 PromptManager 获取诊断模板
+            # 使用 PromptManager 获取诊断模板（按 omics_type 选择领域专用模板）
             try:
-                # 🔥 确保只传递字符串给模板，不传递字典
-                prompt = self.prompt_manager.get_prompt(
-                    "data_diagnosis",
-                    {
-                        "inspection_data": stats_json,  # 字符串
-                        "head_preview": head_preview[:500] if head_preview else ""  # 字符串，截断到 500 字符
-                    },
-                    fallback=DATA_DIAGNOSIS_PROMPT.format(inspection_data=stats_json)
-                )
+                if (omics_type or "").lower() in ("radiomics", "medical_image", "imaging") or stats.get("_imaging_only"):
+                    from ..core.prompts.radiomics_prompts import RADIOMICS_DIAGNOSIS_TEMPLATE
+                    dimensions = stats.get("dimensions_str", "N/A")
+                    spacing = stats.get("spacing_str", "N/A")
+                    mask_status = "已提供" if stats.get("mask_present") else "未提供"
+                    origin = stats.get("origin")
+                    origin_str = str(origin) if origin is not None else "N/A"
+                    prompt = self.prompt_manager.get_prompt(
+                        "data_diagnosis_radiomics",
+                        {
+                            "dimensions": dimensions,
+                            "spacing": spacing,
+                            "mask_status": mask_status,
+                            "origin": origin_str,
+                            "inspection_data": stats_json,
+                        },
+                        fallback=RADIOMICS_DIAGNOSIS_TEMPLATE
+                    )
+                else:
+                    prompt = self.prompt_manager.get_prompt(
+                        "data_diagnosis",
+                        {
+                            "inspection_data": stats_json,
+                            "head_preview": head_preview[:500] if head_preview else "",
+                        },
+                        fallback=DATA_DIAGNOSIS_PROMPT.format(inspection_data=stats_json)
+                    )
                 logger.debug(f"📝 [DEBUG] Prompt length: {len(prompt)}")
             except Exception as prompt_err:
                 logger.warning(f"⚠️ 获取诊断模板失败，使用默认模板: {prompt_err}")
                 try:
-                    # 🔥 安全地格式化 prompt，避免 format 错误
-                    # 确保 stats_json 是字符串
                     if not isinstance(stats_json, str):
                         stats_json = json.dumps(stats_json, ensure_ascii=False)
-                    prompt = DATA_DIAGNOSIS_PROMPT.format(inspection_data=stats_json)
+                    if (omics_type or "").lower() in ("radiomics", "medical_image", "imaging") or stats.get("_imaging_only"):
+                        from ..core.prompts.radiomics_prompts import RADIOMICS_DIAGNOSIS_TEMPLATE
+                        dimensions = stats.get("dimensions_str", "N/A")
+                        spacing = stats.get("spacing_str", "N/A")
+                        mask_status = "已提供" if stats.get("mask_present") else "未提供"
+                        origin_str = str(stats.get("origin", "N/A"))
+                        prompt = RADIOMICS_DIAGNOSIS_TEMPLATE.replace("{{ dimensions }}", dimensions).replace("{{ spacing }}", spacing).replace("{{ mask_status }}", mask_status).replace("{{ origin }}", origin_str).replace("{{ inspection_data }}", stats_json)
+                    else:
+                        prompt = DATA_DIAGNOSIS_PROMPT.format(inspection_data=stats_json)
                 except Exception as format_err:
                     logger.error(f"❌ [DataDiagnostician] Prompt 格式化失败: {format_err}")
-                    # 使用简单的 prompt
-                    # 🔥 确保 stats_json 是字符串
                     if not isinstance(stats_json, str):
                         stats_json = json.dumps(stats_json, ensure_ascii=False)
                     prompt = f"""You are a Senior Bioinformatician specializing in {omics_type}.
@@ -519,9 +543,11 @@ Create a Markdown table with parameter recommendations.
 Use Simplified Chinese for all content."""
             
             # Step 3: 调用 LLM 生成 Markdown 报告
-            # 🔥 CRITICAL FIX: 强制注入统计数据到系统提示，防止 LLM 产生幻觉
+            # 🔥 CRITICAL FIX: 强制注入统计数据到系统提示，防止 LLM 产生幻觉（按领域区分）
             stats_facts = []
-            if omics_type.lower() in ["metabolomics", "metabolomic", "metabonomics"]:
+            if (omics_type or "").lower() in ("radiomics", "medical_image", "imaging") or stats.get("_imaging_only"):
+                stats_facts.append(f"影像尺寸: {stats.get('dimensions_str', 'N/A')}；层厚/间距: {stats.get('spacing_str', 'N/A')}；掩膜: {'已提供' if stats.get('mask_present') else '未提供'}。")
+            elif omics_type.lower() in ["metabolomics", "metabolomic", "metabonomics"]:
                 n_samples = stats.get("n_samples", 0)
                 n_metabolites = stats.get("n_metabolites", 0)
                 missing_rate = stats.get("missing_rate", 0)
@@ -620,7 +646,10 @@ Use Simplified Chinese for all content."""
                 logger.debug(f"📝 [DEBUG] LLM completion: {completion}")
                 
                 think_content, response = llm_client_to_use.extract_think_and_content(completion)
-                
+                # 🔥 DRY: Strip <<<SUGGESTIONS>>> block so it never reaches the frontend
+                if response:
+                    response, suggestions = strip_suggestions_from_text(response)
+                    self.context["diagnosis_suggestions"] = suggestions
                 # 🔥 DEBUG: 打印诊断报告信息
                 if response:
                     logger.info(f"✅ [DataDiagnostician] 诊断报告生成成功，长度: {len(response)}")
@@ -1215,6 +1244,15 @@ Use Simplified Chinese for all content."""
 - 降维分析（PCA、UMAP）
 - 细胞聚类和标记基因识别
 """
+            elif omics_type.lower() in ["spatial", "visium", "spatial transcriptomics"]:
+                expert_role = "空间转录组学分析专家"
+                domain_context = """
+- 10x Visium 数据：Spot 级基因表达与空间坐标（obsm['spatial']）
+- 质量控制与标准化、PCA 降维、Leiden 聚类
+- 空间邻域图、空间自相关（Moran's I）识别空间可变基因（SVGs）
+- 空间图按聚类/基因着色
+**重要**：使用空间组学术语（Spots、Clusters、Spatial Domains、Gene Expression、Moran's I、SVGs）。不要使用代谢组学术语（代谢物、LC-MS、差异代谢物等）。
+"""
             else:
                 expert_role = "生物信息学分析专家"
                 domain_context = "通用组学数据分析流程"
@@ -1242,8 +1280,19 @@ Use Simplified Chinese for all content."""
             # 🔥 TASK 3: Extract Key Findings with SPECIFIC metrics (Feed the Brain)
             # 🔥 修复：根据omics_type初始化不同的key_findings结构
             is_rna_analysis = omics_type.lower() in ["scrna", "scrna-seq", "single_cell", "single-cell", "rna", "rna-seq"]
+            is_spatial_analysis = omics_type.lower() in ["spatial", "visium", "spatial transcriptomics"]
             
-            if is_rna_analysis:
+            if is_spatial_analysis:
+                key_findings = {
+                    "n_spots": "N/A",
+                    "n_genes": "N/A",
+                    "pca_variance": {"PC1": "N/A", "PC2": "N/A"},
+                    "n_clusters": "N/A",
+                    "spatial_domains": "N/A",
+                    "top_svgs": [],  # 空间可变基因
+                    "moran_i_summary": "N/A"
+                }
+            elif is_rna_analysis:
                 key_findings = {
                     "n_cells": "N/A",
                     "n_genes": "N/A",
@@ -1319,15 +1368,31 @@ Use Simplified Chinese for all content."""
                         pc2_val = str(pc2_var)
                     
                     key_findings["pca_variance"] = {"PC1": pc1_val, "PC2": pc2_val}
-                    # 🔥 修复：pca_separation只在代谢组学分析中存在
-                    if not is_rna_analysis:
+                    # 🔥 修复：pca_separation只在代谢组学分析中存在（非 RNA、非 Spatial）
+                    if not is_rna_analysis and not is_spatial_analysis:
                         if separation == "clear":
                             key_findings["pca_separation"] = f"清晰分离 (PC1: {pc1_var}, PC2: {pc2_var})"
                         else:
                             key_findings["pca_separation"] = f"中等分离 (PC1: {pc1_var}, PC2: {pc2_var})"
                 
-                # 🔥 修复：只提取关键计数，不包含完整的top_up/top_down列表（仅代谢组学）
-                if not is_rna_analysis and "differential" in step_name:
+                # 🔥 空间组学：从 load_data/qc_norm 提取 n_spots、n_genes；从 cluster 提取 n_clusters；从 spatial_autocorr 提取 Moran's I、SVGs
+                if is_spatial_analysis:
+                    if "load" in step_name or "qc" in step_name or "norm" in step_name:
+                        if "n_obs" in step_info or "n_spots" in step_info:
+                            key_findings["n_spots"] = step_info.get("n_spots", step_info.get("n_obs", "N/A"))
+                        if "n_vars" in step_info or "n_genes" in step_info:
+                            key_findings["n_genes"] = step_info.get("n_genes", step_info.get("n_vars", "N/A"))
+                    if "cluster" in step_name and "marker" not in step_name:
+                        if "n_clusters" in step_info:
+                            key_findings["n_clusters"] = step_info.get("n_clusters", "N/A")
+                    if "spatial_autocorr" in step_name or "moran" in step_name:
+                        key_findings["moran_i_summary"] = step_info.get("summary", step_info.get("n_svgs", "N/A"))
+                        svgs = step_info.get("top_svgs", step_info.get("var_names", []))
+                        if isinstance(svgs, list) and svgs:
+                            key_findings["top_svgs"] = list(svgs)[:5]
+                
+                # 🔥 修复：只提取关键计数，不包含完整的top_up/top_down列表（仅代谢组学，非 Spatial）
+                if not is_rna_analysis and not is_spatial_analysis and "differential" in step_name:
                     sig_count = step_info.get("significant_count", "N/A")
                     total_count = step_info.get("total_count", "N/A")
                     # 🔥 不提取top_up和top_down列表（可能很长），只使用计数
@@ -1350,8 +1415,8 @@ Use Simplified Chinese for all content."""
                         # Fallback to top_up_names（如果存在）
                         key_findings["top_differential_metabolites"] = step_info.get("top_up_names", [])[:3]
                 
-                # 🔥 修复：只提取top VIP代谢物名称，不包含完整数据（仅代谢组学）
-                if not is_rna_analysis and ("plsda" in step_name or "pls-da" in step_name):
+                # 🔥 修复：只提取top VIP代谢物名称，不包含完整数据（仅代谢组学，非 Spatial）
+                if not is_rna_analysis and not is_spatial_analysis and ("plsda" in step_name or "pls-da" in step_name):
                     top_vip = step_info.get("top_vip_markers", [])
                     if top_vip:
                         # Extract metabolite NAMES only (for biological interpretation)
@@ -1359,8 +1424,8 @@ Use Simplified Chinese for all content."""
                             v.get('name', 'Unknown') for v in top_vip[:3]  # 🔥 只保留top 3
                         ]
                 
-                # 🔥 修复：只提取top通路名称，不包含完整数据（仅代谢组学）
-                if not is_rna_analysis and ("pathway" in step_name or "enrichment" in step_name):
+                # 🔥 修复：只提取top通路名称，不包含完整数据（仅代谢组学，非 Spatial）
+                if not is_rna_analysis and not is_spatial_analysis and ("pathway" in step_name or "enrichment" in step_name):
                     top_pathways = step_info.get("top_pathways", [])
                     if top_pathways:
                         # Extract pathway NAMES only (for biological interpretation)
@@ -1408,6 +1473,60 @@ Use Simplified Chinese for all content."""
             
             logger.info(f"📊 [AnalysisSummary] execution_results_text长度: {len(execution_results_text)}字符")
             
+            if is_spatial_analysis:
+                critical_instruction_text = "Based on the provided metrics above, interpret the **spatial transcriptomics** (10x Visium) results. Use terminology: Spots, Clusters, Spatial Domains, Gene Expression, Moran's I, Spatially Variable Genes (SVGs). Do NOT mention metabolites, LC-MS, or metabolomics. Generate a structured Markdown report with spatial biology interpretation."
+            else:
+                critical_instruction_text = "Based on the provided metrics above, interpret the biological significance. Use your internal knowledge base (PubMed/Literature) to explain **WHY** these specific metabolites/pathways might be altered in this context. Generate a structured Markdown report with deep biological interpretation."
+            
+            # 空间组学使用专用输出结构，禁止出现代谢物/LC-MS 等术语
+            if is_spatial_analysis:
+                output_structure_section = """
+### 1. 统计概览 (Statistical Overview) — 空间转录组
+- 定量总结：Spot 数量、基因数量、Leiden 聚类数、PCA 方差解释（PC1/PC2）
+- 数据质量与组织结构（H&E）简要评估
+- 空间域（Spatial Domains）与整体数据特征
+
+### 2. 空间聚类与基因表达 (Spatial Clusters & Gene Expression)
+- **空间聚类**：Leiden 聚类结果与空间分布
+- **空间可变基因（SVGs）**：基于 Moran's I 识别的基因及其空间模式
+- **基因表达**：讨论关键基因在组织中的空间表达模式（勿使用代谢物、LC-MS 等代谢组学术语）
+
+### 3. 空间生物学解读 (Spatial Biology Interpretation)
+- 组织区域与空间域的关系
+- 空间自相关（Moran's I）结果的生物学意义
+- 与已知空间转录组学文献的关联
+
+### 4. 结论与建议 (Conclusions & Recommendations)
+- 主要发现总结（使用 Spots、Clusters、SVGs、Spatial Domains 等术语）
+- 后续空间分析或实验验证建议
+
+**禁止**：不要提及代谢物（metabolites）、LC-MS、代谢组学或差异代谢物。仅使用空间转录组学术语。
+"""
+            else:
+                output_structure_section = """
+### 1. 统计概览 (Statistical Overview)
+- Quantitative summary: PCA separation quality, PC1/PC2 variance explained, differential analysis counts (up/down regulated)
+- Data quality assessment based on PCA results
+- Overall data characteristics and key statistics
+
+### 2. 关键生物标志物 (Key Biomarkers)
+- **VIP代谢物**: Discuss the top VIP metabolites from PLS-DA analysis (names: """ + (', '.join(key_findings.get('top_vip_metabolites', [])[:5]) if key_findings.get('top_vip_metabolites') else 'see data') + """)
+- **差异代谢物**: Discuss the top differentially expressed metabolites (names: """ + (', '.join(key_findings.get('top_differential_metabolites', [])[:5]) if key_findings.get('top_differential_metabolites') else 'see data') + """)
+- **生物学功能**: Use your internal knowledge base (PubMed/Literature) to explain the potential functions and biological significance of these metabolites
+- **标志物潜力**: Discuss the potential of these metabolites as biomarkers
+
+### 3. 通路机制解读 (Pathway Mechanism Interpretation)
+- **富集通路**: Deep dive into the enriched pathways (names: """ + (', '.join(key_findings.get('top_pathways', [])[:5]) if key_findings.get('top_pathways') else 'see data') + """)
+- **通路功能**: Explain the biological functions of these pathways and their significance in the current research context
+- **机制讨论**: Relate findings to potential biological mechanisms, disease processes, or physiological states
+- **功能意义**: Discuss what the differentially expressed metabolites mean in terms of biological function
+
+### 4. 结论与建议 (Conclusions & Recommendations)
+- **主要发现总结**: Summarize key findings and their biological significance
+- **验证实验建议**: Suggest validation experiments (e.g., targeted metabolomics, qPCR validation)
+- **后续研究**: Propose follow-up studies based on the findings
+"""
+            
             prompt = f"""You are a Senior Bioinformatics Scientist writing a Results & Discussion section for a top-tier journal (Nature Medicine). Your role is to interpret biological data and provide deep scientific insights, connecting findings to biological mechanisms and literature knowledge.
 
 **User Goal:**
@@ -1422,7 +1541,7 @@ Use Simplified Chinese for all content."""
 {failure_info}
 
 **CRITICAL INSTRUCTION:**
-Based on the provided metrics above, interpret the biological significance. Use your internal knowledge base (PubMed/Literature) to explain **WHY** these specific metabolites/pathways might be altered in this context. Generate a structured Markdown report with deep biological interpretation.
+{critical_instruction_text}
 
 **Domain Context:**
 {domain_context}
@@ -1455,28 +1574,7 @@ Based on the provided metrics above, interpret the biological significance. Use 
    - Minimum 800 words, aim for comprehensive coverage
 
 6. **Output Structure (MUST FOLLOW):**
-
-### 1. 统计概览 (Statistical Overview)
-- Quantitative summary: PCA separation quality, PC1/PC2 variance explained, differential analysis counts (up/down regulated)
-- Data quality assessment based on PCA results
-- Overall data characteristics and key statistics
-
-### 2. 关键生物标志物 (Key Biomarkers)
-- **VIP代谢物**: Discuss the top VIP metabolites from PLS-DA analysis (names: {', '.join(key_findings.get('top_vip_metabolites', [])[:5]) if key_findings.get('top_vip_metabolites') else 'see data'})
-- **差异代谢物**: Discuss the top differentially expressed metabolites (names: {', '.join(key_findings.get('top_differential_metabolites', [])[:5]) if key_findings.get('top_differential_metabolites') else 'see data'})
-- **生物学功能**: Use your internal knowledge base (PubMed/Literature) to explain the potential functions and biological significance of these metabolites
-- **标志物潜力**: Discuss the potential of these metabolites as biomarkers
-
-### 3. 通路机制解读 (Pathway Mechanism Interpretation)
-- **富集通路**: Deep dive into the enriched pathways (names: {', '.join(key_findings.get('top_pathways', [])[:5]) if key_findings.get('top_pathways') else 'see data'})
-- **通路功能**: Explain the biological functions of these pathways and their significance in the current research context
-- **机制讨论**: Relate findings to potential biological mechanisms, disease processes, or physiological states
-- **功能意义**: Discuss what the differentially expressed metabolites mean in terms of biological function
-
-### 4. 结论与建议 (Conclusions & Recommendations)
-- **主要发现总结**: Summarize key findings and their biological significance
-- **验证实验建议**: Suggest validation experiments (e.g., targeted metabolomics, qPCR validation)
-- **后续研究**: Propose follow-up studies based on the findings
+{output_structure_section}
 
 **Output Format:**
 - Use Simplified Chinese (简体中文)
@@ -1599,7 +1697,7 @@ Based on the provided metrics above, interpret the biological significance. Use 
 {failure_info}
 
 **CRITICAL INSTRUCTION:**
-Based on the provided metrics above, interpret the biological significance. Use your internal knowledge base (PubMed/Literature) to explain **WHY** these specific metabolites/pathways might be altered in this context. Generate a structured Markdown report with deep biological interpretation.
+{critical_instruction_text}
 
 **Domain Context:**
 {domain_context}
@@ -1608,7 +1706,7 @@ Based on the provided metrics above, interpret the biological significance. Use 
 
 1. **Reasoning Process (DeepSeek-R1)**: 
    - Use the `<think>` tag to show your reasoning process before generating the final report
-   - Inside `<think>`, analyze the data metrics, connect metabolites to pathways, and reason about biological mechanisms
+   - Inside `<think>`, analyze the data metrics and reason about biological mechanisms
    - After reasoning, output the final report outside the `<think>` tags
 
 2. **Scientific Persona**: You are a Senior Bioinformatics Scientist writing a publication-quality results section for Nature Medicine. Write as if you are describing results in a Methods/Results section of a high-impact research paper.
@@ -1620,9 +1718,9 @@ Based on the provided metrics above, interpret the biological significance. Use 
    - If a step failed, simply state the biological limitation
 
 4. **Deep Biological Interpretation**:
-   - Connect metabolites/pathways to biological functions using your internal knowledge base (PubMed/Literature)
+   - Connect findings to biological functions using your internal knowledge base (PubMed/Literature)
    - Explain the MECHANISM, not just the numbers
-   - Discuss how the identified metabolites/pathways relate to biological processes, disease mechanisms, or physiological states
+   - Discuss how the identified results relate to biological processes, disease mechanisms, or physiological states
 
 5. **Professional Language**:
    - Use scientific terminology appropriate for Nature Medicine
@@ -1631,28 +1729,7 @@ Based on the provided metrics above, interpret the biological significance. Use 
    - Minimum 800 words, aim for comprehensive coverage
 
 6. **Output Structure (MUST FOLLOW):**
-
-### 1. 统计概览 (Statistical Overview)
-- Quantitative summary: PCA separation quality, PC1/PC2 variance explained, differential analysis counts
-- Data quality assessment based on PCA results
-- Overall data characteristics and key statistics
-
-### 2. 关键生物标志物 (Key Biomarkers)
-- **VIP代谢物**: Discuss the top VIP metabolites from PLS-DA analysis
-- **差异代谢物**: Discuss the top differentially expressed metabolites
-- **生物学功能**: Explain the potential functions and biological significance
-- **标志物潜力**: Discuss the potential of these metabolites as biomarkers
-
-### 3. 通路机制解读 (Pathway Mechanism Interpretation)
-- **富集通路**: Deep dive into the enriched pathways
-- **通路功能**: Explain the biological functions of these pathways
-- **机制讨论**: Relate findings to potential biological mechanisms
-- **功能意义**: Discuss what the differentially expressed metabolites mean
-
-### 4. 结论与建议 (Conclusions & Recommendations)
-- **主要发现总结**: Summarize key findings and their biological significance
-- **验证实验建议**: Suggest validation experiments
-- **后续研究**: Propose follow-up studies based on the findings
+{output_structure_section}
 
 **Output Format:**
 - Use Simplified Chinese (简体中文)
@@ -1661,7 +1738,7 @@ Based on the provided metrics above, interpret the biological significance. Use 
 
 **Tone**: Professional, Academic, Detailed, Nature Medicine style. Focus on deep biological interpretation and scientific insights, connecting findings to mechanisms.
 
-**CRITICAL**: You MUST provide a detailed Biological Interpretation and Mechanism Analysis. Do NOT just list steps or metrics. Explain the biological meaning, connect findings to known pathways, and discuss mechanisms.
+**CRITICAL**: You MUST provide a detailed Biological Interpretation and Mechanism Analysis. Do NOT just list steps or metrics. Explain the biological meaning and discuss mechanisms.
 
 **IMPORTANT**: Use `<think>` tags to show your reasoning process. Analyze the data deeply, then output the final report.
 
@@ -1675,6 +1752,15 @@ Based on the provided metrics above, interpret the biological significance. Use 
                     total_prompt_length = system_message_length + user_message_length
                     logger.info(f"📊 [AnalysisSummary] 截断后Prompt长度: {total_prompt_length}字符")
                 
+                def _clean_report_content(s: str):
+                    """Strip <<<SUGGESTIONS>>> block and store in context; return cleaned text."""
+                    if not s:
+                        return s
+                    cleaned, sug = strip_suggestions_from_text(s)
+                    if sug:
+                        self.context["report_suggestions"] = sug
+                    return cleaned
+
                 logger.info(f"📞 [AnalysisSummary] 开始LLM调用，max_tokens=2500...")
                 completion = await llm_client_to_use.achat(messages, temperature=0.3, max_tokens=2500)  # 🔥 TASK 2: Increase tokens for comprehensive report
                 logger.info(f"✅ [AnalysisSummary] LLM调用完成，开始解析响应...")
@@ -1693,11 +1779,12 @@ Based on the provided metrics above, interpret the biological significance. Use 
                     logger.debug(f"📝 [DEBUG] Summary preview: {response[:200]}...")
                     # Return original content with tags so frontend can parse and display reasoning
                     has_think_tags = any(tag in original_content for tag in ['<think>', '<think>', '<reasoning>', '<thought>', '<thinking>'])
-                    return original_content if has_think_tags else response
+                    out = original_content if has_think_tags else response
+                    return _clean_report_content(out)
                 elif original_content and len(original_content.strip()) > 100:
                     # 🔥 修复：如果response太短但original_content很长，使用original_content
                     logger.warning(f"⚠️ [AnalysisSummary] 提取后的内容过短，但原始内容较长，使用原始内容（长度: {len(original_content)}）")
-                    return original_content
+                    return _clean_report_content(original_content)
                 else:
                     logger.warning(f"⚠️ [AnalysisSummary] LLM 返回内容过短（response: {len(response) if response else 0}字符, original: {len(original_content)}字符），尝试重新生成...")
                     # Retry with simpler prompt if first attempt failed
@@ -1727,11 +1814,12 @@ Minimum 500 words. Be scientific and detailed."""
                         logger.info(f"✅ [AnalysisSummary] 重试成功，生成深度解释，长度: {len(retry_response)}")
                         # Return original content with tags so frontend can parse and display reasoning
                         has_think_tags = any(tag in retry_original_content for tag in ['<think>', '<think>', '<reasoning>', '<thought>', '<thinking>', '<think>'])
-                        return retry_original_content if has_think_tags else retry_response
+                        out = retry_original_content if has_think_tags else retry_response
+                        return _clean_report_content(out)
                     elif retry_original_content and len(retry_original_content.strip()) > 100:
                         # 🔥 修复：如果重试后的response太短但original_content很长，使用original_content
                         logger.warning(f"⚠️ [AnalysisSummary] 重试后提取的内容过短，但原始内容较长，使用原始内容（长度: {len(retry_original_content)}）")
-                        return retry_original_content
+                        return _clean_report_content(retry_original_content)
                     else:
                         logger.error(f"❌ [AnalysisSummary] 重试后仍无法生成有效内容（response: {len(retry_response) if retry_response else 0}字符, original: {len(retry_original_content)}字符）")
                         # 🔥 TASK 3: Return user-friendly error message instead of raw traceback

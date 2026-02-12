@@ -1088,7 +1088,9 @@ You have access to:
             
             completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=2000)
             think_content, response = self.llm_client.extract_think_and_content(completion)
-            
+            from ...core.stream_utils import strip_suggestions_from_text
+            if response:
+                response, _ = strip_suggestions_from_text(response)
             logger.info("✅ 最终分析报告已生成")
             return response
             

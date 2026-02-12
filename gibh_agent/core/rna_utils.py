@@ -1,13 +1,127 @@
 """
 单细胞RNA-seq数据读取工具函数
-提供统一的10x Genomics数据读取接口，支持压缩和未压缩格式
+提供统一的10x Genomics数据读取接口，支持压缩和未压缩格式；
+支持从 .tar.gz / .tgz 中解压并加载 10x 数据。
 """
 import os
 import logging
+import tarfile
+import zipfile
+import shutil
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 
 logger = logging.getLogger(__name__)
+
+
+def _find_10x_root(root_path: Path) -> Optional[Path]:
+    """
+    在解压目录中递归查找包含 matrix.mtx / matrix.mtx.gz 的 10x 数据目录。
+    """
+    root_path = Path(root_path)
+    if not root_path.is_dir():
+        return None
+    try:
+        files = os.listdir(root_path)
+        if any(f in files for f in ["matrix.mtx", "matrix.mtx.gz"]) and (
+            any(f in files for f in ["barcodes.tsv", "barcodes.tsv.gz"])
+            or any(f in files for f in ["features.tsv", "features.tsv.gz", "genes.tsv", "genes.tsv.gz"])
+        ):
+            return root_path
+    except OSError:
+        pass
+    for root, _dirs, files in os.walk(root_path):
+        p = Path(root)
+        if "matrix.mtx" in files or "matrix.mtx.gz" in files:
+            if any(f in files for f in ["barcodes.tsv", "barcodes.tsv.gz"]) or any(
+                f in files for f in ["features.tsv", "features.tsv.gz", "genes.tsv", "genes.tsv.gz"]
+            ):
+                return p
+    return None
+
+
+def load_10x_from_tarball(
+    archive_path: str,
+    var_names: str = "gene_symbols",
+    persist_h5ad: bool = True,
+) -> Tuple[Any, str]:
+    """
+    从 .tar.gz / .tgz / .zip 中解压 10x 数据并加载为 AnnData。
+    若解压目标目录已存在且含 10x 数据则直接使用（幂等）。
+
+    Args:
+        archive_path: 压缩包绝对路径或相对路径
+        var_names: 'gene_symbols' 或 'gene_ids'，传给 read_10x_data
+        persist_h5ad: 加载后是否立即保存为 .h5ad，供后续步骤使用
+
+    Returns:
+        (adata, output_base_dir): AnnData 与用于写输出的基础目录（压缩包所在目录）
+
+    Raises:
+        ValueError: 非压缩包或解压后未找到 10x 数据
+    """
+    archive_path = Path(archive_path).resolve()
+    if not archive_path.is_file():
+        raise FileNotFoundError(f"压缩包不存在: {archive_path}")
+
+    name = archive_path.name.lower()
+    if name.endswith(".tar.gz"):
+        stem = archive_path.name[:-7]
+    elif name.endswith(".tgz"):
+        stem = archive_path.name[:-4]
+    elif name.endswith(".zip"):
+        stem = archive_path.name[:-4]
+    else:
+        raise ValueError(f"不支持的压缩格式: {archive_path.name}")
+
+    parent_dir = archive_path.parent
+    extract_dir = parent_dir / stem
+
+    if extract_dir.is_dir():
+        tenx_root = _find_10x_root(extract_dir)
+        if tenx_root is not None:
+            logger.info("✅ [10x tarball] 使用已解压目录: %s", tenx_root)
+            adata = read_10x_data(str(tenx_root), var_names=var_names, cache=False)
+            if persist_h5ad:
+                raw_h5ad = parent_dir / f"{stem}.h5ad"
+                adata.write(raw_h5ad)
+                logger.info("✅ [10x tarball] 已持久化为: %s", raw_h5ad)
+            return (adata, str(parent_dir))
+
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        if name.endswith(".tar.gz") or name.endswith(".tgz"):
+            with tarfile.open(archive_path, "r:gz") as tar:
+                tar.extractall(extract_dir)
+        elif name.endswith(".zip"):
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                zf.extractall(extract_dir)
+    except Exception as e:
+        if extract_dir.exists():
+            try:
+                shutil.rmtree(extract_dir)
+            except OSError:
+                pass
+        raise RuntimeError(f"解压失败: {e}") from e
+
+    tenx_root = _find_10x_root(extract_dir)
+    if tenx_root is None:
+        if extract_dir.exists():
+            try:
+                shutil.rmtree(extract_dir)
+            except OSError:
+                pass
+        raise ValueError(
+            f"压缩包内未找到 10x 数据（需包含 matrix.mtx、barcodes.tsv、features/genes.tsv）: {archive_path}"
+        )
+
+    logger.info("✅ [10x tarball] 解压并识别 10x 目录: %s", tenx_root)
+    adata = read_10x_data(str(tenx_root), var_names=var_names, cache=False)
+    if persist_h5ad:
+        raw_h5ad = parent_dir / f"{stem}.h5ad"
+        adata.write(raw_h5ad)
+        logger.info("✅ [10x tarball] 已持久化为: %s", raw_h5ad)
+    return (adata, str(parent_dir))
 
 
 def read_10x_data(

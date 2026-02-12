@@ -16,6 +16,7 @@ from pathlib import Path
 from .agentic import QueryRewriter, Clarifier, Reflector
 from .file_inspector import FileInspector
 from .llm_client import LLMClient
+from .stream_utils import stream_with_suggestions
 from .workflows import WorkflowRegistry
 
 logger = logging.getLogger(__name__)
@@ -207,8 +208,14 @@ class AgentOrchestrator:
                 # Stream LLM response
                 llm_client = self._get_llm_client()
                 if llm_client:
+                    chat_system = (
+                        "你是一个友好的AI助手，帮助用户解答问题。使用中文回答。\n\n"
+                        "在回复的**最后**，根据当前分析上下文生成 1～2 个用户可能想问的后续问题，严格按以下格式输出（不要输出到可见正文）：\n"
+                        "<<<SUGGESTIONS>>>[\"问题1\", \"问题2\"]<<<END_SUGGESTIONS>>>\n"
+                        "若对话在结束（如告别、再见）则不要输出上述块。"
+                    )
                     messages = [
-                        {"role": "system", "content": "你是一个友好的AI助手，帮助用户解答问题。使用中文回答。"},
+                        {"role": "system", "content": chat_system},
                         {"role": "user", "content": query}
                     ]
                     
@@ -221,42 +228,29 @@ class AgentOrchestrator:
                                 if content:
                                     messages.append({"role": role, "content": content})
                     
-                    # 🔥 CRITICAL FIX: Stream Delta tokens only (not accumulated text)
-                    # This prevents the "stutter" bug where frontend accumulates already-accumulated text
-                    # DEFENSIVE FIX: Track accumulated content to detect if LLM provider returns accumulated text
+                    # 🔥 DRY: Use shared stream parser to strip <<<SUGGESTIONS>>> and emit events
                     accumulated_content = ""
-                    async for chunk in llm_client.astream(messages, temperature=0.7, max_tokens=1000):
-                        if chunk.choices and len(chunk.choices) > 0:
-                            delta = chunk.choices[0].delta
-                            if delta and delta.content:
-                                current_content = delta.content
-                                
-                                # 🔥 DEFENSIVE FIX: Detect if LLM provider returns accumulated text
-                                # If current_content starts with accumulated_content, it's accumulated text
-                                # We need to calculate the delta manually
-                                if current_content.startswith(accumulated_content) and len(current_content) > len(accumulated_content):
-                                    # LLM provider returns accumulated text, calculate delta
-                                    delta_content = current_content[len(accumulated_content):]
-                                    accumulated_content = current_content
-                                    
-                                    # Log warning on first detection
-                                    if len(accumulated_content) == len(current_content) and len(delta_content) > 0:
-                                        logger.warning(
-                                            f"⚠️ [Orchestrator] 检测到 LLM 提供商返回累积文本，已自动修复为增量模式。"
-                                            f"原始: {repr(current_content[:50])}, 增量: {repr(delta_content[:50])}"
-                                        )
-                                else:
-                                    # LLM provider returns delta text (standard behavior)
-                                    delta_content = current_content
-                                    accumulated_content += current_content
-                                
-                                # 🔥 FIX: Send ONLY the delta (new token), not accumulated text
-                                if delta_content:  # Only send if there's new content
-                                    yield self._format_sse("message", {
-                                        "content": delta_content  # Only delta, not accumulated!
-                                    })
-                                    await asyncio.sleep(0.01)
-                    
+
+                    async def chat_chunk_iter():
+                        nonlocal accumulated_content
+                        async for chunk in llm_client.astream(messages, temperature=0.7, max_tokens=1000):
+                            if chunk.choices and len(chunk.choices) > 0:
+                                delta = chunk.choices[0].delta
+                                if delta and delta.content:
+                                    current_content = delta.content
+                                    if current_content.startswith(accumulated_content) and len(current_content) > len(accumulated_content):
+                                        delta_content = current_content[len(accumulated_content):]
+                                        accumulated_content = current_content
+                                    else:
+                                        delta_content = current_content
+                                        accumulated_content += current_content
+                                    if delta_content:
+                                        yield delta_content
+
+                    async for event_type, data in stream_with_suggestions(chat_chunk_iter()):
+                        yield self._format_sse(event_type, data)
+                        await asyncio.sleep(0.01)
+
                     yield self._format_sse("status", {
                         "content": "回答完成",
                         "state": "completed"
@@ -315,7 +309,7 @@ class AgentOrchestrator:
                 })
                 await asyncio.sleep(0.01)
                 
-                from .executor import WorkflowExecutor
+                from .executor import WorkflowExecutor, SecurityException
                 # 🔥 CRITICAL REGRESSION FIX: Pass upload_dir to executor for path resolution
                 upload_dir = getattr(self, 'upload_dir', Path(os.getenv("UPLOAD_DIR", "/app/uploads")))
                 upload_dir_str = str(upload_dir) if isinstance(upload_dir, Path) else upload_dir
@@ -379,11 +373,19 @@ class AgentOrchestrator:
                     await asyncio.sleep(0.01)
                 
                 # Execute workflow (this will actually execute all steps)
-                results = executor.execute_workflow(
-                    workflow_data=workflow_config,
-                    file_paths=file_paths,
-                    agent=self.agent
-                )
+                try:
+                    results = executor.execute_workflow(
+                        workflow_data=workflow_config,
+                        file_paths=file_paths,
+                        agent=self.agent
+                    )
+                except SecurityException as e:
+                    logger.warning("❌ [Orchestrator] 执行阶段数据完整性校验未通过: %s", e)
+                    yield self._format_sse("error", {
+                        "error": "数据完整性校验未通过",
+                        "message": str(e) or "数据完整性校验未通过，无法执行分析。"
+                    })
+                    return
                 
                 logger.info(f"✅ [Orchestrator] 工作流执行完成，结果: {type(results)}")
                 
@@ -476,6 +478,10 @@ class AgentOrchestrator:
                             target_agent = self.agent.agents["rna_agent"]
                         elif domain_name == "Metabolomics" and "metabolomics_agent" in self.agent.agents:
                             target_agent = self.agent.agents["metabolomics_agent"]
+                        elif domain_name == "Spatial" and "spatial_agent" in self.agent.agents:
+                            target_agent = self.agent.agents["spatial_agent"]
+                        elif domain_name == "Radiomics" and "radiomics_agent" in self.agent.agents:
+                            target_agent = self.agent.agents["radiomics_agent"]
                         else:
                             # 如果没有匹配的智能体，使用第一个可用的
                             target_agent = list(self.agent.agents.values())[0] if self.agent.agents else None
@@ -673,7 +679,11 @@ class AgentOrchestrator:
                             "workflow_name": workflow_config.get("workflow_name", "工作流")
                         }
                     }
-                    
+                    # 🔥 DRY: Include report suggestions so frontend can render chips
+                    if target_agent and getattr(target_agent, "context", None):
+                        sug = target_agent.context.get("report_suggestions")
+                        if sug:
+                            diagnosis_response["report_data"]["suggestions"] = sug
                     # 🔥 PHASE 2: Add evaluation to diagnosis response
                     if evaluation:
                         diagnosis_response["report_data"]["evaluation"] = evaluation
@@ -729,6 +739,7 @@ class AgentOrchestrator:
         previous_refined_query = session_state.get("previous_refined_query")
         pending_plan = session_state.get("pending_plan")  # 🔥 URGENT FIX: 检查是否有待执行的工作流计划
         pending_modality = session_state.get("pending_modality")  # 🔥 CRITICAL: 检查是否有待处理的模态（恢复条件）
+        preview_target_steps = session_state.get("preview_target_steps")  # 🔥 Intent Inheritance: 保存的 Preview 意图步骤
         
         # 🔥 URGENT FIX: 检查执行意图（"Proceed", "继续", "执行"等）
         execution_keywords = ["proceed", "继续", "执行", "go ahead", "run it", "开始", "execute"]
@@ -850,28 +861,57 @@ class AgentOrchestrator:
             # Initialize planner variable (will be set in either branch)
             planner = None
             
+            # 🔥 INTENT INHERITANCE: Run Branch B (Execution) when has_files - for BOTH resume and normal flow
+            run_execution_branch = False
+            
             if is_resume_action:
                 logger.info(f"🚀 [Orchestrator] 检测到恢复操作: 文件已上传 + 待处理模态={pending_modality}")
-                logger.info(f"🚀 [Orchestrator] 强制进入执行模式，跳过意图分析")
+                logger.info(f"🚀 [Orchestrator] 强制进入执行模式，继承 Preview 意图")
                 
                 # Force the domain to match the pending plan (ignore query re-analysis)
                 domain_name = pending_modality
-                target_steps = []  # Use full SOP for resume
-                
-                # Clear pending state (we're resuming now)
-                session_state.pop("pending_modality", None)
-                self.conversation_state[session_id] = session_state
                 
                 # Get workflow instance
                 workflow = self.workflow_registry.get_workflow(domain_name)
                 if not workflow:
                     raise ValueError(f"无法获取工作流: {domain_name}")
                 
-                # Use full workflow for resume
-                target_steps = list(workflow.steps_dag.keys())
+                # 🔥 INTENT INHERITANCE: Use preview_target_steps when current query is empty/generic
+                # 继续/执行/开始 等通用词 → 直接继承 Preview 意图，不覆盖
+                # 只有用户明确说新意图（如"做差异分析"）才覆盖
+                target_steps = []
+                continuation_keywords = ["继续", "继续分析", "执行", "开始", "go", "proceed", "run it", "上传数据", "上传以"]
+                q = (refined_query or "").strip().lower()
+                is_continuation = q and any(kw in q for kw in continuation_keywords) and len(q) <= 15
+                if refined_query and refined_query.strip() and not is_continuation:
+                    # Check if current message has NEW specific intent (override)
+                    from .planner import SOPPlanner
+                    from .tool_retriever import ToolRetriever
+                    llm_client = self._get_llm_client()
+                    if llm_client:
+                        planner = SOPPlanner(ToolRetriever(), llm_client)
+                        new_steps = planner._fallback_intent_analysis(refined_query, list(workflow.steps_dag.keys()))
+                        if new_steps:
+                            target_steps = new_steps
+                            logger.info(f"✅ [Orchestrator] 恢复模式: 检测到新意图，使用: {target_steps}")
+                
+                if not target_steps and preview_target_steps:
+                    # Inherit from Preview phase (User Intent is the Main Melody)
+                    target_steps = [s for s in preview_target_steps if s in workflow.steps_dag]
+                    if target_steps:
+                        logger.info(f"✅ [Orchestrator] 恢复模式: 继承 Preview 意图: {target_steps}")
+                
+                if not target_steps:
+                    target_steps = list(workflow.steps_dag.keys())
+                    logger.info(f"ℹ️ [Orchestrator] 恢复模式: 无继承意图，使用完整工作流")
+                
+                # Clear pending state (we're resuming now)
+                session_state.pop("pending_modality", None)
+                session_state.pop("preview_target_steps", None)
+                self.conversation_state[session_id] = session_state
                 
                 logger.info(f"✅ [Orchestrator] 恢复模式: domain={domain_name}, target_steps={target_steps}")
-                # Skip to file inspection (Branch B) - don't analyze intent again
+                run_execution_branch = True
             else:
                 # 🔥 CRITICAL REFACTOR: Step 3 - ALWAYS Analyze Intent First (Dynamic Scoping)
                 # Step 3.1: Analyze Intent (ALWAYS FIRST) - Determine modality and target_steps
@@ -946,16 +986,26 @@ class AgentOrchestrator:
                 # Analyze user intent to determine target_steps
                 target_steps = await planner._analyze_user_intent(refined_query, workflow)
                 
+                # 🔥 CRITICAL FIX: Use intent_result.target_steps when _analyze_user_intent returns empty
+                # (Ensures consistency between Preview and Execution - _classify_intent may have captured partial intent)
+                if not target_steps and intent_result.get("target_steps"):
+                    intent_steps = [s for s in intent_result["target_steps"] if s in workflow.steps_dag]
+                    if intent_steps:
+                        target_steps = intent_steps
+                        logger.info(f"✅ [Orchestrator] 使用 intent_result.target_steps 作为回退: {target_steps}")
+                
                 # Ensure target_steps is not empty (fallback to full workflow)
                 if not target_steps:
                     query_lower = refined_query.lower()
-                    vague_keywords = ["analyze this", "full analysis", "完整分析", "全部", "all", "complete"]
+                    vague_keywords = ["analyze this", "full analysis", "完整分析", "全部", "all", "complete", "help me analyze", "帮我分析"]
                     if any(kw in query_lower for kw in vague_keywords):
                         target_steps = list(workflow.steps_dag.keys())
+                        logger.info(f"ℹ️ [Orchestrator] 检测到模糊意图，使用完整工作流")
                     else:
                         # Fallback to keyword matching
-                        from .planner import SOPPlanner
                         target_steps = planner._fallback_intent_analysis(refined_query, list(workflow.steps_dag.keys()))
+                        if target_steps:
+                            logger.info(f"✅ [Orchestrator] 关键词匹配回退成功: {target_steps}")
                         if not target_steps:
                             target_steps = list(workflow.steps_dag.keys())
                 
@@ -1050,30 +1100,41 @@ class AgentOrchestrator:
                     await asyncio.sleep(0.01)
                     
                     try:
-                        # Step A1: Generate Template Workflow with target_steps
+                        # Step A1: Generate Template Workflow - FULL workflow, pre-select by intent
                         yield self._format_sse("status", {
                             "content": "正在根据您的需求定制流程...",
                             "state": "running"
                         })
                         await asyncio.sleep(0.01)
                         
-                        # 🔥 CRITICAL: Use the same target_steps analyzed above
-                        # Path B: PREVIEW MODE - Explicitly tell planner this IS a template
+                        # 🔥 INTENT-DRIVEN PRE-SELECTION: Get workflow for full plan + recommended_steps
+                        workflow = self.workflow_registry.get_workflow(domain_name)
+                        intent_target_steps = target_steps or []
+                        all_steps = list(workflow.steps_dag.keys()) if workflow else []
+                        # Planner always gets FULL workflow; UI pre-selects based on intent
+                        planner_target_steps = all_steps
+                        recommended_steps = []
+                        if intent_target_steps and set(intent_target_steps) != set(all_steps):
+                            recommended_steps = workflow.resolve_dependencies(intent_target_steps)
+                            logger.info(f"✅ [Orchestrator] 意图预选: intent={intent_target_steps} -> recommended={recommended_steps}")
+                        
+                        # Path B: PREVIEW MODE - Generate FULL workflow, UI will pre-select recommended_steps
                         template_result = await planner.generate_plan(
                         user_query=refined_query,
                         file_metadata=None,  # 明确传递 None
                         category_filter=None,
                         domain_name=domain_name,  # 使用已分析的域名
-                        target_steps=target_steps,  # 🔥 CRITICAL: 使用已分析的目标步骤
+                        target_steps=planner_target_steps,  # 🔥 FULL workflow (pre-select in UI)
                         is_template=True  # 🔥 CRITICAL: Explicitly IS a template
                         )
                         
-                        logger.info(f"✅ [Orchestrator] 模板生成完成: {len(target_steps)} 个目标步骤")
+                        logger.info(f"✅ [Orchestrator] 模板生成完成: {len(all_steps)} 个步骤, 预选 {len(recommended_steps) or '全部'}")
                         
-                        # 🔥 CRITICAL: Save pending_modality for resume detection
+                        # 🔥 CRITICAL: Save pending_modality AND preview_target_steps for Intent Inheritance
                         session_state["pending_modality"] = domain_name
+                        session_state["preview_target_steps"] = target_steps
                         self.conversation_state[session_id] = session_state
-                        logger.info(f"💾 [Orchestrator] 已保存待处理模态: {domain_name} (session_id={session_id})")
+                        logger.info(f"💾 [Orchestrator] 已保存待处理模态: {domain_name}, 意图步骤: {target_steps} (session_id={session_id})")
                         
                         # Step A2: Yield Template Card - ONLY if steps are not empty
                         workflow_data = template_result.get("workflow_data") or template_result
@@ -1091,16 +1152,27 @@ class AgentOrchestrator:
                                 return
                             
                             logger.info(f"✅ [Orchestrator] Plan-First模式: 发送workflow事件，包含 {steps_count} 个步骤")
+                            # 🔥 意图驱动预选: recommended_steps 双写确保前端能读到
+                            wf_config = dict(workflow_data) if isinstance(workflow_data, dict) else workflow_data
+                            if isinstance(wf_config, dict):
+                                wf_config["recommended_steps"] = recommended_steps
                             workflow_event_data = {
-                                "workflow_config": workflow_data,
-                                "workflow_data": workflow_data,
-                                "template_mode": True  # 🔥 CRITICAL: 明确标记为模板模式
+                                "workflow_config": wf_config,
+                                "workflow_data": wf_config,
+                                "template_mode": True,  # 🔥 CRITICAL: 明确标记为模板模式
+                                "recommended_steps": recommended_steps  # 🔥 意图驱动预选: 空=全选
                             }
                             yield self._format_sse("workflow", workflow_event_data)
                             await asyncio.sleep(0.01)
                         
                         # 🔥 CRITICAL: Generate message with modality and step count
-                        modality_display = "代谢组学" if domain_name == "Metabolomics" else "转录组"
+                        _modality_map = {
+                            "Metabolomics": "代谢组学",
+                            "Radiomics": "影像组 (Radiomics)",
+                            "Spatial": "空间组学",
+                            "RNA": "转录组",
+                        }
+                        modality_display = _modality_map.get(domain_name, domain_name or "分析")
                         yield self._format_sse("message", {
                             "content": f"已为您规划 **{modality_display}** 分析流程（包含 {steps_count} 个步骤）。请上传数据以激活。"
                         })
@@ -1129,313 +1201,506 @@ class AgentOrchestrator:
                         })
                         return
                 
+                # When has_files (did not return from Branch A): set flag for Branch B
+                run_execution_branch = True
+        
                 # ============================================================
-                # PATH A: CLASSIC EXECUTION (The "Old Way") - Files Detected
+                # PATH A: CLASSIC EXECUTION - Runs when has_files (resume or else)
                 # ============================================================
-                else:
+                if run_execution_branch:
                     logger.info("🚀 [Orchestrator] Path A: 文件检测到。强制执行模式（经典执行路径）")
-                    
-                    # A1. File Inspection - Extract file path and inspect
-                    first_file = files[0]
-                    if isinstance(first_file, dict):
-                        file_path = first_file.get("path") or first_file.get("file_path") or first_file.get("name")
-                    elif isinstance(first_file, str):
-                        file_path = first_file
-                    else:
-                        file_path = str(first_file)
-                    
-                    logger.info(f"🔍 [Orchestrator] Path A: 提取文件路径: {file_path}")
-                    
-                    if not file_path:
-                        logger.error("❌ [Orchestrator] Path A: 无法提取文件路径")
-                        yield self._format_sse("error", {
-                            "error": "文件路径无效",
-                            "message": "无法从文件对象中提取路径"
-                        })
-                        return
-                    
-                    yield self._format_sse("status", {
-                        "content": f"检测到文件，正在进行数据体检...",
-                        "state": "running"
+            
+                # A1. File Inspection - Extract file path and inspect
+                first_file = files[0]
+                if isinstance(first_file, dict):
+                    file_path = first_file.get("path") or first_file.get("file_path") or first_file.get("name")
+                elif isinstance(first_file, str):
+                    file_path = first_file
+                else:
+                    file_path = str(first_file)
+            
+                logger.info(f"🔍 [Orchestrator] Path A: 提取文件路径: {file_path}")
+            
+                if not file_path:
+                    logger.error("❌ [Orchestrator] Path A: 无法提取文件路径")
+                    yield self._format_sse("error", {
+                        "error": "文件路径无效",
+                        "message": "无法从文件对象中提取路径"
                     })
-                    await asyncio.sleep(0.01)
-                    
-                    # Inspect file
-                    file_metadata = None
-                    try:
-                        file_metadata = self.file_inspector.inspect_file(file_path)
-                        logger.info(f"✅ [Orchestrator] Path A: 文件检查完成: {file_path}")
-                        
-                        if file_metadata and file_metadata.get("status") == "success":
-                            # 🔥 TASK 2 FIX: 调用agent的诊断方法生成真正的诊断报告，而不是使用模板
-                            diagnosis_message = None
-                            recommendation_data = None
-                            
-                            # 尝试从缓存加载诊断结果
-                            from ..core.diagnosis_cache import DiagnosisCache
-                            cache = DiagnosisCache()
-                            cached_diagnosis = cache.get_cached_diagnosis(file_path)
-                            
-                            if cached_diagnosis:
-                                logger.info(f"✅ [Orchestrator] 从缓存加载诊断结果: {file_path}")
-                                diagnosis_message = cached_diagnosis.get("diagnosis_report")
-                                recommendation_data = cached_diagnosis.get("recommendation")
-                            else:
-                                # 调用agent的诊断方法生成诊断报告
-                                try:
-                                    # 获取对应的agent实例
-                                    agent_instance = None
-                                    if hasattr(self.agent, 'agents') and self.agent.agents:
-                                        if domain_name == "RNA":
-                                            agent_instance = self.agent.agents.get("RNA")
-                                        elif domain_name == "Metabolomics":
-                                            agent_instance = self.agent.agents.get("Metabolomics")
-                                    
-                                    if agent_instance and hasattr(agent_instance, '_perform_data_diagnosis'):
-                                        logger.info(f"🔍 [Orchestrator] 调用agent诊断方法生成诊断报告: {domain_name}")
-                                        
-                                        # 确定组学类型
-                                        omics_type = "Metabolomics" if domain_name == "Metabolomics" else "scRNA"
-                                        
-                                        # 尝试加载数据预览（用于更准确的诊断）
-                                        dataframe = None
-                                        try:
-                                            import pandas as pd
-                                            head_data = file_metadata.get("head", {})
-                                            if head_data and isinstance(head_data, dict) and "json" in head_data:
-                                                dataframe = pd.DataFrame(head_data["json"])
-                                        except Exception as e:
-                                            logger.debug(f"无法构建数据预览: {e}")
-                                        
-                                        # 调用诊断方法
-                                        diagnosis_message = await agent_instance._perform_data_diagnosis(
-                                            file_metadata=file_metadata,
-                                            omics_type=omics_type,
-                                            dataframe=dataframe
-                                        )
-                                        
-                                        # 从agent的context中获取参数推荐
-                                        if hasattr(agent_instance, 'context') and "parameter_recommendation" in agent_instance.context:
-                                            recommendation_data = agent_instance.context.get("parameter_recommendation")
-                                        
-                                        logger.info(f"✅ [Orchestrator] 诊断报告生成成功，长度: {len(diagnosis_message) if diagnosis_message else 0}")
+                    return
+            
+                yield self._format_sse("status", {
+                    "content": f"检测到文件，正在进行数据体检...",
+                    "state": "running"
+                })
+                await asyncio.sleep(0.01)
+            
+                # 🔥 Multi-file: ALWAYS prefer inspecting common_parent_directory (so SpatialVisiumHandler
+                # sees spatial/ + matrix; single-file stays as first file path).
+                # Step 1: normalize_session_directory runs BEFORE inspect_file so .tar.gz is already
+                # extracted into spatial/ when we inspect.
+                path_for_inspect = file_path
+                # 🔥 Spatial 单文件：若路径为 tissue_positions_list.csv 或含 spatial，按目录体检以得到 real_data_path
+                if len(files) == 1:
+                    _p = Path(file_path)
+                    if not _p.is_absolute():
+                        _p = (self.upload_dir / _p).resolve()
+                    if _p.is_file() and (
+                        _p.name == "tissue_positions_list.csv"
+                        or "tissue_positions" in _p.name.lower()
+                        or "spatial" in _p.parts
+                    ):
+                        parent = _p.parent
+                        if _p.name == "tissue_positions_list.csv" and parent.name == "spatial":
+                            path_for_inspect = str(parent.parent)
+                        else:
+                            path_for_inspect = str(parent)
+                        logger.info(
+                            "✅ [Orchestrator] 单文件为 Spatial 相关，按目录体检 path_for_inspect=%s",
+                            path_for_inspect,
+                        )
+                        # 补全 Visium 布局：若目录有 spatial 但缺 .h5，从父目录复制（分体上传场景）
+                        try:
+                            from .file_handlers.structure_normalizer import normalize_session_directory
+                            normalize_session_directory(Path(path_for_inspect))
+                        except Exception as e:
+                            logger.debug("normalize_session_directory (spatial single-file) skip: %s", e)
+                if len(files) > 1:
+                    resolved_paths = []
+                    for f in files:
+                        p = f.get("path") or f.get("file_path") or f.get("name") if isinstance(f, dict) else f
+                        if not p:
+                            continue
+                        p = Path(p)
+                        if not p.is_absolute():
+                            p = (self.upload_dir / p).resolve()
+                        else:
+                            p = p.resolve()
+                        if p.exists():
+                            resolved_paths.append(p)
+                    if len(resolved_paths) > 1:
+                        try:
+                            common = Path(os.path.commonpath([str(p) for p in resolved_paths]))
+                            if common.is_dir() and str(self.upload_dir) in str(common):
+                                # Radiomics/medical imaging: all files are .nii.gz/.nii/.dcm in same dir →
+                                # inspect one file (image preferred over mask), not the directory.
+                                radiomics_ext = (".nii.gz", ".nii", ".dcm")
+                                all_radiomics = all(
+                                    p.is_file() and p.name.lower().endswith(radiomics_ext)
+                                    for p in resolved_paths
+                                )
+                                if all_radiomics:
+                                    # Prefer image file (no "mask"/"label" in name) for inspection
+                                    candidates = [
+                                        p for p in resolved_paths
+                                        if "mask" not in p.name.lower() and "label" not in p.name.lower()
+                                    ]
+                                    path_for_inspect = str(candidates[0] if candidates else resolved_paths[0])
+                                    logger.info(
+                                        "✅ [Orchestrator] 多文件上传（影像组）：按单文件体检 path=%s",
+                                        path_for_inspect,
+                                    )
+                                else:
+                                    from .file_handlers.structure_normalizer import normalize_session_directory
+                                    normalize_session_directory(common)  # BEFORE inspect: extract spatial/, ensure .h5
+                                    path_for_inspect = str(common)
+                                    logger.info(
+                                        "✅ [Orchestrator] 多文件上传：按会话目录体检 (len=%s, dir=%s)",
+                                        len(resolved_paths),
+                                        path_for_inspect,
+                                    )
+                        except (ValueError, OSError) as e:
+                            logger.debug("Common path / normalizer skip: %s", e)
+                
+                # Step 2: Inspect (directory when multi-file, else single file)
+                file_metadata = None
+                try:
+                    file_metadata = self.file_inspector.inspect_file(path_for_inspect)
+                    logger.info(f"✅ [Orchestrator] Path A: 文件检查完成: {file_path}")
+                
+                    if file_metadata and file_metadata.get("status") == "success":
+                        # 🔥 Security: 仅当存在 .sig 侧车文件时才校验；解压/未签名文件无 .sig 则跳过，不拦截
+                        integrity_status = None
+                        try:
+                            from ..utils.security import verify_file_signature
+                            from .security_config import get_signing_public_key
+                            public_key_b64 = get_signing_public_key()
+                            if public_key_b64:
+                                path_for_verify = Path(file_path)
+                                if not path_for_verify.is_absolute():
+                                    path_for_verify = (self.upload_dir / path_for_verify).resolve()
+                                if path_for_verify.is_file():
+                                    sig_path = Path(str(path_for_verify) + ".sig")
+                                    if sig_path.exists():
+                                        if not verify_file_signature(path_for_verify, public_key_b64):
+                                            logger.warning("❌ [Orchestrator] 数据完整性校验未通过: %s", file_path)
+                                            yield self._format_sse("error", {
+                                                "error": "数据完整性校验未通过",
+                                                "message": "数据完整性校验未通过，请重新上传数据。"
+                                            })
+                                            return
+                                        integrity_status = "verified"
                                     else:
-                                        logger.warning(f"⚠️ [Orchestrator] 无法获取agent实例或诊断方法，使用轻量级诊断")
-                                        # 回退到轻量级诊断
-                                        diagnosis_message = self._generate_lightweight_diagnosis(file_metadata, domain_name)
-                                except Exception as diag_err:
-                                    logger.error(f"❌ [Orchestrator] 诊断报告生成失败: {diag_err}", exc_info=True)
+                                        logger.debug("跳过签名校验（无 .sig）: %s", path_for_verify.name)
+                        except Exception as sec_err:
+                            logger.debug("Signature verification skipped: %s", sec_err)
+                        
+                        # 🔥 TASK 2 FIX: 调用agent的诊断方法生成真正的诊断报告，而不是使用模板
+                        diagnosis_message = None
+                        recommendation_data = None
+                    
+                        # 尝试从缓存加载诊断结果
+                        from ..core.diagnosis_cache import DiagnosisCache
+                        cache = DiagnosisCache()
+                        cached_diagnosis = cache.load_diagnosis(file_path)
+                    
+                        if cached_diagnosis:
+                            logger.info(f"✅ [Orchestrator] 从缓存加载诊断结果: {file_path}")
+                            diagnosis_message = cached_diagnosis.get("diagnosis_report")
+                            recommendation_data = cached_diagnosis.get("recommendation")
+                        else:
+                            # 调用agent的诊断方法生成诊断报告
+                            try:
+                                # 获取对应的agent实例
+                                agent_instance = None
+                                if hasattr(self.agent, 'agents') and self.agent.agents:
+                                    if domain_name == "RNA":
+                                        agent_instance = self.agent.agents.get("rna_agent")
+                                    elif domain_name == "Metabolomics":
+                                        agent_instance = self.agent.agents.get("metabolomics_agent")
+                                    elif domain_name == "Radiomics":
+                                        agent_instance = self.agent.agents.get("radiomics_agent")
+
+                                if agent_instance and hasattr(agent_instance, '_perform_data_diagnosis'):
+                                    logger.info(f"🔍 [Orchestrator] 调用agent诊断方法生成诊断报告: {domain_name}")
+
+                                    # 确定组学类型（供 DataDiagnostician / agent 使用）
+                                    if domain_name == "Metabolomics":
+                                        omics_type = "Metabolomics"
+                                    elif domain_name == "Radiomics":
+                                        omics_type = "Radiomics"
+                                    else:
+                                        omics_type = "scRNA"
+                                
+                                    # 尝试加载数据预览（用于更准确的诊断）
+                                    dataframe = None
+                                    try:
+                                        import pandas as pd
+                                        head_data = file_metadata.get("head", {})
+                                        if head_data and isinstance(head_data, dict) and "json" in head_data:
+                                            dataframe = pd.DataFrame(head_data["json"])
+                                    except Exception as e:
+                                        logger.debug(f"无法构建数据预览: {e}")
+                                
+                                    # 调用诊断方法
+                                    diagnosis_message = await agent_instance._perform_data_diagnosis(
+                                        file_metadata=file_metadata,
+                                        omics_type=omics_type,
+                                        dataframe=dataframe
+                                    )
+                                
+                                    # 从agent的context中获取参数推荐
+                                    if hasattr(agent_instance, 'context') and "parameter_recommendation" in agent_instance.context:
+                                        recommendation_data = agent_instance.context.get("parameter_recommendation")
+                                
+                                    logger.info(f"✅ [Orchestrator] 诊断报告生成成功，长度: {len(diagnosis_message) if diagnosis_message else 0}")
+                                else:
+                                    logger.warning(f"⚠️ [Orchestrator] 无法获取agent实例或诊断方法，使用轻量级诊断")
                                     # 回退到轻量级诊断
                                     diagnosis_message = self._generate_lightweight_diagnosis(file_metadata, domain_name)
-                            
-                            # 如果诊断报告为空，使用轻量级诊断
-                            if not diagnosis_message:
+                            except Exception as diag_err:
+                                logger.error(f"❌ [Orchestrator] 诊断报告生成失败: {diag_err}", exc_info=True)
+                                # 回退到轻量级诊断
                                 diagnosis_message = self._generate_lightweight_diagnosis(file_metadata, domain_name)
-                            
-                            # Extract statistics for SSE event
-                            n_samples = file_metadata.get("n_samples") or file_metadata.get("n_obs") or file_metadata.get("shape", {}).get("rows", 0)
-                            n_features = file_metadata.get("n_features") or file_metadata.get("n_vars") or file_metadata.get("shape", {}).get("cols", 0)
-                            
-                            # 🔥 TASK 2 FIX: 确保诊断报告标题统一（只使用"数据诊断报告"）
-                            # 移除可能存在的重复标题
-                            if diagnosis_message:
-                                # 移除所有可能的标题变体
-                                diagnosis_message = diagnosis_message.replace("### 📊 数据体检报告", "")
-                                diagnosis_message = diagnosis_message.replace("### 📊 数据诊断报告", "")
-                                diagnosis_message = diagnosis_message.replace("## 📊 数据体检报告", "")
-                                diagnosis_message = diagnosis_message.replace("## 📊 数据诊断报告", "")
-                                # 确保以"数据诊断报告"开头
-                                if not diagnosis_message.strip().startswith("#"):
-                                    diagnosis_message = f"### 📊 数据诊断报告\n\n{diagnosis_message.strip()}"
-                            
-                            yield self._format_sse("diagnosis", {
-                                "message": diagnosis_message,
-                                "n_samples": n_samples,
-                                "n_features": n_features,
-                                "file_type": file_metadata.get('file_type'),
-                                "status": "data_ready",
-                                "recommendation": recommendation_data,  # 🔥 TASK 3: 添加参数推荐
-                                "diagnosis_report": diagnosis_message  # 🔥 TASK 2: 添加完整诊断报告
-                            })
-                            await asyncio.sleep(0.01)
-                    except Exception as e:
-                        logger.error(f"❌ [Orchestrator] Path A: 文件检查失败: {e}", exc_info=True)
+                    
+                        # 如果诊断报告为空，使用轻量级诊断
+                        if not diagnosis_message:
+                            diagnosis_message = self._generate_lightweight_diagnosis(file_metadata, domain_name)
+                    
+                        # Extract statistics for SSE event
+                        n_samples = file_metadata.get("n_samples") or file_metadata.get("n_obs") or file_metadata.get("shape", {}).get("rows", 0)
+                        n_features = file_metadata.get("n_features") or file_metadata.get("n_vars") or file_metadata.get("shape", {}).get("cols", 0)
+                    
+                        # 🔥 TASK 2 FIX: 确保诊断报告标题统一（只使用"数据诊断报告"）
+                        # 移除可能存在的重复标题
+                        if diagnosis_message:
+                            # 移除所有可能的标题变体
+                            diagnosis_message = diagnosis_message.replace("### 📊 数据体检报告", "")
+                            diagnosis_message = diagnosis_message.replace("### 📊 数据诊断报告", "")
+                            diagnosis_message = diagnosis_message.replace("## 📊 数据体检报告", "")
+                            diagnosis_message = diagnosis_message.replace("## 📊 数据诊断报告", "")
+                            # 确保以"数据诊断报告"开头
+                            if not diagnosis_message.strip().startswith("#"):
+                                diagnosis_message = f"### 📊 数据诊断报告\n\n{diagnosis_message.strip()}"
+                    
+                        payload = {
+                            "message": diagnosis_message,
+                            "n_samples": n_samples,
+                            "n_features": n_features,
+                            "file_type": file_metadata.get('file_type'),
+                            "status": "data_ready",
+                            "recommendation": recommendation_data,  # 🔥 TASK 3: 添加参数推荐
+                            "diagnosis_report": diagnosis_message,  # 🔥 TASK 2: 添加完整诊断报告
+                        }
+                        if integrity_status:
+                            payload["integrity_status"] = integrity_status
+                        # 🔥 DRY: Include suggestions from diagnosis so frontend can render chips
+                        if agent_instance and getattr(agent_instance, "context", None):
+                            sug = agent_instance.context.get("diagnosis_suggestions")
+                            if sug:
+                                payload["suggestions"] = sug
+                        yield self._format_sse("diagnosis", payload)
+                        await asyncio.sleep(0.01)
+                    elif file_metadata:
+                        # 文件检查未通过（类型无法识别或读取失败），避免进入规划阶段导致“工作流规划失败”
+                        err_msg = file_metadata.get("error") or "无法识别该文件类型或读取失败"
+                        if isinstance(err_msg, str) and len(err_msg) > 200:
+                            err_msg = err_msg[:200] + "..."
+                        logger.warning("❌ [Orchestrator] Path A: 文件检查未通过: %s", file_metadata.get("file_type", "unknown"))
                         yield self._format_sse("error", {
-                            "error": str(e),
-                            "message": f"文件检查失败: {str(e)}"
+                            "error": "文件类型不支持或无法读取",
+                            "message": f"{err_msg}\n\n支持格式：单细胞 RNA 请上传 .h5ad 或解压后的 10x 目录（含 matrix.mtx、barcodes.tsv、features.tsv）；代谢组学请上传 CSV；影像组学请上传 .nii / .nii.gz / .dcm。"
                         })
                         return
-                    
-                    # A2. Plan (With Metadata) - CRITICAL: Explicitly tell planner this is NOT a template
-                    yield self._format_sse("status", {
-                        "content": "正在根据您的需求定制流程...",
-                        "state": "running"
+                except Exception as e:
+                    logger.error(f"❌ [Orchestrator] Path A: 文件检查失败: {e}", exc_info=True)
+                    yield self._format_sse("error", {
+                        "error": str(e),
+                        "message": f"文件检查失败: {str(e)}"
+                    })
+                    return
+            
+                # A2. Plan (With Metadata) - CRITICAL: Explicitly tell planner this is NOT a template
+                yield self._format_sse("status", {
+                    "content": "正在根据您的需求定制流程...",
+                    "state": "running"
+                })
+                await asyncio.sleep(0.01)
+            
+                if planner is None:
+                    from .planner import SOPPlanner
+                    from .tool_retriever import ToolRetriever
+                    llm_client = self._get_llm_client()
+                    if not llm_client:
+                        raise ValueError("LLM 客户端不可用")
+                    tool_retriever = ToolRetriever()
+                    planner = SOPPlanner(tool_retriever, llm_client)
+            
+                logger.info(f"🔍 [Orchestrator] Path A: 调用 planner.generate_plan (is_template=False)")
+                logger.info(f"  - file_metadata 存在: {file_metadata is not None}")
+                logger.info(f"  - domain_name: {domain_name}")
+                logger.info(f"  - target_steps: {target_steps}")
+                if file_metadata:
+                    logger.info(f"  - file_metadata.file_path: {file_metadata.get('file_path', 'N/A')}")
+            
+                # 🔥 INTENT-DRIVEN PRE-SELECTION: Full workflow + recommended_steps for UI
+                workflow = self.workflow_registry.get_workflow(domain_name)
+                intent_target_steps = target_steps or []
+                all_steps = list(workflow.steps_dag.keys()) if workflow else []
+                planner_target_steps = all_steps
+                recommended_steps = []
+                if intent_target_steps and set(intent_target_steps) != set(all_steps):
+                    recommended_steps = workflow.resolve_dependencies(intent_target_steps)
+                    logger.info(f"✅ [Orchestrator] Path A 意图预选: intent={intent_target_steps} -> recommended={recommended_steps}")
+            
+                result = await planner.generate_plan(
+                    user_query=refined_query,
+                    file_metadata=file_metadata,  # 🔥 CRITICAL: file_metadata exists
+                    category_filter=None,
+                    domain_name=domain_name,
+                    target_steps=planner_target_steps,  # 🔥 FULL workflow (pre-select in UI)
+                    is_template=False  # 🔥 CRITICAL: Explicitly NOT a template
+                )
+            
+                logger.info(f"✅ [Orchestrator] Path A: 工作流规划完成")
+                logger.info(f"✅ [Orchestrator] Path A: 返回结果 template_mode: {result.get('template_mode', 'N/A')}")
+            
+                # 🔥 TASK: 检查是否有LLM错误（数据诊断阶段），如果有则通过SSE发送详细错误信息到前端
+                if hasattr(self.agent, 'context') and "last_llm_error" in self.agent.context:
+                    llm_error_info = self.agent.context.pop("last_llm_error")  # 取出后清除
+                    logger.warning(f"⚠️ [Orchestrator] 检测到LLM调用错误（数据诊断阶段），发送详细错误信息到前端")
+                    yield self._format_sse("error", {
+                        "error": llm_error_info.get("error_message", "LLM调用失败"),
+                        "message": f"数据诊断LLM调用失败: {llm_error_info.get('error_message', '未知错误')}",
+                        "error_type": llm_error_info.get("error_type", "Unknown"),
+                        "details": llm_error_info.get("error_details", ""),
+                        "context": llm_error_info.get("context", {}),
+                        "possible_causes": llm_error_info.get("possible_causes", []),
+                        "debug_info": llm_error_info.get("error_details", "")  # 兼容前端字段名
                     })
                     await asyncio.sleep(0.01)
-                    
-                    if planner is None:
-                        from .planner import SOPPlanner
-                        from .tool_retriever import ToolRetriever
-                        llm_client = self._get_llm_client()
-                        if not llm_client:
-                            raise ValueError("LLM 客户端不可用")
-                        tool_retriever = ToolRetriever()
-                        planner = SOPPlanner(tool_retriever, llm_client)
-                    
-                    logger.info(f"🔍 [Orchestrator] Path A: 调用 planner.generate_plan (is_template=False)")
-                    logger.info(f"  - file_metadata 存在: {file_metadata is not None}")
-                    logger.info(f"  - domain_name: {domain_name}")
-                    logger.info(f"  - target_steps: {target_steps}")
-                    if file_metadata:
-                        logger.info(f"  - file_metadata.file_path: {file_metadata.get('file_path', 'N/A')}")
-                    
-                    result = await planner.generate_plan(
-                        user_query=refined_query,
-                        file_metadata=file_metadata,  # 🔥 CRITICAL: file_metadata exists
-                        category_filter=None,
-                        domain_name=domain_name,
-                        target_steps=target_steps,
-                        is_template=False  # 🔥 CRITICAL: Explicitly NOT a template
-                    )
-                    
-                    logger.info(f"✅ [Orchestrator] Path A: 工作流规划完成")
-                    logger.info(f"✅ [Orchestrator] Path A: 返回结果 template_mode: {result.get('template_mode', 'N/A')}")
-                    
-                    # 🔥 TASK: 检查是否有LLM错误（数据诊断阶段），如果有则通过SSE发送详细错误信息到前端
-                    if hasattr(self.agent, 'context') and "last_llm_error" in self.agent.context:
-                        llm_error_info = self.agent.context.pop("last_llm_error")  # 取出后清除
-                        logger.warning(f"⚠️ [Orchestrator] 检测到LLM调用错误（数据诊断阶段），发送详细错误信息到前端")
-                        yield self._format_sse("error", {
-                            "error": llm_error_info.get("error_message", "LLM调用失败"),
-                            "message": f"数据诊断LLM调用失败: {llm_error_info.get('error_message', '未知错误')}",
-                            "error_type": llm_error_info.get("error_type", "Unknown"),
-                            "details": llm_error_info.get("error_details", ""),
-                            "context": llm_error_info.get("context", {}),
-                            "possible_causes": llm_error_info.get("possible_causes", []),
-                            "debug_info": llm_error_info.get("error_details", "")  # 兼容前端字段名
-                        })
-                        await asyncio.sleep(0.01)
-                        
-                    # A3. Force Validation
-                    if isinstance(result, dict):
-                        # FORCE OVERRIDE: Explicitly set template_mode = False
-                        if result.get("template_mode"):
-                            logger.error("❌ [Orchestrator] Path A: 逻辑错误 - Planner 返回 template_mode=True  despite file presence. 强制覆盖。")
-                        result["template_mode"] = False
-                        if "workflow_data" in result:
-                            result["workflow_data"]["template_mode"] = False
-                        
-                        # Validate Steps
-                        workflow_data = result.get("workflow_data") or result
-                        steps = workflow_data.get("steps", [])
-                        if not steps or len(steps) == 0:
-                            logger.warning(f"⚠️ [Orchestrator] Path A: Planner 返回空步骤，回退到硬编码 SOP")
-                            # Regenerate using hardcoded SOP
+                
+                # A3. Force Validation
+                if isinstance(result, dict):
+                    plan_fail_cause = None  # 规划失败时的真实原因，供日志与 SSE details 溯源
+                    # FORCE OVERRIDE: Explicitly set template_mode = False
+                    if result.get("template_mode"):
+                        logger.error("❌ [Orchestrator] Path A: 逻辑错误 - Planner 返回 template_mode=True  despite file presence. 强制覆盖。")
+                    result["template_mode"] = False
+                    if "workflow_data" in result:
+                        result["workflow_data"]["template_mode"] = False
+                
+                    # Validate Steps (兼容 result 为 error 时 workflow_data 仍带 steps 的情况)
+                    workflow_data = result.get("workflow_data") or result
+                    steps = workflow_data.get("steps") if isinstance(workflow_data.get("steps"), list) else []
+                    plan_fail_cause = None  # 用于调试：规划失败时记录真实原因并输出到日志/SSE
+                    if not steps or len(steps) == 0:
+                        plan_fail_cause = result.get("message") or result.get("error") or "Planner 返回步骤为空"
+                        # 🔥 组学分类仅依赖「用户自然语言 + 文件检测」的意图结果，此处不再覆盖 domain_name
+                        logger.warning(
+                            "⚠️ [Orchestrator] Path A: Planner 返回空步骤，回退到 generate_template | "
+                            "planner_result type=%s error=%s message=%s",
+                            result.get("type"),
+                            result.get("error"),
+                            result.get("message"),
+                        )
+                        workflow = self.workflow_registry.get_workflow(domain_name)
+                        if not workflow:
+                            plan_fail_cause = f"无法获取工作流 domain_name={domain_name}"
+                            logger.error("❌ [Orchestrator] Path A: %s（仅支持: %s）", plan_fail_cause, list(self.workflow_registry._workflows.keys()))
+                        _fallback_error_cause = None
+                        if workflow:
+                            all_step_ids = list(workflow.steps_dag.keys())
                             try:
-                                workflow = self.workflow_registry.get_workflow(domain_name)
-                                if not workflow:
-                                    raise ValueError(f"无法获取工作流: {domain_name}")
-                                
-                                if domain_name == "Metabolomics":
-                                    hardcoded_result = planner._generate_metabolomics_plan(file_metadata)
-                                else:
-                                    hardcoded_result = workflow.generate_template(
-                                        target_steps=target_steps or list(workflow.steps_dag.keys()),
-                                        file_metadata=file_metadata
-                                    )
-                                    hardcoded_result = planner._fill_parameters(hardcoded_result, file_metadata, workflow, template_mode=False)
-                                
+                                hardcoded_result = workflow.generate_template(
+                                    target_steps=planner_target_steps or all_step_ids,
+                                    file_metadata=file_metadata
+                                )
+                                filled = planner._fill_parameters(hardcoded_result, file_metadata, workflow, template_mode=False)
                                 result = {
                                     "type": "workflow_config",
-                                    "workflow_data": hardcoded_result.get("workflow_data") or hardcoded_result,
+                                    "workflow_data": filled.get("workflow_data") or filled,
                                     "template_mode": False
                                 }
                                 logger.info(f"✅ [Orchestrator] Path A: 使用硬编码 SOP 生成工作流: {len(result.get('workflow_data', {}).get('steps', []))} 个步骤")
                             except Exception as e:
-                                logger.error(f"❌ [Orchestrator] Path A: 硬编码 SOP 生成失败: {e}", exc_info=True)
-                        
-                        # 🔥 TASK 1: Yield workflow event - ONLY if steps are not empty
-                        workflow_data = result.get("workflow_data") or result
-                        
-                        # 🔥 CRITICAL: Extract steps BEFORE yielding workflow event
-                        steps = workflow_data.get("steps", []) if workflow_data else []
-                        has_valid_plan = bool(workflow_data and steps and len(steps) > 0)
-                        
-                        # 🔥 TASK 1: Empty Guard - Do NOT yield empty plans
-                        if not has_valid_plan:
-                            logger.error(f"❌ [Orchestrator] Path A: 工作流规划失败，步骤为空。不发送workflow事件。")
-                            logger.error(f"   - workflow_data存在: {workflow_data is not None}")
-                            logger.error(f"   - steps长度: {len(steps) if steps else 0}")
-                            yield self._format_sse("error", {
-                                "error": "工作流规划失败",
-                                "message": "无法生成有效的工作流步骤，请检查输入数据或联系技术支持"
-                            })
-                            return
-                        
-                        # 🔥 CRITICAL: In Path A, files are guaranteed to exist (we're in the else branch)
-                        has_files = True  # Path A means files were detected
-                        
-                        # Debug logging BEFORE execution decision
-                        logger.info(f"🔍 [Orchestrator] DEBUG: Query='{refined_query}', Files={len(files) if files else 0}, Plan Generated={has_valid_plan}, Steps={len(steps) if steps else 0}")
-                        logger.info(f"🔍 [Orchestrator] DEBUG: workflow_data keys={list(workflow_data.keys()) if workflow_data else 'None'}")
-                        if workflow_data:
-                            logger.info(f"🔍 [Orchestrator] DEBUG: workflow_data.steps exists={('steps' in workflow_data)}, steps type={type(steps)}, steps length={len(steps) if steps else 0}")
-                        
-                        # 🔥 TASK 1: Yield workflow event ONLY ONCE, at the very end of planning block
-                        # 🔥 TASK 2 & 3 FIX: 添加参数推荐和诊断报告到工作流配置
-                        workflow_event_data = {
-                            "workflow_config": workflow_data,
-                            "template_mode": False  # 🔥 CRITICAL: Always False in Path A
-                        }
-                        
-                        # 添加参数推荐（如果存在）
-                        if hasattr(self.agent, 'context') and "parameter_recommendation" in self.agent.context:
-                            recommendation = self.agent.context.get("parameter_recommendation")
-                            if recommendation:
-                                workflow_event_data["recommendation"] = recommendation
-                                logger.info(f"✅ [Orchestrator] 添加参数推荐到工作流事件: {len(recommendation.get('params', {}))} 个参数")
-                        
-                        # 添加诊断报告（如果存在）
-                        if hasattr(self.agent, 'context') and "diagnosis_report" in self.agent.context:
-                            diagnosis_report = self.agent.context.get("diagnosis_report")
-                            if diagnosis_report:
-                                workflow_event_data["diagnosis_report"] = diagnosis_report
-                                logger.info(f"✅ [Orchestrator] 添加诊断报告到工作流事件")
-                        
-                        logger.info(f"✅ [Orchestrator] Path A: 发送workflow事件，包含 {len(steps)} 个步骤")
-                        yield self._format_sse("workflow", workflow_event_data)
-                        await asyncio.sleep(0.01)
-                    
-                        # Yield result event with workflow config (包含推荐和诊断)
-                        yield self._format_sse("result", workflow_event_data)
-                        await asyncio.sleep(0.01)
-                        
-                        yield self._format_sse("status", {
-                            "content": "工作流规划完成，请确认执行。",
-                            "state": "completed"
+                                import traceback
+                                tb_str = traceback.format_exc()
+                                _fallback_error_cause = str(e)
+                                logger.error(
+                                    "❌ [Orchestrator] Path A: 硬编码 SOP 生成失败 | 根因: %s | traceback:\n%s",
+                                    e, tb_str,
+                                    exc_info=False,
+                                )
+                                try:
+                                    fallback_template = workflow.generate_template(
+                                        target_steps=all_step_ids,
+                                        file_metadata=None
+                                    )
+                                    filled = planner._fill_parameters(fallback_template, file_metadata, workflow, template_mode=False)
+                                    result = {
+                                        "type": "workflow_config",
+                                        "workflow_data": filled.get("workflow_data") or filled,
+                                        "template_mode": False
+                                    }
+                                    logger.info(f"✅ [Orchestrator] Path A: 二次回退成功，步骤数: {len(result.get('workflow_data', {}).get('steps', []))}")
+                                except Exception as e2:
+                                    tb2 = traceback.format_exc()
+                                    _fallback_error_cause = f"首次: {e}; 二次: {e2}"
+                                    logger.error(
+                                        "❌ [Orchestrator] Path A: 二次回退也失败 | 根因: %s | traceback:\n%s",
+                                        e2, tb2,
+                                        exc_info=False,
+                                    )
+                        else:
+                            _fallback_error_cause = f"workflow 为空 (domain_name={domain_name})"
+                            logger.error("❌ [Orchestrator] Path A: %s", _fallback_error_cause)
+                        if _fallback_error_cause:
+                            plan_fail_cause = _fallback_error_cause
+                
+                    # 🔥 TASK 1: Yield workflow event - ONLY if steps are not empty
+                    workflow_data = result.get("workflow_data") or result
+                
+                    # 🔥 CRITICAL: Extract steps BEFORE yielding workflow event
+                    steps = workflow_data.get("steps", []) if workflow_data else []
+                    has_valid_plan = bool(workflow_data and steps and len(steps) > 0)
+                
+                    # 🔥 TASK 1: Empty Guard - Do NOT yield empty plans；并输出可溯源的报错信息供后台调试
+                    if not has_valid_plan:
+                        debug_detail = (
+                            f"workflow_data存在={workflow_data is not None}, steps长度={len(steps) if steps else 0}"
+                            + (f", 根因: {plan_fail_cause}" if plan_fail_cause else "")
+                        )
+                        logger.error(
+                            "❌ [Orchestrator] Path A: 工作流规划失败，步骤为空。%s",
+                            debug_detail,
+                        )
+                        yield self._format_sse("error", {
+                            "error": "工作流规划失败",
+                            "message": "无法生成有效的工作流步骤，请检查输入数据或联系技术支持",
+                            "details": plan_fail_cause or debug_detail,
                         })
-                        await asyncio.sleep(0.01)
-                        
-                        yield self._format_sse("done", {"status": "success"})
-                        return  # 🔥 CRITICAL: STOP HERE - Do NOT auto-execute
-                        
-                        # 🔥 REMOVED: Auto-execution logic
-                        # The workflow should stop at planning stage and wait for explicit execution request
-                        # Execution will be triggered by a second request with workflow_data parameter
-                    else:
-                        # 🔥 CRITICAL: If result is not a dict, log error but still try to execute if workflow_data exists
-                        logger.error(f"❌ [Orchestrator] Path A: result 不是字典类型: {type(result)}")
-                        if workflow_data:
-                            logger.info(f"🚀 [Orchestrator] Path A: result 不是字典，但 workflow_data 存在，尝试执行")
-                            # Try to execute with workflow_data
-                            should_auto_execute = True
-                            # ... (same execution logic as above) ...
-                            # For now, just log and return error
-                            yield self._format_sse("error", {
-                                "error": "工作流规划结果格式错误",
-                                "message": f"规划结果不是字典类型: {type(result)}"
-                            })
-                            return
+                        return
+                
+                    # 🔥 CRITICAL: In Path A, files are guaranteed to exist (we're in the else branch)
+                    has_files = True  # Path A means files were detected
+                
+                    # Debug logging BEFORE execution decision
+                    logger.info(f"🔍 [Orchestrator] DEBUG: Query='{refined_query}', Files={len(files) if files else 0}, Plan Generated={has_valid_plan}, Steps={len(steps) if steps else 0}")
+                    logger.info(f"🔍 [Orchestrator] DEBUG: workflow_data keys={list(workflow_data.keys()) if workflow_data else 'None'}")
+                    if workflow_data:
+                        logger.info(f"🔍 [Orchestrator] DEBUG: workflow_data.steps exists={('steps' in workflow_data)}, steps type={type(steps)}, steps length={len(steps) if steps else 0}")
+                
+                    # 🔥 TASK 1: Yield workflow event ONLY ONCE, at the very end of planning block
+                    # 🔥 TASK 2 & 3 FIX: 添加参数推荐和诊断报告到工作流配置
+                    # 🔥 意图驱动预选: recommended_steps 放顶层 + workflow_config 内（双写确保前端能读到）
+                    if isinstance(workflow_data, dict):
+                        workflow_data = dict(workflow_data)
+                        workflow_data["recommended_steps"] = recommended_steps
+                    workflow_event_data = {
+                        "workflow_config": workflow_data,
+                        "template_mode": False,  # 🔥 CRITICAL: Always False in Path A
+                        "recommended_steps": recommended_steps  # 🔥 意图驱动预选: 空=全选
+                    }
+                
+                    # 添加参数推荐（如果存在）
+                    if hasattr(self.agent, 'context') and "parameter_recommendation" in self.agent.context:
+                        recommendation = self.agent.context.get("parameter_recommendation")
+                        if recommendation:
+                            workflow_event_data["recommendation"] = recommendation
+                            logger.info(f"✅ [Orchestrator] 添加参数推荐到工作流事件: {len(recommendation.get('params', {}))} 个参数")
+                
+                    # 添加诊断报告（如果存在）
+                    if hasattr(self.agent, 'context') and "diagnosis_report" in self.agent.context:
+                        diagnosis_report = self.agent.context.get("diagnosis_report")
+                        if diagnosis_report:
+                            workflow_event_data["diagnosis_report"] = diagnosis_report
+                            logger.info(f"✅ [Orchestrator] 添加诊断报告到工作流事件")
+                
+                    logger.info(f"✅ [Orchestrator] Path A: 发送workflow事件，包含 {len(steps)} 个步骤, recommended_steps={recommended_steps}")
+                    yield self._format_sse("workflow", workflow_event_data)
+                    await asyncio.sleep(0.01)
+            
+                    # Yield result event with workflow config (包含推荐和诊断)
+                    yield self._format_sse("result", workflow_event_data)
+                    await asyncio.sleep(0.01)
+                
+                    yield self._format_sse("status", {
+                        "content": "工作流规划完成，请确认执行。",
+                        "state": "completed"
+                    })
+                    await asyncio.sleep(0.01)
+                
+                    yield self._format_sse("done", {"status": "success"})
+                    return  # 🔥 CRITICAL: STOP HERE - Do NOT auto-execute
+                
+                    # 🔥 REMOVED: Auto-execution logic
+                    # The workflow should stop at planning stage and wait for explicit execution request
+                    # Execution will be triggered by a second request with workflow_data parameter
+                else:
+                    # 🔥 CRITICAL: If result is not a dict, log error but still try to execute if workflow_data exists
+                    logger.error(f"❌ [Orchestrator] Path A: result 不是字典类型: {type(result)}")
+                    if workflow_data:
+                        logger.info(f"🚀 [Orchestrator] Path A: result 不是字典，但 workflow_data 存在，尝试执行")
+                        # Try to execute with workflow_data
+                        should_auto_execute = True
+                        # ... (same execution logic as above) ...
+                        # For now, just log and return error
+                        yield self._format_sse("error", {
+                            "error": "工作流规划结果格式错误",
+                            "message": f"规划结果不是字典类型: {type(result)}"
+                        })
+                    return
             
         except Exception as e:
             logger.error(f"❌ 流式处理失败: {e}", exc_info=True)
@@ -1497,18 +1762,41 @@ class AgentOrchestrator:
     def _generate_lightweight_diagnosis(self, file_metadata: Dict[str, Any], domain_name: str) -> str:
         """
         生成轻量级诊断报告（回退方案）
-        
+
         Args:
             file_metadata: 文件元数据
-            domain_name: 域名（RNA 或 Metabolomics）
-            
+            domain_name: 域名（RNA / Metabolomics / Radiomics / Spatial）
+
         Returns:
             诊断报告字符串
         """
+        file_type = file_metadata.get('file_type', '未知')
+
+        if domain_name == "Radiomics":
+            shape = file_metadata.get("shape", {})
+            size = shape.get("size") or []
+            spacing = shape.get("spacing") or []
+            dim_str = " × ".join(str(s) for s in size) if size else "N/A"
+            spacing_str = " × ".join(f"{s:.2f}" for s in spacing) + " mm" if spacing else "N/A"
+            mask_status = "已提供" if file_metadata.get("mask_path") else "未提供"
+            return f"""### 📊 数据诊断报告
+
+**影像信息**:
+- **影像尺寸**: {dim_str}
+- **层厚/间距**: {spacing_str}
+- **掩膜状态**: {mask_status}
+
+**数据特征**:
+- 文件类型: {file_type}
+- 模态: 影像组学 (Radiomics)
+
+**数据质量**: 数据已就绪，可以开始分析。
+
+**下一步**: 已为您规划分析流程，请确认执行。"""
+
         n_samples = file_metadata.get("n_samples") or file_metadata.get("n_obs") or file_metadata.get("shape", {}).get("rows", 0)
         n_features = file_metadata.get("n_features") or file_metadata.get("n_vars") or file_metadata.get("shape", {}).get("cols", 0)
-        file_type = file_metadata.get('file_type', '未知')
-        
+
         if domain_name == "Metabolomics":
             return f"""### 📊 数据诊断报告
 

@@ -2,6 +2,7 @@
 Celery 异步任务定义
 """
 import logging
+import os
 from pathlib import Path
 from typing import Dict, Any, List
 from gibh_agent.core.celery_app import celery_app
@@ -110,4 +111,39 @@ def process_query_task(self, query: str, history: List[Dict[str, str]] = None, u
     except Exception as e:
         logger.error(f"❌ Celery Worker: 查询处理失败: {e}", exc_info=True)
         raise
+
+
+@celery_app.task(name="gibh_agent.sign_uploaded_file", bind=False)
+def sign_uploaded_file_task(file_path: str) -> None:
+    """
+    Asynchronously sign an uploaded file (BLAKE3 + Ed25519).
+
+    Uses auto-loaded keys from security_config (persisted under /app/data/security).
+    Anti-regression: If the key is missing or signing fails, log and return.
+    Do NOT raise so that Celery does not retry indefinitely.
+
+    Args:
+        file_path: Absolute or relative path to the file to sign.
+    """
+    from gibh_agent.utils.security import sign_file
+    from gibh_agent.core.security_config import get_signing_private_key
+    path = Path(file_path)
+    if not path.is_absolute():
+        upload_dir = os.getenv("UPLOAD_DIR", "/app/uploads")
+        path = Path(upload_dir) / path
+    if not path.exists() or not path.is_file():
+        logger.warning("sign_uploaded_file_task: file not found or not a file: %s", path)
+        return
+    private_key_b64 = get_signing_private_key()
+    if not private_key_b64:
+        logger.warning(
+            "sign_uploaded_file_task: could not load signing key; skipping signing for %s",
+            path,
+        )
+        return
+    success = sign_file(path, private_key_b64)
+    if success:
+        logger.info("sign_uploaded_file_task: signed %s", path)
+    else:
+        logger.error("sign_uploaded_file_task: failed to sign %s", path)
 

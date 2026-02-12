@@ -11,7 +11,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from ...core.tool_registry import registry
-from ...core.rna_utils import read_10x_data
+from ...core.rna_utils import read_10x_data, load_10x_from_tarball
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +52,14 @@ def run_qc_filter(
     try:
         import scanpy as sc
         
-        # 加载数据
-        if os.path.isdir(adata_path):
-            # 🔥 使用统一的10x数据读取函数，支持压缩和未压缩格式
+        # 加载数据（支持 .tar.gz/.tgz 10x 压缩包、10x 目录、.h5ad、其他 scanpy 可读格式）
+        output_base_for_input = None  # 从压缩包加载时，用于写 output_h5ad 的目录
+        if (adata_path.endswith(".tar.gz") or adata_path.endswith(".tgz") or
+                (adata_path.lower().endswith(".zip") and os.path.isfile(adata_path))):
+            adata, output_base_for_input = load_10x_from_tarball(
+                adata_path, var_names="gene_symbols", persist_h5ad=True
+            )
+        elif os.path.isdir(adata_path):
             adata = read_10x_data(adata_path, var_names='gene_symbols', cache=False)
         elif adata_path.endswith('.h5ad'):
             adata = sc.read_h5ad(adata_path)
@@ -107,15 +112,14 @@ def run_qc_filter(
             output_h5ad = os.path.join(output_dir, "filtered.h5ad")
         else:
             # 如果没有指定输出目录，使用输入文件所在目录
-            if os.path.isdir(adata_path):
-                # 如果输入是目录，在目录中创建 filtered.h5ad
+            if output_base_for_input:
+                output_h5ad = os.path.join(output_base_for_input, "filtered.h5ad")
+            elif os.path.isdir(adata_path):
                 output_h5ad = os.path.join(adata_path, "filtered.h5ad")
             elif adata_path.endswith('.h5ad'):
-                # 如果输入是 .h5ad 文件，在同一目录创建 filtered.h5ad
                 input_dir = os.path.dirname(adata_path)
                 output_h5ad = os.path.join(input_dir, "filtered.h5ad")
             else:
-                # 默认使用当前工作目录
                 output_h5ad = os.path.join(os.getcwd(), "filtered.h5ad")
         
         # 确保输出目录存在

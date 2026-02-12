@@ -18,6 +18,7 @@ RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
     fi
 
 # 安装系统级依赖（编译生信库需要）
+# bedtools 为 pybedtools (Epigenomics) 所需
 RUN apt-get update && apt-get install -y \
     build-essential \
     gcc \
@@ -26,6 +27,7 @@ RUN apt-get update && apt-get install -y \
     libcurl4-openssl-dev \
     libssl-dev \
     gosu \
+    bedtools \
     && rm -rf /var/lib/apt/lists/*
 
 # 配置 pip 使用国内镜像源（清华大学镜像，速度更快）

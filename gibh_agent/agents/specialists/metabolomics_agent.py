@@ -1429,7 +1429,9 @@ Return JSON only:
             # 🔥 修复：降低 max_tokens 以匹配简洁性要求（最多 200 字）
             completion = await self.llm_client.achat(messages, temperature=0.2, max_tokens=500)
             think_content, response = self.llm_client.extract_think_and_content(completion)
-            
+            from ...core.stream_utils import strip_suggestions_from_text
+            if response:
+                response, _ = strip_suggestions_from_text(response)
             logger.info(f"📝 Generating diagnosis... Result length: {len(response)}")
             logger.info("📝 Diagnosis generated successfully.")
             return response

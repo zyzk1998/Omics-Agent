@@ -4,14 +4,25 @@
 动态执行工作流，不依赖硬编码的工具逻辑。
 使用 ToolRegistry 查找和执行工具。
 """
+import inspect
 import os
 import logging
+import traceback
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 from datetime import datetime
 
 from .tool_registry import registry
 from .utils import sanitize_for_json
+
+
+class SecurityException(Exception):
+    """Raised when file signature verification fails before execution."""
+
+    def __init__(self, message: str, path: Optional[str] = None):
+        self.path = path
+        super().__init__(message)
+
 
 # 🔥 CRITICAL: 确保工具模块被加载（触发工具注册）
 try:
@@ -225,7 +236,7 @@ class WorkflowExecutor:
         tool_metadata = registry.get_metadata(tool_id)
         tool_category = tool_metadata.category if tool_metadata else None
         
-        # 确定工具期望的文件路径参数名
+        # 确定工具期望的文件路径参数名（Radiomics 使用 image_path/mask_path，不能注入 file_path）
         if tool_category == "scRNA-seq":
             # RNA 工具使用 adata_path
             file_param_name = "adata_path"
@@ -233,6 +244,9 @@ class WorkflowExecutor:
             if "file_path" in params and file_param_name not in params:
                 params[file_param_name] = params.pop("file_path")
                 logger.info(f"🔄 [Executor] 参数映射: file_path -> {file_param_name} (工具: {tool_id})")
+        elif tool_category == "Radiomics":
+            # 影像组学使用 image_path / mask_path，不注入 file_path
+            file_param_name = "image_path"
         else:
             # 其他工具（如代谢组学）使用 file_path
             file_param_name = "file_path"
@@ -298,6 +312,22 @@ class WorkflowExecutor:
             else:
                 logger.error(f"❌ [Executor] 处理后参数中缺少 group_column！")
         
+        # 🔥 CRITICAL FIX: Radiomics/Spatial 等只传入函数签名内参数，避免 file_path/output_dir 等误注入
+        if tool_category in ("Radiomics", "Spatial"):
+            if "file_path" in processed_params:
+                del processed_params["file_path"]
+            if "output_dir" in processed_params:
+                del processed_params["output_dir"]
+            try:
+                sig = inspect.signature(tool_func)
+                allowed = set(sig.parameters.keys())
+                extra = set(processed_params.keys()) - allowed
+                if extra:
+                    for k in extra:
+                        del processed_params[k]
+                    logger.debug(f"🔄 [Executor] {tool_category} 工具 {tool_id} 移除非签名参数: {extra}")
+            except Exception as e:
+                logger.debug("Executor: could not get tool signature for param filter: %s", e)
         # 🔥 CRITICAL FIX: 对于 scRNA-seq 工具，确保移除 file_path 参数（如果存在）
         # 🔥 EXCEPTION: rna_cellranger_count 和 rna_convert_cellranger_to_h5ad 不使用 adata_path
         tools_not_using_adata_path = ["rna_cellranger_count", "rna_convert_cellranger_to_h5ad"]
@@ -349,7 +379,7 @@ class WorkflowExecutor:
         
         # 🔥 CRITICAL REGRESSION FIX: Normalize all path-like parameters before tool execution
         # 🔥 TASK 2: Only resolve paths that are NOT already absolute and existing
-        path_params = ["file_path", "adata_path", "output_path", "output_file", "fastq_path", "reference_path", "output_h5ad"]
+        path_params = ["file_path", "adata_path", "h5ad_path", "image_path", "mask_path", "output_path", "output_file", "fastq_path", "reference_path", "output_h5ad", "features_csv_path", "rad_score_csv_path"]
         for param_name in path_params:
             if param_name in processed_params:
                 original_path = processed_params[param_name]
@@ -371,6 +401,41 @@ class WorkflowExecutor:
                                 # If resolution fails, keep original and let tool handle the error
                                 logger.warning(f"⚠️ [Executor] 路径解析失败，保留原始路径: {original_path} (错误: {e})")
                                 # Keep original_path - tool will handle the error
+        
+        # 🔥 Security: Verify signature only for user-uploaded files (under upload_dir), not pipeline outputs
+        try:
+            from ..utils.security import verify_file_signature
+            from .security_config import get_signing_public_key
+            public_key_b64 = get_signing_public_key()
+            upload_dir_path = Path(self.upload_dir or os.getenv("UPLOAD_DIR", "/app/uploads")).resolve()
+            if public_key_b64 and upload_dir_path.exists():
+                for input_param in ["file_path", "adata_path"]:
+                    path_val = processed_params.get(input_param)
+                    if path_val and isinstance(path_val, str) and path_val not in ["<待上传数据>", "<PENDING_UPLOAD>", ""]:
+                        path_obj = Path(path_val).resolve()
+                        if not path_obj.is_file():
+                            continue
+                        # Only verify files under upload dir (user-uploaded); skip pipeline outputs
+                        try:
+                            path_obj.relative_to(upload_dir_path)
+                        except ValueError:
+                            logger.debug("✅ [Executor] 跳过签名校验（非上传文件）: %s", path_val)
+                            continue
+                        # 仅当存在 .sig 侧车文件时才校验；解压/未签名文件无 .sig 则跳过
+                        sig_path = Path(str(path_obj) + ".sig")
+                        if not sig_path.exists():
+                            logger.debug("✅ [Executor] 跳过签名校验（无 .sig）: %s", path_obj.name)
+                            continue
+                        if not verify_file_signature(path_obj, public_key_b64):
+                            raise SecurityException(
+                                "数据完整性校验未通过，无法执行分析。请重新上传已签名的数据。",
+                                path=str(path_obj),
+                            )
+                        logger.debug(f"✅ [Executor] 文件签名校验通过: %s", path_val)
+        except SecurityException:
+            raise
+        except Exception as e:
+            logger.debug("Signature verification skipped or failed (non-blocking): %s", e)
         
         # 🔥 ARCHITECTURAL UPGRADE: Phase 3 - Pre-Flight Check & Auto-Correction
         # 对于需要 group_column 的工具，验证列是否存在，如果不存在则使用 semantic_map 自动修正
@@ -549,24 +614,32 @@ class WorkflowExecutor:
                     "error_category": formatted_error["error_category"],
                     "suggestion": formatted_error["suggestion"],
                     "can_skip": formatted_error["can_skip"],
-                    "technical_details": formatted_error.get("technical_details", error_msg)  # 保留技术细节
+                    "technical_details": formatted_error.get("technical_details", error_msg),  # 保留技术细节
+                    "traceback": result.get("traceback", ""),  # 工具返回的 traceback（如有）
+                    "debug_info": result.get("traceback", result.get("debug_info", "")),
                 }
             else:
-                logger.info(f"✅ 步骤 {step_id} 执行成功")
-                # 存储结果供后续步骤使用
+                # success 或 skipped
+                is_skipped = result.get("status") == "skipped"
+                if is_skipped:
+                    logger.info(f"⏭️ 步骤 {step_id} 已跳过（依赖未满足）")
+                else:
+                    logger.info(f"✅ 步骤 {step_id} 执行成功")
                 self.step_results[step_id] = result
+                msg = result.get("message") or result.get("error") or (f"步骤 {step_name} 已跳过" if is_skipped else f"步骤 {step_name} 执行完成")
                 return {
                     "status": result.get("status", "success"),
                     "step_id": step_id,
                     "step_name": step_name,
                     "tool_id": tool_id,
                     "result": result,
-                    "message": result.get("message", f"步骤 {step_name} 执行完成")
+                    "message": msg,
                 }
         
         except Exception as e:
             error_msg = f"步骤 {step_id} 执行失败: {str(e)}"
-            logger.error(f"❌ {error_msg}", exc_info=True)
+            tb_str = traceback.format_exc()
+            logger.error(f"❌ {error_msg}\n{tb_str}")
             
             # 🔥 TASK 4: 格式化异常错误信息
             from .error_formatter import ErrorFormatter
@@ -583,7 +656,9 @@ class WorkflowExecutor:
                 "error_category": formatted_error["error_category"],
                 "suggestion": formatted_error["suggestion"],
                 "can_skip": formatted_error["can_skip"],
-                "technical_details": formatted_error.get("technical_details", str(e))
+                "technical_details": formatted_error.get("technical_details", str(e)),
+                "traceback": tb_str,
+                "debug_info": tb_str,
             }
     
     def _process_data_flow(
@@ -622,13 +697,15 @@ class WorkflowExecutor:
             if key == "group_column":
                 logger.debug(f"✅ [数据流处理] 已复制 group_column: {value}")
         
-        # 🔥 根据工具类别确定文件路径参数名
+        # 🔥 根据工具类别确定文件路径参数名（Radiomics 不注入 file_path）
         if tool_category == "scRNA-seq":
             file_param_name = "adata_path"
+        elif tool_category == "Radiomics":
+            file_param_name = "image_path"
         else:
             file_param_name = "file_path"
         
-        # 🔥 如果文件路径参数缺失，尝试从上下文注入
+        # 🔥 如果文件路径参数缺失，尝试从上下文注入（Radiomics 已有 image_path 则不再注入）
         if file_param_name not in params and step_context:
             current_file_path = step_context.get("current_file_path")
             if current_file_path:
@@ -775,23 +852,34 @@ class WorkflowExecutor:
                                 step_result.get("file_path")
                             )
                         else:
-                            # 其他工具使用标准字段
+                            # 其他工具使用标准字段（含 Radiomics、Spatial：adata_path、h5ad_path、output_path 等）
                             output_path = (
+                                step_result.get("adata_path") or
+                                step_result.get("h5ad_path") or
                                 step_result.get("output_file") or
                                 step_result.get("output_path") or
                                 step_result.get("file_path") or
+                                step_result.get("csv_path") or
+                                step_result.get("output_csv_path") or
                                 step_result.get("plot_path") or
                                 step_result.get("result_path") or
                                 step_result.get("preprocessed_file")
                             )
-                        if output_path:
+                        if output_path and isinstance(output_path, (str, bytes, os.PathLike)):
                             processed[key] = output_path
                             logger.info(f"🔄 数据流: {key} = <{placeholder}> -> {output_path}")
                         else:
-                            # 如果没有找到路径，使用整个结果
-                            processed[key] = step_result
+                            # 路径参数不能赋值为 dict，保留占位符或原值，避免 TypeError
+                            if key in ("h5ad_path", "adata_path", "file_path", "output_path", "image_path", "mask_path"):
+                                logger.warning(f"⚠️ 占位符 <{placeholder}> 未解析出路径，保留原值")
+                                processed[key] = value
+                            else:
+                                processed[key] = step_result
                     else:
-                        processed[key] = step_result
+                        if key in ("h5ad_path", "adata_path", "file_path", "output_path", "image_path", "mask_path"):
+                            processed[key] = value
+                        else:
+                            processed[key] = step_result
                 elif step_context and placeholder in step_context:
                     processed[key] = step_context[placeholder]
                 else:
@@ -1243,7 +1331,7 @@ class WorkflowExecutor:
                         else:
                             logger.debug(f"🔍 [Executor] 步骤 {tool_id} 的输出不更新 current_file_path（后续步骤应使用占位符）")
             
-            # 构建步骤详情（符合前端格式）
+            # 构建步骤详情（符合前端格式）；传递错误与 traceback 以便前端控制台可打印
             step_detail = {
                 "step_id": step_id,
                 "tool_id": step.get("tool_id"),
@@ -1257,26 +1345,36 @@ class WorkflowExecutor:
                     "data": step_result.get("result", {})
                 }
             }
+            if step_result.get("status") == "error":
+                step_detail["error"] = step_result.get("error", "")
+                step_detail["message"] = step_result.get("message", "")
+                step_detail["user_message"] = step_result.get("user_message", "")
+                step_detail["error_category"] = step_result.get("error_category", "")
+                step_detail["suggestion"] = step_result.get("suggestion", "")
+                step_detail["can_skip"] = step_result.get("can_skip", False)
+                step_detail["technical_details"] = step_result.get("technical_details", "")
+                step_detail["traceback"] = step_result.get("traceback", "") or step_result.get("debug_info", "")
+                step_detail["debug_info"] = step_result.get("debug_info", "") or step_result.get("traceback", "")
             
-            # 🔥 提取图片路径（如果有）- 严格检查文件类型
+            # 🔥 提取图片路径（如果有）- 优先可展示的 PNG/JPEG，绝不使用 .nii/.dcm 作为 plot
             result_data = step_result.get("result", {})
             if isinstance(result_data, dict):
-                # 优先检查明确的图片路径字段
-                plot_path = result_data.get("plot_path") or result_data.get("image_path")
-                
-                # 如果没有明确的图片路径字段，检查 output_path 的文件扩展名
-                if not plot_path:
-                    output_path = result_data.get("output_path") or result_data.get("output_file") or result_data.get("file_path")
-                    if output_path and self._is_image_file(output_path):
-                        plot_path = output_path
-                
-                # 只有确认是图片文件才添加到 plot 字段
-                if plot_path and self._is_image_file(plot_path):
+                cand = result_data.get("plot_path")
+                if not cand or not self._is_image_file(cand):
+                    out_cand = result_data.get("output_path") or result_data.get("output_file") or result_data.get("file_path")
+                    if out_cand and self._is_image_file(out_cand):
+                        cand = out_cand
+                if not cand or not self._is_image_file(cand):
+                    img_cand = result_data.get("image_path")
+                    if img_cand and self._is_image_file(img_cand):
+                        cand = img_cand
+                plot_path = cand
+                path_lower = (plot_path or "").lower()
+                if plot_path and self._is_image_file(plot_path) and not path_lower.endswith(".nii.gz") and not path_lower.endswith(".nii") and not path_lower.endswith(".dcm"):
                     step_detail["plot"] = plot_path
                     logger.info(f"🖼️ 检测到图片文件: {plot_path}")
                 elif plot_path:
-                    # 如果不是图片文件（如 CSV），记录到 data 字段而不是 plot
-                    logger.debug(f"📄 检测到非图片文件: {plot_path}，不添加到 plot 字段")
+                    logger.debug(f"📄 跳过非可展示文件作为 plot: {plot_path}")
             
             steps_details.append(step_detail)
             steps_results.append(step_detail["step_result"])
@@ -1299,12 +1397,12 @@ class WorkflowExecutor:
                 # 不 break，继续执行后续步骤
                 # 注意：如果后续步骤依赖于当前失败的步骤，它们可能会失败，但至少会尝试执行
         
-        # 确定最终状态
-        all_success = all(
-            detail.get("status") == "success"
+        # 确定最终状态：success 与 skipped 均视为非失败（skipped 为依赖未满足时的优雅跳过）
+        all_ok = all(
+            detail.get("status") in ("success", "skipped")
             for detail in steps_details
         )
-        workflow_status = "success" if all_success else "error"
+        workflow_status = "success" if all_ok else "error"
         
         # 提取最终图片（最后一个成功步骤的图片）
         final_plot = None

@@ -28,6 +28,8 @@ from gibh_agent import create_agent
 from gibh_agent.core.file_inspector import FileInspector
 from gibh_agent.core.orchestrator import AgentOrchestrator
 from gibh_agent.core.file_handlers.structure_normalizer import normalize_session_directory
+from gibh_agent.core.file_handlers.universal_normalizer import normalize_session_directory as universal_unpack
+from gibh_agent.core.file_handlers.modality_sniffer import detect_dominant_modality, paths_for_response
 
 # 配置日志
 logging.basicConfig(
@@ -118,7 +120,8 @@ except Exception as e:
 
 # 安全配置
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 100 * 1024 * 1024))  # 默认 100MB
-ALLOWED_EXTENSIONS = {'.h5ad', '.mtx', '.tsv', '.csv', '.txt', '.gz', '.tar', '.zip'}
+# .h5 = 10x Visium / scRNA Feature Barcode Matrix (industry standard); .h5ad = AnnData
+ALLOWED_EXTENSIONS = {'.h5', '.h5ad', '.mtx', '.tsv', '.csv', '.txt', '.gz', '.tar', '.zip'}
 ALLOWED_MIME_TYPES = {
     'text/csv', 'text/tab-separated-values', 'text/plain',
     'application/gzip', 'application/x-gzip',
@@ -1497,9 +1500,65 @@ async def upload_file(
             except Exception as e:
                 logger.warning("⚠️ 签名任务入队失败（文件已保存，不影响上传）: %s", e)
         
+        # Universal Ingestion: unpack archives (zip/tar.gz) and get effective root
+        effective_root = None
+        try:
+            unpacked, effective_root = universal_unpack(Path(user_dir), remove_archive=False)
+            if unpacked and effective_root is not None:
+                # Visium 分体上传：.h5 在 user_dir，spatial 在 effective_root；复制 .h5 进 effective_root 以便识别为 Spatial
+                effective_path = Path(effective_root)
+                has_h5 = any(
+                    f.is_file() and (f.name.endswith("_feature_bc_matrix.h5") or f.name == "filtered_feature_bc_matrix.h5" or f.name == "raw_feature_bc_matrix.h5")
+                    for f in effective_path.iterdir()
+                )
+                if not has_h5:
+                    for f in Path(user_dir).iterdir():
+                        if f.is_file() and (f.name.endswith("_feature_bc_matrix.h5") or f.name in ("filtered_feature_bc_matrix.h5", "raw_feature_bc_matrix.h5")):
+                            dest = effective_path / f.name
+                            if not dest.exists():
+                                try:
+                                    import shutil
+                                    shutil.copy2(str(f), str(dest))
+                                    logger.info("✅ [UniversalIngestion] 已将 matrix .h5 复制到解压目录: %s -> %s", f.name, effective_path)
+                                except Exception as e:
+                                    logger.warning("⚠️ 复制 .h5 到解压目录失败: %s", e)
+                            break
+                # 先规范化布局（创建 spatial/、从父目录补 .h5），再检测模态
+                try:
+                    normalize_session_directory(Path(effective_root))
+                except Exception as e:
+                    logger.warning("⚠️ 解压目录规范化失败: %s", e)
+                modality, payload = detect_dominant_modality(effective_root)
+                if modality != "unknown" and payload is not None:
+                    if modality == "Spatial" and payload is not None:
+                        try:
+                            normalize_session_directory(Path(payload))
+                        except Exception as e:
+                            logger.warning("⚠️ Spatial 目录规范化失败: %s", e)
+                    inner_paths = paths_for_response(modality, payload, UPLOAD_DIR)
+                    if inner_paths:
+                        uploaded_results = []
+                        for p in inner_paths:
+                            try:
+                                size = p.stat().st_size if p.is_file() else 0
+                            except OSError:
+                                size = 0
+                            rel = str(p.relative_to(UPLOAD_DIR))
+                            uploaded_results.append({
+                                "file_id": p.name,
+                                "file_name": p.name,
+                                "file_path": str(p),
+                                "file_size": size,
+                                "metadata": None,
+                                "is_10x": False,
+                            })
+                        logger.info("✅ [UniversalIngestion] 路径已重写为解压内容: %s", [str(p.relative_to(UPLOAD_DIR)) for p in inner_paths])
+        except Exception as e:
+            logger.warning("⚠️ Universal unpack / Modality Sniffer 失败（不影响上传）: %s", e)
+        
         # SpatialStructureNormalizer: reorganize loose spatial.tar.gz + .h5 into Visium layout (spatial/ + matrix)
         try:
-            normalize_session_directory(Path(user_dir))
+            normalize_session_directory(Path(effective_root if effective_root is not None else user_dir))
         except Exception as e:
             logger.warning("⚠️ 目录结构规范化失败（不影响上传）: %s", e)
         
@@ -1675,16 +1734,16 @@ async def chat_endpoint(req: ChatRequest):
                     logger.warning(f"⚠️ [ChatEndpoint] 无法确定文件路径，跳过")
                     continue
                 
-                # 🔥 CRITICAL: 验证文件存在
+                # 始终加入文件项（路径存在则用绝对路径，不存在也保留以便进入执行分支，体检时再报错）
+                file_dict = {
+                    "name": file_name or os.path.basename(str(file_path)),
+                    "path": str(file_path.resolve()) if file_path.exists() else str(file_path)
+                }
+                uploaded_files.append(file_dict)
                 if file_path.exists():
-                    file_dict = {
-                        "name": file_name or os.path.basename(str(file_path)),
-                        "path": str(file_path)
-                    }
-                    uploaded_files.append(file_dict)
                     logger.info(f"✅ [ChatEndpoint] 添加文件: {file_dict}")
                 else:
-                    logger.warning(f"⚠️ [ChatEndpoint] 文件不存在，跳过: {file_path}")
+                    logger.warning(f"⚠️ [ChatEndpoint] 路径暂不存在，仍加入列表以便执行分支: {file_path}")
             
             logger.info(f"✅ [ChatEndpoint] 转换后的 uploaded_files: {uploaded_files}")
             logger.info(f"✅ [ChatEndpoint] uploaded_files 数量: {len(uploaded_files)}")

@@ -343,6 +343,8 @@ def detect_spatial_autocorr(
         return {"status": "error", "error": f"h5ad file not found: {h5ad_path}"}
     try:
         adata = ad.read_h5ad(p)
+        adata.obs_names_make_unique()
+        adata.var_names_make_unique()
         if genes:
             gene_list = [g.strip() for g in genes.split(",") if g.strip() in adata.var_names]
             if not gene_list:

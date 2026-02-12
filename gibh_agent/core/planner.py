@@ -1022,14 +1022,15 @@ Return ONLY a JSON array (e.g., ["pca_analysis"] or [] for full workflow)."""
         system_prompt = """You are an Intent Classifier for Bioinformatics Workflows.
 
 Your task is to classify user queries into:
-1. Domain Name: "Metabolomics", "RNA", or "Spatial" (strictly one of these three)
+1. Domain Name: "Metabolomics", "RNA", "Spatial", or "Radiomics" (strictly one of these four)
 2. Mode: "EXECUTION" or "PLANNING" (determines if user wants to run or preview)
-3. Target Steps: List of specific steps the user wants (e.g., ["pca_analysis"], ["spatial_autocorr", "plot_genes"])
+3. Target Steps: List of specific steps the user wants (e.g., ["pca_analysis"], ["load_image", "preview_slice", "extract_features"])
 
 **Available Domains:**
 - Metabolomics: For metabolite data analysis (CSV files with metabolite measurements)
 - RNA: For single-cell RNA-seq analysis (H5AD files, FASTQ files)
 - Spatial: For spatial transcriptomics / 10x Visium (Visium directories, spatial coordinates, spots, Moran's I, SVGs)
+- Radiomics: For medical imaging (NIfTI, DICOM), CT/MRI, texture analysis, biomarker discovery
 
 **Available Steps (Metabolomics):**
 - inspect_data, preprocess_data, pca_analysis, metabolomics_plsda, differential_analysis, visualize_volcano, metabolomics_pathway_enrichment
@@ -1040,17 +1041,20 @@ Your task is to classify user queries into:
 **Available Steps (Spatial):**
 - load_data, qc_norm, dimensionality_reduction, clustering, spatial_neighbors, spatial_autocorr, plot_clusters, plot_genes
 
+**Available Steps (Radiomics):**
+- load_image, preprocess, preview_slice, extract_features, calc_score, viz_score
+
 **Mode Classification Rules (CRITICAL):**
 1. IF File is **False** (no file uploaded): ALWAYS return "PLANNING".
 2. IF File is **True** (file uploaded):
    - Query implies ACTION ("analyze", "run", "do", "start", "执行", "分析", "运行", "开始"): -> Return "EXECUTION"
    - Query implies INQUIRY ("show me the plan", "what steps?", "preview", "预览", "显示", "查看"): -> Return "PLANNING"
-   - Query is VAGUE ("metabolomics", "RNA", "Spatial", "代谢组", "转录组", "空间"): -> Default to "EXECUTION"
+   - Query is VAGUE ("metabolomics", "RNA", "Spatial", "Radiomics", "代谢组", "转录组", "空间", "影像组学"): -> Default to "EXECUTION"
 
 **Output Format:**
 Return ONLY a JSON object:
 {
-  "domain_name": "Metabolomics" | "RNA" | "Spatial",
+  "domain_name": "Metabolomics" | "RNA" | "Spatial" | "Radiomics",
   "mode": "EXECUTION" | "PLANNING",
   "target_steps": ["step1", "step2", ...]  // Empty array [] means full workflow
 }
@@ -1059,10 +1063,14 @@ Return ONLY a JSON object:
 - User: "Analyze spatial autocorrelation." -> {"domain_name": "Spatial", "mode": "EXECUTION" or "PLANNING" (depends on file), "target_steps": ["spatial_autocorr", "plot_genes"]}
 - User: "Show me the spatial workflow." (no file) -> {"domain_name": "Spatial", "mode": "PLANNING", "target_steps": []}
 
+**Few-Shot Example (Radiomics):**
+- User: "Extract features from this CT." -> {"domain_name": "Radiomics", "mode": "EXECUTION", "target_steps": ["load_image", "preprocess", "preview_slice", "extract_features", "calc_score", "viz_score"]}
+- User: "Run radiomics on this image." (with file) -> {"domain_name": "Radiomics", "mode": "EXECUTION", "target_steps": []}
+
 **Rules:**
-- **User Intent Priority**: If user asks for specific analysis (e.g., "PCA", "spatial autocorrelation"), target_steps MUST include only those steps. Do NOT return full pipeline.
+- **User Intent Priority**: If user asks for specific analysis (e.g., "PCA", "spatial autocorrelation", "extract features"), target_steps MUST include only those steps or the full Radiomics pipeline [load_image, preview_slice, extract_features]. Do NOT return full pipeline unless vague.
 - If user asks for "full analysis" or "完整分析" or "analyze this file" (vague), use empty array []
-- Domain name MUST be exactly "Metabolomics", "RNA", or "Spatial" (case-sensitive)
+- Domain name MUST be exactly "Metabolomics", "RNA", "Spatial", or "Radiomics" (case-sensitive)
 - Mode MUST be exactly "EXECUTION" or "PLANNING" (case-sensitive)"""
 
         # 🔥 TASK 3 FIX: 增强用户查询和文件格式的关联
@@ -1070,11 +1078,13 @@ Return ONLY a JSON object:
         rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "cell ranger", "fastq", "测序", "sequencing"]
         metabolomics_keywords = ["metabolomics", "metabolite", "代谢组", "代谢物", "代谢"]
         spatial_keywords = ["visium", "spatial", "slice", "spot", "moran", "spatial transcriptomics", "空间转录组", "空间组学"]
+        radiomics_keywords = ["ct", "mri", "radiomics", "texture", "nifti", "dicom", "影像组学", "放射组学", "纹理特征"]
 
         # 检测用户查询中的领域关键词
         has_rna_keyword = any(kw in query_lower for kw in rna_keywords)
         has_metabolomics_keyword = any(kw in query_lower for kw in metabolomics_keywords)
         has_spatial_keyword = any(kw in query_lower for kw in spatial_keywords)
+        has_radiomics_keyword = any(kw in query_lower for kw in radiomics_keywords)
 
         user_prompt = f"""**User Query:**
 {user_query}
@@ -1087,14 +1097,16 @@ File Uploaded: {has_file} ({'True' if has_file else 'False'})
 
 **CRITICAL ROUTING RULES (User Intent + File Format):**
 1. **Visium/Spatial files** (file_type="visium" or domain="Spatial") MUST route to "Spatial" domain.
-2. **FASTQ files** (file_type="fastq" or extension=".fastq"/".fq") MUST route to "RNA" domain, regardless of query.
-3. **H5AD/10x files** (file_type="h5ad" or "10x_mtx"): If file_type is "visium" or domain is "Spatial" → "Spatial"; else → "RNA".
-4. **CSV/Tabular files** (file_type="tabular" or extension=".csv") MUST route to "Metabolomics" domain, unless user explicitly mentions RNA.
-5. **User Query Keywords:**
+2. **Medical imaging / Radiomics files** (file_type="medical_image" or domain="Radiomics" or extension .nii/.nii.gz/.dcm) MUST route to "Radiomics" domain.
+3. **FASTQ files** (file_type="fastq" or extension=".fastq"/".fq") MUST route to "RNA" domain, regardless of query.
+4. **H5AD/10x files** (file_type="h5ad" or "10x_mtx"): If file_type is "visium" or domain is "Spatial" → "Spatial"; else → "RNA".
+5. **CSV/Tabular files** (file_type="tabular" or extension=".csv") MUST route to "Metabolomics" domain, unless user explicitly mentions RNA.
+6. **User Query Keywords:**
    - If query contains Spatial keywords (visium, spatial, slice, spot, moran): Prefer "Spatial" domain
+   - If query contains Radiomics keywords (ct, mri, radiomics, texture, nifti, dicom): Prefer "Radiomics" domain
    - If query contains RNA keywords ({', '.join(rna_keywords[:5])}): Prefer "RNA" domain
    - If query contains Metabolomics keywords ({', '.join(metabolomics_keywords[:3])}): Prefer "Metabolomics" domain
-6. **Priority Order:** File format (visium → Spatial) > User query keywords > LLM inference
+7. **Priority Order:** File format (visium→Spatial, medical_image→Radiomics) > User query keywords > LLM inference
 
 **Task:**
 Classify the intent and return JSON only. Remember:
@@ -1151,6 +1163,13 @@ Classify the intent and return JSON only. Remember:
                         domain_name = "Spatial"
                     else:
                         logger.info("✅ [SOPPlanner] Visium/Spatial 文件已正确分类为 Spatial")
+                # 🔥 Radiomics: medical_image / domain=Radiomics → Radiomics
+                elif file_type == "medical_image" or file_domain == "Radiomics":
+                    if domain_name != "Radiomics":
+                        logger.warning(f"⚠️ [SOPPlanner] 检测到医学影像/Radiomics 文件，强制覆盖域名: {domain_name} → Radiomics")
+                        domain_name = "Radiomics"
+                    else:
+                        logger.info("✅ [SOPPlanner] 医学影像已正确分类为 Radiomics")
                 # 🔥 TASK 3 FIX: 文件格式优先路由（最高优先级）
                 # 1. FASTQ文件 → 强制路由到RNA
                 elif file_type == "fastq" or (file_path and any(ext in file_path.lower() for ext in [".fastq", ".fq", "fastq"])):
@@ -1202,13 +1221,17 @@ Classify the intent and return JSON only. Remember:
                     if domain_name != "RNA":
                         logger.info(f"ℹ️ [SOPPlanner] 用户查询包含RNA关键词，调整域名: {domain_name} → RNA")
                         domain_name = "RNA"
-                elif has_metabolomics_keyword and not has_rna_keyword and not has_spatial_keyword:
+                elif has_metabolomics_keyword and not has_rna_keyword and not has_spatial_keyword and not has_radiomics_keyword:
                     if domain_name != "Metabolomics":
                         logger.info(f"ℹ️ [SOPPlanner] 用户查询包含代谢组关键词，调整域名: {domain_name} → Metabolomics")
                         domain_name = "Metabolomics"
-            
-            # 验证域名（支持 Spatial）
-            if domain_name not in ["Metabolomics", "RNA", "Spatial"]:
+                elif has_radiomics_keyword and not has_spatial_keyword:
+                    if domain_name != "Radiomics":
+                        logger.info(f"ℹ️ [SOPPlanner] 用户查询包含影像组学关键词，调整域名: {domain_name} → Radiomics")
+                        domain_name = "Radiomics"
+
+            # 验证域名（支持 Spatial, Radiomics）
+            if domain_name not in ["Metabolomics", "RNA", "Spatial", "Radiomics"]:
                 logger.warning(f"⚠️ LLM 返回了无效的域名: {domain_name}，使用默认值 Metabolomics")
                 domain_name = "Metabolomics"
             
@@ -1266,6 +1289,9 @@ Classify the intent and return JSON only. Remember:
             if file_type == "visium" or file_domain == "Spatial":
                 domain_name = "Spatial"
                 logger.info("✅ [SOPPlanner] Fallback: 检测到 Visium/Spatial 文件，使用 Spatial 域名")
+            elif file_type == "medical_image" or file_domain == "Radiomics":
+                domain_name = "Radiomics"
+                logger.info("✅ [SOPPlanner] Fallback: 检测到医学影像/Radiomics 文件，使用 Radiomics 域名")
             elif file_type == "anndata" or (file_path and file_path.lower().endswith(('.h5ad', '.h5', '.loom'))):
                 logger.info("✅ [SOPPlanner] 检测到 RNA 文件类型（anndata/h5ad），使用 RNA 域名")
                 domain_name = "RNA"
@@ -1323,15 +1349,21 @@ Classify the intent and return JSON only. Remember:
             else:
                 # 未知文件类型，使用关键词匹配
                 rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "h5ad"]
+                radiomics_keywords_fallback = ["ct", "mri", "radiomics", "texture", "nifti", "dicom", "影像组学"]
                 if any(kw in query_lower for kw in spatial_keywords_fallback):
                     domain_name = "Spatial"
+                elif any(kw in query_lower for kw in radiomics_keywords_fallback):
+                    domain_name = "Radiomics"
                 else:
                     domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
         else:
             # No file metadata - check query keywords
             rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "h5ad"]
+            radiomics_keywords_fallback = ["ct", "mri", "radiomics", "texture", "nifti", "dicom", "影像组学"]
             if any(kw in query_lower for kw in spatial_keywords_fallback):
                 domain_name = "Spatial"
+            elif any(kw in query_lower for kw in radiomics_keywords_fallback):
+                domain_name = "Radiomics"
             else:
                 domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
         
@@ -1392,7 +1424,25 @@ Classify the intent and return JSON only. Remember:
             workflow_config["workflow_data"]["steps"] = steps
         
         file_path = file_metadata.get("file_path")
-        
+        real_data_path = file_metadata.get("real_data_path") or file_path  # Visium root for spatial workflow
+        # 🔥 Spatial: 若 real_data_path 为文件路径（如 tissue_positions_list.csv），推导为 Visium 根目录
+        if real_data_path:
+            rp = Path(real_data_path)
+            if rp.is_file():
+                parent = rp.parent
+                if rp.name == "tissue_positions_list.csv" or "tissue_positions" in rp.name.lower():
+                    real_data_path = str(parent.parent if parent.name == "spatial" else parent)
+                elif "spatial" in rp.parts:
+                    for i, part in enumerate(rp.parts):
+                        if part == "spatial" and i > 0:
+                            real_data_path = str(Path(*rp.parts[:i]))
+                            break
+                    else:
+                        real_data_path = str(parent)
+                else:
+                    real_data_path = str(parent)
+                logger.info("✅ [SOPPlanner] 从文件路径推导 data_dir -> %s", real_data_path)
+
         # 🔥 CRITICAL FIX: 检测分组列（用于代谢组学）
         # 首先尝试从 semantic_map 获取
         semantic_map = file_metadata.get("semantic_map", {})
@@ -1413,6 +1463,21 @@ Classify the intent and return JSON only. Remember:
             params = step.get("params", {})
             step_id = step.get("id")
             
+            # 🔥 CRITICAL FIX: 填充 data_dir（Spatial Visium load_data 步骤）
+            if "data_dir" in params and real_data_path:
+                old_val = params.get("data_dir", "")
+                params["data_dir"] = real_data_path
+                if old_val and old_val != real_data_path:
+                    logger.info(f"✅ [SOPPlanner] 填充 data_dir: {old_val} -> {real_data_path} ({step_id})")
+            # 🔥 Spatial Consumer: pass Sensor's detected matrix file name (dynamic H5 loading)
+            if "counts_file" in params and file_metadata.get("matrix_file"):
+                params["counts_file"] = file_metadata["matrix_file"]
+            # 🔥 Radiomics: fill image_path and mask_path from file_metadata
+            if "image_path" in params and file_path:
+                params["image_path"] = file_path
+            if "mask_path" in params and file_metadata.get("mask_path"):
+                params["mask_path"] = file_metadata["mask_path"]
+
             # 🔥 CRITICAL FIX: 填充 file_path 或 adata_path（覆盖占位符）
             if "file_path" in params or "adata_path" in params:
                 param_name = "adata_path" if "adata_path" in params else "file_path"

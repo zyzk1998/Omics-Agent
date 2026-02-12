@@ -57,6 +57,14 @@ paths:
   results_dir: "${RESULTS_DIR:/app/results}"
   hpc_work_dir: "${HPC_WORK_DIR:/scratch/gibh}"
 
+# 文件签名配置（BLAKE3 + Ed25519，异步侧车 .sig）
+# 占位：实际密钥从环境变量读取，不在此文件写明文。
+# 生成密钥: python scripts/generate_keys.py → 将输出填入 .env
+# 依赖: pip install blake3 pynacl
+signing:
+  private_key_env: "FILE_SIGNING_PRIVATE_KEY"   # Base64 编码的 Ed25519 私钥（32 字节）
+  public_key_env: "FILE_SIGNING_PUBLIC_KEY"     # Base64 编码的 Ed25519 公钥（32 字节）
+
 # HPC/任务分发配置
 dispatcher:
   # 任务提交方式: "local", "slurm", "ssh"
