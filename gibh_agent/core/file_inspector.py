@@ -12,8 +12,10 @@ import os
 import json
 import gzip
 import logging
+import tarfile
+import zipfile
 from pathlib import Path
-from typing import Dict, Optional, Any, List, Tuple
+from typing import Dict, Optional, Any, List, Tuple, Set
 from abc import ABC, abstractmethod
 import numpy as np
 
@@ -587,6 +589,57 @@ class TenXDirectoryHandler(BaseFileHandler):
             }
 
 
+def _archive_member_basenames(archive_path: Path) -> Optional[Set[str]]:
+    """
+    Peek into archive and return the set of member basenames (lowercase).
+    Returns None on open/list error.
+    """
+    names: Set[str] = set()
+    name_lower = archive_path.name.lower()
+    try:
+        if name_lower.endswith(".zip"):
+            with zipfile.ZipFile(archive_path, "r") as z:
+                for n in z.namelist():
+                    base = n.replace("\\", "/").split("/")[-1].lower()
+                    if base:
+                        names.add(base)
+            return names
+        if name_lower.endswith((".tar.gz", ".tgz", ".tar")):
+            with tarfile.open(archive_path, "r:*") as t:
+                for m in t.getmembers():
+                    base = (m.name or "").replace("\\", "/").split("/")[-1].lower()
+                    if base:
+                        names.add(base)
+            return names
+    except Exception as e:
+        logger.debug("Archive peek failed %s: %s", archive_path, e)
+    return None
+
+
+def _archive_contains_10x_scrna(archive_path: Path) -> bool:
+    """
+    Content sniffing: return True only if the archive contains standard 10x scRNA-seq
+    files (matrix.mtx[/.gz], barcodes.tsv[/.gz], features.tsv or genes.tsv[/.gz]).
+    Returns False for spatial-only archives (images, scalefactors, no matrix.mtx).
+    """
+    basenames = _archive_member_basenames(archive_path)
+    if not basenames:
+        return False
+    has_matrix = any(
+        b in basenames for b in ("matrix.mtx", "matrix.mtx.gz")
+    )
+    has_barcodes = any(
+        b in basenames for b in ("barcodes.tsv", "barcodes.tsv.gz")
+    )
+    has_features = any(
+        b in basenames for b in (
+            "features.tsv", "features.tsv.gz",
+            "genes.tsv", "genes.tsv.gz",
+        )
+    )
+    return bool(has_matrix and (has_barcodes or has_features))
+
+
 @register_inspector(priority=9)
 class Archive10xHandler(BaseFileHandler):
     """
@@ -594,14 +647,18 @@ class Archive10xHandler(BaseFileHandler):
     
     委托 core.rna_utils.load_10x_from_tarball 解压并加载，与执行阶段共用同一套逻辑，
     保证 Inspector 能读则 Executor 一定能读。persist_h5ad=True 以便执行阶段直接使用 .h5ad，避免重复解压。
+    can_handle 使用内容嗅探（peek）：仅当压缩包内含有 matrix.mtx + barcodes/features 时返回 True，
+    不含 MTX 的 spatial 包由 StructureNormalizer 解压后由 SpatialVisiumHandler 识别。
     """
     
     def can_handle(self, path: Path) -> bool:
-        """仅处理文件且为支持的压缩格式（Cell Ranger 常用）"""
+        """Only handle archives that contain standard 10x scRNA-seq files (content sniffing)."""
         if not path.is_file():
             return False
         name = path.name.lower()
-        return name.endswith(".tar.gz") or name.endswith(".zip")
+        if not (name.endswith(".tar.gz") or name.endswith(".tgz") or name.endswith(".tar") or name.endswith(".zip")):
+            return False
+        return _archive_contains_10x_scrna(path)
     
     def inspect(self, path: Path) -> Dict[str, Any]:
         """
@@ -1294,3 +1351,10 @@ try:
     logger.info("✅ [FileInspector] Registered SpatialVisiumHandler (priority=20)")
 except ImportError as e:
     logger.debug("SpatialVisiumHandler not loaded: %s", e)
+
+try:
+    from .file_handlers.extended_handlers import RadiomicsHandler
+    _registry.register(10, RadiomicsHandler)
+    logger.info("✅ [FileInspector] Registered RadiomicsHandler (priority=10)")
+except ImportError as e:
+    logger.debug("RadiomicsHandler not loaded: %s", e)

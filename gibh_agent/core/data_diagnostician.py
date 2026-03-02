@@ -48,13 +48,24 @@ class DataDiagnostician:
                 "stats": {}
             }
         
+        # 🔥 CRITICAL: Route by file identity or explicit omics_type so medical_image never gets scRNA template
+        _is_radiomics = (
+            file_metadata.get("domain") == "Radiomics"
+            or file_metadata.get("file_type") == "medical_image"
+            or (omics_type and str(omics_type).lower() in ["radiomics", "medical_image", "imaging"])
+        )
+        if _is_radiomics:
+            return self._analyze_radiomics(file_metadata, dataframe)
+        
         # 根据组学类型分发到不同的分析器
-        if omics_type.lower() in ["scrna", "scrna-seq", "single_cell", "single-cell"]:
+        if omics_type and omics_type.lower() in ["scrna", "scrna-seq", "single_cell", "single-cell"]:
             return self._analyze_scRNA(file_metadata, dataframe)
         elif omics_type.lower() in ["metabolomics", "metabolomic", "metabonomics"]:
             return self._analyze_metabolomics(file_metadata, dataframe)
         elif omics_type.lower() in ["bulkrna", "bulk_rna", "bulk-rna", "rna-seq"]:
             return self._analyze_bulkRNA(file_metadata, dataframe)
+        elif omics_type.lower() in ["radiomics", "medical_image", "imaging"]:
+            return self._analyze_radiomics(file_metadata, dataframe)
         else:
             return self._analyze_default(file_metadata, dataframe)
     
@@ -245,6 +256,53 @@ class DataDiagnostician:
             "stats": stats
         }
     
+    def _analyze_radiomics(
+        self,
+        file_metadata: Dict[str, Any],
+        dataframe: Optional[pd.DataFrame] = None,
+    ) -> Dict[str, Any]:
+        """
+        分析影像组学数据：从文件元数据或影像头信息提取尺寸、间距、掩膜状态等。
+        不使用 Cells/Genes，仅使用影像相关指标。
+        """
+        stats: Dict[str, Any] = {}
+        shape = file_metadata.get("shape", {})
+        size = shape.get("size") or []
+        spacing = shape.get("spacing") or []
+        origin = shape.get("origin") or []
+        direction = shape.get("direction") or []
+
+        stats["dimensions"] = size
+        stats["spacing_mm"] = spacing
+        stats["origin"] = origin
+        stats["direction"] = direction
+        stats["mask_present"] = bool(file_metadata.get("mask_path"))
+        stats["mask_path"] = file_metadata.get("mask_path")
+        stats["file_path"] = file_metadata.get("file_path")
+        stats["modality"] = file_metadata.get("modality", "Radiomics")
+        # 不写入 n_cells / n_genes，避免被误当作单细胞数据喂给 LLM 导致幻觉
+        stats["_imaging_only"] = True
+
+        # 维度/层厚摘要（用于报告与 LLM 上下文）
+        if size and len(size) >= 3:
+            stats["dimensions_str"] = " × ".join(str(s) for s in size)
+        else:
+            stats["dimensions_str"] = "N/A"
+        if spacing and len(spacing) >= 3:
+            stats["spacing_str"] = " × ".join(f"{s:.2f}" for s in spacing) + " mm"
+            stats["spacing_x"] = spacing[0]
+            stats["spacing_y"] = spacing[1] if len(spacing) > 1 else None
+            stats["spacing_z"] = spacing[2] if len(spacing) > 2 else None
+        else:
+            stats["spacing_str"] = "N/A"
+            stats["spacing_x"] = stats["spacing_y"] = stats["spacing_z"] = None
+
+        return {
+            "status": "success",
+            "omics_type": "Radiomics",
+            "stats": stats,
+        }
+
     def _analyze_default(
         self,
         file_metadata: Dict[str, Any],
@@ -252,26 +310,26 @@ class DataDiagnostician:
     ) -> Dict[str, Any]:
         """
         默认分析（通用统计）
-        
+
         Args:
             file_metadata: 文件元数据
             dataframe: 可选的数据预览
-        
+
         Returns:
             统计事实字典
         """
         stats = {}
-        
+
         # 基本统计
         stats["n_rows"] = file_metadata.get("shape", {}).get("rows", 0)
         stats["n_cols"] = file_metadata.get("shape", {}).get("cols", 0)
         stats["missing_rate"] = file_metadata.get("missing_rate", 0)
-        
+
         # 数据范围
         data_range = file_metadata.get("data_range", {})
         stats["min_value"] = data_range.get("min", None)
         stats["max_value"] = data_range.get("max", None)
-        
+
         return {
             "status": "success",
             "omics_type": "default",

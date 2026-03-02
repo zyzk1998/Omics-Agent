@@ -1253,9 +1253,17 @@ Use Simplified Chinese for all content."""
 - 空间图按聚类/基因着色
 **重要**：使用空间组学术语（Spots、Clusters、Spatial Domains、Gene Expression、Moran's I、SVGs）。不要使用代谢组学术语（代谢物、LC-MS、差异代谢物等）。
 """
+            elif omics_type.lower() in ["radiomics", "imaging"]:
+                expert_role = "影像组学分析专家"
+                domain_context = """
+- 医学影像（NIfTI/DICOM）与 ROI/mask；预处理（重采样、归一化）
+- 影像组学特征：形状、一阶统计、纹理（GLCM、GLRLM 等）
+- Rad-Score、风险概率、特征 CSV
+**重要**：使用影像组学术语（ROI、mask、PyRadiomics、Rad-Score、纹理特征）。不要使用代谢组学或转录组学术语。
+"""
             else:
-                expert_role = "生物信息学分析专家"
-                domain_context = "通用组学数据分析流程"
+                expert_role = "数据分析专家"
+                domain_context = "通用数据分析流程。请根据实际步骤结果（步骤名称与指标）概括发现与结论，勿使用特定组学术语（如代谢物、LC-MS、转录本）除非结果中明确包含该领域数据。"
             
             # 🔥 CRITICAL FIX: Build failure information for prompt
             failure_info = ""
@@ -1278,9 +1286,10 @@ Use Simplified Chinese for all content."""
                 rule3_text = "- ⚠️ Some steps failed during execution. You MUST still summarize the successful steps (e.g., PCA, PLS-DA, Volcano plots) and explain what insights can be drawn from them.\n- For failed steps, briefly note what went wrong (e.g., 'Pathway enrichment failed due to missing gseapy library') but focus on interpreting the successful results."
             
             # 🔥 TASK 3: Extract Key Findings with SPECIFIC metrics (Feed the Brain)
-            # 🔥 修复：根据omics_type初始化不同的key_findings结构
+            # 🔥 修复：根据omics_type初始化不同的key_findings结构，避免跨领域幻觉（如 Radiomics 用代谢组话术）
             is_rna_analysis = omics_type.lower() in ["scrna", "scrna-seq", "single_cell", "single-cell", "rna", "rna-seq"]
             is_spatial_analysis = omics_type.lower() in ["spatial", "visium", "spatial transcriptomics"]
+            is_radiomics_analysis = omics_type.lower() in ["radiomics", "imaging"]
             
             if is_spatial_analysis:
                 key_findings = {
@@ -1291,6 +1300,14 @@ Use Simplified Chinese for all content."""
                     "spatial_domains": "N/A",
                     "top_svgs": [],  # 空间可变基因
                     "moran_i_summary": "N/A"
+                }
+            elif is_radiomics_analysis:
+                key_findings = {
+                    "image_shape": "N/A",
+                    "n_features": "N/A",
+                    "rad_score": "N/A",
+                    "risk_probability": "N/A",
+                    "top_features": [],
                 }
             elif is_rna_analysis:
                 key_findings = {
@@ -1369,7 +1386,7 @@ Use Simplified Chinese for all content."""
                     
                     key_findings["pca_variance"] = {"PC1": pc1_val, "PC2": pc2_val}
                     # 🔥 修复：pca_separation只在代谢组学分析中存在（非 RNA、非 Spatial）
-                    if not is_rna_analysis and not is_spatial_analysis:
+                    if not is_rna_analysis and not is_spatial_analysis and not is_radiomics_analysis:
                         if separation == "clear":
                             key_findings["pca_separation"] = f"清晰分离 (PC1: {pc1_var}, PC2: {pc2_var})"
                         else:
@@ -1391,8 +1408,24 @@ Use Simplified Chinese for all content."""
                         if isinstance(svgs, list) and svgs:
                             key_findings["top_svgs"] = list(svgs)[:5]
                 
+                # 🔥 影像组学：从 load/feature/rad_score 步骤提取
+                if is_radiomics_analysis:
+                    if "load" in step_name or "image" in step_name:
+                        if "shape" in step_info:
+                            key_findings["image_shape"] = step_info.get("shape", "N/A")
+                    if "feature" in step_name or "extract" in step_name:
+                        n_feat = step_info.get("n_features", step_info.get("feature_count", "N/A"))
+                        if n_feat != "N/A":
+                            key_findings["n_features"] = n_feat
+                        top_f = step_info.get("top_features", step_info.get("feature_names", []))[:5]
+                        if top_f:
+                            key_findings["top_features"] = list(top_f) if isinstance(top_f, list) else [str(top_f)]
+                    if "rad_score" in step_name or "score" in step_name:
+                        key_findings["rad_score"] = step_info.get("rad_score", step_info.get("score", "N/A"))
+                        key_findings["risk_probability"] = step_info.get("risk_probability", step_info.get("probability", "N/A"))
+                
                 # 🔥 修复：只提取关键计数，不包含完整的top_up/top_down列表（仅代谢组学，非 Spatial）
-                if not is_rna_analysis and not is_spatial_analysis and "differential" in step_name:
+                if not is_rna_analysis and not is_spatial_analysis and not is_radiomics_analysis and "differential" in step_name:
                     sig_count = step_info.get("significant_count", "N/A")
                     total_count = step_info.get("total_count", "N/A")
                     # 🔥 不提取top_up和top_down列表（可能很长），只使用计数
@@ -1416,7 +1449,7 @@ Use Simplified Chinese for all content."""
                         key_findings["top_differential_metabolites"] = step_info.get("top_up_names", [])[:3]
                 
                 # 🔥 修复：只提取top VIP代谢物名称，不包含完整数据（仅代谢组学，非 Spatial）
-                if not is_rna_analysis and not is_spatial_analysis and ("plsda" in step_name or "pls-da" in step_name):
+                if not is_rna_analysis and not is_spatial_analysis and not is_radiomics_analysis and ("plsda" in step_name or "pls-da" in step_name):
                     top_vip = step_info.get("top_vip_markers", [])
                     if top_vip:
                         # Extract metabolite NAMES only (for biological interpretation)
@@ -1425,7 +1458,7 @@ Use Simplified Chinese for all content."""
                         ]
                 
                 # 🔥 修复：只提取top通路名称，不包含完整数据（仅代谢组学，非 Spatial）
-                if not is_rna_analysis and not is_spatial_analysis and ("pathway" in step_name or "enrichment" in step_name):
+                if not is_rna_analysis and not is_spatial_analysis and not is_radiomics_analysis and ("pathway" in step_name or "enrichment" in step_name):
                     top_pathways = step_info.get("top_pathways", [])
                     if top_pathways:
                         # Extract pathway NAMES only (for biological interpretation)
@@ -1474,11 +1507,13 @@ Use Simplified Chinese for all content."""
             logger.info(f"📊 [AnalysisSummary] execution_results_text长度: {len(execution_results_text)}字符")
             
             if is_spatial_analysis:
-                critical_instruction_text = "Based on the provided metrics above, interpret the **spatial transcriptomics** (10x Visium) results. Use terminology: Spots, Clusters, Spatial Domains, Gene Expression, Moran's I, Spatially Variable Genes (SVGs). Do NOT mention metabolites, LC-MS, or metabolomics. Generate a structured Markdown report with spatial biology interpretation."
+                critical_instruction_text = "Analyze Spatial transcriptomics (10x Visium) results. Discuss: (1) Tissue Architecture and Clusters (spatial domains, Leiden); (2) Spatially Variable Genes (SVGs, Moran's I); (3) Biological Functions (pathway enrichment if present). Use terminology: Spots, Clusters, Spatial Domains, Gene Expression, Moran's I, SVGs. DO NOT use Metabolomics terms (no metabolites, LC-MS, or differential metabolites). Generate a structured Markdown report."
+            elif is_radiomics_analysis:
+                critical_instruction_text = "You are a Medical Imaging Expert. Summarize the radiomics analysis. Mention: Image Dimensions, Mask Alignment, Texture Features (shape, first-order, GLCM), and Rad-Score / risk probability. Use terminology: ROI, mask, PyRadiomics, NIfTI, DICOM. DO NOT mention Metabolites, LC-MS, Genes, or transcriptomics. Generate a structured Markdown report in Simplified Chinese."
             else:
                 critical_instruction_text = "Based on the provided metrics above, interpret the biological significance. Use your internal knowledge base (PubMed/Literature) to explain **WHY** these specific metabolites/pathways might be altered in this context. Generate a structured Markdown report with deep biological interpretation."
             
-            # 空间组学使用专用输出结构，禁止出现代谢物/LC-MS 等术语
+            # 空间/影像组学使用专用输出结构，禁止出现其他领域术语
             if is_spatial_analysis:
                 output_structure_section = """
 ### 1. 统计概览 (Statistical Overview) — 空间转录组
@@ -1501,6 +1536,22 @@ Use Simplified Chinese for all content."""
 - 后续空间分析或实验验证建议
 
 **禁止**：不要提及代谢物（metabolites）、LC-MS、代谢组学或差异代谢物。仅使用空间转录组学术语。
+"""
+            elif is_radiomics_analysis:
+                output_structure_section = """
+### 1. 统计概览 (Statistical Overview) — 影像组学
+- 影像与 ROI 信息、提取特征数量、Rad-Score 与风险概率
+- 数据质量与预处理简要说明
+
+### 2. 影像组学特征与 Rad-Score (Radiomics Features & Rad-Score)
+- **特征**：形状、一阶、纹理等；关键特征与 Rad-Score 解读
+- **风险概率**：Sigmoid 输出与临床意义
+
+### 3. 结论与建议 (Conclusions & Recommendations)
+- 主要发现总结（使用影像组学术语）
+- 后续验证或临床解读建议
+
+**禁止**：不要提及代谢物、LC-MS、转录组或通路富集。仅使用影像组学术语（ROI、mask、PyRadiomics、Rad-Score）。
 """
             else:
                 output_structure_section = """

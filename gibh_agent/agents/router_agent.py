@@ -49,6 +49,11 @@ class RouterAgent(BaseAgent):
         ],
         "imaging": [
             "image", "microscopy", "histology", "病理", "影像"
+        ],
+        "radiomics": [
+            "ct", "mri", "radiomics", "texture", "nifti", "dicom", "medical imaging",
+            "影像组学", "放射组学", "纹理特征", "肿瘤异质性",
+            "pyradiomics", "simpleitk", ".nii", ".dcm"
         ]
     }
     
@@ -60,6 +65,7 @@ class RouterAgent(BaseAgent):
         "metabolomics": "metabolomics_agent",
         "proteomics": "proteomics_agent",
         "spatial_omics": "spatial_agent",
+        "radiomics": "radiomics_agent",
         "imaging": "imaging_agent"
     }
     
@@ -109,6 +115,22 @@ class RouterAgent(BaseAgent):
                 timeout=10.0
             )
             if llm_route:
+                if (llm_route.get("modality") or "").lower() == "unknown" or llm_route.get("routing") == "ask_modality":
+                    logger.warning("⚠️ RouterAgent: LLM 返回 unknown 模态，触发 HITL")
+                    return {
+                        "modality": "unknown",
+                        "intent": "ask_modality",
+                        "confidence": 0,
+                        "routing": "ask_modality",
+                        "reasoning": "LLM could not determine modality.",
+                        "action": "show_modality_selector",
+                        "available_modalities": [
+                            {"id": "RNA", "label": "单细胞/转录组 (RNA)"},
+                            {"id": "Metabolomics", "label": "代谢组学 (Metabolomics)"},
+                            {"id": "Spatial", "label": "空间转录组 (Spatial)"},
+                            {"id": "Radiomics", "label": "影像组学 (Radiomics)"},
+                        ],
+                    }
                 logger.info(f"✅ RouterAgent: LLM 路由成功 - {llm_route.get('routing')} (confidence: {llm_route.get('confidence', 0):.2f})")
                 return llm_route
         except asyncio.TimeoutError:
@@ -116,14 +138,21 @@ class RouterAgent(BaseAgent):
         except Exception as e:
             logger.error(f"❌ RouterAgent: LLM 路由失败: {e}", exc_info=True)
         
-        # 默认路由到转录组（向后兼容）
-        logger.warning(f"⚠️ RouterAgent: 使用默认路由 (rna_agent)")
+        # 无法识别模态时返回 HITL：要求前端展示「请选择数据类型」
+        logger.warning(f"⚠️ RouterAgent: 无法识别模态，返回 ask_modality（需用户选择）")
         return {
-            "modality": "transcriptomics",
-            "intent": "analysis",
-            "confidence": 0.5,
-            "routing": "rna_agent",
-            "reasoning": "Default routing to transcriptomics"
+            "modality": "unknown",
+            "intent": "ask_modality",
+            "confidence": 0,
+            "routing": "ask_modality",
+            "reasoning": "Detected ambiguous data. Please select the modality.",
+            "action": "show_modality_selector",
+            "available_modalities": [
+                {"id": "RNA", "label": "单细胞/转录组 (RNA)"},
+                {"id": "Metabolomics", "label": "代谢组学 (Metabolomics)"},
+                {"id": "Spatial", "label": "空间转录组 (Spatial)"},
+                {"id": "Radiomics", "label": "影像组学 (Radiomics)"},
+            ],
         }
     
     def _quick_route(
@@ -222,6 +251,21 @@ class RouterAgent(BaseAgent):
                 "confidence": 0.92,
                 "routing": "spatial_agent",
                 "reasoning": "Query contains spatial/Visium keywords"
+            }
+
+        # Radiomics quick-route (CT, MRI, NIfTI, DICOM, Texture)
+        radiomics_keywords = [
+            "ct", "mri", "radiomics", "texture", "nifti", "dicom", "medical imaging",
+            "影像组学", "放射组学", "纹理特征", "肿瘤异质性", "pyradiomics"
+        ]
+        if any(kw in query_lower for kw in radiomics_keywords):
+            logger.info("✅ 快速路由: 查询包含影像组学关键词 → radiomics_agent")
+            return {
+                "modality": "radiomics",
+                "intent": self._detect_intent(query),
+                "confidence": 0.90,
+                "routing": "radiomics_agent",
+                "reasoning": "Query contains CT/MRI/Radiomics/NIfTI/DICOM keywords"
             }
 
         # 🔧 修复：优先检查查询中的代谢组关键词（即使没有文件）

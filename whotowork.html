@@ -746,24 +746,26 @@
             margin-bottom: 8px;
         }
         
-        .print-btn {
+        /* 架构漫游按钮 - 右上角浮动 */
+        .tour-btn {
             position: fixed;
             top: 20px;
             right: 20px;
-            background: #667eea;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
             padding: 12px 24px;
-            border-radius: 6px;
+            border-radius: 10px;
             cursor: pointer;
             font-size: 14px;
-            font-weight: 500;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            font-weight: 600;
+            box-shadow: 0 4px 14px rgba(102, 126, 234, 0.4);
             z-index: 1000;
+            transition: transform 0.2s, box-shadow 0.2s;
         }
-        
-        .print-btn:hover {
-            background: #5568d3;
+        .tour-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
         }
         
         /* Code Pop-up Modal */
@@ -816,145 +818,12 @@
             color: #0d47a1;
         }
         
-        @media print {
-            /* 页面设置 */
-            @page {
-                size: A4 landscape;
-                margin: 1cm;
-            }
-            
-            /* 强制打印背景颜色 */
-            * {
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-            }
-            
-            body {
-                background: white !important;
-                padding: 0;
-                margin: 0;
-            }
-            
-            /* 隐藏 UI 元素 */
-            .print-btn,
-            .code-modal,
-            .control-bar,
-            .detail-panel {
-                display: none !important;
-            }
-            
-            /* 容器样式 */
-            .container {
-                box-shadow: none !important;
-                padding: 20px !important;
-                background: white !important;
-                border-radius: 0 !important;
-            }
-            
-            /* Master-Detail 布局在打印时变为单列 */
-            .main-layout {
-                display: grid !important;
-                grid-template-columns: 1fr !important;
-            }
-            
-            .diagram-section {
-                width: 100% !important;
-            }
-            
-            /* 隐藏 SVG 覆盖层 */
-            .svg-overlay {
-                display: none !important;
-            }
-            
-            /* 流程图样式 */
-            .flow-diagram {
-                page-break-inside: avoid !important;
-                background: #f8f9fa !important;
-                border: 2px solid #dee2e6 !important;
-                padding: 30px !important;
-                margin: 20px 0 !important;
-            }
-            
-            .flow-grid {
-                gap: 25px 15px !important;
-            }
-            
-            /* 卡片样式 - 确保背景和边框打印 */
-            .flow-step-card {
-                page-break-inside: avoid !important;
-                break-inside: avoid !important;
-                background: white !important;
-                border: 3px solid !important;
-                box-shadow: 0 2px 6px rgba(0,0,0,0.1) !important;
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-            }
-            
-            /* 确保渐变背景打印 */
-            .flow-step-card.user-layer {
-                background: linear-gradient(135deg, #e8f5e9 0%, #ffffff 100%) !important;
-                border-color: #4CAF50 !important;
-            }
-            
-            .flow-step-card.orchestrator-layer {
-                background: linear-gradient(135deg, #f3e5f5 0%, #ffffff 100%) !important;
-                border-color: #9C27B0 !important;
-            }
-            
-            .flow-step-card.brain-layer {
-                background: linear-gradient(135deg, #fff5f0 0%, #ffffff 100%) !important;
-                border-color: #FF6B35 !important;
-            }
-            
-            .flow-step-card.agent-layer {
-                background: linear-gradient(135deg, #fff3e0 0%, #ffffff 100%) !important;
-                border-color: #FF9800 !important;
-            }
-            
-            .flow-step-card.executor-layer {
-                background: linear-gradient(135deg, #ffebee 0%, #ffffff 100%) !important;
-                border-color: #F44336 !important;
-            }
-            
-            /* 学术徽章样式 */
-            .academic-badge {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-                color: white !important;
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-            }
-            
-            
-            /* 标题和文本 */
-            h1, h2, h3 {
-                color: #333 !important;
-                page-break-after: avoid !important;
-            }
-            
-            .section {
-                page-break-inside: avoid !important;
-            }
-            
-            /* 代码块 */
-            .code-block {
-                background: #1e1e1e !important;
-                color: #d4d4d4 !important;
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-            }
-            
-            /* 数据格式框 */
-            .data-format {
-                background: #e7f3ff !important;
-                border-left: 4px solid #2196F3 !important;
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-            }
-        }
     </style>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/driver.js@1.0.1/dist/driver.css"/>
+    <script src="https://cdn.jsdelivr.net/npm/driver.js@1.0.1/dist/driver.js.iife.js"></script>
 </head>
 <body>
-    <button class="print-btn" onclick="window.print()">🖨️ 打印/导出 PDF</button>
+    <button class="tour-btn" onclick="startTour()">👋 架构漫游 (Start Tour)</button>
     
     <!-- Code Pop-up Modal (点击连接线显示，点击任意处关闭) -->
     <div class="code-modal" id="code-modal" onclick="event.stopPropagation()">
@@ -977,6 +846,7 @@
                     <button class="scenario-btn" onclick="renderScenario('error', this)">错误循环 (Error Loop)</button>
                     <button class="scenario-btn" onclick="renderScenario('chat', this)">直接聊天 (Direct Chat)</button>
                     <button class="scenario-btn" onclick="renderScenario('reset', this)">重置 (Reset)</button>
+                    <button class="scenario-btn" onclick="showInfraReport()">基础设施与安全 (Infra &amp; Security)</button>
                 </div>
                 
                 <!-- 流程图 - 数字实验室类比 (CSS Grid 2D 布局) -->
@@ -1039,11 +909,12 @@
                         <!-- 第4行: 领域专家 (全宽) -->
                         <div class="flow-step-card agent-layer clickable" data-module="agent" onclick="showModuleDetails('agent')">
                             <div class="step-title">🧬 领域专家 (Domain Agents)</div>
-                            <div class="step-desc">拥有 RNA/代谢组学的专业知识，执行领域特定分析</div>
+                            <div class="step-desc">多模态：RNA、代谢组学、空间组学 (Visium)、影像组学 (NIfTI) 等，执行领域特定分析</div>
                             <div class="step-components">
-                                <span class="component-tag">RNA Agent</span>
-                                <span class="component-tag">Metabolomics Agent</span>
-                                <span class="component-tag">领域知识</span>
+                                <span class="component-tag">RNA</span>
+                                <span class="component-tag">Metabolomics</span>
+                                <span class="component-tag">Spatial</span>
+                                <span class="component-tag">Radiomics</span>
                             </div>
                         </div>
                         
@@ -1097,8 +968,8 @@
                 user: {
                     component: "用户 (User)",
                     coreFunction: "用户交互接口",
-                    dataIO: "Input: 自然语言查询 + 文件上传 → Output: HTTP POST 请求",
-                    technologyDescription: "实现基于 React/Vanilla JS 的前端界面，使用 FormData API 处理文件上传，通过 fetch API 发送 HTTP POST 请求到后端。前端负责用户输入验证、文件预览和错误提示。",
+                    dataIO: "Input: 自然语言查询 + 文件上传（含复杂压缩包 .tar.gz / .zip 及医学影像 .nii.gz）→ Output: HTTP POST 请求",
+                    technologyDescription: "实现基于 React/Vanilla JS 的前端界面，使用 FormData API 处理文件上传，支持复杂归档（.tar.gz、.zip）与医学影像（.nii.gz）等格式。通过 fetch API 发送 HTTP POST 请求到后端。前端负责用户输入验证、文件预览和错误提示。",
                     keyLogic: "用户在 Web UI 中输入查询文本或上传文件，前端收集用户输入并发送到后端 API。",
                     designRationale: "分离用户界面层与业务逻辑层，实现前后端解耦。前端负责交互和展示，后端负责计算和决策。这种架构支持前后端独立开发和部署，提高系统可维护性。",
                     upstreamDownstream: "Upstream: N/A (用户入口) | Downstream: Orchestrator (接收用户请求)",
@@ -1109,7 +980,7 @@
                     component: "总控编排 (Orchestrator)",
                     coreFunction: "core.orchestrator.AgentOrchestrator.stream_process()",
                     dataIO: "Input: UserQuery + ConversationHistory + UploadedFiles → Output: SSE Events (status, workflow, step_result, diagnosis, result)",
-                    technologyDescription: "实现基于 SOP（Standard Operating Procedure）的协调机制。使用 Celery 进行异步任务调度，Redis 作为消息代理（message broker）处理高并发请求。通过 FastAPI 的 StreamingResponse 实现 SSE 流式输出，使用 Python async/await 异步生成器逐条 yield SSE 事件。使用 LLM API 进行意图分类，基于规则和 LLM 输出进行路由决策。",
+                    technologyDescription: "实现基于 SOP 的协调机制。规划前集成 **Structure Normalizer**（自动解压 zip/tar.gz 并重组目录，如配对 .h5 与 spatial/）与 **Modality Sniffer**（按文件内容/结构自动检测模态）。使用 Celery 异步任务调度，Redis 作为消息代理。通过 FastAPI StreamingResponse 实现 SSE 流式输出。使用 LLM 进行意图分类，基于规则与 LLM 输出路由。",
                     keyLogic: "管理对话历史，进行意图分类（Chat vs Task），协调多智能体协作。使用 LLM 进行全局意图判断，根据结果路由到规划流程或直接聊天。维护会话状态和上下文。",
                     designRationale: "为什么需要 Orchestrator？实现单一入口点，统一管理多智能体协作。分离意图分类与具体执行，允许在规划前进行 Human-in-the-loop 验证。支持流式输出，提升用户体验。防止多个智能体直接通信导致的混乱，确保数据流的一致性。",
                     upstreamDownstream: "Upstream: User (接收用户请求) | Downstream: Planner (任务模式) / LLM (聊天模式) / Executor (执行模式)",
@@ -1118,10 +989,10 @@
                 },
                 planner: {
                     component: "首席科学家 (Lead Scientist / Planner)",
-                    coreFunction: "core.planner.SOPPlanner.plan_workflow()",
-                    dataIO: "Input: UserQuery + FileMetadata + ToolSchemas → Output: JSON_Workflow: {workflow_name, steps: [{step_id, tool_id, name, params}]}",
-                    technologyDescription: "使用 Chain-of-Thought (CoT) Prompting 分解生物问题。由 deepseek-R1（MoE 架构）提供推理能力。将工具 Schema 注入到 LLM 提示词中，使用 JSON Schema 验证 LLM 输出，确保工作流格式正确。实现参数推荐算法，基于数据统计信息（如样本数、特征数）推荐最佳参数。使用 Few-shot Learning 提供示例工作流。",
-                    keyLogic: "使用 Chain-of-Thought (CoT) 推理拆解科学问题。将用户需求分解为可执行的步骤序列。每个步骤包含工具ID和参数配置。支持参数推荐和动态调整。",
+                    coreFunction: "core.planner.SOPPlanner.generate_plan()",
+                    dataIO: "Input: UserQuery + FileMetadata + ToolSchemas → Output: JSON_Workflow: {workflow_name, steps: [{step_id, tool_id, name, params, selected}]}",
+                    technologyDescription: "使用 Chain-of-Thought (CoT) Prompting 分解生物问题。由 deepseek-R1（MoE 架构）提供推理能力。将工具 Schema 注入到 LLM 提示词中，使用 JSON Schema 验证 LLM 输出。**Dynamic Planning**：根据用户意图（如「跳过预处理」「不要通路富集」）动态勾选/取消步骤（target_steps 与 skip_steps），生成可定制工作流。使用 Few-shot Learning 提供 Spatial/Radiomics 等模态的示例。",
+                    keyLogic: "使用 CoT 推理拆解科学问题。**Dynamic Planning**：根据用户意图选择或取消步骤（如 skip preprocessing、no pathway enrichment），再解析依赖生成完整步骤序列。每个步骤含 tool_id、params 及 selected 状态。支持参数推荐与动态调整。",
                     designRationale: "为什么分离 Planner 和 Executor？允许在昂贵执行前进行 Human-in-the-loop 验证，防止错误执行浪费计算资源。支持工作流的预览、修改和优化。实现规划与执行的解耦，提高系统灵活性。通过 Schema 验证防止 LLM 产生无效工作流，减少执行错误。",
                     upstreamDownstream: "Upstream: Orchestrator (接收任务意图) + Retriever (获取工具 Schema) | Downstream: Executor (发送工作流配置) / Frontend (预览模式)",
                     llmLogic: "<strong>触发点:</strong> <code>generate_plan()</code> → <code>_classify_intent()</code> → <code>llm_client.achat(messages, temperature=0.1)</code><br><br><strong>Prompt 策略:</strong> Chain-of-Thought (CoT) + Few-shot Learning。System Prompt 注入：1) 领域分类规则（Metabolomics vs RNA），2) 可用步骤列表（从 WorkflowRegistry 获取），3) 模式分类规则（PLANNING vs EXECUTION）。User Prompt 包含：UserQuery + FileMetadata（是否有文件）+ 目标步骤列表。<br><br><strong>上下文窗口:</strong> UserQuery + FileMetadata（has_file: bool）+ ToolSchemas（从 Retriever 获取的 top-k 工具 JSON Schema）+ WorkflowRegistry 的 DAG 依赖关系（作为 System Prompt 的一部分）。<br><br><strong>输出解析:</strong> 1) JSON.parse() 提取 <code>{\"domain_name\": \"Metabolomics\" | \"RNA\", \"mode\": \"EXECUTION\" | \"PLANNING\", \"target_steps\": [...]}</code>，2) 使用 Pydantic 模型验证格式，3) 如果 target_steps 为空数组，则使用完整工作流（从 WorkflowRegistry 获取所有步骤）。",
@@ -1140,10 +1011,10 @@
                 },
                 agent: {
                     component: "领域专家 (Domain Agents)",
-                    coreFunction: "agents.rna.RNAAgent.execute_workflow() / agents.metabolomics.MetabolomicsAgent.execute_workflow()",
+                    coreFunction: "agents.specialists.*Agent.run_workflow / execute_workflow()",
                     dataIO: "Input: WorkflowConfig + FilePaths → Output: AnalysisResults: {steps_details, steps_results, summary}",
-                    technologyDescription: "每个领域 Agent 封装特定组学领域的 SOP（Standard Operating Procedure）模板。使用 Python 类继承 BaseAgent，重写 execute_workflow 方法。领域知识通过提示词模板和工具选择策略体现。使用 LLM 生成领域特定的诊断报告，基于步骤结果提取关键指标（如 RNA-seq 的细胞数、基因数、线粒体比例等）。",
-                    keyLogic: "拥有特定组学领域的专业知识（RNA-seq, Metabolomics）。根据工作流配置创建 WorkflowExecutor，执行分析步骤。聚合步骤结果，生成领域特定的诊断报告。",
+                    technologyDescription: "支持 **多模态**：RNA、Metabolomics、**Spatial Omics (Visium)**、**Radiomics (NIfTI)** 等。每个领域 Agent 封装该模态的 SOP，继承 BaseAgent 并重写 execute_workflow 与 **_generate_analysis_summary**。采用 **Prompt 注入模式**：子类提供 summary_template（或完全覆盖摘要生成），避免跨领域话术幻觉（如 Radiomics 不用代谢组学术语）。File Inspector 使用策略模式（SpatialVisiumHandler、RadiomicsHandler 等）与优先级逻辑提取元数据。",
+                    keyLogic: "拥有多模态专业知识（RNA、Metabolomics、Spatial、Radiomics 等）。根据工作流配置创建 WorkflowExecutor 执行步骤。聚合步骤结果，使用领域专属 prompt 生成诊断摘要（Domain-Specific Summary），不调用通用代谢组学话术。",
                     designRationale: "为什么需要领域特定的 Agent？不同组学领域有不同的分析流程和专业知识。通过领域 Agent 封装领域知识，实现关注点分离。支持领域特定的错误处理和参数推荐。允许系统扩展新的组学领域，无需修改核心架构。",
                     upstreamDownstream: "Upstream: Orchestrator (接收工作流配置) | Downstream: Executor (委托执行) + Output (返回分析结果)",
                     llmLogic: "<strong>触发点:</strong> <code>_detect_intent_with_llm()</code> → <code>llm_client.achat(messages)</code> 和 <code>generate_diagnosis_report()</code> → <code>llm_client.achat(messages)</code><br><br><strong>Prompt 策略:</strong> 1) 意图检测：Zero-shot Classification，System Prompt: \"You are an intent classification assistant. Return JSON only.\" 2) 诊断报告生成：Few-shot Learning，System Prompt 包含领域特定的诊断模板（例如 RNA-seq 的细胞数、基因数、线粒体比例等指标提取规则）。<br><br><strong>上下文窗口:</strong> 1) 意图检测：UserQuery + UploadedFiles（文件名列表），2) 诊断报告：StepsResults（JSON 格式的步骤执行结果）+ 领域特定的指标提取规则（作为 System Prompt 的一部分）。<br><br><strong>输出解析:</strong> 1) 意图检测：JSON.parse() 提取 <code>{\"intent\": \"explain_file\" | \"run_workflow\" | \"chat\", \"reasoning\": \"...\"}</code>，2) 诊断报告：Markdown 格式的文本，包含关键指标（细胞数、基因数等）和诊断建议。",
@@ -1153,7 +1024,7 @@
                     component: "执行引擎 (Executor)",
                     coreFunction: "core.executor.WorkflowExecutor.execute_step()",
                     dataIO: "Input: StepConfig: {step_id, tool_id, params} → Output: StepResult: {status, logs, data, images}",
-                    technologyDescription: "实现沙箱化执行环境。通过 Python 反射机制（Reflection，使用 getattr, importlib）动态加载工具函数。使用 Pydantic 模型验证步骤参数，确保类型和格式正确。集成 Scanpy 和 DESeq2 进行组学数据处理。工具执行可能涉及：1) 同步 Python 函数调用，2) Subprocess 调用外部程序（如 Cell Ranger），3) Celery 异步任务队列处理耗时操作。处理步骤间数据流：前一步的输出文件路径作为下一步的输入参数。",
+                    technologyDescription: "实现沙箱化执行环境。通过 Python 反射动态加载工具函数，Pydantic 验证步骤参数。集成 Scanpy、Squidpy、PyRadiomics 等处理多模态数据。步骤结果经 SSE 推送到前端；前端对非图片类输出（.nii.gz、.h5、.csv 等）使用 **Universal File Card** 渲染（文件图标 + 文件名 + 下载按钮），仅对 .png/.jpg 等使用 &lt;img&gt; 预览。处理步骤间数据流：前一步输出路径作为下一步输入（如 h5ad_path 链式传递）。",
                     keyLogic: "从 ToolRegistry 动态查找工具函数。使用 Pydantic 验证参数。调用工具函数（可能涉及 Subprocess 或 Celery 异步任务）。处理步骤间的数据流（前一步输出作为下一步输入）。收集执行结果和错误信息。",
                     designRationale: "为什么分离 Executor 和 Planner？允许在规划后、执行前进行验证，防止无效参数导致执行失败。支持错误恢复和重试机制（Executor → Planner 反馈循环）。实现执行逻辑的通用化，无需为每个工具编写特定代码。通过参数验证减少运行时错误。",
                     upstreamDownstream: "Upstream: Agent (接收工作流配置) | Downstream: Tools (调用工具函数) / Planner (错误反馈循环) / Output (返回执行结果)",
@@ -1521,20 +1392,28 @@
                             step: 1,
                             module: "用户 (User)",
                             input: "自然语言查询: \"帮我分析这个数据\"",
-                            process: "用户在前端界面输入查询文本",
+                            process: "用户在前端界面输入查询文本并上传文件（含压缩包/医学影像）",
                             output: "HTTP POST 请求: {message: \"帮我分析这个数据\", uploaded_files: [...]}",
                             dataType: "Raw Text → HTTP Request"
                         },
                         {
                             step: 2,
+                            module: "文件治理 (File Governance)",
+                            input: "UploadedFiles（原始上传路径，含 .zip / .tar.gz / .nii.gz 等）",
+                            process: "StructureNormalizer 解压归档并重组目录（如配对 .h5 与 spatial/）→ ModalitySniffer 按内容/结构检测模态（Spatial/Radiomics/RNA/Metabolomics）→ FileInspector 使用策略（SpatialVisiumHandler、RadiomicsHandler 等）与优先级逻辑提取元数据",
+                            output: "effective_root（解压后根目录）、dominant_modality、file_metadata",
+                            dataType: "Archives → Unpacked Structure → Modality + Metadata"
+                        },
+                        {
+                            step: 3,
                             module: "总控编排 (Orchestrator)",
-                            input: "UserQuery + ConversationHistory",
+                            input: "UserQuery + ConversationHistory + FileMetadata（含 modality）",
                             process: "调用关键词规则检查（task_keywords）",
                             output: "Rule Check Result: 如果匹配关键词则直接返回，否则进入 LLM 分类",
                             dataType: "Query → Rule Check"
                         },
                         {
-                            step: 3,
+                            step: 4,
                             module: "🤖 LLM API (Intent Classification)",
                             input: "UserQuery + System Prompt: \"你是一个意图分类助手。只返回JSON格式的意图类型。\"",
                             process: "llm_client.achat(messages, temperature=0.1, max_tokens=50)",
@@ -1542,7 +1421,7 @@
                             dataType: "Natural Language → LLM API → JSON Response"
                         },
                         {
-                            step: 4,
+                            step: 5,
                             module: "总控编排 (Orchestrator)",
                             input: "LLM JSON Response",
                             process: "解析 JSON，提取 intent 类型，移除 Markdown 代码块",
@@ -1550,7 +1429,7 @@
                             dataType: "LLM Response → Structured Intent"
                         },
                         {
-                            step: 5,
+                            step: 6,
                             module: "首席科学家 (Planner)",
                             input: "Task Object + FileMetadata",
                             process: "准备 LLM 调用上下文（需要工具 Schema）",
@@ -1558,7 +1437,7 @@
                             dataType: "Intent → Planning Context"
                         },
                         {
-                            step: 6,
+                            step: 7,
                             module: "图书馆员 (Retriever)",
                             input: "UserQuery: \"分析RNA数据\"",
                             process: "Embeddings API: embedding_model.embed_query(query_text)",
@@ -1566,7 +1445,7 @@
                             dataType: "Natural Language → Embedding Vector"
                         },
                         {
-                            step: 7,
+                            step: 8,
                             module: "图书馆员 (Retriever)",
                             input: "Query Vector + ChromaDB Tool Embeddings",
                             process: "余弦相似度搜索（cosine similarity），返回 top-k 工具",
@@ -1574,23 +1453,23 @@
                             dataType: "Vector Similarity → Tool Schemas"
                         },
                         {
-                            step: 8,
+                            step: 9,
                             module: "🤖 LLM API (Workflow Generation)",
                             input: "UserQuery + ToolSchemas + System Prompt (CoT + Few-shot)",
                             process: "llm_client.achat(messages, temperature=0.1) - Chain-of-Thought 推理",
-                            output: "LLM Response: {\"domain_name\": \"RNA\", \"mode\": \"PLANNING\", \"target_steps\": [...]}",
+                            output: "LLM Response: {\"domain_name\": \"RNA\", \"mode\": \"PLANNING\", \"target_steps\": [...], \"skip_steps\": [...]}",
                             dataType: "Context + Schemas → LLM API → JSON Plan"
                         },
                         {
-                            step: 9,
+                            step: 10,
                             module: "首席科学家 (Planner)",
                             input: "LLM JSON Response + WorkflowRegistry DAG",
-                            process: "解析 JSON，使用 Pydantic 验证，填充完整工作流参数",
-                            output: "JSON Workflow: {workflow_name, steps: [{step_id, tool_id, name, params}]}",
+                            process: "解析 JSON，应用 Dynamic Planning（skip_steps 对应步骤 selected=false），验证并填充工作流参数",
+                            output: "JSON Workflow: {workflow_name, steps: [{step_id, tool_id, name, params, selected}]}",
                             dataType: "LLM Response + DAG → Complete Workflow"
                         },
                         {
-                            step: 10,
+                            step: 11,
                             module: "前端渲染 (Frontend)",
                             input: "JSON Workflow (via SSE)",
                             process: "渲染工作流卡片，等待用户确认",
@@ -1614,8 +1493,8 @@
                             step: 2,
                             module: "总控编排 (Orchestrator)",
                             input: "Execution Request",
-                            process: "路由到对应的领域 Agent（基于 workflow domain_name）",
-                            output: "Agent Selection: RNAAgent / MetabolomicsAgent",
+                            process: "路由到对应的领域 Agent（基于 workflow domain_name / modality）",
+                            output: "Agent Selection: RNAAgent / MetabolomicsAgent / SpatialAgent / RadiomicsAgent 等",
                             dataType: "Request → Agent Instance"
                         },
                         {
@@ -1653,8 +1532,8 @@
                         {
                             step: 6,
                             module: "分析结果 (Output)",
-                            input: "Aggregated Results + AI Report",
-                            process: "SSE 流式推送，前端实时渲染",
+                            input: "Aggregated Results + Domain-Specific Summary（领域专属摘要）",
+                            process: "各领域 Agent 使用各自 summary 模板生成报告（如 RadiomicsAgent 用影像组学 prompt，SpatialAgent 用空间组学 prompt，非通用代谢组学话术）。SSE 流式推送，前端以 Universal File Card / 图片渲染结果。",
                             output: "Rendered UI: Workflow Cards + Step Results + AI Diagnosis",
                             dataType: "Results → Rendered UI"
                         }
@@ -1839,6 +1718,39 @@
                     card.classList.remove('active-flow');
                 });
                 document.querySelector(`[data-module="${moduleId}"]`).classList.add('active-flow');
+            }
+            
+            // 基础设施与安全报告（含内生安全体系）
+            function showInfraReport() {
+                const defaultState = document.getElementById('default-state');
+                const detailContent = document.getElementById('detail-content');
+                if (!defaultState || !detailContent) return;
+                defaultState.style.display = 'none';
+                detailContent.classList.add('active');
+                detailContent.innerHTML = `
+                    <div class="detail-item">
+                        <div class="detail-item-label">📋 基础设施与安全报告 (Infrastructure &amp; Security Report)</div>
+                        <div class="detail-item-value">
+                            <p style="margin-bottom: 12px;">当前系统架构下的基础设施与安全机制概览。</p>
+                            <ul style="margin-left: 18px; line-height: 1.8;">
+                                <li><strong>Celery + Redis</strong>：异步任务队列与消息代理，支持高并发与耗时任务解耦。</li>
+                                <li><strong>FastAPI + SSE</strong>：流式响应与实时事件推送。</li>
+                                <li><strong>NGINX</strong>：反向代理与负载均衡。</li>
+                            </ul>
+                            <div class="detail-item" style="margin-top: 20px;">
+                                <div class="detail-item-label">🛡️ 内生安全体系 (Intrinsic Security)</div>
+                                <div class="detail-item-value" style="border-left-color: #28a745;">
+                                    <ul style="margin-left: 18px; line-height: 1.9;">
+                                        <li><strong>异步签名 (Async Signing)</strong>：Celery Worker 在后台计算 BLAKE3 哈希，并使用 Ed25519 对上传文件进行数字签名，不阻塞主请求。</li>
+                                        <li><strong>Sidecar 校验 (Sidecar Verification)</strong>：为每个上传生成 .sig 旁路文件，用于完整性校验，不修改原始数据即可验证。</li>
+                                        <li><strong>Fail-Open 设计 (Fail-Open Design)</strong>：安全校验失败不阻断上传可用性，保证业务可用优先，审计与告警可另行处理。</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.querySelectorAll('.flow-step-card').forEach(card => card.classList.remove('active-flow'));
             }
             
             // 场景模式渲染
@@ -2189,6 +2101,90 @@
                     }
                 }
             }
+            
+            // ========== 架构漫游 Tour (Driver.js) - V2 架构 ==========
+            window.startTour = function() {
+                try {
+                    const driverFn = (window.driver && window.driver.js && window.driver.js.driver)
+                        ? window.driver.js.driver
+                        : (window["driver.js"] && window["driver.js"].driver)
+                            ? window["driver.js"].driver
+                            : (typeof window.driver === 'function')
+                                ? window.driver
+                                : null;
+                    if (!driverFn) {
+                        console.warn('Driver.js not loaded. Check: window.driver =', window.driver);
+                        alert('引导库加载失败，请检查网络或刷新页面。');
+                        return;
+                    }
+                    const d = driverFn({
+                        showProgress: true,
+                        nextBtnText: '下一步',
+                        prevBtnText: '上一步',
+                        doneBtnText: '完成',
+                        progressText: '{{current}} / {{total}}',
+                        steps: [
+                            {
+                                element: 'body',
+                                popover: {
+                                    title: 'Welcome',
+                                    description: 'Welcome to the Omics Agent White-box Dashboard. This page shows the V2 architecture with 7 Modalities, File Governance, and Intrinsic Security.'
+                                }
+                            },
+                            {
+                                element: '.control-bar',
+                                popover: {
+                                    title: 'Scenario Bar',
+                                    description: 'Switch between Planning, Execution, and Security views. Use the buttons to see data flow for each scenario. Click "Infra & Security" to view our Intrinsic Security layer.'
+                                },
+                                onHighlightStarted: function() {
+                                    if (typeof renderScenario === 'function') {
+                                        renderScenario('planning', document.querySelector('.scenario-btn'));
+                                    }
+                                }
+                            },
+                            {
+                                element: '[data-module="user"]',
+                                popover: {
+                                    title: 'User',
+                                    description: 'Supports 7 Modalities including Spatial (Visium) & Radiomics (NIfTI). Auto-unpacks archives (zip/tar.gz) and pairs .h5 with spatial/ for structure normalization.'
+                                }
+                            },
+                            {
+                                element: '[data-module="orchestrator"]',
+                                popover: {
+                                    title: 'Orchestrator',
+                                    description: 'The central hub. Now features Modality Sniffing to auto-detect data types (Spatial, Radiomics, RNA, Metabolomics) before planning.'
+                                }
+                            },
+                            {
+                                element: '[data-module="agent"]',
+                                popover: {
+                                    title: 'Domain Agents',
+                                    description: 'Domain Specialists. We now have Spatial & Radiomics Agents with specific prompts. Each agent overrides _generate_analysis_summary to avoid cross-domain hallucination.'
+                                }
+                            },
+                            {
+                                element: '.control-bar .scenario-btn:last-of-type',
+                                popover: {
+                                    title: 'Infrastructure & Security',
+                                    description: 'Click here to see our Intrinsic Security layer (BLAKE3 Signatures, Ed25519 signing, .sig sidecar verification, and Docker Sandbox). Fail-Open design ensures availability.'
+                                },
+                                onHighlightStarted: function() {
+                                    if (typeof showInfraReport === 'function') showInfraReport();
+                                }
+                            }
+                        ],
+                        onDestroyed: function() {
+                            if (typeof renderScenario === 'function') renderScenario('reset');
+                        }
+                    });
+                    d.drive();
+                } catch (err) {
+                    console.error('Tour error:', err);
+                    alert('引导启动失败: ' + (err.message || String(err)));
+                }
+            };
             
             document.addEventListener('DOMContentLoaded', initSVG);
             window.addEventListener('resize', debounce(onResize, 150));

@@ -319,17 +319,19 @@ def detect_spatial_autocorr(
     h5ad_path: str,
     method: str = "moran",
     genes: Optional[str] = None,
+    output_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Compute Moran's I (or other method) for genes.
+    Compute Moran's I (or other method) for genes. Optionally write AnnData with uns['moranI'] for downstream pathway enrichment.
 
     Args:
         h5ad_path: Path to h5ad file (with spatial graph or obsm['spatial']).
         method: 'moran' (default) or 'geary'.
         genes: Optional comma-separated gene names; if None, use first 500 vars.
+        output_path: Optional path to write h5ad with uns['moranI']; required for spatial_pathway_enrichment.
 
     Returns:
-        Dict with status, results (gene -> I, pval), n_genes, and optional error.
+        Dict with status, results, output_path (if written), n_genes, and optional error.
     """
     try:
         import anndata as ad
@@ -367,13 +369,167 @@ def detect_spatial_autocorr(
             out = res.to_dict(orient="index")
         else:
             out = dict(res)
+        # Always write h5ad with uns['moranI'] so functional_enrichment can read it (executor chains by output)
+        if not output_path or (isinstance(output_path, str) and not output_path.strip()):
+            output_path = str(p.parent / "spatial_autocorr.h5ad")
+        out_p = Path(output_path)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        if out_p.suffix.lower() != ".h5ad":
+            out_p = out_p.parent / (out_p.stem + ".h5ad")
+        adata.write_h5ad(str(out_p))
+        out_path = str(out_p.resolve())
         return {
             "status": "success",
             "results": out,
             "method": method,
             "n_genes": len(out),
-            "h5ad_path": str(p.resolve()),
+            "output_path": out_path,
+            "h5ad_path": out_path,  # downstream steps must receive this path (has uns['moranI'])
         }
     except Exception as e:
         logger.exception("detect_spatial_autocorr failed: %s", e)
+        return {"status": "error", "error": str(e), "h5ad_path": h5ad_path}
+
+
+# ---------------------------------------------------------------------------
+# Pathway enrichment from top SVGs (biological depth)
+# ---------------------------------------------------------------------------
+
+
+@registry.register(
+    name="spatial_pathway_enrichment",
+    description="Run pathway enrichment on top spatially variable genes (from Moran's I). Outputs dot plot and CSV. Uses gseapy when available; fallback CSV with gene list otherwise.",
+    category="Spatial",
+    output_type="file_path",
+)
+def spatial_pathway_enrichment(
+    h5ad_path: str,
+    top_n: int = 50,
+    output_path: Optional[str] = None,
+    gene_sets: str = "KEGG_2021_Human",
+) -> Dict[str, Any]:
+    """
+    Take top SVGs from Moran's I -> enrichment (gseapy) -> dot plot (.png) + CSV.
+    If gseapy fails (e.g. network), return graceful fallback CSV with top genes only.
+
+    Args:
+        h5ad_path: Path to h5ad (should have uns['moranI'] from spatial_detect_autocorr).
+        top_n: Number of top SVGs to use (default 50).
+        output_path: Optional directory or base path for plot and CSV.
+        gene_sets: gseapy gene set name (default KEGG_2021_Human).
+
+    Returns:
+        Dict with status, plot_path, csv_path, top_svgs, enrichment_table (if any), fallback_message.
+    """
+    try:
+        import anndata as ad
+        import pandas as pd
+        import numpy as np
+    except ImportError as e:
+        logger.warning("anndata/pandas not installed: %s", e)
+        return {"status": "error", "error": "anndata and pandas are required"}
+    p = Path(h5ad_path)
+    if not p.is_file():
+        return {"status": "error", "error": f"h5ad file not found: {h5ad_path}"}
+    out_dir = Path(output_path).parent if output_path else p.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    base_name = Path(output_path).stem if output_path else "spatial_pathway_enrichment"
+    plot_path = out_dir / f"{base_name}_dotplot.png"
+    csv_path = out_dir / f"{base_name}_top_genes.csv"
+    fallback_csv = out_dir / f"{base_name}_top_genes_fallback.csv"
+
+    try:
+        adata = ad.read_h5ad(p)
+        key = "moranI"
+        if key not in adata.uns:
+            return {"status": "error", "error": "Run spatial_detect_autocorr first to get uns['moranI']."}
+        res = adata.uns[key]
+        if isinstance(res, pd.DataFrame):
+            if "I" in res.columns:
+                res = res.sort_values("I", ascending=False)
+            elif "pval_norm" in res.columns:
+                res = res.sort_values("pval_norm", ascending=True)
+            genes = res.index.tolist()[: top_n]
+        else:
+            genes = list(res.keys())[: top_n] if isinstance(res, dict) else []
+        if not genes:
+            return {"status": "error", "error": "No genes in Moran's I results."}
+
+        # Fallback CSV: always write top genes description (for when gseapy fails)
+        fallback_df = pd.DataFrame({"gene": genes, "rank": range(1, len(genes) + 1)})
+        fallback_df.to_csv(str(fallback_csv), index=False)
+
+        enrichment_table = None
+        plot_path_final = None
+        csv_path_final = None
+        fallback_message = None
+
+        try:
+            import gseapy as gp
+            gene_sets_list = [gene_sets] if isinstance(gene_sets, str) else gene_sets
+            enr = gp.enrichr(
+                gene_list=genes,
+                gene_sets=gene_sets_list,
+                organism="Human",
+                outdir=None,
+                no_plot=True,
+            )
+            if enr is not None:
+                enrichment_table = getattr(enr, "results", enr) if hasattr(enr, "results") else enr
+                if isinstance(enrichment_table, pd.DataFrame) and not enrichment_table.empty:
+                    csv_path_final = out_dir / f"{base_name}_enrichment.csv"
+                    enrichment_table.to_csv(str(csv_path_final), index=False)
+                    n_show = min(15, len(enrichment_table))
+                    plot_df = enrichment_table.head(n_show)
+                    import matplotlib
+                    matplotlib.use("Agg")
+                    import matplotlib.pyplot as plt
+                    fig, ax = plt.subplots(figsize=(8, max(4, n_show * 0.35)))
+                    y_pos = np.arange(len(plot_df))
+                    pvals = plot_df["Adjusted P-value"] if "Adjusted P-value" in plot_df.columns else plot_df.get("P-value", pd.Series([0.01] * len(plot_df)))
+                    pvals = np.clip(pvals.astype(float), 1e-20, 1)
+                    logp = -np.log10(pvals)
+                    ax.barh(y_pos, logp, color="steelblue", alpha=0.8)
+                    ax.set_yticks(y_pos)
+                    ax.set_yticklabels(plot_df["Term"].str[:50] if "Term" in plot_df.columns else plot_df.index.astype(str), fontsize=9)
+                    ax.set_xlabel("-log10(Adjusted P-value)")
+                    ax.set_title("Pathway enrichment (top SVGs)")
+                    ax.invert_yaxis()
+                    fig.tight_layout()
+                    fig.savefig(str(plot_path), dpi=150)
+                    plt.close(fig)
+                    plot_path_final = plot_path
+                else:
+                    fallback_message = "gseapy returned empty results; using top genes CSV only."
+                    csv_path_final = fallback_csv
+        except Exception as gseapy_err:
+            logger.warning("gseapy enrichment failed (e.g. network): %s", gseapy_err)
+            fallback_message = f"Enrichment skipped ({gseapy_err!s}); see top_genes CSV for biological context."
+            csv_path_final = fallback_csv
+
+        # Build return: always include fallback CSV path
+        result = {
+            "status": "success",
+            "top_svgs": genes[:20],
+            "n_svgs_used": len(genes),
+            "csv_path": str(csv_path_final.resolve()) if csv_path_final and csv_path_final.exists() else str(fallback_csv.resolve()),
+            "h5ad_path": str(p.resolve()),
+        }
+        if fallback_message:
+            result["fallback_message"] = fallback_message
+        if plot_path_final and plot_path_final.exists():
+            result["plot_path"] = str(plot_path_final.resolve())
+        if enrichment_table is not None:
+            result["enrichment_terms_count"] = len(enrichment_table)
+
+        # Normalize plot_path to results/ relative for frontend
+        if "plot_path" in result:
+            import os
+            results_dir = os.getenv("RESULTS_DIR", "/app/results").rstrip("/")
+            abs_p = result["plot_path"]
+            if results_dir and abs_p.startswith(results_dir):
+                result["plot_path"] = "results/" + abs_p[len(results_dir):].lstrip("/")
+        return result
+    except Exception as e:
+        logger.exception("spatial_pathway_enrichment failed: %s", e)
         return {"status": "error", "error": str(e), "h5ad_path": h5ad_path}

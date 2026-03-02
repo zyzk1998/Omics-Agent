@@ -1089,6 +1089,35 @@
         const filePreviewArea = document.getElementById('filePreviewArea');
         const dropOverlay = document.getElementById('dropOverlay');
 
+        // 🔥 GLOBAL SCOPE: renderWorkflowCard / executeWorkflowFromForm / toggleParameterRecommendations
+        //    so useFavoriteWorkflow and onclick handlers can call them on load (fix ReferenceError)
+        function getCardZone() {
+            return window.currentMessageZones?.cardZone ||
+                (document.querySelectorAll('#chatContent .cards-zone').length ? [...document.querySelectorAll('#chatContent .cards-zone')].pop() : null) ||
+                document.getElementById('chatContent');
+        }
+        function escapeHtmlForCard(text) {
+            if (!text) return '';
+            var div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        function noopAddProcessStep() {}
+
+        window._renderWorkflowCardImpl = null;
+        window.renderWorkflowCard = function(workflowData) {
+            if (typeof window._renderWorkflowCardImpl === 'function') return window._renderWorkflowCardImpl(workflowData);
+            var z = getCardZone();
+            if (!z) { console.error('❌ [renderWorkflowCard] cardZone 不存在'); return null; }
+            console.warn('⚠️ [renderWorkflowCard] 尚未就绪，请先发送一条消息或刷新后重试');
+            return null;
+        };
+        window._executeWorkflowFromFormImpl = null;
+        window.executeWorkflowFromForm = function(buttonElement) {
+            if (typeof window._executeWorkflowFromFormImpl === 'function') return window._executeWorkflowFromFormImpl(buttonElement);
+            console.warn('⚠️ [executeWorkflowFromForm] 尚未就绪，请先发送一条消息');
+        };
+
         function autoResize(textarea) {
             textarea.style.height = 'auto';
             textarea.style.height = textarea.scrollHeight + 'px';
@@ -1672,19 +1701,47 @@
                         return div.innerHTML;
                     }
                     
-                    // 🔥 格式感知：仅将可展示图片用 <img> 渲染；仅 .nii/.dcm/.h5/.csv 等显示「不可预览」徽章
+                    // Universal: only image extensions render as <img>; data files get File Card (Icon + Filename + Download)
                     function isDisplayableImage(path) {
                         if (!path || typeof path !== 'string') return false;
                         const p = path.toLowerCase();
-                        // 明确不可预览：影像/数据文件
-                        if (p.endsWith('.nii.gz') || p.endsWith('.nii') || p.endsWith('.dcm') || p.endsWith('.h5') || p.endsWith('.h5ad') || p.endsWith('.csv')) return false;
-                        // 图片扩展名一律按可展示处理（含 results/ 下 spatial 等）
+                        // Data files: never render as <img> (avoids 404 and broken icons for .nii, .h5, .vcf, etc.)
+                        if (p.endsWith('.nii.gz') || p.endsWith('.nii') || p.endsWith('.dcm') || p.endsWith('.h5') || p.endsWith('.h5ad') ||
+                            p.endsWith('.csv') || p.endsWith('.txt') || p.endsWith('.vcf') || p.endsWith('.vcf.gz') || p.endsWith('.gz')) return false;
                         return /\.(png|jpe?g|gif|bmp|webp|svg)$/i.test(p);
                     }
-                    function isNonPreviewableBadge(path) {
+                    function isDataFile(path) {
                         if (!path || typeof path !== 'string') return false;
                         const p = path.toLowerCase();
-                        return p.endsWith('.nii.gz') || p.endsWith('.nii') || p.endsWith('.dcm') || p.endsWith('.h5') || p.endsWith('.h5ad') || p.endsWith('.csv');
+                        return p.endsWith('.nii.gz') || p.endsWith('.nii') || p.endsWith('.dcm') || p.endsWith('.h5') || p.endsWith('.h5ad') ||
+                            p.endsWith('.csv') || p.endsWith('.txt') || p.endsWith('.vcf') || p.endsWith('.vcf.gz') || p.endsWith('.gz');
+                    }
+                    function isNonPreviewableBadge(path) {
+                        return isDataFile(path);
+                    }
+                    
+                    // Universal File Card: 非图片结果文件统一展示为「文件图标 + 文件名 + 下载按钮」
+                    function renderUniversalFileCard(filePath, labelOptional) {
+                        if (!filePath || typeof filePath !== 'string') return '';
+                        const label = labelOptional || '结果文件';
+                        let downloadUrl = filePath.replace(/^\/app\/results\//, '').replace(/^\/app\/uploads\//, '').replace(/^\/app\//, '');
+                        if (downloadUrl.startsWith('results/')) downloadUrl = '/results/' + downloadUrl.replace(/^results\//, '');
+                        else if (downloadUrl.startsWith('uploads/')) downloadUrl = '/uploads/' + downloadUrl.replace(/^uploads\//, '');
+                        else if (!downloadUrl.startsWith('/')) downloadUrl = (filePath.indexOf('uploads') !== -1 ? '/uploads/' : '/results/') + downloadUrl;
+                        const fileName = filePath.split(/[/\\]/).pop() || filePath;
+                        return `
+                            <div class="mt-2 universal-file-card card border">
+                                <div class="card-body py-2 px-3 d-flex align-items-center">
+                                    <i class="bi bi-file-earmark-binary text-secondary me-2" style="font-size:1.5rem;"></i>
+                                    <div class="flex-grow-1 min-width-0">
+                                        <span class="small text-muted d-block">${escapeHtml(String(label))}</span>
+                                        <code class="small text-break">${escapeHtml(fileName)}</code>
+                                    </div>
+                                    <a href="${escapeHtml(downloadUrl)}" download="${escapeHtml(fileName)}" class="btn btn-outline-primary btn-sm ms-2" target="_blank" rel="noopener">
+                                        <i class="bi bi-download"></i> 下载
+                                    </a>
+                                </div>
+                            </div>`;
                     }
                     
                     // 🔥 辅助函数：更新调试面板（原始数据）
@@ -2474,23 +2531,8 @@
                                                 <p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${imageUrl}</p>
                                             </div>
                                         `;
-                                    } else if (isNonPreviewableBadge(plotPath)) {
-                                        resultContentHtml += `
-                                            <div class="mt-2">
-                                                <div class="alert alert-light border d-flex align-items-center" role="alert">
-                                                    <i class="bi bi-file-earmark-medical text-secondary me-2"></i>
-                                                    <span>3D 影像/数据文件（不可预览）</span>
-                                                    <code class="ms-2 small text-muted">${escapeHtml(plotPath.split(/[/\\]/).pop() || plotPath)}</code>
-                                                </div>
-                                            </div>
-                                        `;
                                     } else {
-                                        resultContentHtml += `
-                                            <div class="mt-2">
-                                                <span class="badge bg-secondary">结果文件</span>
-                                                <code class="ms-2 small text-muted">${escapeHtml(plotPath.split(/[/\\]/).pop() || plotPath)}</code>
-                                            </div>
-                                        `;
+                                        resultContentHtml += renderUniversalFileCard(plotPath, isDataFile(plotPath) ? '数据文件' : '结果文件');
                                     }
                                 }
                                 
@@ -2516,23 +2558,8 @@
                                                     <p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${imageUrl}</p>
                                                 </div>
                                             `;
-                                        } else if (isNonPreviewableBadge(imgPath)) {
-                                            resultContentHtml += `
-                                                <div class="mt-2">
-                                                    <div class="alert alert-light border d-flex align-items-center" role="alert">
-                                                        <i class="bi bi-file-earmark-medical text-secondary me-2"></i>
-                                                        <span>数据文件（不可预览）</span>
-                                                        <code class="ms-2 small text-muted">${escapeHtml(String(imgPath).split(/[/\\]/).pop() || imgPath)}</code>
-                                                    </div>
-                                                </div>
-                                            `;
                                         } else {
-                                            resultContentHtml += `
-                                                <div class="mt-2">
-                                                    <span class="badge bg-secondary">结果文件</span>
-                                                    <code class="ms-2 small text-muted">${escapeHtml(String(imgPath).split(/[/\\]/).pop() || imgPath)}</code>
-                                                </div>
-                                            `;
+                                            resultContentHtml += renderUniversalFileCard(imgPath, isDataFile(imgPath) ? '数据文件' : '结果文件');
                                         }
                                     });
                                 }
@@ -2645,9 +2672,8 @@
                         console.log(`✅ [renderExecutionSteps] 已渲染 ${stepsDetails.length} 个步骤到统一报告容器`);
                     }
                     
-                    // 🔥 CRITICAL REFACTOR: 渲染工作流卡片 - 只更新 cardZone，不覆盖 textZone
-                    // 🔥 修复：将renderWorkflowCard提升到全局作用域，以便useFavoriteWorkflow可以访问
-                    window.renderWorkflowCard = function(workflowData) {
+                    // 🔥 实现挂到 _renderWorkflowCardImpl，供全局 window.renderWorkflowCard 委托调用（修复 Favorites ReferenceError）
+                    window._renderWorkflowCardImpl = function(workflowData) {
                         // 🔥 DEBUG: 添加调试日志
                         console.log("🔍 [renderWorkflowCard] Rendering Interactive Workflow Card:", workflowData);
                         
@@ -3028,9 +3054,8 @@
                         return formId;  // Return the newly generated formId
                     };
                     
-                    // 🔥 CRITICAL FIX: Execute workflow from form (collects parameters from inputs)
-                    // 🔥 TASK 1: Use DOM traversal instead of ID lookup for robustness
-                    window.executeWorkflowFromForm = function(buttonElement) {
+                    // 🔥 实现挂到 _executeWorkflowFromFormImpl，供全局 window.executeWorkflowFromForm 委托调用
+                    window._executeWorkflowFromFormImpl = function(buttonElement) {
                         // 🔥 TASK 1: Find form container using DOM traversal (works 100% of the time)
                         // Since we don't have <form> tag, find the params-form container div instead
                         const formElement = buttonElement.closest('.params-form, [data-form-id]');
@@ -4405,11 +4430,7 @@
                         <h6>3. ${plotTitle}</h6>
                         <div class="card border-0 shadow-sm">
                             <div class="card-body">
-                                <div class="alert alert-light border d-flex align-items-center" role="alert">
-                                    <i class="bi bi-file-earmark-medical text-secondary me-2"></i>
-                                    <span>3D 影像/数据文件（不可预览）</span>
-                                    <code class="ms-2 small text-muted">${escapeHtml(String(imagePath).split(/[/\\]/).pop() || imagePath)}</code>
-                                </div>
+                                ${renderUniversalFileCard(imagePath, '数据文件')}
                                 ${keyStep.summary ? `<p class="mt-2 text-secondary">${keyStep.summary}</p>` : ''}
                             </div>
                         </div>
@@ -4487,7 +4508,7 @@
                             }
                             contentHtml += `<div class="mt-2 mb-3"><img src="${normalizedPath}" class="img-fluid rounded border" style="max-width:100%; cursor:zoom-in;" onclick="openLightbox(this.src)" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"><p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${normalizedPath}</p></div>`;
                         } else {
-                            contentHtml += `<div class="mt-2 mb-3"><div class="alert alert-light border d-flex align-items-center" role="alert"><i class="bi bi-file-earmark-medical text-secondary me-2"></i><span>3D 影像/数据文件（不可预览）</span><code class="ms-2 small text-muted">${escapeHtml(String(imagePath).split(/[/\\]/).pop() || imagePath)}</code></div></div>`;
+                            contentHtml += `<div class="mt-2 mb-3">${renderUniversalFileCard(imagePath, '数据文件')}</div>`;
                         }
                     }
                     

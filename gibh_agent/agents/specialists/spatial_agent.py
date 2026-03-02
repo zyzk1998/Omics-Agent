@@ -213,6 +213,61 @@ Uploaded Files: {files_str}
             yield text
         return _gen()
 
+    async def _generate_analysis_summary(
+        self,
+        steps_results: List[Dict[str, Any]],
+        omics_type: str = "Spatial",
+        workflow_name: str = "空间转录组流程",
+        summary_context: Optional[Dict[str, Any]] = None,
+        output_dir: Optional[str] = None,
+    ) -> Optional[str]:
+        """Hard override: do NOT call super(). Generate summary with strictly Spatial Omics prompt via LLM. FORBIDDEN: Metabolomics, metabolites, LC-MS."""
+        import json
+        system_prompt = """You are a Spatial Transcriptomics Expert. Summarize the analysis of 10x Visium (spatial) data.
+
+You MUST report:
+1. Spot count, gene count, and data quality.
+2. Dimensionality reduction (PCA) and Leiden clustering (number of clusters, spatial domains).
+3. Spatially Variable Genes (SVGs) and Moran's I results.
+4. Pathway enrichment of SVGs if present; spatial plots (clusters, gene expression).
+
+Use ONLY these terms: Spots, Clusters, Spatial Domains, Gene Expression, Moran's I, SVGs, Leiden, obsm['spatial'], spatial autocorrelation, pathway enrichment (for genes).
+
+FORBIDDEN WORDS (do not use): Metabolomics, metabolites, LC-MS, GC-MS, differential metabolites, VIP, volcano plot (in metabolomics sense).
+
+Output in Simplified Chinese (简体中文), Markdown, with clear sections. Be concise (300–600 words)."""
+
+        steps_text = []
+        for i, sr in enumerate(steps_results or []):
+            name = sr.get("step_name", sr.get("name", f"Step {i+1}"))
+            status = sr.get("status", "")
+            data = sr.get("data", {})
+            steps_text.append(f"- **{name}** ({status}): {json.dumps(data, ensure_ascii=False)[:500]}")
+        user_content = (
+            f"Workflow: {workflow_name}\n\nSteps:\n"
+            + "\n".join(steps_text)
+            + "\n\nSummarize the above spatial transcriptomics run in Chinese. Report spots, clusters, SVGs, Moran's I. Do not mention metabolomics, metabolites, or LC-MS."
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ]
+        try:
+            completion = await self.llm_client.achat(messages, temperature=0.2, max_tokens=1500)
+            if not completion or not getattr(completion, "choices", None):
+                return None
+            if hasattr(self.llm_client, "extract_think_and_content"):
+                _, text = self.llm_client.extract_think_and_content(completion)
+            else:
+                block = completion.choices[0]
+                msg = getattr(block, "message", None)
+                text = getattr(msg, "content", None) if msg else getattr(block, "content", "")
+            return (text or "").strip() or None
+        except Exception as e:
+            logger.exception("SpatialAgent _generate_analysis_summary failed: %s", e)
+            return None
+
     async def _stream_chat_response(
         self,
         query: str,

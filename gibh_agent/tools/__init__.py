@@ -85,11 +85,17 @@ try:
 except Exception as e:
     logger.error(f"❌ 自动加载工具失败: {e}", exc_info=True)
 
-# Step 2 (Additive only): Explicitly ensure 5 NEW modality modules are loaded.
+# Step 2 (Additive only): Explicitly ensure modality packages and flat modules are loaded.
 # Genomics, Epigenomics, Proteomics, Spatial, Radiomics. Do not remove existing imports above.
 for _mod in ["genomics_tools", "epigenomics_tools", "proteomics_tools", "radiomics_tools"]:
     try:
         importlib.import_module(f".{_mod}", package=__name__)
     except ImportError:
         pass
+# Radiomics package (atomic: io, analysis, visualization)
+try:
+    importlib.import_module(".radiomics", package=__name__)
+    logger.info("✅ 已加载 Radiomics 工具包 (io, analysis, visualization)")
+except ImportError as e:
+    logger.warning("⚠️ Radiomics 工具包未加载（可能缺少依赖）: %s", e)
 

@@ -397,6 +397,12 @@ def create_default_prompt_manager() -> PromptManager:
     # 注册报告模板（使用 Jinja2 模板引擎）
     manager.register_template("rna_report", RNA_REPORT_PROMPT)
     manager.register_template("data_diagnosis", DATA_DIAGNOSIS_PROMPT)
-    
+    # 影像组学专用诊断模板（LLM 基于影像元数据输出诊断与参数推荐）
+    try:
+        from .prompts.radiomics_prompts import RADIOMICS_DIAGNOSIS_TEMPLATE
+        manager.register_template("data_diagnosis_radiomics", RADIOMICS_DIAGNOSIS_TEMPLATE)
+    except Exception:
+        pass  # 可选：无 prompts 包时仅保留通用诊断
+
     return manager
 

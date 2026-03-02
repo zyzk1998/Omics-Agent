@@ -983,8 +983,12 @@ class AgentOrchestrator:
                 if not workflow:
                     raise ValueError(f"无法获取工作流: {domain_name}")
                 
-                # Analyze user intent to determine target_steps
-                target_steps = await planner._analyze_user_intent(refined_query, workflow)
+                # Analyze user intent to determine target_steps (returns dict with target_steps + skip_steps)
+                intent_analysis = await planner._analyze_user_intent(refined_query, workflow)
+                if isinstance(intent_analysis, dict):
+                    target_steps = intent_analysis.get("target_steps") or []
+                else:
+                    target_steps = intent_analysis if isinstance(intent_analysis, list) else []
                 
                 # 🔥 CRITICAL FIX: Use intent_result.target_steps when _analyze_user_intent returns empty
                 # (Ensures consistency between Preview and Execution - _classify_intent may have captured partial intent)

@@ -48,6 +48,7 @@ class SpatialWorkflow(BaseWorkflow):
             "clustering": ["dimensionality_reduction"],
             "spatial_neighbors": ["clustering"],
             "spatial_autocorr": ["spatial_neighbors"],
+            "functional_enrichment": ["spatial_autocorr"],
             "plot_clusters": ["clustering"],
             "plot_genes": ["spatial_autocorr"],
         }
@@ -118,13 +119,25 @@ class SpatialWorkflow(BaseWorkflow):
                 "tool_id": "spatial_detect_autocorr",
                 "default_params": {
                     "h5ad_path": "",
+                    "output_path": "",
                     "method": "moran",
                     "genes": None,
                 },
             },
+            "functional_enrichment": {
+                "name": "通路富集 (SVGs)",
+                "description": "对 top 空间可变基因做通路富集（gseapy），输出点图与 CSV。h5ad_path 由 spatial_autocorr 输出链式传入（含 uns['moranI']）。",
+                "tool_id": "spatial_pathway_enrichment",
+                "default_params": {
+                    "h5ad_path": "",  # resolved from <spatial_autocorr> output by executor
+                    "top_n": 50,
+                    "output_path": "",
+                    "gene_sets": "KEGG_2021_Human",
+                },
+            },
             "plot_clusters": {
                 "name": "空间图（按聚类着色）",
-                "description": "在空间坐标上按 leiden 聚类着色绘制散点图",
+                "description": "在空间坐标上按 Leiden 聚类着色绘制散点图（离散色板）",
                 "tool_id": "spatial_plot_scatter",
                 "default_params": {
                     "h5ad_path": "",

@@ -1553,6 +1553,22 @@ async def upload_file(
                                 "is_10x": False,
                             })
                         logger.info("✅ [UniversalIngestion] 路径已重写为解压内容: %s", [str(p.relative_to(UPLOAD_DIR)) for p in inner_paths])
+                elif modality == "unknown" and effective_root is not None:
+                    # 解压成功但模态未知：仍将 file_paths 指向解压目录，避免下游工具收到 zip 路径
+                    effective_path = Path(effective_root)
+                    try:
+                        rel = str(effective_path.relative_to(UPLOAD_DIR))
+                    except ValueError:
+                        rel = effective_path.name
+                    uploaded_results = [{
+                        "file_id": effective_path.name,
+                        "file_name": effective_path.name,
+                        "file_path": str(effective_path.resolve()),
+                        "file_size": 0,
+                        "metadata": None,
+                        "is_10x": False,
+                    }]
+                    logger.info("✅ [UniversalIngestion] 模态未知，路径已重写为解压目录（供下游使用）: %s", rel)
         except Exception as e:
             logger.warning("⚠️ Universal unpack / Modality Sniffer 失败（不影响上传）: %s", e)
         
@@ -2260,6 +2276,22 @@ async def execute_workflow(request: dict):
                 )
                 
                 routing = route_result.get("routing", "rna_agent")
+                modality = route_result.get("modality", "")
+                # HITL：模态未知时返回「请选择数据类型」，由前端展示按钮
+                if routing == "ask_modality" or modality == "unknown":
+                    logger.info("📋 RouterAgent 返回 ask_modality，要求用户选择数据类型")
+                    return JSONResponse(content={
+                        "type": "ask_modality",
+                        "message": "检测到数据类型不明确，请选择分析类型：",
+                        "action": "show_modality_selector",
+                        "modalities": route_result.get("available_modalities", [
+                            {"id": "RNA", "label": "单细胞/转录组 (RNA)"},
+                            {"id": "Metabolomics", "label": "代谢组学 (Metabolomics)"},
+                            {"id": "Spatial", "label": "空间转录组 (Spatial)"},
+                            {"id": "Radiomics", "label": "影像组学 (Radiomics)"},
+                        ]),
+                        "file_paths": file_paths,
+                    })
                 target_agent = agent.agents.get(routing)
                 
                 # 如果路由的智能体不存在，使用默认的 RNA Agent

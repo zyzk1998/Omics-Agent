@@ -20,6 +20,29 @@ from .workflows import WorkflowRegistry
 
 logger = logging.getLogger(__name__)
 
+# Step semantics for Dynamic Planning: LLM uses these to map "skip X" / "no Y" to step IDs.
+SOP_PLANNER_STEP_SEMANTICS = {
+    "Spatial": [
+        ("load_data", "Load Visium data from Space Ranger output directory"),
+        ("qc_norm", "QC and normalization of spots/genes"),
+        ("dimensionality_reduction", "PCA dimensionality reduction"),
+        ("clustering", "Leiden clustering on the graph"),
+        ("spatial_neighbors", "Spatial neighborhood graph (for Moran's I)"),
+        ("spatial_autocorr", "Spatially variable genes (Moran's I)"),
+        ("functional_enrichment", "Pathway enrichment of top SVGs (pathway enrichment)"),
+        ("plot_clusters", "Spatial scatter plot colored by clusters"),
+        ("plot_genes", "Spatial scatter plot colored by gene expression"),
+    ],
+    "Radiomics": [
+        ("load_image", "Load NIfTI/DICOM medical image"),
+        ("preprocess", "Resampling and intensity normalization (preprocessing)"),
+        ("preview_slice", "Export mid-slice PNG for preview"),
+        ("extract_features", "PyRadiomics texture/shape feature extraction"),
+        ("calc_score", "Rad-Score and risk probability (scoring)"),
+        ("viz_score", "Rad-Score visualization (bar/gauge chart)"),
+    ],
+}
+
 
 class WorkflowPlanner:
     """
@@ -551,9 +574,15 @@ class SOPPlanner:
             
             # 🔥 ARCHITECTURAL FIX: 优先运行意图分析（Plan-First）
             # Step 4: Analyze User Intent (LLM) - 从可用工具集中选择目标步骤（如果未提供）
+            steps_to_skip: List[str] = []
             if target_steps is None:
                 logger.info("🔍 [SOPPlanner] Step 2: 分析用户意图（选择目标步骤）...")
-                target_steps = await self._analyze_user_intent(user_query, workflow)
+                intent_result = await self._analyze_user_intent(user_query, workflow)
+                if isinstance(intent_result, dict):
+                    steps_to_skip = intent_result.get("skip_steps") or []
+                    target_steps = intent_result.get("target_steps") or []
+                else:
+                    target_steps = intent_result if isinstance(intent_result, list) else []
             else:
                 logger.info(f"✅ [SOPPlanner] 使用提供的目标步骤: {target_steps}")
             
@@ -607,6 +636,14 @@ class SOPPlanner:
                 target_steps=resolved_steps,
                 file_metadata=file_metadata
             )
+            
+            # 🔥 Dynamic Planning: Uncheck steps the user asked to skip (selected: false)
+            if steps_to_skip:
+                wd = workflow_config.get("workflow_data") or {}
+                for step in (wd.get("steps") or []):
+                    if step.get("id") in steps_to_skip:
+                        step["selected"] = False
+                        logger.info(f"✅ [SOPPlanner] 已取消勾选步骤: {step.get('id')}")
             
             # 🔥 URGENT FIX: 验证生成的模板包含步骤
             steps_count = len(workflow_config.get('workflow_data', {}).get('steps', []))
@@ -734,73 +771,95 @@ class SOPPlanner:
                 "message": f"工作流规划失败: {str(e)}",
             }
     
+    def _get_domain_knowledge(self, workflow: "BaseWorkflow") -> str:
+        """
+        返回当前工作流各步骤的领域描述，供 LLM 理解“跳过/仅运行”等意图。
+        
+        Spatial / Radiomics 步骤包含详细语义，便于 Dynamic Planning（如 skip preprocessing、no pathway enrichment）。
+        """
+        steps_dag = workflow.steps_dag if hasattr(workflow, "steps_dag") else getattr(workflow, "get_steps_dag", lambda: {})()
+        steps_dag = steps_dag if isinstance(steps_dag, dict) else {}
+        domain_name = getattr(workflow, "get_name", lambda: "Unknown")()
+        lines = [f"**Domain:** {domain_name}", ""]
+        for step_id in steps_dag.keys():
+            meta = workflow.get_step_metadata(step_id) if hasattr(workflow, "get_step_metadata") else {}
+            name = meta.get("name", step_id)
+            desc = (meta.get("description") or "")[:160]
+            lines.append(f"- **{step_id}**: {name}. {desc}")
+        # Append explicit step semantics for Spatial/Radiomics so LLM knows what to skip (e.g. "pathway enrichment" -> functional_enrichment, "scoring" -> calc_score/viz_score)
+        semantics = SOP_PLANNER_STEP_SEMANTICS.get(domain_name)
+        if semantics:
+            lines.append("")
+            lines.append("**Step semantics (for skip/keep intent):**")
+            for sid, hint in semantics:
+                if sid in steps_dag:
+                    lines.append(f"- {sid}: {hint}")
+        return "\n".join(lines)
+
     async def _analyze_user_intent(
         self,
         user_query: str,
         workflow: "BaseWorkflow"
-    ) -> List[str]:
+    ):
         """
-        分析用户意图，从可用工具集中选择目标步骤
+        分析用户意图，从可用工具集中选择目标步骤，并识别需要“跳过”的步骤。
         
-        🔥 ARCHITECTURAL REFACTOR: Dynamic Intent Filtering
-        
-        使用 LLM 从工作流的可用步骤中选择用户明确请求的步骤。
-        
-        Args:
-            user_query: 用户查询文本
-            workflow: 工作流实例（包含 steps_dag）
+        支持 Dynamic Planning：用户说 "skip preprocessing" / "不要通路富集" 时，
+        返回 skip_steps，规划器会将对应步骤设为 selected: false。
         
         Returns:
-            目标步骤ID列表（例如：["pca_analysis"]）
-            如果查询模糊（如"Analyze this"），返回空列表（表示完整工作流）
+            dict: {"target_steps": ["step1", ...], "skip_steps": ["step_x"]}
+            或 list: 兼容旧版，表示 target_steps，skip_steps 视为 []。
         """
         # 获取可用步骤列表
         available_steps = list(workflow.steps_dag.keys())
+        domain_knowledge = self._get_domain_knowledge(workflow)
         
-        # 构建提示词
+        # 构建提示词（含领域步骤说明 + 跳过/仅运行 few-shot）
         system_prompt = """You are an Intent Analyzer for Bioinformatics Workflows.
 
-Your task is to select the *Target Steps* the user explicitly asked for from the available toolset.
+Your task is to output TWO lists:
+1. **target_steps**: Steps to include (same as before). Use [] for "full workflow".
+2. **skip_steps**: Steps the user explicitly asked to SKIP (e.g. "skip preprocessing", "不要聚类", "no pathway enrichment").
 
-**CRITICAL - User Intent Priority (MUST FOLLOW):**
-1. If the user asks for a SPECIFIC analysis (e.g., "PCA", "主成分分析", "Do PCA only"), return ONLY that step's ID. Prerequisites (e.g., inspect_data, preprocess_data) will be added automatically by the system. Do NOT return the full pipeline.
-2. If the user asks for multiple specific steps, return ONLY those steps.
-3. Return empty list [] ONLY when the user's query is genuinely VAGUE (e.g., "Analyze this file", "Full analysis", "完整分析", "Help me analyze", "全部分析").
-4. **Execution Mode**: When a file is uploaded, STILL respect the user's specific request. Do NOT default to full workflow just because a file exists. If they asked for "PCA only", return ["pca_analysis"].
+**CRITICAL - User Intent:**
+- "Analyze this but skip X" / "全部分析但跳过X" -> target_steps = [] (full), skip_steps = ["X"]
+- "Just do A and B, no C" -> target_steps = ["A", "B"] (or minimal set including deps), skip_steps = ["C"] if C is in workflow
+- Specific only (e.g. "PCA only") -> target_steps = ["pca_analysis"], skip_steps = []
+- Vague ("Analyze this", "完整分析") -> target_steps = [], skip_steps = []
 
-**Rules:**
-- Specific request (PCA, 主成分, volcano, 火山图, pathway, 通路) -> Return ONLY those step IDs
-- Vague request (analyze, 分析, full, 完整, all, 全部) -> Return []
-- Return ONLY a JSON array of tool_ids from the available steps, no explanations.
+**Output Format (strict JSON object only):**
+{"target_steps": ["step1", "step2", ...], "skip_steps": ["step_to_skip", ...]}
 
-**Output Format:**
-Return ONLY a JSON array:
-["step1", "step2", ...]  // Empty array [] means full workflow
+- target_steps: only use step IDs from the Available Steps list. Empty [] = full workflow.
+- skip_steps: only use step IDs from the Available Steps list. Empty [] = no skip.
 
-**Examples (Partial = return specific steps):**
-- "Do PCA only." -> ["pca_analysis"]
-- "我要做代谢组主成分分析" -> ["pca_analysis"]
-- "Run PCA on this file." -> ["pca_analysis"]
-- "Just PCA." -> ["pca_analysis"]
-- "PCA and volcano" -> ["pca_analysis", "visualize_volcano"]
+**Few-Shot (Spatial):**
+- User: "Run spatial analysis but I don't need pathway enrichment." -> {"target_steps": [], "skip_steps": ["functional_enrichment"]}
+- User: "Analyze this Visium data, skip clustering." -> {"target_steps": [], "skip_steps": ["clustering"]}
 
-**Examples (Vague = return []):**
-- "Analyze this." -> []
-- "Full analysis." -> []
-- "完整分析" -> []
-- "Help me analyze this file." -> []"""
+**Few-Shot (Radiomics):**
+- User: "Just extract features from this CT, no scoring needed." -> {"target_steps": ["load_image", "preprocess", "preview_slice", "extract_features"], "skip_steps": ["calc_score", "viz_score"]}
+- User: "Analyze this Radiomics data but skip the preprocessing step." -> {"target_steps": [], "skip_steps": ["preprocess"]}
+
+**Few-Shot (Metabolomics/RNA):**
+- "Do PCA only." -> {"target_steps": ["pca_analysis"], "skip_steps": []}
+- "Full analysis." -> {"target_steps": [], "skip_steps": []}"""
 
         user_prompt = f"""**User Query:**
 {user_query}
 
-**Available Steps:**
+**Step Definitions (use these IDs in target_steps and skip_steps):**
+{domain_knowledge}
+
+**Available Step IDs:**
 {json.dumps(available_steps, ensure_ascii=False, indent=2)}
 
 **Task:**
-Select the target steps the user explicitly asked for. Return ONLY a JSON array of step IDs.
+From the user query, output a JSON object with "target_steps" and "skip_steps". Use only step IDs from the list above.
 
-**Output:**
-Return ONLY a JSON array (e.g., ["pca_analysis"] or [] for full workflow)."""
+**Output (JSON only):**
+{{"target_steps": [...], "skip_steps": [...]}}"""
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -810,7 +869,7 @@ Return ONLY a JSON array (e.g., ["pca_analysis"] or [] for full workflow)."""
         response = await self.llm_client.achat(
             messages=messages,
             temperature=0.1,
-            max_tokens=256
+            max_tokens=512
         )
         
         # 🔥 FIX: 提取 ChatCompletion 对象的内容
@@ -819,41 +878,43 @@ Return ONLY a JSON array (e.g., ["pca_analysis"] or [] for full workflow)."""
         else:
             response_text = str(response)
         
-        # 解析响应
+        # 解析响应：支持 {"target_steps": [...], "skip_steps": [...]} 或旧版纯数组
         try:
-            target_steps = json.loads(response_text.strip())
-            if not isinstance(target_steps, list):
-                logger.warning(f"⚠️ LLM 返回了非列表类型: {type(target_steps)}，使用空列表")
-                return []
+            raw = json.loads(response_text.strip())
+            if isinstance(raw, dict):
+                target_steps = raw.get("target_steps")
+                skip_steps = raw.get("skip_steps")
+                if not isinstance(target_steps, list):
+                    target_steps = []
+                if not isinstance(skip_steps, list):
+                    skip_steps = []
+            else:
+                target_steps = raw if isinstance(raw, list) else []
+                skip_steps = []
             
-            # 验证步骤是否存在于工作流中
             valid_steps = [s for s in target_steps if s in available_steps]
-            invalid_steps = set(target_steps) - set(available_steps)
-            if invalid_steps:
-                logger.warning(f"⚠️ LLM 返回了无效的步骤ID: {invalid_steps}，已过滤")
+            valid_skip = [s for s in skip_steps if s in available_steps]
+            invalid = set(target_steps) - set(available_steps) | (set(skip_steps) - set(available_steps))
+            if invalid:
+                logger.warning(f"⚠️ LLM 返回了无效的步骤ID: {invalid}，已过滤")
             
-            logger.info(f"✅ [SOPPlanner] 意图分析完成: {valid_steps}")
-            return valid_steps
+            logger.info(f"✅ [SOPPlanner] 意图分析完成: target_steps={valid_steps}, skip_steps={valid_skip}")
+            return {"target_steps": valid_steps, "skip_steps": valid_skip}
         except json.JSONDecodeError as e:
             logger.error(f"❌ 意图分析 JSON 解析失败: {e}")
             logger.error(f"响应内容: {response_text[:200] if 'response_text' in locals() else str(response)[:200]}")
-            # 回退：尝试从查询中推断
-            return self._fallback_intent_analysis(user_query, available_steps)
+            fallback_list = self._fallback_intent_analysis(user_query, available_steps)
+            return {"target_steps": fallback_list, "skip_steps": []}
     
     def _fallback_intent_analysis(self, user_query: str, available_steps: List[str]) -> List[str]:
         """
-        回退的意图分析（基于关键词）
-        
-        Args:
-            user_query: 用户查询
-            available_steps: 可用步骤列表
+        回退的意图分析（基于关键词），含 Spatial / Radiomics 步骤关键词。
         
         Returns:
-            目标步骤列表
+            目标步骤列表（供 plan 使用；意图分析异常时由 _analyze_user_intent 包装为 dict）
         """
         query_lower = user_query.lower()
         
-        # 检查是否包含特定步骤的关键词（用于 LLM 失败时的回退）
         step_keywords = {
             "pca_analysis": ["pca", "主成分", "主成分分析", "principal component"],
             "differential_analysis": ["differential", "差异", "diff", "差异分析"],
@@ -861,7 +922,24 @@ Return ONLY a JSON array (e.g., ["pca_analysis"] or [] for full workflow)."""
             "visualize_volcano": ["volcano", "火山图"],
             "metabolomics_pathway_enrichment": ["pathway", "通路", "enrichment", "富集", "通路富集"],
             "preprocess_data": ["preprocess", "预处理"],
-            "inspect_data": ["inspect", "检查", "数据检查"]
+            "inspect_data": ["inspect", "检查", "数据检查"],
+            # Spatial
+            "load_data": ["load", "加载"],
+            "qc_norm": ["qc", "quality", "标准化", "norm"],
+            "dimensionality_reduction": ["pca", "dimensionality", "降维"],
+            "clustering": ["clustering", "cluster", "聚类", "leiden"],
+            "spatial_neighbors": ["neighbors", "邻域"],
+            "spatial_autocorr": ["autocorr", "moran", "svg", "spatially variable"],
+            "functional_enrichment": ["pathway", "enrichment", "富集", "通路"],
+            "plot_clusters": ["plot cluster", "聚类图"],
+            "plot_genes": ["plot gene", "基因图"],
+            # Radiomics
+            "load_image": ["load", "加载"],
+            "preprocess": ["preprocess", "预处理", "resample", "重采样"],
+            "preview_slice": ["preview", "预览"],
+            "extract_features": ["extract", "feature", "特征提取", "texture"],
+            "calc_score": ["score", "rad-score", "评分"],
+            "viz_score": ["viz", "visualize score", "评分图"],
         }
         
         matched_steps = []
@@ -870,7 +948,6 @@ Return ONLY a JSON array (e.g., ["pca_analysis"] or [] for full workflow)."""
                 if any(kw in query_lower for kw in keywords):
                     matched_steps.append(step_id)
         
-        # 如果匹配到步骤，返回匹配的步骤；否则返回空列表（完整工作流）
         return matched_steps if matched_steps else []
     
     def _resolve_dependencies(

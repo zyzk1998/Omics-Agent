@@ -97,7 +97,7 @@ manage_services() {
     echo "1) 启动服务"
     echo "2) 停止服务"
     echo "3) 🔄 快速重启 (代码生效)"
-    echo "4) 🔨 重建并重启 (依赖/配置生效)"
+    echo "4) 🔨 重建并重启 (无缓存，依赖/配置生效)"
     echo "0) 返回"
     echo ""
     read -p "请选择: " choice
@@ -128,14 +128,14 @@ manage_services() {
             docker_compose_cmd ps
             ;;
         4)
-            echo "🔨 重建并重启 (依赖/配置生效)..."
-            echo -e "${YELLOW}⚠️  这将完全停止、重新构建并启动容器，可能需要几分钟...${NC}"
-            # 🔥 完全停止所有服务
+            echo "🔨 重建并重启 (无缓存，依赖/配置生效)..."
+            echo -e "${YELLOW}⚠️  将完全停止、无缓存重新构建并启动，可能需要几分钟...${NC}"
             echo "🛑 停止所有服务..."
             sudo docker compose down
-            # 🔥 重新构建并启动（绝对重启）
-            echo "🔨 重新构建并启动..."
-            sudo docker compose up --build -d
+            echo "🔨 无缓存重新构建（保证 requirements.txt 等依赖被重新安装）..."
+            sudo docker compose build --no-cache
+            echo "🚀 启动容器..."
+            sudo docker compose up -d
             wait_for_service
             sudo docker compose ps
             ;;

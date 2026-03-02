@@ -10,8 +10,21 @@ from ...core.tool_registry import registry
 logger = logging.getLogger(__name__)
 
 
-def _scatter_spatial_no_image(adata: Any, color_by: str, out: Path) -> None:
-    """当无 tissue 图时用 obsm['spatial'] 做散点图，避免依赖 uns['spatial'][*]['images']。"""
+def _is_categorical_color(adata: Any, color_by: str) -> bool:
+    """True if color_by is in obs and is categorical / string (e.g. leiden, cell_type)."""
+    if color_by not in adata.obs.columns:
+        return False
+    col = adata.obs[color_by]
+    if hasattr(col, "dtype"):
+        if col.dtype.name == "category":
+            return True
+        if col.dtype.kind in ("U", "O", "S") or col.dtype == object:
+            return True
+    return False
+
+
+def _scatter_spatial_no_image(adata: Any, color_by: str, out: Path, dpi: int = 200) -> None:
+    """当无 tissue 图时用 obsm['spatial'] 做散点图；分类用离散 palette，连续用 viridis/plasma。"""
     import numpy as np
     import matplotlib
     matplotlib.use("Agg")
@@ -22,31 +35,30 @@ def _scatter_spatial_no_image(adata: Any, color_by: str, out: Path) -> None:
     xy = xy[valid]
     if color_by in adata.obs.columns:
         raw = adata.obs[color_by].values[valid]
-        # leiden 等为字符串类别，matplotlib.scatter 的 c 需要数值
-        if hasattr(raw, "dtype") and (raw.dtype == object or (hasattr(raw.dtype, "kind") and raw.dtype.kind in ("U", "O", "S"))):
+        if _is_categorical_color(adata, color_by):
             import pandas as pd
             cat = pd.Categorical(raw)
             vals = cat.codes.astype(float)
             uniq = cat.categories.tolist()
             n_cat = len(uniq)
             cmap = plt.get_cmap("tab10" if n_cat <= 10 else "tab20")
-            sc = ax.scatter(xy[:, 0], xy[:, 1], c=vals, s=5, cmap=cmap, vmin=-0.5, vmax=n_cat - 0.5)
+            sc = ax.scatter(xy[:, 0], xy[:, 1], c=vals, s=8, cmap=cmap, vmin=-0.5, vmax=n_cat - 0.5)
             cbar = fig.colorbar(sc, ax=ax, ticks=np.arange(n_cat), label=color_by)
             cbar.ax.set_yticklabels(uniq)
         else:
             vals = np.asarray(raw, dtype=float)
-            sc = ax.scatter(xy[:, 0], xy[:, 1], c=vals, s=5, cmap="viridis")
+            sc = ax.scatter(xy[:, 0], xy[:, 1], c=vals, s=8, cmap="viridis")
             fig.colorbar(sc, ax=ax, label=color_by)
     else:
         idx = list(adata.var_names).index(color_by)
         v = adata.X[valid, idx]
         vals = np.ravel(v.toarray() if hasattr(v, "toarray") else v)
-        sc = ax.scatter(xy[:, 0], xy[:, 1], c=vals, s=5, cmap="viridis")
+        sc = ax.scatter(xy[:, 0], xy[:, 1], c=vals, s=8, cmap="viridis")
         fig.colorbar(sc, ax=ax, label=color_by)
     ax.set_title(f"Spatial: {color_by}")
     ax.set_xlabel("x"); ax.set_ylabel("y")
     fig.tight_layout()
-    fig.savefig(str(out), dpi=150)
+    fig.savefig(str(out), dpi=dpi)
     plt.close(fig)
 
 
@@ -107,16 +119,22 @@ def plot_spatial_scatter(
                     return {"status": "error", "error": "'total_counts' / 'n_counts' not in obs; no obs column to color by."}
         if color_by not in adata.var_names and color_by not in adata.obs.columns:
             return {"status": "error", "error": f"'{color_by}' not in var_names or obs.columns."}
-        # 无组织图时用 img=False；若报 images 或 color/c 参数错误则用自绘散点图（支持 leiden 等分类列）
+        # Categorical (e.g. leiden) -> discrete palette; continuous (gene) -> viridis/plasma
+        is_categorical = _is_categorical_color(adata, color_by)
+        plot_kwargs = {"save": str(out), "show": False, "img": False}
+        if is_categorical:
+            plot_kwargs["palette"] = "tab20"
+        else:
+            plot_kwargs["cmap"] = "viridis"
         try:
-            sq.pl.spatial_scatter(adata, color=color_by, save=str(out), show=False, img=False)
+            sq.pl.spatial_scatter(adata, color=color_by, **plot_kwargs)
         except Exception as e:
             err = str(e).lower()
-            if "images" in err or "image" in err or "img" in err or "'c' argument" in err or "sequence of numbers" in err:
-                _scatter_spatial_no_image(adata, color_by, out)
+            if "images" in err or "image" in err or "img" in err or "'c' argument" in err or "sequence of numbers" in err or "palette" in err:
+                _scatter_spatial_no_image(adata, color_by, out, dpi=200)
             else:
                 try:
-                    _scatter_spatial_no_image(adata, color_by, out)
+                    _scatter_spatial_no_image(adata, color_by, out, dpi=200)
                 except Exception:
                     raise
         # 返回前端可识别的路径：优先 results/ 相对路径，便于 <img src="/results/...">

@@ -18,6 +18,7 @@ from .agents.specialists.epigenomics_agent import EpigenomicsAgent
 from .agents.specialists.metabolomics_agent import MetabolomicsAgent
 from .agents.specialists.proteomics_agent import ProteomicsAgent
 from .agents.specialists.spatial_agent import SpatialAgent
+from .agents.specialists.radiomics_agent import RadiomicsAgent
 from .agents.specialists.imaging_agent import ImagingAgent
 
 logger = logging.getLogger(__name__)
@@ -187,6 +188,11 @@ class GIBHAgent:
         )
         
         agents["spatial_agent"] = SpatialAgent(
+            llm_client=self.llm_clients["logic"],
+            prompt_manager=self.prompt_manager
+        )
+        
+        agents["radiomics_agent"] = RadiomicsAgent(
             llm_client=self.llm_clients["logic"],
             prompt_manager=self.prompt_manager
         )
