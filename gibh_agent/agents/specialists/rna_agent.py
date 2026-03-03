@@ -251,35 +251,9 @@ class RNAAgent(BaseAgent):
                     "response": self._stream_string_response(f"文件检查时出错: {str(e)}")
                 }
         
-        # 智能数据检测：如果需要 Cell Ranger 但没有上传文件，提供测试数据选择
-        needs_cellranger = self._needs_cellranger(query_lower)
-        if needs_cellranger and not file_paths:
-            # 检查是否有测试数据可用
-            test_datasets = self.test_data_manager.scan_test_datasets()
-            if test_datasets:
-                # 返回测试数据选择请求
-                return {
-                    "type": "test_data_selection",
-                    "message": "检测到您没有上传相关数据。请选择：",
-                    "options": [
-                        "1. 使用本地测试数据集",
-                        "2. 上传您自己的数据"
-                    ],
-                    "datasets": test_datasets,
-                    "datasets_json": self.test_data_manager.format_datasets_for_selection(test_datasets),
-                    "datasets_display": self.test_data_manager.format_datasets_for_display(test_datasets)
-                }
-            else:
-                # 没有测试数据，提示用户上传
-                return {
-                    "type": "chat",
-                    "response": self._stream_string_response(
-                        "检测到您没有上传相关数据，且没有可用的测试数据集。\n"
-                        "请上传 FASTQ 文件或 .h5ad 文件以开始分析。"
-                    )
-                }
+        # 与 Spatial/Radiomics 一致：无文件时不再提供本地测试数据选择，由规划器返回工作流预览卡片（上传以激活）
         
-        # 处理测试数据选择（用户通过 JSON 选择）
+        # 处理测试数据选择（用户通过 JSON 选择，保留兼容）
         if "test_dataset_id" in kwargs:
             dataset_id = kwargs["test_dataset_id"]
             dataset = self.test_data_manager.get_dataset_by_id(dataset_id)
@@ -508,12 +482,12 @@ File Path: {file_path}
         logger.info(f"   RNAPlanner available: {self.sop_planner is not None}")
         logger.info("=" * 80)
         
-        # 🔥 Phase 3: 优先使用 SOP 驱动的动态规划器
+        # 🔥 Phase 3: 优先使用 SOP 驱动的动态规划器（无文件时也生成预览模板，与 Spatial/Radiomics 一致）
         if self.sop_planner:
             try:
                 logger.info("🧠 [RNAPlanner] 尝试使用动态规划器生成工作流...")
                 
-                # Step 1: 检查文件获取元数据
+                # Step 1: 有文件时检查并获取元数据
                 file_metadata = None
                 if file_paths:
                     try:
@@ -522,26 +496,25 @@ File Path: {file_path}
                         upload_dir = os.getenv("UPLOAD_DIR", "/app/uploads")
                         inspector = FileInspector(upload_dir)
                         file_metadata = inspector.inspect_file(file_paths[0])
-                        
                         if file_metadata.get("status") != "success":
                             logger.warning(f"⚠️ 文件检查失败: {file_metadata.get('error')}")
                             file_metadata = None
                     except Exception as e:
                         logger.warning(f"⚠️ 文件检查异常: {e}")
                 
-                # Step 2: 使用 RNAPlanner 生成计划
-                if file_metadata:
-                    plan_result = await self.sop_planner.generate_plan(
-                        user_query=query,
-                        file_metadata=file_metadata,
-                        category_filter="scRNA-seq"
-                    )
-                    
-                    # 检查是否成功
-                    if plan_result.get("type") != "error":
-                        logger.info("✅ [RNAPlanner] 动态规划成功")
-                        
-                        # 生成诊断报告（可选）
+                # Step 2: 有文件用真实参数，无文件用模板模式（预览卡片，与 Spatial/Radiomics 一致）
+                is_template = not file_metadata or not (file_metadata.get("file_path") if file_metadata else None)
+                plan_result = await self.sop_planner.generate_plan(
+                    user_query=query,
+                    file_metadata=file_metadata,
+                    category_filter="scRNA-seq",
+                    domain_name="RNA",
+                    is_template=is_template,
+                )
+                
+                if plan_result.get("type") != "error":
+                    logger.info("✅ [RNAPlanner] 动态规划成功 (template=%s)", is_template)
+                    if file_metadata and not is_template:
                         diagnosis_report = None
                         try:
                             diagnosis_report = await self._perform_data_diagnosis(
@@ -551,23 +524,12 @@ File Path: {file_path}
                             )
                         except Exception as e:
                             logger.warning(f"⚠️ 诊断报告生成失败: {e}")
-                        
-                        # 添加诊断报告到结果
                         if diagnosis_report:
                             plan_result["diagnosis_report"] = diagnosis_report
-                        
-                        # 🔥 TASK 5: 添加参数推荐到结果
-                        if hasattr(self, 'context') and "parameter_recommendation" in self.context:
-                            recommendation = self.context.get("parameter_recommendation")
-                            if recommendation:
-                                plan_result["recommendation"] = recommendation
-                                logger.info(f"✅ [RNAAgent] 添加参数推荐到结果: {len(recommendation.get('params', {}))} 个参数")
-                        
-                        return plan_result
-                    else:
-                        logger.warning(f"⚠️ [RNAPlanner] 规划失败: {plan_result.get('error')}")
-                else:
-                    logger.warning("⚠️ [RNAPlanner] 文件元数据不可用，回退到传统逻辑")
+                    if hasattr(self, "context") and self.context.get("parameter_recommendation"):
+                        plan_result["recommendation"] = self.context.get("parameter_recommendation")
+                    return plan_result
+                logger.warning("⚠️ [RNAPlanner] 规划失败: %s", plan_result.get("error"))
             
             except Exception as e:
                 logger.error(f"❌ [RNAPlanner] 动态规划异常: {e}", exc_info=True)

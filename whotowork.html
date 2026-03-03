@@ -746,7 +746,7 @@
             margin-bottom: 8px;
         }
         
-        /* 架构漫游按钮 - 右上角浮动 */
+        /* 新手引导按钮 - 右上角浮动 */
         .tour-btn {
             position: fixed;
             top: 20px;
@@ -823,7 +823,7 @@
     <script src="https://cdn.jsdelivr.net/npm/driver.js@1.0.1/dist/driver.js.iife.js"></script>
 </head>
 <body>
-    <button class="tour-btn" onclick="startTour()">👋 架构漫游 (Start Tour)</button>
+    <button class="tour-btn" onclick="startTour()">👋 新手引导</button>
     
     <!-- Code Pop-up Modal (点击连接线显示，点击任意处关闭) -->
     <div class="code-modal" id="code-modal" onclick="event.stopPropagation()">
@@ -2102,7 +2102,7 @@
                 }
             }
             
-            // ========== 架构漫游 Tour (Driver.js) - V2 架构 ==========
+            // ========== 新手引导 Tour (Driver.js) - V2 架构 ==========
             window.startTour = function() {
                 try {
                     const driverFn = (window.driver && window.driver.js && window.driver.js.driver)
@@ -2127,15 +2127,15 @@
                             {
                                 element: 'body',
                                 popover: {
-                                    title: 'Welcome',
-                                    description: 'Welcome to the Omics Agent White-box Dashboard. This page shows the V2 architecture with 7 Modalities, File Governance, and Intrinsic Security.'
+                                    title: '欢迎',
+                                    description: '欢迎使用 Omics Agent 白盒架构仪表板。本页展示 V2 架构：支持 7 大模态、文件治理与内生安全体系。'
                                 }
                             },
                             {
                                 element: '.control-bar',
                                 popover: {
-                                    title: 'Scenario Bar',
-                                    description: 'Switch between Planning, Execution, and Security views. Use the buttons to see data flow for each scenario. Click "Infra & Security" to view our Intrinsic Security layer.'
+                                    title: '场景栏',
+                                    description: '在规划、执行与安全视图间切换。点击不同按钮可查看各场景的数据流向；点击「基础设施与安全」可查看内生安全层。'
                                 },
                                 onHighlightStarted: function() {
                                     if (typeof renderScenario === 'function') {
@@ -2146,29 +2146,29 @@
                             {
                                 element: '[data-module="user"]',
                                 popover: {
-                                    title: 'User',
-                                    description: 'Supports 7 Modalities including Spatial (Visium) & Radiomics (NIfTI). Auto-unpacks archives (zip/tar.gz) and pairs .h5 with spatial/ for structure normalization.'
+                                    title: '用户',
+                                    description: '支持 7 大模态（含空间组学 Visium、影像组学 NIfTI 等）。自动解压压缩包（zip/tar.gz）并重组目录（如 .h5 与 spatial/ 配对）。'
                                 }
                             },
                             {
                                 element: '[data-module="orchestrator"]',
                                 popover: {
-                                    title: 'Orchestrator',
-                                    description: 'The central hub. Now features Modality Sniffing to auto-detect data types (Spatial, Radiomics, RNA, Metabolomics) before planning.'
+                                    title: '总控编排',
+                                    description: '系统中枢。具备模态嗅探能力，在规划前自动识别数据类型（空间、影像、RNA、代谢组学等）。'
                                 }
                             },
                             {
                                 element: '[data-module="agent"]',
                                 popover: {
-                                    title: 'Domain Agents',
-                                    description: 'Domain Specialists. We now have Spatial & Radiomics Agents with specific prompts. Each agent overrides _generate_analysis_summary to avoid cross-domain hallucination.'
+                                    title: '领域专家',
+                                    description: '各领域专属智能体。现包含空间组学与影像组学 Agent，采用专属摘要模板，重写 _generate_analysis_summary 以避免跨领域话术混淆。'
                                 }
                             },
                             {
                                 element: '.control-bar .scenario-btn:last-of-type',
                                 popover: {
-                                    title: 'Infrastructure & Security',
-                                    description: 'Click here to see our Intrinsic Security layer (BLAKE3 Signatures, Ed25519 signing, .sig sidecar verification, and Docker Sandbox). Fail-Open design ensures availability.'
+                                    title: '基础设施与安全',
+                                    description: '点击此处查看内生安全体系：BLAKE3 哈希、Ed25519 签名、.sig 旁路校验与 Docker 沙箱。Fail-Open 设计保证业务可用。'
                                 },
                                 onHighlightStarted: function() {
                                     if (typeof showInfraReport === 'function') showInfraReport();

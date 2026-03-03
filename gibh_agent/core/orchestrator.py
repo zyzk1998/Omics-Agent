@@ -1040,63 +1040,7 @@ class AgentOrchestrator:
                 if not has_files:
                     logger.info("⚠️ [Orchestrator] 分支 A: Plan-First 模式（无文件）")
                     logger.info("⚠️ [Orchestrator] 进入预览模式，不会生成诊断报告")
-                    
-                    # 🔥 TASK 2: 检测用户意图是否包含 RNA 分析全流程（包括 cellranger）
-                    query_lower = refined_query.lower()
-                    rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "cell ranger"]
-                    full_workflow_keywords = ["完整", "全流程", "全部", "full", "complete", "all", "标准流程"]
-                    has_cellranger_intent = any(kw in query_lower for kw in ["cellranger", "cell ranger", "fastq", "测序"])
-                    is_full_workflow = any(kw in query_lower for kw in full_workflow_keywords) or len(target_steps) > 5
-                    is_rna_domain = domain_name == "RNA"
-                    
-                    # 检测是否包含 cellranger 步骤
-                    has_cellranger_step = any("cellranger" in step.lower() for step in target_steps)
-                    
-                    # 🔥 TASK 1 FIX: 如果用户意图包含 RNA 分析，询问是否使用测试数据，但同时生成工作流卡片（预览模式）
-                    if is_rna_domain and (has_cellranger_intent or has_cellranger_step or is_full_workflow or len(target_steps) > 0):
-                        logger.info("🔍 [Orchestrator] 检测到 RNA 分析意图，询问是否使用测试数据，同时生成工作流卡片")
-                        
-                        # 🔥 TASK 3: 根据工作流步骤推荐对应的测试数据
-                        from ..core.test_data_manager import TestDataManager
-                        test_data_manager = TestDataManager()
-                        recommended_datasets = test_data_manager.get_datasets_by_workflow_type(target_steps)
-                        
-                        # 选择最合适的测试数据
-                        recommended_dataset = None
-                        if recommended_datasets:
-                            # 优先选择第一个推荐的数据集
-                            recommended_dataset = recommended_datasets[0]
-                        
-                        # 构建消息
-                        if has_cellranger_step or has_cellranger_intent:
-                            message = "检测到您想要进行 RNA 分析全流程（包含 Cell Ranger 步骤），但未上传文件。Cell Ranger 步骤需要原始 FASTQ 文件，文件通常较大。"
-                            question = "是否使用测试数据进行全流程分析？"
-                        else:
-                            message = "检测到您想要进行 RNA 分析，但未上传文件。"
-                            question = "是否使用测试数据进行分析？"
-                        
-                        # 🔥 TASK 1 FIX: 先发送测试数据询问（但不return，继续生成工作流卡片）
-                        test_data_question = {
-                            "type": "test_data_question",
-                            "message": message,
-                            "question": question,
-                            "test_data_path": recommended_dataset.get("fastq_dir") or recommended_dataset.get("h5ad_file") or "/app/test_data/pbmc_1k_v3_fastqs" if recommended_dataset else "/app/test_data/pbmc_1k_v3_fastqs",
-                            "test_data_info": {
-                                "name": recommended_dataset.get("name", "PBMC 1k v3") if recommended_dataset else "PBMC 1k v3",
-                                "description": recommended_dataset.get("description", "10x Genomics 单细胞 RNA-seq 测试数据") if recommended_dataset else "10x Genomics 单细胞 RNA-seq 测试数据",
-                                "size": "约 100MB"
-                            },
-                            "workflow_steps": target_steps,
-                            "recommended_datasets": recommended_datasets  # 传递所有推荐的数据集供前端选择
-                        }
-                        yield self._format_sse("workflow", {
-                            "workflow_config": None,
-                            "template_mode": True,
-                            "test_data_question": test_data_question
-                        })
-                        await asyncio.sleep(0.01)
-                        # 🔥 TASK 1 FIX: 不return，继续生成工作流卡片
-                    
+                    # RNA 与 Spatial/Radiomics 一致：无文件时仅展示工作流预览卡片（蓝按钮「上传以激活」），不再询问本地测试数据
                     yield self._format_sse("status", {
                         "content": "未检测到文件，进入方案预览模式...",
                         "state": "running"

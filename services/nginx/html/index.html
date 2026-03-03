@@ -823,46 +823,34 @@
             display: block;
         }
 
-        /* 🔥 TASK 4: Print CSS - Only print report card */
+        /* Print: 仅打印报告区域，三部分可见，手风琴全部展开 */
         @media print {
             @page { margin: 1cm; size: auto; }
-            
-            /* Hide everything by default */
-            body * { 
-                visibility: hidden; 
-            }
-            
-            /* Show only unified report container */
-            .unified-report-container, 
-            .unified-report-container * { 
-                visibility: visible; 
-            }
-            
-            /* Position report at top-left */
-            .unified-report-container { 
-                position: absolute; 
-                left: 0; 
-                top: 0; 
-                width: 100%; 
-            }
-            
-            /* Ensure accordion items are expanded */
-            .accordion-collapse { 
-                display: block !important; 
-                height: auto !important; 
-                opacity: 1 !important; 
+            body * { visibility: hidden; }
+            .unified-report-container,
+            .unified-report-container * {
                 visibility: visible !important;
             }
-            
-            /* Hide print button in print */
-            .unified-report-container .btn { 
-                display: none !important; 
+            .unified-report-container {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                margin: 0;
+                padding: 0;
+                visibility: visible !important;
             }
-            .accordion-button::after { display: none !important; } /* 隐藏折叠箭头 */
+            /* 强制展开所有 accordion，保证工作流执行结果完整打印 */
+            .accordion-collapse {
+                display: block !important;
+                height: auto !important;
+                opacity: 1 !important;
+                visibility: visible !important;
+            }
+            .btn, .no-print { display: none !important; }
+            .accordion-button::after { display: none !important; }
             .accordion-button { pointer-events: none; padding-left: 0; font-weight: bold; color: #000 !important; background: none !important; }
             .accordion-item { border: none; border-bottom: 1px solid #eee; page-break-inside: avoid; }
-            
-            /* 图片防跨页 */
             img { max-width: 80% !important; page-break-inside: avoid; display: block; margin: 10px 0; }
             * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         }
@@ -1799,14 +1787,12 @@
                                 break;
                                 
                             case 'diagnosis':
-                                // 🔥 TASK 3: Render diagnosis report LAST (after execution results)
-                                // 🔥 FEATURE: Support streaming reasoning tags
-                                if (data.report_data && data.report_data.diagnosis) {
-                                    renderDiagnosisCard(data.report_data.diagnosis, data);
-                                } else {
-                                    renderDiagnosisCard(data, data);
+                                // 数据驱动：diagnosis_report → 数据诊断(#report-diagnosis)；report_data.diagnosis → 专家分析(#report-summary)
+                                if (data.diagnosis_report != null) {
+                                    renderReportSection('diagnosis', data.diagnosis_report, data);
+                                } else if (data.report_data && data.report_data.diagnosis != null) {
+                                    renderReportSection('summary', data.report_data.diagnosis, data);
                                 }
-                                // 🔥 DRY: Render follow-up suggestions from diagnosis/report (no raw block reaches frontend)
                                 const diagnosisSuggestions = (data.report_data && data.report_data.suggestions) || data.suggestions;
                                 if (Array.isArray(diagnosisSuggestions) && diagnosisSuggestions.length > 0) {
                                     renderSuggestions(diagnosisSuggestions);
@@ -1834,35 +1820,24 @@
                                 break;
                                 
                             case 'result':
-                                // 🔥 TASK 3: Reorder output - Render Execution Results FIRST, then Diagnosis Report LAST
-                                // 支持多种数据结构：report_data.diagnosis/workflow 或 diagnosis_report/workflow_config
+                                // 数据驱动：steps_details → #report-execution；diagnosis → #report-summary；diagnosis_report → #report-diagnosis
                                 if (data.report_data) {
-                                    // 新格式：report_data.diagnosis 和 report_data.workflow
-                                    // 🔥 TASK 3: FIRST render execution steps (Accordion)
                                     if (data.report_data.steps_details && data.report_data.steps_details.length > 0) {
                                         renderExecutionSteps(data.report_data.steps_details);
                                     }
-                                    // 🔥 TASK 3: THEN render diagnosis report (Blue Box) LAST
-                                    if (data.report_data.diagnosis) {
-                                        renderDiagnosisCard(data.report_data.diagnosis, data);
+                                    if (data.report_data.diagnosis != null) {
+                                        renderReportSection('summary', data.report_data.diagnosis, data);
                                     }
-                                    // 🔥 CRITICAL FIX: 不在 result 事件中渲染 workflow，避免重复
-                                    // workflow 应该在 'workflow' 事件中渲染
                                 } else {
-                                    // 旧格式：diagnosis_report 和 workflow_config
-                                    // 🔥 TASK 3: FIRST render execution steps if available
                                     if (data.steps_details && data.steps_details.length > 0) {
                                         renderExecutionSteps(data.steps_details);
                                     }
-                                    // 🔥 TASK 3: THEN render diagnosis report LAST
-                                    if (data.diagnosis_report) {
-                                        renderDiagnosisCard(data.diagnosis_report, data);
+                                    if (data.diagnosis_report != null) {
+                                        renderReportSection('diagnosis', data.diagnosis_report, data);
                                     }
-                                    // 🔥 CRITICAL FIX: 只在没有单独的 'workflow' 事件时才渲染
-                                    // 传递完整 data 以包含 recommended_steps（意图驱动预选）
                                     if (data.workflow_config && !data._workflow_already_rendered) {
                                         renderWorkflowCard(data);
-                                        data._workflow_already_rendered = true; // 标记已渲染
+                                        data._workflow_already_rendered = true;
                                     }
                                 }
                                 break;
@@ -2243,137 +2218,50 @@
                         }
                     }
                     
-                    // 🔥 TASK 3: Unified Report - Render diagnosis (Singleton ID: #diagnosis-section-content)
-                    // Title appears EXACTLY ONCE in card header; no duplicate headers in body.
-                    function renderDiagnosisCard(diagnosisData, fullData = null) {
+                    // 数据驱动报告渲染：依据数据字段唯一写入对应容器，禁止跨容器或 DOM 状态判断
+                    // section: 'diagnosis' | 'summary'；数据来源：diagnosis_report → diagnosis，report_data.diagnosis → summary
+                    function renderReportSection(section, content, fullData) {
                         const cardZoneRef = window.currentMessageZones?.cardZone || aiContentDiv;
-                        
                         if (!cardZoneRef) {
-                            console.error('❌ [renderDiagnosisCard] cardZone 不存在，无法渲染诊断卡片');
+                            console.error('❌ [renderReportSection] cardZone 不存在');
                             return;
                         }
-                        
-                        // Template mode: skip rendering
-                        const hasRealStats = diagnosisData && (
-                            diagnosisData.n_samples !== undefined || 
-                            diagnosisData.n_features !== undefined ||
-                            diagnosisData.n_cells !== undefined ||
-                            diagnosisData.n_genes !== undefined
-                        );
-                        const isTemplateMode = diagnosisData && (
-                            diagnosisData.template_mode || 
-                            diagnosisData.status === 'template_ready'
-                        ) && !hasRealStats;
-                        if (isTemplateMode) {
-                            console.log('ℹ️ [renderDiagnosisCard] 模板模式诊断，跳过渲染');
-                            return;
-                        }
-                        
-                        // Extract diagnosis message and integrity flag
-                        let diagnosisMessage = '';
-                        if (typeof diagnosisData === 'string') {
-                            diagnosisMessage = diagnosisData;
-                        } else if (diagnosisData && diagnosisData.message) {
-                            diagnosisMessage = diagnosisData.message;
-                        } else {
-                            diagnosisMessage = diagnosisData ? JSON.stringify(diagnosisData, null, 2) : '';
-                        }
-                        const integrityVerified = (diagnosisData && diagnosisData.integrity_status === 'verified') ||
+                        if (section !== 'diagnosis' && section !== 'summary') return;
+                        let rawMessage = '';
+                        if (typeof content === 'string') rawMessage = content;
+                        else if (content && content.message) rawMessage = content.message;
+                        else if (content) rawMessage = JSON.stringify(content, null, 2);
+                        const integrityVerified = (content && content.integrity_status === 'verified') ||
                             (fullData && (fullData.integrity_status === 'verified' || (fullData.report_data && fullData.report_data.integrity_status === 'verified')));
-                        
-                        // Extract thinking content (<think> tags)
+                        let reportContent = rawMessage;
                         let thinkingContent = '';
-                        let reportContent = diagnosisMessage;
-                        const thinkPatterns = [
-                            /<think>(.*?)<\/think>/gs,
-                            /<think>(.*?)<\/redacted_reasoning>/gs,
-                            /<reasoning>(.*?)<\/reasoning>/gs
-                        ];
-                        for (const pattern of thinkPatterns) {
-                            const matches = [...diagnosisMessage.matchAll(pattern)];
-                            if (matches && matches.length > 0) {
-                                thinkingContent = matches.map(m => m[1]).join('\n\n');
-                                reportContent = diagnosisMessage.replace(pattern, '').trim();
+                        const thinkPatterns = [/<think>(.*?)<\/think>/gs, /<think>(.*?)<\/redacted_reasoning>/gs, /<reasoning>(.*?)<\/reasoning>/gs];
+                        for (const p of thinkPatterns) {
+                            const m = [...rawMessage.matchAll(p)];
+                            if (m.length) {
+                                thinkingContent = m.map(x => x[1]).join('\n\n');
+                                reportContent = rawMessage.replace(p, '').trim();
                                 break;
                             }
                         }
-                        
                         let thinkingHtml = '';
                         if (thinkingContent) {
-                            const thinkingId = `thinking-${Date.now()}`;
-                            thinkingHtml = `
-                                <div class="mb-3">
-                                    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#${thinkingId}" aria-expanded="false" aria-controls="${thinkingId}">
-                                        <i class="bi bi-lightbulb"></i> 💭 查看思考过程
-                                    </button>
-                                    <div class="collapse mt-2" id="${thinkingId}">
-                                        <div class="card card-body bg-light" style="font-size: 13px; line-height: 1.6; color: #555; max-height: 400px; overflow-y: auto;">
-                                            <pre style="white-space: pre-wrap; font-family: 'Courier New', monospace; margin: 0;">${escapeHtml(thinkingContent)}</pre>
-                                        </div>
-                                    </div>
-                                </div>
-                            `;
+                            const tid = 'thinking-' + Date.now();
+                            thinkingHtml = '<div class="mb-3"><button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#' + tid + '"><i class="bi bi-lightbulb"></i> 💭 查看思考过程</button><div class="collapse mt-2" id="' + tid + '"><div class="card card-body bg-light" style="font-size:13px;line-height:1.6;color:#555;max-height:400px;overflow-y:auto;"><pre style="white-space:pre-wrap;font-family:\'Courier New\',monospace;margin:0">' + escapeHtml(thinkingContent) + '</pre></div></div></div>';
                         }
-                        
-                        const integrityBadge = integrityVerified
-                            ? '<p class="mb-2 small text-success"><i class="bi bi-shield-check"></i> 数据完整性校验通过</p>'
-                            : '';
-                        
-                        const bodyHtml = `
-                            ${integrityBadge}
-                            ${thinkingHtml}
-                            <div class="expert-report-content" style="font-size: 14px; line-height: 1.8; color: #333; background: #f0f7ff; padding: 20px; border-radius: 8px; border-left: 4px solid #4d6bfe;">
-                                ${safeMarkedParse(reportContent)}
-                            </div>
-                        `;
-                        
-                        // Singleton: find unified-report-container, then #diagnosis-section-content
-                        let reportContainer = cardZoneRef.querySelector('.unified-report-container');
-                        let contentEl = reportContainer ? reportContainer.querySelector('#diagnosis-section-content') : null;
-                        
-                        if (contentEl) {
-                            // UPDATE existing content only (no new title)
-                            contentEl.innerHTML = bodyHtml;
-                            console.log('✅ [renderDiagnosisCard] 已更新诊断内容 (diagnosis-section-content)');
-                            return;
-                        }
-                        
-                        // CREATE section once: card with single header + diagnosis-section-content
+                        const integrityBadge = integrityVerified ? '<p class="mb-2 small text-success"><i class="bi bi-shield-check"></i> 数据完整性校验通过</p>' : '';
+                        const bodyHtml = integrityBadge + thinkingHtml + '<div class="report-content-box" style="font-size:14px;line-height:1.8;color:#333;background:#f0f7ff;padding:20px;border-radius:8px;border-left:4px solid #4d6bfe">' + safeMarkedParse(reportContent) + '</div>';
+                        var reportContainer = cardZoneRef.querySelector('.unified-report-container');
                         if (!reportContainer) {
                             reportContainer = document.createElement('div');
                             reportContainer.className = 'unified-report-container mt-3';
-                            reportContainer.innerHTML = `
-                                <div class="card border-0 shadow-sm">
-                                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                                        <h5 class="mb-0">
-                                            <i class="bi bi-file-earmark-text"></i> 📊 数据诊断报告
-                                        </h5>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="execution-results-section"></div>
-                                        <div class="expert-insight-section mt-4">
-                                            <div id="diagnosis-section-content"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            `;
+                            reportContainer.innerHTML = '<div class="card border-0 shadow-sm"><div class="card-header bg-primary text-white d-flex justify-content-between align-items-center"><h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> 📊 分析结题报告</h5><button class="btn btn-sm btn-light" onclick="window.printReport()"><i class="bi bi-printer"></i> 🖨️ 打印报告</button></div><div class="card-body"><div class="report-diagnosis-content"></div><div class="report-execution-content mt-4"></div><div class="report-summary-content mt-4"></div></div></div>';
                             cardZoneRef.appendChild(reportContainer);
-                        } else {
-                            // Container exists but no #diagnosis-section-content (e.g. created by renderExecutionSteps)
-                            const expertSection = reportContainer.querySelector('.expert-insight-section');
-                            if (expertSection) {
-                                contentEl = document.createElement('div');
-                                contentEl.id = 'diagnosis-section-content';
-                                expertSection.appendChild(contentEl);
-                            }
                         }
-                        
-                        contentEl = reportContainer.querySelector('#diagnosis-section-content');
-                        if (contentEl) {
-                            contentEl.innerHTML = bodyHtml;
-                            console.log('✅ [renderDiagnosisCard] 已渲染诊断报告（标题仅显示一次）');
-                        } else {
-                            console.error('❌ [renderDiagnosisCard] 无法创建或找到 #diagnosis-section-content');
+                        var target = reportContainer.querySelector(section === 'diagnosis' ? '.report-diagnosis-content' : '.report-summary-content');
+                        if (target) {
+                            target.innerHTML = bodyHtml;
+                            console.log('✅ [renderReportSection] 已写入 ' + (section === 'diagnosis' ? '数据诊断' : '专家分析'));
                         }
                     }
                     
@@ -2392,28 +2280,12 @@
                             // Create unified report container
                             reportContainer = document.createElement('div');
                             reportContainer.className = 'unified-report-container mt-3';
-                            reportContainer.innerHTML = `
-                                <div class="card border-0 shadow-sm">
-                                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                                        <h5 class="mb-0">
-                                            <i class="bi bi-file-earmark-text"></i> 📊 分析结题报告
-                                        </h5>
-                                        <button class="btn btn-sm btn-light" onclick="window.printReport()">
-                                            <i class="bi bi-printer"></i> 🖨️ 打印报告
-                                        </button>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="execution-results-section"></div>
-                                        <div class="expert-insight-section mt-4"></div>
-                                </div>
-                            </div>
-                        `;
+                            reportContainer.innerHTML = '<div class="card border-0 shadow-sm"><div class="card-header bg-primary text-white d-flex justify-content-between align-items-center"><h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> 📊 分析结题报告</h5><button class="btn btn-sm btn-light" onclick="window.printReport()"><i class="bi bi-printer"></i> 🖨️ 打印报告</button></div><div class="card-body"><div class="report-diagnosis-content"></div><div class="report-execution-content mt-4"></div><div class="report-summary-content mt-4"></div></div></div>';
                             cardZoneRef.appendChild(reportContainer);
                         }
-                        
-                        const executionSection = reportContainer.querySelector('.execution-results-section');
+                        const executionSection = reportContainer.querySelector('.report-execution-content');
                         if (!executionSection) {
-                            console.error('❌ [renderExecutionSteps] 执行结果区域不存在');
+                            console.error('❌ [renderExecutionSteps] .report-execution-content 不存在');
                             return;
                         }
                         
@@ -3914,102 +3786,60 @@
             return row.querySelector('.bubble');
         }
 
-        // 🔥 修复：打印分析结题报告，只打印数据诊断报告、执行结果详情和AI专家分析报告
+        // 全局历史聚合：多轮对话下诊断在上一条卡片、执行/专家在最新卡片，故在整页取「最后一个」对应区块，空块不输出防首页留白
         window.printReport = function() {
-            const reportContainer = document.querySelector('.unified-report-container');
-            if (!reportContainer) {
-                alert('未找到报告容器');
+            var root = document.getElementById('chatContent') || document.body;
+            var allDiagnosis = root.querySelectorAll('.report-diagnosis-content');
+            var allExecution = root.querySelectorAll('.report-execution-content');
+            var allSummary = root.querySelectorAll('.report-summary-content');
+            var latestDiagnosisEl = allDiagnosis.length ? allDiagnosis[allDiagnosis.length - 1] : null;
+            var latestExecutionEl = allExecution.length ? allExecution[allExecution.length - 1] : null;
+            var latestSummaryEl = allSummary.length ? allSummary[allSummary.length - 1] : null;
+            var latestDiagnosisHtml = (latestDiagnosisEl && latestDiagnosisEl.innerHTML) ? latestDiagnosisEl.innerHTML.trim() : '';
+            var latestExecutionHtml = (latestExecutionEl && latestExecutionEl.innerHTML) ? latestExecutionEl.innerHTML.trim() : '';
+            var latestSummaryHtml = (latestSummaryEl && latestSummaryEl.innerHTML) ? latestSummaryEl.innerHTML.trim() : '';
+            if (!latestDiagnosisHtml && !latestExecutionHtml && !latestSummaryHtml) {
+                alert('未找到可打印的报告内容');
                 return;
             }
-            
-            // 🔥 修复：只提取需要打印的部分
-            // 1. 数据诊断报告（expert-insight-section中包含"数据诊断报告"的部分）
-            // 2. 执行结果详情（execution-results-section）
-            // 3. AI专家分析报告（expert-insight-section中包含"AI 专家分析报告"的部分）
-            
-            const executionSection = reportContainer.querySelector('.execution-results-section');
-            const expertSection = reportContainer.querySelector('.expert-insight-section');
-            
-            let printContent = '<div class="print-report-container">';
-            printContent += '<h1 style="text-align: center; margin-bottom: 30px; border-bottom: 3px solid #4d6bfe; padding-bottom: 15px;">分析结题报告</h1>';
-            
-            // 🔥 修复：正确提取expert-insight-section中的所有内容
-            // expert-insight-section可能包含多个h6标题，需要按顺序提取
-            if (expertSection) {
-                const allH6 = expertSection.querySelectorAll('h6');
-                const allChildren = Array.from(expertSection.children);
-                
-                // 按顺序处理每个h6及其后续内容
-                for (let i = 0; i < allH6.length; i++) {
-                    const h6 = allH6[i];
-                    const h6Text = h6.textContent || '';
-                    const h6Index = allChildren.indexOf(h6);
-                    
-                    // 确定这是数据诊断报告还是AI专家分析报告
-                    let sectionTitle = '';
-                    let sectionType = '';
-                    if (h6Text.includes('数据诊断报告') || (h6Text.includes('📊') && !h6Text.includes('AI'))) {
-                        sectionTitle = '📊 数据诊断报告';
-                        sectionType = 'diagnosis';
-                    } else if (h6Text.includes('AI 专家分析报告') || h6Text.includes('专家分析报告') || h6Text.includes('💡')) {
-                        sectionTitle = '💡 AI 专家分析报告';
-                        sectionType = 'ai_expert';
-                    } else {
-                        continue; // 跳过不匹配的h6
-                    }
-                    
-                    // 提取从当前h6到下一个h6之间的所有内容
-                    let sectionContent = '<div class="print-section" style="margin-bottom: 30px; page-break-inside: avoid;">';
-                    sectionContent += `<h2 style="border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px;">${sectionTitle}</h2>`;
-                    
-                    // 收集从当前h6到下一个h6（或section结束）的所有内容
-                    const nextH6Index = i < allH6.length - 1 ? allChildren.indexOf(allH6[i + 1]) : allChildren.length;
-                    for (let j = h6Index; j < nextH6Index; j++) {
-                        // 🔥 修复：检查元素是否存在，避免undefined错误
-                        if (allChildren[j] && allChildren[j].outerHTML) {
-                            sectionContent += allChildren[j].outerHTML;
-                        }
-                    }
-                    
-                    sectionContent += '</div>';
-                    printContent += sectionContent;
-                }
+            // 强制展开手风琴：class 内 collapse/accordion-collapse → show，display:none → block
+            if (latestExecutionHtml) {
+                latestExecutionHtml = latestExecutionHtml.replace(/class="([^"]*)"/g, function(_, cls) {
+                    return 'class="' + cls.replace(/\baccordion-collapse\b/g, 'show').replace(/\bcollapse\b/g, 'show').replace(/\s+/g, ' ').trim() + '"';
+                }).replace(/style="([^"]*)"/gi, function(_, s) {
+                    if (/display\s*:\s*none/i.test(s)) return 'style="display:block !important"';
+                    return 'style="' + s + '"';
+                });
             }
-            
-            // 2. 执行结果详情
-            if (executionSection && executionSection.innerHTML.trim()) {
-                printContent += '<div class="print-section" style="margin-bottom: 30px; page-break-inside: avoid;">';
-                printContent += '<h2 style="border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px;">执行结果详情</h2>';
-                printContent += executionSection.innerHTML;
-                printContent += '</div>';
+            var finalHtml = '';
+            if (latestDiagnosisHtml) finalHtml += '<div class="print-section"><h2>一、数据诊断报告</h2><div class="print-section-body">' + latestDiagnosisHtml + '</div></div>';
+            if (latestExecutionHtml) finalHtml += '<div class="print-section"><h2>二、执行结果详情</h2><div class="print-section-body">' + latestExecutionHtml + '</div></div>';
+            if (latestSummaryHtml) finalHtml += '<div class="print-section"><h2>三、专家分析报告</h2><div class="print-section-body">' + latestSummaryHtml + '</div></div>';
+            var printContent = '<h1>分析结题报告</h1>' + finalHtml;
+            var printWin = window.open('', '_blank', 'height=800,width=900');
+            if (!printWin) {
+                alert('无法打开打印窗口，请允许弹窗');
+                return;
             }
-            
-            printContent += '</div>';
-            
-            const printWindow = window.open('', '', 'height=800,width=800');
-            printWindow.document.write('<html><head><title>分析结题报告</title>');
-            printWindow.document.write('<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">');
-            printWindow.document.write('<style>');
-            printWindow.document.write(`
-                body { font-family: 'Times New Roman', serif; padding: 40px; color: #000; }
-                .btn { display: none !important; }
-                .card-header { background: #4d6bfe !important; color: white !important; padding: 15px; }
-                .accordion-button { pointer-events: none; padding: 0; font-weight: bold; color: #000; background: none; border: none; }
-                .accordion-button::after { display: none; }
-                .accordion-collapse { display: block !important; }
-                .accordion-item { border: none; border-bottom: 1px solid #ddd; margin-bottom: 10px; }
-                img { max-width: 80%; display: block; margin: 10px auto; page-break-inside: avoid; }
-                .table-responsive { overflow-x: visible; }
-                .print-section { page-break-inside: avoid; margin-bottom: 30px; }
-                h1, h2, h3, h4, h5, h6 { color: #000; }
-                .expert-report-content { background: #f0f7ff; padding: 20px; border-radius: 8px; border-left: 4px solid #4d6bfe; }
-            `);
-            printWindow.document.write('</style></head><body>');
-            printWindow.document.write(printContent);
-            printWindow.document.write('</body></html>');
-            printWindow.document.close();
-            printWindow.focus();
-            setTimeout(() => printWindow.print(), 250);
+            var doc = printWin.document;
+            doc.open();
+            doc.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>分析结题报告</title>');
+            doc.write('<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">');
+            doc.write('<style>');
+            doc.write('body{margin:0;padding:20px;font-family:sans-serif;color:#000;background:#fff}');
+            doc.write('.print-section{margin-bottom:30px;page-break-inside:avoid}');
+            doc.write('h1{text-align:center;margin:10px 0 20px 0;font-size:22px;page-break-before:avoid}');
+            doc.write('h2{font-size:18px;border-bottom:1px solid #ccc;padding-bottom:5px;margin-top:0}');
+            doc.write('table,img,.accordion-item{page-break-inside:avoid}');
+            doc.write('.print-section-body,.accordion-collapse,.collapse{display:block !important;visibility:visible !important;height:auto !important}');
+            doc.write('.accordion-button::after{display:none !important}.accordion-button{pointer-events:none;font-weight:bold;color:#000 !important;background:#f8f9fa !important;border:1px solid #dee2e6}');
+            doc.write('.btn,.no-print{display:none !important}pre,code{background:#f5f5f5;padding:6px;border-radius:4px}.table{width:100%}');
+            doc.write('</style></head><body>');
+            doc.write(printContent);
+            doc.write('</body></html>');
+            doc.close();
+            printWin.focus();
+            setTimeout(function() { printWin.print(); }, 400);
         };
 
         // 🔥 核心功能：局部打印 (只打印报告部分，不打印聊天记录) - Legacy function

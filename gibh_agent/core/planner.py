@@ -2497,13 +2497,11 @@ Your task is to generate executable workflow plans that STRICTLY follow the scRN
    - ALWAYS perform Leiden Clustering (rna_clustering) - default resolution=0.5
    - Generate clustering visualization (rna_visualize_clustering)
 
-6. **Marker Detection & Annotation (REQUIRED):**
+6. **Marker Detection & Annotation (REQUIRED - FINAL):**
    - ALWAYS find Marker Genes (rna_find_markers) - for each cluster
    - ALWAYS perform Cell Type Annotation (rna_cell_annotation) - using markers
    - Generate marker visualization (rna_visualize_markers)
-
-7. **Export (FINAL STEP):**
-   - ALWAYS export results (rna_export_results) - H5AD, CSVs, figures ZIP
+   - Workflow ends after rna_cell_annotation (no export step).
 
 **OUTPUT CONTRACT (CRITICAL - MUST MATCH EXACTLY):**
 
@@ -2604,7 +2602,6 @@ Generate ONLY the JSON object, no markdown code blocks, no additional text."""
             "rna_visualize_qc": "QC 可视化",
             "rna_visualize_clustering": "聚类可视化",
             "rna_visualize_markers": "Marker 可视化",
-            "rna_export_results": "结果导出"
         }
         
         if tool_name in name_mapping:

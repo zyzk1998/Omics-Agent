@@ -132,3 +132,20 @@ node_modules/
 
 # 基准测试输出（可选提交）
 benchmark_results/
+
+# 生成图表与输出（不提交到仓库）
+output-images/
+*.vsdx
+*.vsd
+*.emf
+/.png
+omics_agent_flowchart.svg
+omics_agent_flowchart.vsdx
+planning_execution_flowchart.*
+spatial_scatter.png
+test_flow.vsdx
+test_rect.vsdx
+
+# 临时技术清单/文档（可选提交）
+File_System_Technical_Inventory.md
+The_Tech_Arsenal.md

@@ -28,8 +28,7 @@ class RNAWorkflow(BaseWorkflow):
     10. rna_umap - UMAP 降维
     11. rna_clustering - Leiden 聚类
     12. rna_find_markers - Marker 基因检测
-    13. rna_cell_annotation - 细胞类型注释
-    14. rna_export_results - 结果导出
+    13. rna_cell_annotation - 细胞类型注释（流程终点）
     """
     
     def get_name(self) -> str:
@@ -84,11 +83,8 @@ class RNAWorkflow(BaseWorkflow):
             # 步骤12: Marker 基因检测（依赖：rna_clustering）
             "rna_find_markers": ["rna_clustering"],
             
-            # 步骤13: 细胞类型注释（依赖：rna_find_markers）
+            # 步骤13: 细胞类型注释（依赖：rna_find_markers，流程终点）
             "rna_cell_annotation": ["rna_find_markers"],
-            
-            # 步骤14: 结果导出（依赖：rna_cell_annotation）
-            "rna_export_results": ["rna_cell_annotation"],
         }
     
     def get_step_metadata(self, step_id: str) -> Dict[str, Any]:
@@ -197,12 +193,6 @@ class RNAWorkflow(BaseWorkflow):
                 "tool_id": "rna_cell_annotation",
                 "default_params": {}
             },
-            "rna_export_results": {
-                "name": "结果导出",
-                "description": "SOP规则：必须导出结果（H5AD、CSV、图表）",
-                "tool_id": "rna_export_results",
-                "default_params": {}
-            }
         }
         
         if step_id not in metadata_map:
@@ -332,41 +322,36 @@ class RNAWorkflow(BaseWorkflow):
                 "params": step_meta.get("default_params", {}).copy()
             }
             
-            # 🔥 TASK 1 FIX: 根据文件类型和步骤类型填充参数
-            if file_metadata:
+            # 🔥 标准预览模式：无文件时使用占位符，与 Spatial/Radiomics 一致
+            has_file = file_metadata and file_metadata.get("file_path")
+            if has_file:
                 file_path = file_metadata.get("file_path")
-                if file_path:
-                    # CellRanger步骤需要fastqs_path
-                    if step_id == "rna_cellranger_count":
-                        step_config["params"]["fastqs_path"] = file_path
-                        # 设置其他CellRanger参数
-                        if "sample_id" not in step_config["params"]:
-                            import os
-                            sample_id = os.path.basename(file_path).replace("_fastqs", "").replace("fastqs", "").replace("_", "-")
-                            if not sample_id or sample_id == "":
-                                sample_id = "sample"
-                            step_config["params"]["sample_id"] = sample_id
-                        if "transcriptome_path" not in step_config["params"]:
-                            step_config["params"]["transcriptome_path"] = "/opt/refdata-gex-GRCh38-2020-A"  # 默认值
-                        if "output_dir" not in step_config["params"]:
-                            import os
-                            output_dir = os.path.join(os.path.dirname(file_path), "cellranger_output")
-                            step_config["params"]["output_dir"] = output_dir
-                    # Convert步骤需要cellranger输出路径（占位符，执行时自动填充）
-                    elif step_id == "rna_convert_cellranger_to_h5ad":
-                        step_config["params"]["cellranger_matrix_dir"] = "<rna_cellranger_count_output>"
-                    # QC和其他步骤需要adata_path
-                    elif step_id in ["rna_qc_filter", "rna_doublet_detection", "rna_normalize", "rna_hvg", 
-                                    "rna_scale", "rna_pca", "rna_neighbors", "rna_umap", "rna_clustering",
-                                    "rna_find_markers", "rna_cell_annotation"]:
-                        if is_fastq:
-                            # FASTQ流程：qc_filter应该使用convert步骤的输出
-                            step_config["params"]["adata_path"] = "<rna_convert_cellranger_to_h5ad_output>" if step_id == "rna_qc_filter" else "<previous_step_output>"
-                        else:
-                            # 非FASTQ流程：直接使用输入文件
-                            step_config["params"]["adata_path"] = file_path
+                # CellRanger步骤需要fastqs_path
+                if step_id == "rna_cellranger_count":
+                    step_config["params"]["fastqs_path"] = file_path
+                    if "sample_id" not in step_config["params"]:
+                        import os
+                        sample_id = os.path.basename(file_path).replace("_fastqs", "").replace("fastqs", "").replace("_", "-")
+                        if not sample_id or sample_id == "":
+                            sample_id = "sample"
+                        step_config["params"]["sample_id"] = sample_id
+                    if "transcriptome_path" not in step_config["params"]:
+                        step_config["params"]["transcriptome_path"] = "/opt/refdata-gex-GRCh38-2020-A"
+                    if "output_dir" not in step_config["params"]:
+                        import os
+                        output_dir = os.path.join(os.path.dirname(file_path), "cellranger_output")
+                        step_config["params"]["output_dir"] = output_dir
+                elif step_id == "rna_convert_cellranger_to_h5ad":
+                    step_config["params"]["cellranger_matrix_dir"] = "<rna_cellranger_count_output>"
+                elif step_id in ["rna_qc_filter", "rna_doublet_detection", "rna_normalize", "rna_hvg",
+                                "rna_scale", "rna_pca", "rna_neighbors", "rna_umap", "rna_clustering",
+                                "rna_find_markers", "rna_cell_annotation"]:
+                    if is_fastq:
+                        step_config["params"]["adata_path"] = "<rna_convert_cellranger_to_h5ad_output>" if step_id == "rna_qc_filter" else "<previous_step_output>"
+                    else:
+                        step_config["params"]["adata_path"] = file_path
             else:
-                # Plan-First模式：使用占位符
+                # 无文件或占位：使用 <PENDING_UPLOAD>，前端显示「上传以激活」
                 if step_id == "rna_cellranger_count":
                     step_config["params"]["fastqs_path"] = "<PENDING_UPLOAD>"
                 elif step_id == "rna_convert_cellranger_to_h5ad":
@@ -383,13 +368,19 @@ class RNAWorkflow(BaseWorkflow):
         if is_fastq:
             workflow_name = "RNA 全流程分析（含Cell Ranger）"
         
+        has_file = file_metadata and file_metadata.get("file_path")
+        template_mode = not has_file
+        workflow_data = {
+            "workflow_name": workflow_name,
+            "name": workflow_name,
+            "steps": steps,
+        }
+        if template_mode:
+            workflow_data["template_mode"] = True
         return {
             "type": "workflow_config",
-            "workflow_data": {
-                "workflow_name": workflow_name,
-                "name": workflow_name,
-                "steps": steps
-            },
-            "file_paths": [file_metadata.get("file_path")] if file_metadata and file_metadata.get("file_path") else []
+            "workflow_data": workflow_data,
+            "file_paths": [file_metadata.get("file_path")] if has_file else [],
+            "template_mode": template_mode,
         }
 

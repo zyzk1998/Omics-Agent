@@ -4,7 +4,7 @@
 import os
 import time
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from pathlib import Path
 import matplotlib
 matplotlib.use('Agg')
@@ -13,6 +13,123 @@ import matplotlib.pyplot as plt
 from ...core.tool_registry import registry
 
 logger = logging.getLogger(__name__)
+
+
+def _get_fallback_markers() -> Dict[str, str]:
+    """
+    内置 PBMC/免疫细胞 marker 字典：基因名 -> 细胞类型。
+    用于无 .pkl 模型时基于表达的规则注释，输出具生物学意义的标签（如 T cells, B cells）。
+    """
+    return {
+        "CD3D": "T cells",
+        "CD3E": "T cells",
+        "CD4": "CD4+ T cells",
+        "CD8A": "CD8+ T cells",
+        "MS4A1": "B cells",   # CD20
+        "CD79A": "B cells",
+        "GNLY": "NK cells",
+        "NKG7": "NK cells",
+        "CD14": "Monocytes",
+        "LYZ": "Monocytes",
+        "FCGR3A": "CD16+ Monocytes",
+        "S100A8": "Monocytes",
+        "S100A9": "Monocytes",
+        "PPBP": "Platelets",
+        "PF4": "Platelets",
+        "FCER1A": "pDC",
+        "CST3": "pDC",
+        "IL3RA": "pDC",
+    }
+
+
+def _fallback_marker_annotation(
+    adata,
+    adata_path: str,
+    output_dir: Optional[str],
+    sc,
+) -> Dict[str, Any]:
+    """
+    当 CellTypist 参考文件不可用时，使用内置 marker 字典按簇打分，
+    为每个簇分配生物学细胞类型（T cells, B cells, NK cells 等），而非 Cluster_0/1。
+    """
+    markers = _get_fallback_markers()
+    var_names = set(adata.var_names)
+    cluster_key = None
+    for key in ("leiden", "louvain", "cluster"):
+        if key in adata.obs.columns:
+            cluster_key = key
+            break
+    if cluster_key is None:
+        adata.obs["cell_type"] = "Unknown"
+        n_cell_types = 1
+        label_counts = {"Unknown": len(adata)}
+    else:
+        # 每个基因可能对应同一类型，合并为 基因 -> 类型，按类型聚合表达
+        gene_to_type: Dict[str, str] = {g: t for g, t in markers.items() if g in var_names}
+        if not gene_to_type:
+            adata.obs["cell_type"] = "Cluster_" + adata.obs[cluster_key].astype(str)
+            label_counts = adata.obs["cell_type"].value_counts()
+            n_cell_types = len(label_counts)
+            logger.warning("No fallback marker genes found in adata.var_names, using cluster labels.")
+        else:
+            # 按类型取该类型所有 marker 的平均表达作为类型得分
+            type_genes: Dict[str, List[str]] = {}
+            for g, t in gene_to_type.items():
+                type_genes.setdefault(t, []).append(g)
+            clusters = adata.obs[cluster_key].astype(str).unique()
+            cluster_to_label = {}
+            import numpy as np
+            for cl in clusters:
+                mask = adata.obs[cluster_key].astype(str) == cl
+                scores = {}
+                for cell_type, genes in type_genes.items():
+                    try:
+                        sub = adata[mask, genes].X
+                        if hasattr(sub, "toarray"):
+                            sub = sub.toarray()
+                        scores[cell_type] = float(np.mean(sub))
+                    except Exception:
+                        scores[cell_type] = 0.0
+                best = max(scores, key=scores.get)
+                cluster_to_label[cl] = best if scores[best] > 0 else f"Cluster_{cl}"
+            adata.obs["cell_type"] = adata.obs[cluster_key].astype(str).map(cluster_to_label)
+            label_counts = adata.obs["cell_type"].value_counts()
+            n_cell_types = len(label_counts)
+    plot_path = None
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+        if "X_umap" in adata.obsm.keys():
+            timestamp = int(time.time())
+            plot_path = os.path.join(output_dir, f"umap_annotated_{timestamp}.png")
+            fig, ax = plt.subplots(figsize=(10, 8))
+            sc.pl.umap(
+                adata,
+                color="cell_type",
+                ax=ax,
+                show=False,
+                title="UMAP: Cell Type (marker-based)",
+                legend_loc="right margin",
+                frameon=False,
+                legend_fontsize=8,
+            )
+            plt.savefig(plot_path, bbox_inches="tight", dpi=300)
+            plt.close()
+        output_h5ad = os.path.join(output_dir, "annotated.h5ad")
+        adata.write(output_h5ad)
+    else:
+        out_dir = os.path.dirname(adata_path) or "."
+        output_h5ad = os.path.join(out_dir, "annotated.h5ad")
+        adata.write(output_h5ad)
+    return {
+        "status": "success",
+        "method": "marker_fallback",
+        "model": None,
+        "n_cell_types": n_cell_types,
+        "cell_types": label_counts.to_dict() if hasattr(label_counts, "to_dict") else dict(label_counts),
+        "plot_path": plot_path,
+        "output_h5ad": output_h5ad,
+        "summary": f"细胞类型注释完成（基于 marker 打分）: 识别到 {n_cell_types} 种类型",
+    }
 
 
 @registry.register(
@@ -90,15 +207,31 @@ def run_cell_annotation(
                 import celltypist
                 from celltypist import models
                 
-                # 设置缓存目录
-                if cache_dir is None:
-                    cache_dir = os.path.join(os.getcwd(), "test_data", "cache")
-                cache_path = Path(cache_dir)
-                cache_path.mkdir(parents=True, exist_ok=True)
+                # 1) 优先使用持久化参考目录（容器内 /app/data/references 或环境变量）
+                ref_dirs = [
+                    Path(os.getenv("CELLTYPIST_REFERENCE_DIR", "/app/data/references")),
+                    Path(os.getenv("REFERENCE_DIR", "/app/data/references")),
+                    Path(os.getcwd()) / "test_data" / "cache",
+                ]
+                if cache_dir:
+                    ref_dirs.insert(0, Path(cache_dir))
+                cache_path = None
+                model_path = None
+                for d in ref_dirs:
+                    if d.exists():
+                        p = d / model_name
+                        if os.path.exists(str(p)):
+                            model_path = p
+                            cache_path = d
+                            logger.info("✅ [Cell Annotation] 使用参考模型: %s", model_path)
+                            break
+                if model_path is None:
+                    # 2) 使用默认缓存目录并确保存在
+                    cache_path = Path(cache_dir or os.path.join(os.getcwd(), "test_data", "cache"))
+                    cache_path.mkdir(parents=True, exist_ok=True)
+                    model_path = cache_path / model_name
                 
-                model_path = cache_path / model_name
-                
-                # 下载或加载模型
+                # 下载或加载模型（仅当本地尚不存在时尝试下载）
                 if not model_path.exists():
                     logger.info(f"📥 正在下载 CellTypist 模型: {model_name}")
                     # 🔥 FIX: celltypist 的 download_models 使用 model 参数，不使用 folder 参数
@@ -142,13 +275,24 @@ def run_cell_annotation(
                                     logger.warning(f"⚠️ [CellAnnotation] 模型已下载到默认位置，请手动移动到: {cache_path}")
                             except Exception as e3:
                                 logger.error(f"❌ [CellAnnotation] 所有下载方法都失败: {e3}")
-                                return {
-                                    "status": "error",
-                                    "error": f"无法下载CellTypist模型: {str(e3)}。请检查网络连接或手动下载模型。"
-                                }
+                                # 不报错退出：使用 scanpy 聚类作为注释结果，保证步骤成功
+                                logger.warning("CellTypist 模型不可用，改用基于聚类的注释。")
+                                return _fallback_marker_annotation(adata, adata_path, output_dir, sc)
                 
-                # 加载模型
-                model = celltypist.models.Model.load(str(model_path))
+                # 若下载后仍无本地文件，使用 marker 规则注释
+                if not model_path.exists():
+                    logger.warning(
+                        "Cell type annotation reference not found. Using marker-based fallback. path=%s",
+                        model_path,
+                    )
+                    return _fallback_marker_annotation(adata, adata_path, output_dir, sc)
+                
+                # 加载模型（捕获 FileNotFoundError：路径存在检查后仍可能缺失，如权限/挂载问题）
+                try:
+                    model = celltypist.models.Model.load(str(model_path))
+                except (FileNotFoundError, OSError) as e:
+                    logger.warning("Reference model file not readable or missing: %s. Using marker-based fallback.", e)
+                    return _fallback_marker_annotation(adata, adata_path, output_dir, sc)
                 logger.info(f"✅ 模型加载成功: {model_name}")
                 
                 # 运行注释
