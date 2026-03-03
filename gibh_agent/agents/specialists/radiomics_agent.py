@@ -1,4 +1,4 @@
-"""空间组学智能体（Spatial Omics Agent）"""
+"""影像组学智能体（Radiomics Agent）"""
 import json
 import logging
 import os
@@ -7,42 +7,52 @@ from typing import Dict, Any, List, Optional, AsyncIterator
 from ..base_agent import BaseAgent
 from ...core.llm_client import LLMClient
 from ...core.prompt_manager import PromptManager
-from ...core.workflows.spatial_workflow import SpatialWorkflow
+from ...core.workflows.radiomics_workflow import RadiomicsWorkflow
 
 logger = logging.getLogger(__name__)
 
 
-# 领域系统指令（与 RNA/Metabolomics 一致的模式）
-SPATIAL_INSTRUCTION = """You are a Senior Bioinformatician specializing in Spatial Transcriptomics (e.g. 10x Visium).
+RADIOMICS_INSTRUCTION = """You are a Senior Radiomics Expert specializing in Medical Imaging, CT/MRI, Texture Analysis, Biomarker Discovery, and Rad-Score Modeling.
 
 **CAPABILITIES:**
-- Analyze 10x Visium (Space Ranger) data: load matrices and spatial coordinates, quality control, and visualization.
-- Identify spatial domains and gene expression patterns across tissue (e.g. Moran's I for spatially variable genes).
-- Interpret spot-level data, histological images alignment, and spatial autocorrelation results.
+- Full clinical pipeline: Load image -> Preprocessing (resampling, normalization) -> Feature extraction -> Feature selection -> Rad-Score calculation -> Risk probability (Sigmoid) -> Score visualization.
+- Analyze CT, MRI, and other medical imaging (NIfTI, DICOM).
+- Interpret radiomics features: shape, first-order statistics, and texture (GLCM, GLRLM, GLDM, NGTDM, GLSZM).
+- Preprocessing: isotropic resampling (e.g. 1×1×1 mm) and intensity normalization before extraction.
+- Rad-Score: pre-defined signature (weighted sum of key features, e.g. Entropy, Sphericity) and risk probability.
+- Support tumor heterogeneity assessment and imaging biomarker extraction.
+- Explain mid-slice previews, feature CSV, Rad-Score, and risk in plain language.
 
 **TERMINOLOGY:**
-- Spot, Spots, Visium, Space Ranger
-- obsm['spatial'], spatial_connectivities
-- Spatially Variable Genes (SVGs), Moran's I, spatial autocorrelation
-- Spatial domain, tissue region
+- NIfTI (.nii, .nii.gz), DICOM (.dcm)
+- ROI, mask, segmentation
+- PyRadiomics, SimpleITK
+- Preprocessing, resampling, normalization
+- Rad-Score, signature, risk probability, Sigmoid
+- Shape features, first-order, texture, GLCM, Haralick
 
 **CONTEXT:**
-Data are spatial transcriptomics (gene expression per spot with 2D coordinates). Generate diagnosis and recommendations in Simplified Chinese (简体中文). Focus on spatial-specific metrics: spot count, genes, spatial graph, and SVG detection."""
+Data are 3D medical images and optional segmentation masks. Generate diagnosis and recommendations in Simplified Chinese (简体中文). Focus on image dimensions, spacing, preprocessing, radiomics features, and Rad-Score interpretation."""
 
 
-class SpatialAgent(BaseAgent):
-    """空间组学智能体：处理 Visium 等空间转录组分析。"""
+# 前端/编排器展示用名称，避免被错误显示为「转录组」
+MODALITY_DISPLAY = "影像组 (Radiomics)"
+
+
+class RadiomicsAgent(BaseAgent):
+    """影像组学智能体：处理医学影像与影像组学分析。"""
 
     def __init__(
         self,
         llm_client: LLMClient,
         prompt_manager: PromptManager,
-        spatial_config: Optional[Dict[str, Any]] = None,
+        radiomics_config: Optional[Dict[str, Any]] = None,
     ):
-        super().__init__(llm_client, prompt_manager, "spatial_expert")
-        self.name = "Spatial"
-        self.workflow = SpatialWorkflow()
-        self.spatial_config = spatial_config or {}
+        super().__init__(llm_client, prompt_manager, "radiomics_expert")
+        self.name = "Radiomics"
+        self.modality_display = MODALITY_DISPLAY
+        self.workflow = RadiomicsWorkflow()
+        self.radiomics_config = radiomics_config or {}
 
     async def process_query(
         self,
@@ -51,9 +61,7 @@ class SpatialAgent(BaseAgent):
         uploaded_files: List[Dict[str, str]] = None,
         **kwargs,
     ) -> Dict[str, Any]:
-        """
-        处理用户查询：意图识别 -> 解释文件 / 生成工作流 / 聊天。
-        """
+        """处理用户查询：意图识别 -> 解释文件 / 生成工作流 / 聊天。"""
         query_lower = (query or "").lower().strip()
         file_paths = self.get_file_paths(uploaded_files or [])
 
@@ -89,7 +97,7 @@ class SpatialAgent(BaseAgent):
             intent_result = await self._detect_intent(query, query_lower, file_paths, uploaded_files)
             intent = intent_result.get("intent", "chat")
         except Exception as e:
-            logger.warning("SpatialAgent 意图检测失败，使用回退: %s", e)
+            logger.warning("RadiomicsAgent 意图检测失败，使用回退: %s", e)
 
         if intent == "explain_file":
             if not file_paths:
@@ -126,8 +134,8 @@ User Input: {query}
 Uploaded Files: {files_str}
 
 意图分类为以下之一：
-1. "explain_file" - 用户想了解文件内容/结构（如：这是什么文件、文件里有什么）
-2. "run_workflow" - 用户想执行分析流程（如：分析一下、跑流程、做空间转录组分析）
+1. "explain_file" - 用户想了解文件内容/结构（如：这是什么影像、文件里有什么）
+2. "run_workflow" - 用户想执行分析流程（如：分析一下、提取影像组学特征、做 Radiomics）
 3. "chat" - 普通对话或咨询
 
 只返回 JSON：
@@ -150,7 +158,7 @@ Uploaded Files: {files_str}
                 result["intent"] = "chat"
             return result
         except Exception as e:
-            logger.warning("SpatialAgent 意图解析失败: %s", e)
+            logger.warning("RadiomicsAgent 意图解析失败: %s", e)
             return {"intent": "chat", "reasoning": str(e)}
 
     async def _handle_explain_file(self, query: str, input_path: str) -> Dict[str, Any]:
@@ -164,18 +172,20 @@ Uploaded Files: {files_str}
                 return {"type": "chat", "response": self._stream_string_response(inspection.get("error", "检查失败"))}
             summary = (
                 f"文件路径: {input_path}\n"
-                f"类型/形状等信息: {inspection.get('file_type', 'N/A')} / {inspection.get('shape', {})}\n"
+                f"类型: {inspection.get('file_type', 'N/A')} / 域: {inspection.get('domain', 'N/A')}\n"
+                f"形状/元数据: {inspection.get('shape', {})}\n"
             )
             return {"type": "chat", "response": self._stream_string_response(summary)}
         except Exception as e:
-            logger.exception("SpatialAgent explain_file 失败: %s", e)
+            logger.exception("RadiomicsAgent explain_file 失败: %s", e)
             return {"type": "chat", "response": self._stream_string_response(f"解释文件时出错: {e}")}
 
     def _is_workflow_request(self, query_lower: str, file_paths: List[str]) -> bool:
         """是否为工作流类请求。"""
         workflow_kw = [
             "规划", "流程", "workflow", "pipeline", "分析", "run", "执行",
-            "plan", "做一下", "跑一下", "分析一下", "全流程", "visium", "空间转录",
+            "plan", "做一下", "跑一下", "分析一下", "全流程", "radiomics", "影像组学",
+            "提取特征", "extract feature", "nifti", "dicom", "ct", "mri",
         ]
         if query_lower and any(kw in query_lower for kw in workflow_kw):
             return True
@@ -186,7 +196,7 @@ Uploaded Files: {files_str}
         return False
 
     async def _generate_workflow_config(self, query: str, file_paths: List[str]) -> Dict[str, Any]:
-        """使用 SpatialWorkflow 生成工作流配置。"""
+        """使用 RadiomicsWorkflow 生成工作流配置。"""
         file_metadata = None
         if file_paths:
             try:
@@ -197,18 +207,13 @@ Uploaded Files: {files_str}
                 if file_metadata.get("status") != "success":
                     file_metadata = {"file_path": file_paths[-1]}
             except Exception as e:
-                logger.warning("SpatialAgent 文件检查失败，使用路径: %s", e)
+                logger.warning("RadiomicsAgent 文件检查失败，使用路径: %s", e)
                 file_metadata = {"file_path": file_paths[-1]}
         if not file_metadata:
             file_metadata = {}
-        workflow_result = self.workflow.generate_template(
-            target_steps=None,
-            file_metadata=file_metadata,
-        )
-        return workflow_result
+        return self.workflow.generate_template(target_steps=None, file_metadata=file_metadata)
 
     def _stream_string_response(self, text: str) -> AsyncIterator[str]:
-        """将字符串包装为异步生成器。"""
         async def _gen():
             yield text
         return _gen()
@@ -216,24 +221,24 @@ Uploaded Files: {files_str}
     async def _generate_analysis_summary(
         self,
         steps_results: List[Dict[str, Any]],
-        omics_type: str = "Spatial",
-        workflow_name: str = "空间转录组流程",
+        omics_type: str = "Radiomics",
+        workflow_name: str = "影像组学流程",
         summary_context: Optional[Dict[str, Any]] = None,
         output_dir: Optional[str] = None,
     ) -> Optional[str]:
-        """Hard override: do NOT call super(). Generate summary with strictly Spatial Omics prompt via LLM. FORBIDDEN: Metabolomics, metabolites, LC-MS."""
+        """Hard override: do NOT use BaseAgent. Generate summary with strictly Radiomics prompt via LLM. FORBIDDEN: Metabolomics, Genes, Cells, LC-MS."""
         import json
-        system_prompt = """You are a Spatial Transcriptomics Expert. Summarize the analysis of 10x Visium (spatial) data.
+        system_prompt = """You are a Medical Imaging Expert. Summarize the radiomics analysis of the NIfTI/medical image.
 
 You MUST report:
-1. Spot count, gene count, and data quality.
-2. Dimensionality reduction (PCA) and Leiden clustering (number of clusters, spatial domains).
-3. Spatially Variable Genes (SVGs) and Moran's I results.
-4. Pathway enrichment of SVGs if present; spatial plots (clusters, gene expression).
+1. Image dimensions and mask status (alignment, ROI).
+2. Preprocessing (resampling, normalization).
+3. Extracted texture features (shape, first-order, GLCM etc.) and Rad-Score.
+4. Risk level or probability if available.
 
-Use ONLY these terms: Spots, Clusters, Spatial Domains, Gene Expression, Moran's I, SVGs, Leiden, obsm['spatial'], spatial autocorrelation, pathway enrichment (for genes).
+Use ONLY these terms: NIfTI, DICOM, ROI, mask, PyRadiomics, texture features, Rad-Score, risk probability, image size, preprocessing.
 
-FORBIDDEN WORDS (do not use): Metabolomics, metabolites, LC-MS, GC-MS, differential metabolites, VIP, volcano plot (in metabolomics sense).
+FORBIDDEN WORDS (do not use): Metabolomics, metabolites, Genes, gene expression, Cells, single cell, LC-MS, GC-MS, PCA (unless for imaging), pathway enrichment, differential metabolites, VIP, volcano plot.
 
 Output in Simplified Chinese (简体中文), Markdown, with clear sections. Be concise (300–600 words)."""
 
@@ -243,11 +248,7 @@ Output in Simplified Chinese (简体中文), Markdown, with clear sections. Be c
             status = sr.get("status", "")
             data = sr.get("data", {})
             steps_text.append(f"- **{name}** ({status}): {json.dumps(data, ensure_ascii=False)[:500]}")
-        user_content = (
-            f"Workflow: {workflow_name}\n\nSteps:\n"
-            + "\n".join(steps_text)
-            + "\n\nSummarize the above spatial transcriptomics run in Chinese. Report spots, clusters, SVGs, Moran's I. Do not mention metabolomics, metabolites, or LC-MS."
-        )
+        user_content = f"Workflow: {workflow_name}\n\nSteps:\n" + "\n".join(steps_text) + "\n\nSummarize the above radiomics run in Chinese. Report image size, mask status, Rad-Score, and risk. Do not mention metabolomics, genes, or LC-MS."
         # 🔥 User-Facing Error Translation: 若有失败步骤，追加执行日志并要求输出「数据诊断与优化建议」章节
         failed_steps_full = (summary_context or {}).get("failed_steps", [])
         if failed_steps_full:
@@ -278,7 +279,7 @@ Output in Simplified Chinese (简体中文), Markdown, with clear sections. Be c
                 text = getattr(msg, "content", None) if msg else getattr(block, "content", "")
             return (text or "").strip() or None
         except Exception as e:
-            logger.exception("SpatialAgent _generate_analysis_summary failed: %s", e)
+            logger.exception("RadiomicsAgent _generate_analysis_summary failed: %s", e)
             return None
 
     async def _stream_chat_response(
@@ -286,10 +287,9 @@ Output in Simplified Chinese (简体中文), Markdown, with clear sections. Be c
         query: str,
         file_paths: List[str],
     ) -> AsyncIterator[str]:
-        """流式聊天，使用 SPATIAL_INSTRUCTION 作为系统提示。"""
-        system_prompt = SPATIAL_INSTRUCTION
+        """流式聊天，使用 RADIOMICS_INSTRUCTION 作为系统提示。"""
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": RADIOMICS_INSTRUCTION},
             {"role": "user", "content": query},
         ]
         try:
@@ -299,5 +299,5 @@ Output in Simplified Chinese (简体中文), Markdown, with clear sections. Be c
                     if c:
                         yield c
         except Exception as e:
-            logger.exception("SpatialAgent 流式聊天失败: %s", e)
+            logger.exception("RadiomicsAgent 流式聊天失败: %s", e)
             yield f"\n\n错误: {str(e)}"

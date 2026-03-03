@@ -1272,6 +1272,38 @@ Use Simplified Chinese for all content."""
                 for failed_step in failed_steps:
                     failure_info += f"- **{failed_step.get('name', 'Unknown')}**: {failed_step.get('error', 'Unknown error')}\n"
                 failure_info += "\n**IMPORTANT**: Some steps failed, but you should still summarize the successful steps. Explain what was accomplished and note the failures."
+
+            # 🔥 User-Facing Error Translation: 从 summary_context 的 failed_steps（完整 step_detail）提取执行日志供 LLM 翻译为人话
+            execution_log_text = ""
+            execution_log_instruction_block = ""
+            failed_steps_full = (summary_context or {}).get("failed_steps", [])
+            if has_failures and failed_steps_full:
+                _max_tb = 1200  # 每条 traceback 最多字符，避免 prompt 爆炸
+                for fd in failed_steps_full:
+                    name = fd.get("name", fd.get("step_id", "Unknown"))
+                    err = fd.get("error", fd.get("message", ""))
+                    tb = fd.get("traceback", fd.get("debug_info", ""))
+                    if isinstance(tb, str) and len(tb) > _max_tb:
+                        tb = tb[: _max_tb] + "\n... (已截断)"
+                    execution_log_text += f"\n--- 步骤: {name} ---\n错误: {err}\n"
+                    if tb:
+                        execution_log_text += f"Traceback:\n{tb}\n"
+                execution_log_instruction_block = f"""
+
+【执行日志与异常诊断指令】
+以下是本次工作流的底层执行日志（含报错与 Traceback）：
+{execution_log_text}
+
+作为专业的生物信息学专家，你需要对上述日志进行「适老化/小白化」的异常诊断，并在报告中**专门开辟一个章节**：「⚠️ 数据诊断与优化建议」：
+
+1. **无异常：** 若日志中全部成功、无报错（Traceback），可忽略此指令，正常输出专业报告。
+2. **忽略噪音：** 忽略不影响最终结果的普通 Warnings（如版本弃用警告）。
+3. **数据类报错翻译：** 若发现因用户数据导致的报错（如 KeyError 缺列、ValueError 样本太少、格式不匹配等），请**委婉且专业**地指出。
+   - 示例语气：「您的输入数据中似乎缺少用于质控的某列，建议检查文件格式后重新上传。」
+4. **系统类报错翻译：** 若发现是系统资源或算法崩溃（如 MemoryError、Timeout、依赖缺失），请代表系统向用户致歉。
+   - 示例语气：「非常抱歉，当前数据量超出了计算节点内存限制，该步骤未能完成。建议您尝试对数据进行降采样后重试。」
+5. **残缺数据分析：** 即使部分步骤失败，也必须基于已成功的步骤（如数据质控阶段）为用户提供有价值的分析，绝不能只回复一句报错。
+"""
             
             # 🔥 CRITICAL FIX: Build rule 2 text separately to avoid f-string backslash issue
             rule2_text = ""
@@ -1577,6 +1609,15 @@ Use Simplified Chinese for all content."""
 - **验证实验建议**: Suggest validation experiments (e.g., targeted metabolomics, qPCR validation)
 - **后续研究**: Propose follow-up studies based on the findings
 """
+            # 🔥 若有失败步骤，统一在输出结构中增加「数据诊断与优化建议」章节
+            if has_failures:
+                output_structure_section += """
+
+### ⚠️ 数据诊断与优化建议 (Data Diagnosis & Optimization)
+- 将执行日志中的报错翻译为生物学小白能听懂的人话建议
+- 区分数据类问题（如缺列、格式不匹配）与系统类问题（如内存、超时）并给出对应建议
+- 即使部分步骤失败，也基于已成功步骤给出可操作建议
+"""
             
             prompt = f"""You are a Senior Bioinformatics Scientist writing a Results & Discussion section for a top-tier journal (Nature Medicine). Your role is to interpret biological data and provide deep scientific insights, connecting findings to biological mechanisms and literature knowledge.
 
@@ -1590,6 +1631,7 @@ Use Simplified Chinese for all content."""
 {key_findings_json}
 {execution_results_text}
 {failure_info}
+{execution_log_instruction_block}
 
 **CRITICAL INSTRUCTION:**
 {critical_instruction_text}
@@ -1746,6 +1788,7 @@ Use Simplified Chinese for all content."""
 {key_findings_json}
 {execution_results_text}
 {failure_info}
+{execution_log_instruction_block}
 
 **CRITICAL INSTRUCTION:**
 {critical_instruction_text}
