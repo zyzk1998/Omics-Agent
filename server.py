@@ -309,6 +309,7 @@ class ChatRequest(BaseModel):
     stream: Optional[bool] = False  # 🔥 SSE 流式传输开关
     session_id: Optional[str] = None  # 🔥 BUG FIX: 添加 session_id 字段
     user_id: Optional[str] = "guest"  # 🔥 BUG FIX: 添加 user_id 字段，默认为 guest
+    model_name: Optional[str] = "deepseek-ai/DeepSeek-R1"  # 🔥 前端模型切换：传给硅基流动的真实模型 ID
 
 
 # 日志缓冲区（保留用于未来扩展）
@@ -1769,7 +1770,22 @@ async def chat_endpoint(req: ChatRequest):
             
             # 返回 SSE 流式响应
             async def generate_sse():
+                original_llm_clients = {}
+                override_llm = None
                 try:
+                    # 🔥 动态模型路由：前端传入 model_name 时，临时替换所有 agent 的 LLM 为指定模型（硅基流动）
+                    model_name = getattr(req, "model_name", None) or ""
+                    if model_name and hasattr(agent, "agents") and agent.agents:
+                        try:
+                            from gibh_agent.core.llm_client import LLMClientFactory
+                            override_llm = LLMClientFactory.create_cloud_siliconflow(model=model_name)
+                            for name, a in agent.agents.items():
+                                if hasattr(a, "llm_client") and a.llm_client is not None:
+                                    original_llm_clients[name] = a.llm_client
+                                    a.llm_client = override_llm
+                            logger.info(f"🔀 [ChatEndpoint] 已切换模型: {model_name}")
+                        except Exception as swap_err:
+                            logger.warning(f"⚠️ [ChatEndpoint] 模型切换失败，使用默认: {swap_err}")
                     async for event in orchestrator.stream_process(
                         query=req.message,
                         files=uploaded_files,
@@ -1785,6 +1801,13 @@ async def chat_endpoint(req: ChatRequest):
                     import json
                     error_event = f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
                     yield error_event
+                finally:
+                    # 恢复各 agent 原有 LLM 客户端，避免影响后续请求
+                    if original_llm_clients and hasattr(agent, "agents"):
+                        for name, a in agent.agents.items():
+                            if name in original_llm_clients:
+                                a.llm_client = original_llm_clients[name]
+                        logger.debug("🔀 [ChatEndpoint] 已恢复默认模型")
             
             return StreamingResponse(
                 generate_sse(),
