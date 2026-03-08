@@ -36,6 +36,7 @@ wheels/
 *.bam
 *.vcf
 data/
+data/mysql/
 uploads/
 results/
 

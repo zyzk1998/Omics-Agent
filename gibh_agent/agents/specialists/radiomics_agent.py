@@ -256,7 +256,7 @@ Output in Simplified Chinese (简体中文), Markdown, with clear sections. Be c
             execution_log = ""
             for fd in failed_steps_full:
                 name = fd.get("name", fd.get("step_id", "Unknown"))
-                err = fd.get("error", fd.get("message", ""))
+                err = fd.get("user_message") or fd.get("error", fd.get("message", ""))
                 tb = fd.get("traceback", fd.get("debug_info", ""))
                 if isinstance(tb, str) and len(tb) > _max_tb:
                     tb = tb[:_max_tb] + "\n... (已截断)"

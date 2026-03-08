@@ -51,14 +51,16 @@ Focus on metabolite-specific quality metrics (missing values, abundance range, n
 class MetabolomicsAgent(BaseAgent):
     """代谢组学智能体"""
     
-    # 定义严格的步骤顺序（依赖链）
+    # 定义严格的步骤顺序（依赖链，与 MetabolomicsWorkflow DAG 一致）
     STEPS_ORDER = [
-        "inspect_data",      # 步骤1: 数据检查
-        "preprocess_data",   # 步骤2: 数据预处理
-        "pca_analysis",      # 步骤3: PCA 分析
-        "differential_analysis",  # 步骤4: 差异分析
-        "visualize_pca",     # 步骤5: PCA 可视化
-        "visualize_volcano"  # 步骤6: 火山图可视化
+        "metabo_data_validation",  # 步骤0: 数据校验与稀疏性检查
+        "inspect_data",          # 步骤1: 数据检查
+        "preprocess_data",       # 步骤2: 数据预处理
+        "pca_analysis",          # 步骤3: PCA 分析
+        "metabo_model_comparison",  # 步骤3b: 多维模型对比
+        "differential_analysis", # 步骤4: 差异分析
+        "visualize_pca",        # 步骤5: PCA 可视化
+        "visualize_volcano"     # 步骤6: 火山图可视化
     ]
     
     # 步骤映射（step_id -> 在 STEPS_ORDER 中的索引）
@@ -88,9 +90,11 @@ class MetabolomicsAgent(BaseAgent):
         
         # 标准工作流步骤（代谢组学分析流程）- 保留作为回退
         self.workflow_steps = [
+            {"name": "0. 数据校验", "step_id": "metabo_data_validation", "tool_id": "metabo_data_validation", "desc": "丰度矩阵与样本分组校验：shape、缺失率、零值比例"},
             {"name": "1. 数据检查", "step_id": "inspect_data", "tool_id": "inspect_data", "desc": "检查数据文件的基本信息（样本数、代谢物数、缺失值、分组信息等）"},
             {"name": "2. 数据预处理", "step_id": "preprocess_data", "tool_id": "preprocess_data", "desc": "数据预处理：处理缺失值、标准化、缩放"},
             {"name": "3. 主成分分析", "step_id": "pca_analysis", "tool_id": "pca_analysis", "desc": "执行主成分分析 (PCA)，降维并提取主要变异"},
+            {"name": "3b. 多维模型对比", "step_id": "metabo_model_comparison", "tool_id": "metabo_model_comparison", "desc": "PCA + PLS-DA + VIP 1x3 对比图"},
             {"name": "4. 差异代谢物分析", "step_id": "differential_analysis", "tool_id": "differential_analysis", "desc": "执行差异代谢物分析（两组比较），识别显著差异的代谢物"},
             {"name": "5. PCA 可视化", "step_id": "visualize_pca", "tool_id": "visualize_pca", "desc": "生成 PCA 可视化图，展示样本在主成分空间的分布"},
             {"name": "6. 火山图可视化", "step_id": "visualize_volcano", "tool_id": "visualize_volcano", "desc": "生成火山图 (Volcano Plot)，展示差异代谢物的统计显著性"},

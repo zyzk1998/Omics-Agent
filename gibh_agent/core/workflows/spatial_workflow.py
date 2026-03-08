@@ -1,9 +1,9 @@
 """
 Spatial transcriptomics workflow (10x Visium) — production-grade pipeline.
 
-DAG: load_data -> qc_norm -> dimensionality_reduction -> clustering
-      -> spatial_neighbors -> spatial_autocorr -> plot_genes
-      -> plot_clusters (from clustering)
+DAG: load_data -> spatial_data_validation -> qc_norm -> dimensionality_reduction
+      -> clustering -> spatial_clustering_comparison -> spatial_neighbors
+      -> spatial_autocorr -> functional_enrichment -> plot_clusters -> plot_genes
 """
 import logging
 from typing import Dict, Any, List, Optional
@@ -18,14 +18,17 @@ class SpatialWorkflow(BaseWorkflow):
     Spatial transcriptomics (Visium) workflow — full Scanpy/Squidpy pipeline.
 
     Steps:
-    1. load_data          - Load Visium (spatial_load_visium_data)
-    2. qc_norm            - QC + normalize + log1p (spatial_preprocess_qc)
+    0. load_data               - Load Visium (spatial_load_visium_data)
+    1. spatial_data_validation - Image & coordinate validation (秀肌肉)
+    2. qc_norm                 - QC + normalize + log1p (spatial_preprocess_qc)
     3. dimensionality_reduction - PCA (spatial_pca_reduction)
-    4. clustering         - Leiden clustering (spatial_clustering)
-    5. spatial_neighbors  - Spatial graph from coordinates (spatial_calculate_neighbors)
-    6. spatial_autocorr  - Moran's I for SVGs (spatial_detect_autocorr)
-    7. plot_clusters      - Spatial scatter colored by leiden (spatial_plot_scatter)
-    8. plot_genes         - Spatial scatter colored by gene/SVG (spatial_plot_scatter)
+    4. clustering              - Leiden clustering (spatial_clustering)
+    5. spatial_clustering_comparison - Multi-res spatial domains 1x3 (spatial_clustering_comparison)
+    6. spatial_neighbors       - Spatial graph from coordinates (spatial_calculate_neighbors)
+    7. spatial_autocorr        - Moran's I for SVGs (spatial_detect_autocorr)
+    8. functional_enrichment   - Pathway enrichment (spatial_pathway_enrichment)
+    9. plot_clusters           - Spatial scatter colored by leiden (spatial_plot_scatter)
+    10. plot_genes             - Spatial scatter colored by gene/SVG (spatial_plot_scatter)
     """
 
     def get_name(self) -> str:
@@ -43,10 +46,12 @@ class SpatialWorkflow(BaseWorkflow):
         """Step dependency DAG. Higher steps depend on lower steps."""
         return {
             "load_data": [],
+            "spatial_data_validation": ["load_data"],
             "qc_norm": ["load_data"],
             "dimensionality_reduction": ["qc_norm"],
             "clustering": ["dimensionality_reduction"],
-            "spatial_neighbors": ["clustering"],
+            "spatial_clustering_comparison": ["clustering"],
+            "spatial_neighbors": ["spatial_clustering_comparison"],
             "spatial_autocorr": ["spatial_neighbors"],
             "functional_enrichment": ["spatial_autocorr"],
             "plot_clusters": ["clustering"],
@@ -56,6 +61,12 @@ class SpatialWorkflow(BaseWorkflow):
     def get_step_metadata(self, step_id: str) -> Dict[str, Any]:
         """Step display name, description, tool_id, default_params."""
         metadata_map = {
+            "spatial_data_validation": {
+                "name": "空间数据校验",
+                "description": "快速校验 obsm['spatial'] 与 uns['spatial']，用于流程前置展示",
+                "tool_id": "spatial_data_validation",
+                "default_params": {"h5ad_path": ""},
+            },
             "load_data": {
                 "name": "加载 Visium 数据",
                 "description": "从 Space Ranger 输出目录加载 10x Visium 数据，得到 AnnData（含 obsm['spatial']）",
@@ -100,6 +111,16 @@ class SpatialWorkflow(BaseWorkflow):
                     "n_neighbors": 15,
                     "use_rep": "X_pca",
                     "key_added": "leiden",
+                },
+            },
+            "spatial_clustering_comparison": {
+                "name": "多分辨率空间域对比",
+                "description": "在 0.3/0.5/0.8 分辨率下 Leiden 空间聚类，1x3 组织切片图",
+                "tool_id": "spatial_clustering_comparison",
+                "default_params": {
+                    "h5ad_path": "",
+                    "output_plot_path": "<output_dir>/spatial_multires_comparison.png",
+                    "resolutions": [0.3, 0.5, 0.8],
                 },
             },
             "spatial_neighbors": {

@@ -1,5 +1,30 @@
 services:
   # =========================================
+  # 0. 用户与资产中台 - MySQL（Phase 1 数据库基建）
+  # =========================================
+  mysql:
+    image: mysql:8.0
+    container_name: gibh_v2_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-omics_agent_root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-omics_agent}
+      MYSQL_USER: ${MYSQL_USER:-omics}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-omics_agent_pwd}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - gibh-network
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # =========================================
   # 1. 消息队列 - Redis
   # =========================================
   redis:
@@ -43,6 +68,12 @@ services:
       - HOME=/home/appuser
       # 禁用 Numba 缓存调试（帮助解决缓存问题）
       - NUMBA_DEBUG_CACHE=1
+      # Phase 1: MySQL 连接（可选，未配置时应用仍可启动）
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-omics_agent}
+      - MYSQL_USER=${MYSQL_USER:-omics}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-omics_agent_pwd}
     volumes:
       - .:/app
       - ./data/uploads:/app/uploads
@@ -50,7 +81,10 @@ services:
       - ./data:/app/data
       - /etc/localtime:/etc/localtime:ro
     depends_on:
-      - redis
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - gibh-network
     # 🔧 修复：使用 entrypoint 脚本修复权限
@@ -126,6 +160,7 @@ networks:
     driver: bridge
 
 volumes:
+  mysql_data:
   redis-data:
     driver: local
 

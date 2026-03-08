@@ -20,13 +20,23 @@ from .workflows import WorkflowRegistry
 
 logger = logging.getLogger(__name__)
 
+
+def _is_flat_params(d: dict) -> bool:
+    """判断 recommended_params 是否为扁平键值对（参数名->值），而非 step_id->params 的嵌套。"""
+    if not d or not isinstance(d, dict):
+        return False
+    return not any(isinstance(v, dict) for v in d.values())
+
+
 # Step semantics for Dynamic Planning: LLM uses these to map "skip X" / "no Y" to step IDs.
 SOP_PLANNER_STEP_SEMANTICS = {
     "Spatial": [
         ("load_data", "Load Visium data from Space Ranger output directory"),
+        ("spatial_data_validation", "Image & coordinate validation (秀肌肉 first step)"),
         ("qc_norm", "QC and normalization of spots/genes"),
         ("dimensionality_reduction", "PCA dimensionality reduction"),
         ("clustering", "Leiden clustering on the graph"),
+        ("spatial_clustering_comparison", "Multi-resolution spatial domain 1x3 comparison (秀肌肉)"),
         ("spatial_neighbors", "Spatial neighborhood graph (for Moran's I)"),
         ("spatial_autocorr", "Spatially variable genes (Moran's I)"),
         ("functional_enrichment", "Pathway enrichment of top SVGs (pathway enrichment)"),
@@ -34,10 +44,12 @@ SOP_PLANNER_STEP_SEMANTICS = {
         ("plot_genes", "Spatial scatter plot colored by gene expression"),
     ],
     "Radiomics": [
+        ("radiomics_data_validation", "Data & ROI validation (秀肌肉 first step)"),
         ("load_image", "Load NIfTI/DICOM medical image"),
         ("preprocess", "Resampling and intensity normalization (preprocessing)"),
         ("preview_slice", "Export mid-slice PNG for preview"),
         ("extract_features", "PyRadiomics texture/shape feature extraction"),
+        ("radiomics_model_comparison", "Multi-algorithm LR/SVM/RF ROC comparison (秀肌肉)"),
         ("calc_score", "Rad-Score and risk probability (scoring)"),
         ("viz_score", "Rad-Score visualization (bar/gauge chart)"),
     ],
@@ -169,12 +181,13 @@ Your task is to generate executable workflow plans based on user queries and ava
 
 **CRITICAL RULES:**
 1. Output MUST be a valid JSON object (no markdown code blocks, no extra text).
-2. Structure: {"workflow_name": "...", "steps": [{"id": "step1", "tool_name": "...", "params": {...}, "dependency": "..."}]}
+2. Structure: {"workflow_name": "...", "steps": [...], "recommended_params": {...} (optional)}.
 3. **Data Flow**: The output of Step N must match the input of Step N+1 (e.g., file paths).
 4. If a parameter is a file path, use placeholders like `<step1_output>` or match the uploaded filename.
 5. Use tool names EXACTLY as provided in the tool schemas.
 6. Only include parameters that exist in the tool's args_schema.
 7. For file paths, prefer using the actual uploaded filename if available.
+8. **recommended_params**: You MUST recommend execution parameters based on data scale and output them as a JSON object in "recommended_params". Example: {"n_pcs": 30, "resolution": 0.8, "min_genes": 200} or per-step: {"rna_clustering": {"resolution": 0.8}, "rna_pca": {"n_comps": 30}}. Only include parameter names that exist in the tool's signature; values will be type-coerced by the executor.
 
 **Step Structure:**
 - "id": Unique step identifier (e.g., "step1", "step2")
@@ -196,7 +209,8 @@ Your task is to generate executable workflow plans based on user queries and ava
       },
       "dependency": null
     }
-  ]
+  ],
+  "recommended_params": {"n_components": 10, "resolution": 0.6}
 }
 
 Generate ONLY the JSON object, no additional text."""
@@ -414,19 +428,36 @@ Remember: Output ONLY the JSON object, no markdown, no code blocks, no explanati
                 "selected": True,  # Frontend may use this
                 "params": adapted_params
             }
-            
+            # 动态参数推荐：若 LLM 输出了 recommended_params（按 step_id/tool_id 或全局），则挂到步骤上供 Executor 注入
+            rec = workflow_plan.get("recommended_params") or {}
+            if isinstance(rec, dict):
+                step_rec = rec.get(tool_name) or rec.get(step.get("id")) or (rec if _is_flat_params(rec) else {})
+                if step_rec and isinstance(step_rec, dict):
+                    adapted_step["recommended_params"] = step_rec
             adapted_steps.append(adapted_step)
         
+        workflow_data_inner = {
+            "workflow_name": workflow_plan["workflow_name"],
+            "steps": adapted_steps
+        }
+        if workflow_plan.get("recommended_params"):
+            workflow_data_inner["recommended_params"] = workflow_plan["recommended_params"]
         # 构建最终的工作流配置（符合前端格式）
         workflow_config = {
             "type": "workflow_config",
-            "workflow_data": {
-                "workflow_name": workflow_plan["workflow_name"],
-                "steps": adapted_steps
-            },
+            "workflow_data": workflow_data_inner,
             "file_paths": context_files
         }
-        
+        # 前端“参数推荐”卡片：从 recommended_params 生成 recommendation（前端展示与后端执行一致）
+        rec = workflow_plan.get("recommended_params")
+        if isinstance(rec, dict) and rec and _is_flat_params(rec):
+            workflow_config["recommendation"] = {
+                "summary": "基于数据特征生成的参数推荐",
+                "params": {
+                    k: {"value": v, "reason": "基于数据特征推荐"}
+                    for k, v in rec.items()
+                },
+            }
         return workflow_config
     
     def _get_step_display_name(self, tool_name: str, tool_desc: str) -> str:
@@ -440,12 +471,20 @@ Remember: Output ONLY the JSON object, no markdown, no code blocks, no explanati
         Returns:
             显示名称
         """
-        # 简单的名称映射
+        # 简单的名称映射（含各模态新工具）
         name_mapping = {
             "metabolomics_pca": "主成分分析 (PCA)",
             "metabolomics_differential_analysis": "差异分析",
             "metabolomics_preprocess": "数据预处理",
-            "file_inspect": "文件检查"
+            "file_inspect": "文件检查",
+            "rna_data_validation": "正在执行底层数据结构与内存预检...",
+            "rna_clustering_comparison": "正在生成多分辨率聚类鲁棒性对比图...",
+            "metabo_data_validation": "正在执行底层数据与稀疏性校验...",
+            "metabo_model_comparison": "正在执行多维机器学习模型 (PCA/PLS-DA) 效能对比...",
+            "spatial_data_validation": "正在执行空间影像与坐标校验...",
+            "spatial_clustering_comparison": "正在生成多分辨率空间域物理映射对比图...",
+            "radiomics_data_validation": "正在执行数据与 ROI 校验...",
+            "radiomics_model_comparison": "正在执行多算法 (LR/SVM/RF) ROC 诊断效能对比...",
         }
         
         if tool_name in name_mapping:
@@ -923,8 +962,14 @@ From the user query, output a JSON object with "target_steps" and "skip_steps". 
             "metabolomics_pathway_enrichment": ["pathway", "通路", "enrichment", "富集", "通路富集"],
             "preprocess_data": ["preprocess", "预处理"],
             "inspect_data": ["inspect", "检查", "数据检查"],
+            "metabo_data_validation": ["validation", "校验", "数据校验"],
+            "metabo_model_comparison": ["model comparison", "模型对比", "pca plsda"],
+            "rna_data_validation": ["validation", "预检", "数据校验"],
+            "rna_clustering_comparison": ["clustering comparison", "多分辨率", "聚类对比"],
             # Spatial
             "load_data": ["load", "加载"],
+            "spatial_data_validation": ["spatial validation", "空间校验", "坐标校验"],
+            "spatial_clustering_comparison": ["spatial comparison", "空间域对比", "多分辨率空间"],
             "qc_norm": ["qc", "quality", "标准化", "norm"],
             "dimensionality_reduction": ["pca", "dimensionality", "降维"],
             "clustering": ["clustering", "cluster", "聚类", "leiden"],
@@ -938,6 +983,8 @@ From the user query, output a JSON object with "target_steps" and "skip_steps". 
             "preprocess": ["preprocess", "预处理", "resample", "重采样"],
             "preview_slice": ["preview", "预览"],
             "extract_features": ["extract", "feature", "特征提取", "texture"],
+            "radiomics_data_validation": ["radiomics validation", "roi 校验", "数据校验"],
+            "radiomics_model_comparison": ["roc", "model comparison", "lr svm rf", "诊断效能"],
             "calc_score": ["score", "rad-score", "评分"],
             "viz_score": ["viz", "visualize score", "评分图"],
         }
@@ -1946,17 +1993,24 @@ Your task is to generate executable workflow plans that STRICTLY follow the Meta
 
 **CRITICAL SOP RULES (MUST FOLLOW):**
 
-1. **Data Quality Assessment (MANDATORY FIRST STEP):**
+0. **Data Validation (MANDATORY FIRST STEP - 秀肌肉):**
+   - ALWAYS include metabo_data_validation as the very first step when planning the full workflow. It checks matrix/metadata shape, missing and zero value ratio.
+   - Then proceed to inspect_data and preprocess_data.
+
+1. **Data Quality Assessment (AFTER VALIDATION):**
    - IF missing_values > 50% → MUST use a dropping/imputation tool.
    - IF missing_values > 0% AND missing_values <= 50% → MUST use an imputation tool.
-   - ALWAYS perform data inspection first (inspect_data).
+   - ALWAYS perform data inspection (inspect_data) after metabo_data_validation.
 
 2. **Data Preprocessing (ALWAYS REQUIRED):**
    - ALWAYS perform Normalization (Log2 transformation + Scaling).
    - Use preprocess_data tool for this step.
    - Parameters should be auto-filled based on file metadata.
 
-3. **Analysis Type Selection (CONDITIONAL):**
+3. **Multi-Algorithm Model Comparison (RECOMMENDED - 秀肌肉):**
+   - Include metabo_model_comparison after preprocess_data when planning the full pipeline. It runs PCA + PLS-DA + VIP and produces a 1x3 comparison plot. This step is optional for user-skip but MUST be in the default DAG.
+
+4. **Analysis Type Selection (CONDITIONAL):**
    - IF group_columns exist (metadata_columns detected OR numeric columns with ≤5 unique values like 0/1) → MUST perform:
      a. Unsupervised Analysis: PCA (pca_analysis) - ALWAYS perform PCA first
      b. Supervised Analysis: PLS-DA (metabolomics_plsda) - MUST add if groups detected
@@ -1965,7 +2019,7 @@ Your task is to generate executable workflow plans that STRICTLY follow the Meta
    - IF NO group_columns → Perform Unsupervised Analysis only:
      a. PCA (pca_analysis)
 
-4. **Visualization Rules (CRITICAL - MUST FOLLOW):**
+5. **Visualization Rules (CRITICAL - MUST FOLLOW):**
    - 🔥 ANTI-REDUNDANCY RULE: The tool `pca_analysis` ALREADY generates a plot. If you select `pca_analysis`, you MUST NOT select `visualize_pca`. They are mutually exclusive. Adding both will cause errors.
    - 🔥 DATA FLOW RULE: If you perform `differential_analysis`, you MUST follow it with `visualize_volcano` to plot the results.
    - 🔥 GROUP DETECTION: If a column (like 'Diet') has few unique values (e.g., 0 and 1, or 2-5 unique values), treat it as a Grouping Column. In this case, you MUST add `metabolomics_plsda` and `metabolomics_pathway_enrichment`.
@@ -2432,8 +2486,10 @@ Total Features: {file_metadata.get('total_feature_columns', 'N/A')}
         Returns:
             显示名称（中文）
         """
-        # 名称映射（匹配新的工具 ID）
+        # 名称映射（匹配新的工具 ID，含数据校验与多维对比）
         name_mapping = {
+            "metabo_data_validation": "正在执行底层数据与稀疏性校验...",
+            "metabo_model_comparison": "正在执行多维机器学习模型 (PCA/PLS-DA) 效能对比...",
             "inspect_data": "数据检查",
             "preprocess_data": "数据预处理",
             "pca_analysis": "主成分分析 (PCA)",
@@ -2472,7 +2528,11 @@ Your task is to generate executable workflow plans that STRICTLY follow the scRN
 
 **CRITICAL SOP RULES (MUST FOLLOW):**
 
-1. **Input Type Detection (MANDATORY FIRST STEP):**
+0. **Data Validation (MANDATORY FIRST STEP - 秀肌肉):**
+   - ALWAYS include rna_data_validation as the very first step when planning the full workflow. It performs fast shape/obs/var checks and ensures downstream steps receive valid input.
+   - If input is FASTQ → after CellRanger/convert, the first analytical step is still rna_data_validation (or QC); if input is H5AD/matrix → start with rna_data_validation then rna_qc_filter.
+
+1. **Input Type Detection (MANDATORY AFTER DATA VALIDATION):**
    - IF input is FASTQ files (.fastq, .fq) → MUST start with CellRanger (rna_cellranger_count) - This runs ASYNCHRONOUSLY
    - IF input is Matrix/H5AD (.h5ad, .mtx, 10x directory) → Start directly with QC (rna_qc_filter)
 
@@ -2495,6 +2555,7 @@ Your task is to generate executable workflow plans that STRICTLY follow the scRN
 
 5. **Clustering (REQUIRED):**
    - ALWAYS perform Leiden Clustering (rna_clustering) - default resolution=0.5
+   - Include rna_clustering_comparison after rna_clustering when planning the full pipeline: it runs Leiden at 0.3/0.5/0.8 and produces a 1x3 UMAP comparison (multi-resolution robustness). This step is optional for user-skip but MUST be in the default DAG.
    - Generate clustering visualization (rna_visualize_clustering)
 
 6. **Marker Detection & Annotation (REQUIRED - FINAL):**
@@ -2583,8 +2644,9 @@ Generate ONLY the JSON object, no markdown code blocks, no additional text."""
         Returns:
             显示名称（中文）
         """
-        # scRNA-seq 特定的名称映射
+        # scRNA-seq 特定的名称映射（含数据校验与多维对比）
         name_mapping = {
+            "rna_data_validation": "正在执行底层数据结构与内存预检...",
             "rna_cellranger_count": "Cell Ranger 计数（异步）",
             "rna_convert_cellranger_to_h5ad": "转换为 H5AD 格式",
             "rna_qc_filter": "质量控制过滤",
@@ -2597,6 +2659,7 @@ Generate ONLY the JSON object, no markdown code blocks, no additional text."""
             "rna_umap": "UMAP 降维",
             "rna_tsne": "t-SNE 降维",
             "rna_clustering": "Leiden 聚类",
+            "rna_clustering_comparison": "正在生成多分辨率聚类鲁棒性对比图...",
             "rna_find_markers": "Marker 基因检测",
             "rna_cell_annotation": "细胞类型注释",
             "rna_visualize_qc": "QC 可视化",

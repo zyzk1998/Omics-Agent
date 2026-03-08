@@ -60,6 +60,8 @@ class ToolRegistry:
         工具注册装饰器
         
         自动从函数签名提取类型提示，生成 Pydantic 模型作为参数 schema。
+        为支持动态参数推荐与注入：请将可调参数（如 n_comps、resolution、min_genes）
+        作为带默认值的函数入参（Keyword Arguments），勿在函数内部硬编码。
         
         Args:
             name: 工具的唯一标识符

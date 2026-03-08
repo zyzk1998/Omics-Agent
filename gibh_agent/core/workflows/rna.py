@@ -47,16 +47,15 @@ class RNAWorkflow(BaseWorkflow):
             依赖图字典
         """
         return {
-            # 步骤1: Cell Ranger 计数（无依赖，仅当输入是 FASTQ 时）
+            # 步骤1: 数据校验（秀肌肉前置，无依赖）
+            "rna_data_validation": [],
+            # 步骤2: Cell Ranger 计数（无依赖，仅当输入是 FASTQ 时）
             "rna_cellranger_count": [],
-            
-            # 步骤2: 转换为 H5AD（依赖：rna_cellranger_count）
+            # 步骤3: 转换为 H5AD（依赖：rna_cellranger_count）
             "rna_convert_cellranger_to_h5ad": ["rna_cellranger_count"],
-            
-            # 步骤3: QC 过滤（依赖：输入文件或 rna_convert_cellranger_to_h5ad）
-            "rna_qc_filter": [],  # 可以从原始 H5AD 或 Cell Ranger 输出开始
-            
-            # 步骤4: 双联体检测（依赖：rna_qc_filter）
+            # 步骤4: QC 过滤（依赖：rna_data_validation 以保持顺序）
+            "rna_qc_filter": ["rna_data_validation"],
+            # 步骤5: 双联体检测（依赖：rna_qc_filter）
             "rna_doublet_detection": ["rna_qc_filter"],
             
             # 步骤5: 数据标准化（依赖：rna_doublet_detection）
@@ -79,11 +78,11 @@ class RNAWorkflow(BaseWorkflow):
             
             # 步骤11: Leiden 聚类（依赖：rna_neighbors）
             "rna_clustering": ["rna_neighbors"],
-            
-            # 步骤12: Marker 基因检测（依赖：rna_clustering）
-            "rna_find_markers": ["rna_clustering"],
-            
-            # 步骤13: 细胞类型注释（依赖：rna_find_markers，流程终点）
+            # 步骤12: 多分辨率聚类对比（依赖：rna_clustering，仅出图不写回 h5ad）
+            "rna_clustering_comparison": ["rna_clustering"],
+            # 步骤13: Marker 基因检测（依赖：rna_clustering_comparison，沿用其 output 链）
+            "rna_find_markers": ["rna_clustering_comparison"],
+            # 步骤14: 细胞类型注释（依赖：rna_find_markers，流程终点）
             "rna_cell_annotation": ["rna_find_markers"],
         }
     
@@ -98,6 +97,12 @@ class RNAWorkflow(BaseWorkflow):
             步骤元数据字典
         """
         metadata_map = {
+            "rna_data_validation": {
+                "name": "数据校验",
+                "description": "快速校验数据 shape 与 obs/var 存在性，用于流程前置展示",
+                "tool_id": "rna_data_validation",
+                "default_params": {}
+            },
             "rna_cellranger_count": {
                 "name": "Cell Ranger 计数（异步）",
                 "description": "SOP规则：如果输入是 FASTQ 文件，必须首先使用 Cell Ranger 进行计数",
@@ -179,6 +184,14 @@ class RNAWorkflow(BaseWorkflow):
                 "tool_id": "rna_clustering",
                 "default_params": {
                     "resolution": 0.5
+                }
+            },
+            "rna_clustering_comparison": {
+                "name": "多分辨率聚类对比",
+                "description": "在 0.3/0.5/0.8 分辨率下 Leiden 聚类并绘制 1x3 UMAP 对比图",
+                "tool_id": "rna_clustering_comparison",
+                "default_params": {
+                    "resolutions": [0.3, 0.5, 0.8]
                 }
             },
             "rna_find_markers": {
@@ -271,6 +284,10 @@ class RNAWorkflow(BaseWorkflow):
             logger.error(f"❌ [RNAWorkflow] steps_dag 为空，无法生成模板")
             raise ValueError("工作流 DAG 为空，无法生成模板")
         
+        # 非 FASTQ 时数据校验在首步；FASTQ 时无 h5ad 故跳过校验步骤
+        if is_fastq and "rna_data_validation" in resolved_steps:
+            resolved_steps = [s for s in resolved_steps if s != "rna_data_validation"]
+            logger.info("✅ [RNAWorkflow] FASTQ 流程跳过 rna_data_validation（无 h5ad）")
         # 🔥 TASK 1 FIX: 如果是FASTQ，确保步骤顺序正确
         if is_fastq:
             # 确保cellranger步骤在qc_filter之前
@@ -343,23 +360,27 @@ class RNAWorkflow(BaseWorkflow):
                         step_config["params"]["output_dir"] = output_dir
                 elif step_id == "rna_convert_cellranger_to_h5ad":
                     step_config["params"]["cellranger_matrix_dir"] = "<rna_cellranger_count_output>"
-                elif step_id in ["rna_qc_filter", "rna_doublet_detection", "rna_normalize", "rna_hvg",
+                elif step_id in ["rna_data_validation", "rna_qc_filter", "rna_doublet_detection", "rna_normalize", "rna_hvg",
                                 "rna_scale", "rna_pca", "rna_neighbors", "rna_umap", "rna_clustering",
-                                "rna_find_markers", "rna_cell_annotation"]:
+                                "rna_clustering_comparison", "rna_find_markers", "rna_cell_annotation"]:
                     if is_fastq:
                         step_config["params"]["adata_path"] = "<rna_convert_cellranger_to_h5ad_output>" if step_id == "rna_qc_filter" else "<previous_step_output>"
                     else:
                         step_config["params"]["adata_path"] = file_path
+                    if step_id == "rna_clustering_comparison":
+                        step_config["params"]["output_plot_path"] = "<output_dir>/multires_leiden_umap.png"
             else:
                 # 无文件或占位：使用 <PENDING_UPLOAD>，前端显示「上传以激活」
                 if step_id == "rna_cellranger_count":
                     step_config["params"]["fastqs_path"] = "<PENDING_UPLOAD>"
                 elif step_id == "rna_convert_cellranger_to_h5ad":
                     step_config["params"]["cellranger_matrix_dir"] = "<rna_cellranger_count_output>"
-                elif step_id in ["rna_qc_filter", "rna_doublet_detection", "rna_normalize", "rna_hvg",
+                elif step_id in ["rna_data_validation", "rna_qc_filter", "rna_doublet_detection", "rna_normalize", "rna_hvg",
                                 "rna_scale", "rna_pca", "rna_neighbors", "rna_umap", "rna_clustering",
-                                "rna_find_markers", "rna_cell_annotation"]:
+                                "rna_clustering_comparison", "rna_find_markers", "rna_cell_annotation"]:
                     step_config["params"]["adata_path"] = "<PENDING_UPLOAD>"
+                    if step_id == "rna_clustering_comparison":
+                        step_config["params"]["output_plot_path"] = "<output_dir>/multires_leiden_umap.png"
             
             steps.append(step_config)
         

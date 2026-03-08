@@ -135,7 +135,30 @@ class ErrorFormatter:
                 "can_skip": False
             }
         
-        # 8. 默认错误（未知错误）
+        # 8. 分组/标签缺失（PLS-DA、ROC、差异分析等需分组）
+        if any(keyword in error for keyword in [
+            "分组", "分组标签", "至少两个", "group", "label_col", "metadata",
+            "样本分组", "分类标签", "pls-da", "pls_da", "两组的样本", "label column"
+        ]) or "需要至少两" in error or "至少 2" in error:
+            return {
+                "user_message": error if len(error.strip()) > 10 else f"数据分组问题：{step_name} 需要至少两个有效分组才能执行（如 PLS-DA、ROC）。请上传或指定样本分组信息。",
+                "error_category": "data_issue",
+                "suggestion": "请检查是否上传了样本分组文件 (Metadata)，或在参数中正确指定分组列/标签列。",
+                "can_skip": True,
+                "technical_details": error
+            }
+        
+        # 9. 工具已返回用户向文案（中文句子）：优先保留，避免被 generic 覆盖
+        if len(error.strip()) >= 20 and any(c in error for c in ["请", "需要", "检查", "上传", "指定", "正确"]):
+            return {
+                "user_message": error,
+                "error_category": "data_issue",
+                "suggestion": "请根据上述提示检查数据或参数后重试，或跳过此步骤继续其他分析。",
+                "can_skip": True,
+                "technical_details": error
+            }
+        
+        # 10. 默认错误（未知错误）
         return {
             "user_message": f"执行失败：{step_name} 步骤执行时遇到问题。",
             "error_category": "unknown_error",

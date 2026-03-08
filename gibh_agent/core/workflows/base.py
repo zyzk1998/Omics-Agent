@@ -2,6 +2,13 @@
 基础工作流抽象类
 
 定义所有工作流必须实现的接口和通用依赖解析逻辑。
+
+完全体扩展法则 (Future-Proofing Manifesto)
+-----------------------------------------
+未来扩展任何新模态（如基因组、蛋白组），必须严格遵循「完全体原则」：
+1. 新增底层 Tool -> 2. 注册 DAG -> 3. 更新 Agent Prompt 认知 ->
+4. 补全前端 Step 映射 -> 5. 更新 UI 引导提示词 -> 6. 纳入全局容错循环。
+缺一不可。详见各 workflow 与 planner 中的步骤语义与 STEP_NAME_MAP。
 """
 import logging
 from abc import ABC, abstractmethod
@@ -242,8 +249,8 @@ class BaseWorkflow(ABC):
                 if "file_path" in step_config["params"] or "adata_path" in step_config["params"]:
                     param_name = "adata_path" if "adata_path" in step_config["params"] else "file_path"
                     step_config["params"][param_name] = "<PENDING_UPLOAD>"
-                elif step_id in ["inspect_data", "preprocess_data", "pca_analysis", "differential_analysis", 
-                                 "metabolomics_plsda", "metabolomics_pathway_enrichment"]:
+                elif step_id in ["metabo_data_validation", "inspect_data", "preprocess_data", "pca_analysis", "differential_analysis",
+                                 "metabo_model_comparison", "metabolomics_plsda", "metabolomics_pathway_enrichment"]:
                     # 对于需要文件路径的步骤，添加占位符
                     step_config["params"]["file_path"] = "<PENDING_UPLOAD>"
             

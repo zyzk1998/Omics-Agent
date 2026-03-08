@@ -922,7 +922,7 @@ Use Simplified Chinese for all content."""
                     failed_steps.append({
                         "name": step_name,
                         "status": step_status,
-                        "error": step_result.get("error") or step_result.get("message", "未知错误")
+                        "error": step_result.get("user_message") or step_result.get("error") or step_result.get("message", "未知错误")
                     })
                     logger.debug(f"⚠️ [AnalysisSummary] 记录失败的步骤: {step_name} (status: {step_status})")
             
@@ -1270,7 +1270,8 @@ Use Simplified Chinese for all content."""
             if has_failures and failed_steps:
                 failure_info = f"\n\n**⚠️ Failed Steps ({len(failed_steps)}/{len(steps_results)}):**\n"
                 for failed_step in failed_steps:
-                    failure_info += f"- **{failed_step.get('name', 'Unknown')}**: {failed_step.get('error', 'Unknown error')}\n"
+                    err_text = failed_step.get("user_message") or failed_step.get("error", "Unknown error")
+                    failure_info += f"- **{failed_step.get('name', 'Unknown')}**: {err_text}\n"
                 failure_info += "\n**IMPORTANT**: Some steps failed, but you should still summarize the successful steps. Explain what was accomplished and note the failures."
 
             # 🔥 User-Facing Error Translation: 从 summary_context 的 failed_steps（完整 step_detail）提取执行日志供 LLM 翻译为人话
@@ -1281,7 +1282,7 @@ Use Simplified Chinese for all content."""
                 _max_tb = 1200  # 每条 traceback 最多字符，避免 prompt 爆炸
                 for fd in failed_steps_full:
                     name = fd.get("name", fd.get("step_id", "Unknown"))
-                    err = fd.get("error", fd.get("message", ""))
+                    err = fd.get("user_message") or fd.get("error", fd.get("message", ""))
                     tb = fd.get("traceback", fd.get("debug_info", ""))
                     if isinstance(tb, str) and len(tb) > _max_tb:
                         tb = tb[: _max_tb] + "\n... (已截断)"

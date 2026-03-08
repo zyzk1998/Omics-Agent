@@ -1,32 +1,13 @@
-# .cursorignore - 拯救 Cursor 专用配置
-.git/
-.vscode/
-__pycache__/
-*.pyc
-node_modules/
-venv/
-.venv/
-env/
-
-# 屏蔽所有生成的结果数据和日志
-results/
-data/uploads/
-logs/
-*.log
-*.txt
-*.md
-!README.md
-!api.md
-
-# 屏蔽临时文件
-*.tmp
-*.bak
-*.swp
-.DS_Store
-
-# 屏蔽大文件
 *.h5ad
 *.csv
+*.tsv
 *.mtx
-*.png
+*.gz
 *.pdf
+*.png
+data/
+rawdata/
+scanpy_output/
+uploads/
+.git/
+__pycache__/

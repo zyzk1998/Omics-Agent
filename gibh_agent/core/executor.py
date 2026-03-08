@@ -3,17 +3,21 @@
 
 动态执行工作流，不依赖硬编码的工具逻辑。
 使用 ToolRegistry 查找和执行工具。
+支持动态参数智能推荐与注入：按函数签名过滤并做类型转换，防止幻觉参数与 TypeError。
 """
 import inspect
 import os
 import logging
 import traceback
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Callable, get_origin, get_args
 from pathlib import Path
 from datetime import datetime
 
 from .tool_registry import registry
 from .utils import sanitize_for_json
+
+# 隐患 3：类型转换失败时的哨兵，用于丢弃非法推荐参数而非透传导致底层 TypeError
+_COERCE_FAILED = object()
 
 
 class SecurityException(Exception):
@@ -185,7 +189,66 @@ class WorkflowExecutor:
         )
         logger.error(f"❌ [Path Resolver] {error_msg}")
         raise FileNotFoundError(error_msg)
-    
+
+    @staticmethod
+    def _coerce_value(annotation: Any, value: Any) -> Any:
+        """根据参数注解将 LLM 输出的值转换为目标类型。转换失败返回 _COERCE_FAILED，由调用方丢弃该参数，避免毒药透传导致底层 TypeError。"""
+        if value is None:
+            return value
+        if annotation is inspect.Parameter.empty:
+            return value
+        ann = annotation
+        try:
+            origin = get_origin(ann)
+            if origin is not None:
+                args = get_args(ann)
+                if args and type(None) in args:
+                    ann = next((a for a in args if a is not type(None)), ann)
+            if ann is float:
+                return float(value) if not isinstance(value, (int, float)) else float(value)
+            if ann is int:
+                return int(value) if not isinstance(value, int) else int(value)
+            if ann is bool:
+                if isinstance(value, bool):
+                    return value
+                if isinstance(value, str):
+                    return value.strip().lower() in ("1", "true", "yes", "on")
+                return bool(value)
+            return value
+        except (TypeError, ValueError):
+            return _COERCE_FAILED
+
+    def _filter_and_coerce_params_to_signature(
+        self, params: Dict[str, Any], tool_func: Callable
+    ) -> Dict[str, Any]:
+        """
+        防幻觉参数过滤 + 类型转换：只保留工具函数签名中存在的参数，并对值做类型转换。
+        支持 **kwargs：若函数有 VAR_KEYWORD，则未在具名参数中的键也会保留。
+        """
+        try:
+            sig = inspect.signature(tool_func)
+        except Exception as e:
+            logger.debug("无法获取工具签名，跳过过滤: %s", e)
+            return params
+        allowed = set(sig.parameters.keys())
+        has_kwargs = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
+        valid_params = {}
+        for key, value in params.items():
+            if key in sig.parameters:
+                param = sig.parameters[key]
+                coerced = self._coerce_value(param.annotation, value)
+                if coerced is _COERCE_FAILED:
+                    logger.warning("丢弃非法推荐参数（类型转换失败）: %s = %s，将使用工具默认值", key, value)
+                    continue
+                valid_params[key] = coerced
+            elif has_kwargs:
+                valid_params[key] = value
+            else:
+                logger.warning("丢弃无效的推荐参数: %s (工具签名中不存在)", key)
+        return valid_params
+
     def execute_step(
         self,
         step_data: Dict[str, Any],
@@ -203,7 +266,16 @@ class WorkflowExecutor:
         """
         step_id = step_data.get("step_id", "unknown")
         tool_id = step_data.get("tool_id")
-        params = step_data.get("params", {})
+        params = dict(step_data.get("params", {}))
+        # 动态参数推荐与注入：优先使用步骤级 recommended_params，否则使用工作流级（step_context）
+        recommended_params = step_data.get("recommended_params") or (step_context or {}).get("recommended_params") or {}
+        if not isinstance(recommended_params, dict):
+            recommended_params = {}
+        if recommended_params:
+            for k, v in recommended_params.items():
+                if v is not None:
+                    params[k] = v
+            logger.debug(f"🔄 [Executor] 已合并 recommended_params: {list(recommended_params.keys())}")
         step_name = step_data.get("name", tool_id)
         
         logger.info(f"🔧 执行步骤: {step_id} ({tool_id})")
@@ -567,6 +639,9 @@ class WorkflowExecutor:
                     "message": f"步骤 {step_name} 执行失败：缺少必需参数 group_column"
                 }
         
+        # 防幻觉 + 类型转换：只保留签名内参数并做类型转换（如 resolution="0.8" -> 0.8）
+        processed_params = self._filter_and_coerce_params_to_signature(processed_params, tool_func)
+
         # 执行工具
         try:
             # 🔥 CRITICAL DEBUG: 记录所有参数（包括 group_column）
@@ -596,9 +671,15 @@ class WorkflowExecutor:
                 error_msg = result.get("error") or result.get("message") or f"步骤 {step_name} 执行失败"
                 logger.error(f"❌ 步骤 {step_id} 执行失败: {error_msg}")
                 
-                # 🔥 TASK 4: 格式化错误信息，使其对用户友好
+                # 🔥 全局报错一致性：工具已返回 user_message 时优先使用，否则再走 ErrorFormatter
                 from .error_formatter import ErrorFormatter
-                formatted_error = ErrorFormatter.format_error(error_msg, tool_id, step_name)
+                tool_user_message = result.get("user_message") or result.get("message")
+                if tool_user_message and len(str(tool_user_message).strip()) > 5:
+                    user_message = str(tool_user_message).strip()
+                    formatted_error = ErrorFormatter.format_error(error_msg, tool_id, step_name)
+                    formatted_error["user_message"] = user_message  # 优先保留工具侧用户向文案
+                else:
+                    formatted_error = ErrorFormatter.format_error(error_msg, tool_id, step_name)
                 
                 # 存储结果供后续步骤使用（即使失败也存储，用于调试）
                 self.step_results[step_id] = result
@@ -609,7 +690,7 @@ class WorkflowExecutor:
                     "tool_id": tool_id,
                     "result": result,
                     "error": error_msg,
-                    "message": formatted_error["user_message"],  # 🔥 使用用户友好的错误消息
+                    "message": formatted_error["user_message"],
                     "user_message": formatted_error["user_message"],
                     "error_category": formatted_error["error_category"],
                     "suggestion": formatted_error["suggestion"],
@@ -637,20 +718,23 @@ class WorkflowExecutor:
                 }
         
         except Exception as e:
-            error_msg = f"步骤 {step_id} 执行失败: {str(e)}"
+            error_msg = str(e)
             tb_str = traceback.format_exc()
-            logger.error(f"❌ {error_msg}\n{tb_str}")
+            logger.error(f"❌ 步骤 {step_id} 执行失败: {error_msg}\n{tb_str}")
             
-            # 🔥 TASK 4: 格式化异常错误信息
+            # 🔥 全局报错一致性：ValueError 等业务异常常含中文说明，优先保留为 user_message
             from .error_formatter import ErrorFormatter
-            formatted_error = ErrorFormatter.format_error(str(e), tool_id, step_name, error_type="exception")
+            formatted_error = ErrorFormatter.format_error(error_msg, tool_id, step_name, error_type="exception")
+            if isinstance(e, ValueError) and len(error_msg.strip()) >= 15 and any(c in error_msg for c in ["请", "需要", "检查", "上传", "指定"]):
+                formatted_error["user_message"] = error_msg
+                formatted_error["error_category"] = "data_issue"
             
             return {
                 "status": "error",
                 "step_id": step_id,
                 "step_name": step_name,
                 "tool_id": tool_id,
-                "error": str(e),
+                "error": error_msg,
                 "message": formatted_error["user_message"],
                 "user_message": formatted_error["user_message"],
                 "error_category": formatted_error["error_category"],
@@ -838,10 +922,19 @@ class WorkflowExecutor:
                     else:
                         logger.warning(f"⚠️ 未找到 differential_analysis 步骤结果，无法提取 {placeholder}")
                 
-                # 尝试从 step_results 中获取
-                if placeholder in self.step_results:
-                    step_result = self.step_results[placeholder]
-                    # 🔥 CRITICAL FIX: 对于 scRNA-seq 工具，优先提取 output_h5ad
+                # 尝试从 step_results 中获取；若占位符对应步骤被跳过，用前序步骤输出（纯无负担跳过）
+                step_result = self.step_results.get(placeholder)
+                if not step_result and step_context and isinstance(step_context.get("steps_order"), list):
+                    steps_order = step_context["steps_order"]
+                    if placeholder in steps_order:
+                        idx = steps_order.index(placeholder)
+                        for j in range(idx - 1, -1, -1):
+                            prev_id = steps_order[j]
+                            if prev_id in self.step_results:
+                                step_result = self.step_results[prev_id]
+                                logger.info(f"🔄 占位符 <{placeholder}> 对应步骤未执行，回退使用前序步骤 {prev_id} 的输出")
+                                break
+                if step_result is not None:
                     if isinstance(step_result, dict):
                         # 对于 scRNA-seq 工具，优先查找 output_h5ad
                         if tool_category == "scRNA-seq":
@@ -905,6 +998,13 @@ class WorkflowExecutor:
         if "group_column" in params and "group_column" not in processed:
             processed["group_column"] = params["group_column"]
             logger.error(f"❌ [数据流处理] CRITICAL: group_column 在双重检查中丢失，已强制恢复: {params['group_column']}")
+        
+        # 替换参数字符串中的 <output_dir> 为实际输出目录（如 output_plot_path: "<output_dir>/xxx.png"）
+        if step_context and step_context.get("output_dir"):
+            out_dir = step_context["output_dir"]
+            for k, v in list(processed.items()):
+                if isinstance(v, str) and "<output_dir>" in v:
+                    processed[k] = v.replace("<output_dir>", out_dir)
         
         return processed
     
@@ -1236,12 +1336,15 @@ class WorkflowExecutor:
                 placeholder_keys = [k for k, v in params.items() if isinstance(v, str) and v.startswith("<") and v.endswith(">")]
                 logger.info(f"🔄 检测到占位符 {placeholder_keys}，跳过自动注入，等待占位符解析")
             
-            # 构建步骤上下文（包含文件路径等）
+            # 构建步骤上下文（含 steps_order 供占位符回退：跳过某步时用前序步骤输出）
+            steps_order = [s.get("step_id") or s.get("tool_id") or s.get("id") for s in steps if (s.get("step_id") or s.get("tool_id") or s.get("id"))]
             step_context = {
                 "file_paths": file_paths or [],
                 "output_dir": self.output_dir,
                 "workflow_name": workflow_name,
-                "current_file_path": current_file_path  # 传递当前文件路径
+                "current_file_path": current_file_path,
+                "recommended_params": workflow_data.get("recommended_params"),
+                "steps_order": steps_order,
             }
             
             # 🔥 参数映射：如果工具期望 adata_path 但提供了 file_path，进行映射
@@ -1331,7 +1434,12 @@ class WorkflowExecutor:
                         else:
                             logger.debug(f"🔍 [Executor] 步骤 {tool_id} 的输出不更新 current_file_path（后续步骤应使用占位符）")
             
-            # 构建步骤详情（符合前端格式）；传递错误与 traceback 以便前端控制台可打印
+            # 构建步骤详情（符合前端格式）；data 合并顶层 plot_path/output_plot_path 以便前端报告渲染
+            result_data = step_result.get("result", {}) or {}
+            if isinstance(result_data, dict):
+                for k in ("plot_path", "output_plot_path", "lollipop_path", "clustermap_path"):
+                    if step_result.get(k) and k not in result_data:
+                        result_data = {**result_data, k: step_result.get(k)}
             step_detail = {
                 "step_id": step_id,
                 "tool_id": step.get("tool_id"),
@@ -1342,7 +1450,10 @@ class WorkflowExecutor:
                     "step_name": step_name,
                     "status": step_result.get("status", "error"),
                     "logs": step_result.get("message", ""),
-                    "data": step_result.get("result", {})
+                    "data": result_data,
+                    "error": step_result.get("error", ""),
+                    "message": step_result.get("message", ""),
+                    "user_message": step_result.get("user_message", ""),
                 }
             }
             if step_result.get("status") == "error":
@@ -1356,25 +1467,27 @@ class WorkflowExecutor:
                 step_detail["traceback"] = step_result.get("traceback", "") or step_result.get("debug_info", "")
                 step_detail["debug_info"] = step_result.get("debug_info", "") or step_result.get("traceback", "")
             
-            # 🔥 提取图片路径（如果有）- 优先可展示的 PNG/JPEG，绝不使用 .nii/.dcm 作为 plot
-            result_data = step_result.get("result", {})
-            if isinstance(result_data, dict):
-                cand = result_data.get("plot_path")
-                if not cand or not self._is_image_file(cand):
-                    out_cand = result_data.get("output_path") or result_data.get("output_file") or result_data.get("file_path")
-                    if out_cand and self._is_image_file(out_cand):
-                        cand = out_cand
-                if not cand or not self._is_image_file(cand):
-                    img_cand = result_data.get("image_path")
-                    if img_cand and self._is_image_file(img_cand):
-                        cand = img_cand
-                plot_path = cand
-                path_lower = (plot_path or "").lower()
-                if plot_path and self._is_image_file(plot_path) and not path_lower.endswith(".nii.gz") and not path_lower.endswith(".nii") and not path_lower.endswith(".dcm"):
-                    step_detail["plot"] = plot_path
-                    logger.info(f"🖼️ 检测到图片文件: {plot_path}")
-                elif plot_path:
-                    logger.debug(f"📄 跳过非可展示文件作为 plot: {plot_path}")
+            # 🔥 提取图片路径（如果有）- 优先 result，再顶层；支持 plot_path / output_plot_path
+            result_data = step_result.get("result", {}) or {}
+            if not isinstance(result_data, dict):
+                result_data = {}
+            cand = (result_data.get("plot_path") or result_data.get("output_plot_path") or
+                    step_result.get("plot_path") or step_result.get("output_plot_path"))
+            if not cand or not self._is_image_file(cand):
+                out_cand = result_data.get("output_path") or result_data.get("output_file") or result_data.get("file_path")
+                if out_cand and self._is_image_file(out_cand):
+                    cand = out_cand
+            if not cand or not self._is_image_file(cand):
+                img_cand = result_data.get("image_path") or result_data.get("lollipop_path") or result_data.get("clustermap_path")
+                if img_cand and self._is_image_file(img_cand):
+                    cand = img_cand
+            plot_path = cand
+            path_lower = (plot_path or "").lower()
+            if plot_path and self._is_image_file(plot_path) and not path_lower.endswith(".nii.gz") and not path_lower.endswith(".nii") and not path_lower.endswith(".dcm"):
+                step_detail["plot"] = plot_path
+                logger.info(f"🖼️ 检测到图片文件: {plot_path}")
+            elif plot_path:
+                logger.debug(f"📄 跳过非可展示文件作为 plot: {plot_path}")
             
             steps_details.append(step_detail)
             steps_results.append(step_detail["step_result"])

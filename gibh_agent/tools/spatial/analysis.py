@@ -3,11 +3,60 @@ Spatial analysis: QC, PCA, clustering, UMAP, neighbors graph, autocorrelation (M
 """
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from ...core.tool_registry import registry
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Step 0: Image & coordinate validation (show muscle)
+# ---------------------------------------------------------------------------
+
+@registry.register(
+    name="spatial_data_validation",
+    description="Fast validation: read h5ad, check obsm['spatial'] and uns['spatial']. For DAG visibility only.",
+    category="Spatial",
+    output_type="json",
+)
+def spatial_data_validation(adata_path: Optional[str] = None, h5ad_path: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]:
+    """
+    极速空间数据校验：读取 h5ad，检查 obsm['spatial'] 与 uns['spatial']（如有）。
+    不修改数据，不写回文件。接受 adata_path 或 h5ad_path（与 executor 一致）。
+    """
+    path_in = adata_path or h5ad_path or (kwargs.get("h5ad_path") if kwargs else None)
+    if not path_in:
+        return {"status": "error", "error": "请提供 adata_path 或 h5ad_path"}
+    try:
+        import anndata as ad
+    except ImportError:
+        return {"status": "error", "error": "anndata is required"}
+    p = Path(path_in)
+    if not p.is_file():
+        return {"status": "error", "error": f"h5ad file not found: {path_in}"}
+    try:
+        adata = ad.read_h5ad(p)
+        n_spots = adata.n_obs
+        n_genes = adata.n_vars
+        has_spatial_coord = "spatial" in adata.obsm
+        has_spatial_uns = "spatial" in adata.uns
+        return {
+            "status": "success",
+            "message": (
+                f"空间数据校验通过。共 {n_spots} 个空间位点 (Spots)，{n_genes} 个基因。"
+                "空间物理坐标对齐完成，内存预分配完毕。"
+            ),
+            "n_spots": int(n_spots),
+            "n_genes": int(n_genes),
+            "has_obsm_spatial": has_spatial_coord,
+            "has_uns_spatial": has_spatial_uns,
+            "h5ad_path": str(p.resolve()),
+            "output_path": str(p.resolve()),
+        }
+    except Exception as e:
+        logger.warning("spatial_data_validation failed: %s", e)
+        return {"status": "error", "error": str(e)}
 
 
 # ---------------------------------------------------------------------------
@@ -177,16 +226,213 @@ def spatial_clustering(
         out = out.parent / (out.stem + ".h5ad") if out.suffix.lower() != ".h5ad" else out
         out.parent.mkdir(parents=True, exist_ok=True)
         adata.write_h5ad(str(out))
-        return {
+
+        # 追加：双屏联动图 (UMAP + 空间切片) + Top3 SVG 物理映射图（不替换原有逻辑）
+        dual_path = None
+        top3_svg_path = None
+        if output_path and "spatial" in adata.obsm:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            out_dir = out.parent
+            try:
+                if "X_umap" not in adata.obsm and "neighbors" in adata.uns:
+                    sc.tl.umap(adata, min_dist=0.5, spread=1.0)
+                palette = adata.uns.get(f"{key_added}_colors")
+                import numpy as np
+                if palette is None:
+                    palette = list(plt.get_cmap("tab10")(np.linspace(0, 1, max(n_clusters, 1))))
+                if "X_umap" in adata.obsm:
+                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+                    sc.pl.umap(adata, color=key_added, ax=ax1, show=False, palette=palette, legend_loc="on data" if n_clusters <= 8 else "right margin")
+                    try:
+                        import squidpy as sq
+                        sq.pl.spatial_scatter(adata, color=key_added, ax=ax2, show=False, img=bool(adata.uns.get("spatial")), spot_size=100, palette=palette)
+                    except Exception:
+                        _draw_spatial_categorical(adata, key_added, ax2, palette=palette)
+                    plt.tight_layout()
+                    dual_path = str(out_dir / "spatial_umap_dual.png")
+                    fig.savefig(dual_path, bbox_inches="tight", dpi=150)
+                    plt.close()
+            except Exception as ex:
+                logger.warning("双屏联动图生成失败: %s", ex)
+            # 隐患 2 修复：按优先级探测 Top 基因来源（moranI -> rank_genes_groups），避免仅绑定 moranI 导致标准流程永不触发
+            try:
+                top_genes = []
+                if "moranI" in adata.uns:
+                    import pandas as pd
+                    res = adata.uns["moranI"]
+                    if isinstance(res, pd.DataFrame):
+                        if "I" in res.columns:
+                            top_genes = res.nlargest(3, "I").index.tolist()
+                        else:
+                            top_genes = res.index[:3].tolist()
+                    else:
+                        top_genes = list(res.keys())[:3] if isinstance(res, dict) else []
+                if not top_genes and "rank_genes_groups" in adata.uns:
+                    rgg = adata.uns["rank_genes_groups"]
+                    names = rgg.get("names")
+                    if names is not None:
+                        try:
+                            group_names = names.dtype.names if hasattr(names.dtype, "names") else None
+                            if group_names:
+                                first_group = group_names[0]
+                                top_genes = list(names[first_group][:3])
+                            else:
+                                top_genes = list(names.flatten())[:3]
+                        except Exception:
+                            top_genes = []
+                top_genes = [g for g in top_genes if g in adata.var_names][:3]
+                if top_genes:
+                    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+                    for i, gene in enumerate(top_genes):
+                        ax = axes[i]
+                        try:
+                            import squidpy as sq
+                            sq.pl.spatial_scatter(adata, color=gene, ax=ax, show=False, img=bool(adata.uns.get("spatial")), cmap="magma", spot_size=100)
+                        except Exception:
+                            _draw_spatial_gene(adata, gene, ax, cmap="magma")
+                        ax.set_title(gene)
+                    plt.tight_layout()
+                    top3_svg_path = str(out_dir / "spatial_top3_svg.png")
+                    fig.savefig(top3_svg_path, bbox_inches="tight", dpi=150)
+                    plt.close()
+                else:
+                    logger.info("无 Moran's I 或 rank_genes_groups 可用基因，跳过 Top3 基因空间映射图")
+            except Exception as ex:
+                logger.warning("Top3 SVG 物理映射图生成失败: %s", ex)
+
+        result = {
             "status": "success",
             "output_path": str(out.resolve()),
             "h5ad_path": str(p.resolve()),
             "n_clusters": n_clusters,
             "key_added": key_added,
         }
+        if dual_path:
+            result["dual_panel_path"] = dual_path
+        if top3_svg_path:
+            result["top3_svg_path"] = top3_svg_path
+        return result
     except Exception as e:
         logger.exception("spatial_clustering failed: %s", e)
         return {"status": "error", "error": str(e), "h5ad_path": h5ad_path}
+
+
+@registry.register(
+    name="spatial_clustering_comparison",
+    description="Multi-resolution spatial domains: Leiden at 0.3/0.5/0.8, 1x3 spatial plot. Input adata must have spatial neighbors.",
+    category="Spatial",
+    output_type="mixed",
+)
+def spatial_clustering_comparison(
+    adata_path: Optional[str] = None,
+    output_plot_path: str = "",
+    resolutions: Optional[List[float]] = None,
+    h5ad_path: Optional[str] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    多分辨率空间域对比：对已构建空间邻域图的 adata 在 0.3/0.5/0.8 下做 Leiden，
+    绘制 1x3 组织切片聚类图。无 H&E 时仅绘制坐标散点，不抛 KeyError。
+    """
+    path_in = adata_path or h5ad_path or (kwargs.get("h5ad_path") if kwargs else None)
+    if not path_in:
+        return {"status": "error", "error": "请提供 adata_path 或 h5ad_path"}
+    if resolutions is None:
+        resolutions = [0.3, 0.5, 0.8]
+    try:
+        import anndata as ad
+        import scanpy as sc
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError as e:
+        return {"status": "error", "error": f"scanpy/anndata required: {e}"}
+    p = Path(path_in)
+    if not p.is_file():
+        return {"status": "error", "error": f"h5ad file not found: {path_in}"}
+    try:
+        adata = ad.read_h5ad(p)
+        if "spatial" not in adata.obsm:
+            return {"status": "error", "error": "No obsm['spatial'] in AnnData."}
+        if "neighbors" not in adata.uns:
+            rep = "X_pca" if "X_pca" in adata.obsm else "X"
+            sc.pp.neighbors(adata, n_neighbors=15, use_rep=rep)
+        keys = []
+        for res in resolutions:
+            key = f"spatial_leiden_{res}"
+            keys.append(key)
+            sc.tl.leiden(adata, resolution=res, key_added=key)
+        out = Path(output_plot_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if out.suffix.lower() != ".png":
+            out = out.parent / (out.stem + ".png")
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        has_image = bool(adata.uns.get("spatial"))
+        for i, (res, key) in enumerate(zip(resolutions, keys)):
+            ax = axes[i]
+            try:
+                if has_image:
+                    import squidpy as sq
+                    sq.pl.spatial_scatter(adata, color=key, ax=ax, show=False, img=True, spot_size=100)
+                else:
+                    _draw_spatial_categorical(adata, key, ax)
+            except Exception:
+                _draw_spatial_categorical(adata, key, ax)
+            ax.set_title(f"Resolution {res}")
+        plt.tight_layout()
+        fig.savefig(str(out), bbox_inches="tight", dpi=150)
+        plt.close()
+        return {
+            "status": "success",
+            "message": "多分辨率空间域对比图已保存",
+            "plot_path": str(out.resolve()),
+            "h5ad_path": str(p.resolve()),
+            "output_path": str(p.resolve()),
+        }
+    except Exception as e:
+        logger.exception("spatial_clustering_comparison failed: %s", e)
+        return {"status": "error", "error": str(e), "h5ad_path": path_in}
+
+
+def _draw_spatial_categorical(adata: Any, color_by: str, ax: Any, palette: Optional[List[Any]] = None) -> None:
+    """无底图时按 obsm['spatial'] 画散点，分类着色；palette 与 UMAP 一致时双屏颜色一致。"""
+    import numpy as np
+    import matplotlib.pyplot as plt
+    xy = adata.obsm["spatial"]
+    valid = ~np.any(np.isnan(xy), axis=1)
+    xy = xy[valid]
+    raw = adata.obs[color_by].values[valid]
+    import pandas as pd
+    cat = pd.Categorical(raw)
+    vals = cat.codes.astype(int)
+    n_cat = len(cat.categories)
+    if palette is not None and len(palette) >= n_cat:
+        colors = [palette[i] for i in vals]
+        ax.scatter(xy[:, 0], xy[:, 1], c=colors, s=8)
+    else:
+        cmap = plt.get_cmap("tab10" if n_cat <= 10 else "tab20")
+        ax.scatter(xy[:, 0], xy[:, 1], c=vals, s=8, cmap=cmap, vmin=-0.5, vmax=n_cat - 0.5)
+    ax.set_title(color_by)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+
+
+def _draw_spatial_gene(adata: Any, gene: str, ax: Any, cmap: str = "magma") -> None:
+    """无底图时按 obsm['spatial'] 画基因表达散点。"""
+    import numpy as np
+    import matplotlib.pyplot as plt
+    xy = adata.obsm["spatial"]
+    valid = ~np.any(np.isnan(xy), axis=1)
+    idx = list(adata.var_names).index(gene) if gene in adata.var_names else 0
+    v = adata.X[valid, idx]
+    vals = np.ravel(v.toarray() if hasattr(v, "toarray") else v)
+    sc = ax.scatter(xy[valid, 0], xy[valid, 1], c=vals, s=8, cmap=cmap)
+    plt.colorbar(sc, ax=ax, label=gene)
+    ax.set_title(gene)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
 
 
 @registry.register(

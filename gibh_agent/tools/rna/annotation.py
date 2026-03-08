@@ -9,10 +9,64 @@ from pathlib import Path
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import numpy as np
 
 from ...core.tool_registry import registry
 
 logger = logging.getLogger(__name__)
+
+
+def _append_dotplot_and_barplot(
+    adata,
+    output_dir: str,
+    groupby_key: str,
+    sc,
+    timestamp: Optional[int] = None,
+) -> Dict[str, Optional[str]]:
+    """
+    在注释完成后追加：DotPlot（Top 3-5 marker 按细胞类型）+ 细胞亚群比例柱状图。
+    不修改原有逻辑，仅追加保存新图。返回 {"dotplot_path": ..., "barplot_path": ...}。
+    """
+    out = {"dotplot_path": None, "barplot_path": None}
+    if not output_dir or groupby_key not in adata.obs.columns:
+        return out
+    ts = timestamp or int(time.time())
+    os.makedirs(output_dir, exist_ok=True)
+    try:
+        n_top = 5
+        sc.tl.rank_genes_groups(adata, groupby_key, method="wilcoxon", n_genes=n_top)
+        top_genes = []
+        for g in adata.uns["rank_genes_groups"]["names"].dtype.names:
+            for j in range(min(n_top, len(adata.uns["rank_genes_groups"]["names"][g]))):
+                gn = adata.uns["rank_genes_groups"]["names"][g][j]
+                if gn in adata.var_names and gn not in top_genes:
+                    top_genes.append(gn)
+        top_genes = top_genes[:15]
+        if top_genes:
+            fig, ax = plt.subplots(figsize=(max(8, len(top_genes) * 0.4), 5))
+            sc.pl.dotplot(adata, var_names=top_genes, groupby=groupby_key, ax=ax, show=False)
+            plt.tight_layout()
+            dot_path = os.path.join(output_dir, f"dotplot_celltype_{ts}.png")
+            plt.savefig(dot_path, bbox_inches="tight", dpi=150)
+            plt.close()
+            out["dotplot_path"] = dot_path
+    except Exception as e:
+        logger.warning("DotPlot 追加失败: %s", e)
+    try:
+        counts = adata.obs[groupby_key].value_counts()
+        fig, ax = plt.subplots(figsize=(max(6, len(counts) * 0.5), 5))
+        counts.plot(kind="bar", ax=ax, color=plt.cm.tab20(np.linspace(0, 1, len(counts))))
+        ax.set_title("细胞亚群比例")
+        ax.set_ylabel("细胞数")
+        plt.xticks(rotation=45, ha="right")
+        plt.tight_layout()
+        bar_path = os.path.join(output_dir, f"celltype_proportion_{ts}.png")
+        plt.savefig(bar_path, bbox_inches="tight", dpi=150)
+        plt.close()
+        out["barplot_path"] = bar_path
+    except Exception as e:
+        logger.warning("柱状图追加失败: %s", e)
+    return out
 
 
 def _get_fallback_markers() -> Dict[str, str]:
@@ -120,6 +174,8 @@ def _fallback_marker_annotation(
         out_dir = os.path.dirname(adata_path) or "."
         output_h5ad = os.path.join(out_dir, "annotated.h5ad")
         adata.write(output_h5ad)
+    # 追加 DotPlot 与细胞亚群比例柱状图
+    extra_plots = _append_dotplot_and_barplot(adata, output_dir or out_dir, "cell_type", sc)
     return {
         "status": "success",
         "method": "marker_fallback",
@@ -127,6 +183,8 @@ def _fallback_marker_annotation(
         "n_cell_types": n_cell_types,
         "cell_types": label_counts.to_dict() if hasattr(label_counts, "to_dict") else dict(label_counts),
         "plot_path": plot_path,
+        "dotplot_path": extra_plots.get("dotplot_path"),
+        "barplot_path": extra_plots.get("barplot_path"),
         "output_h5ad": output_h5ad,
         "summary": f"细胞类型注释完成（基于 marker 打分）: 识别到 {n_cell_types} 种类型",
     }
@@ -341,7 +399,8 @@ def run_cell_annotation(
                 if output_dir:
                     output_h5ad = os.path.join(output_dir, "annotated.h5ad")
                     adata.write(output_h5ad)
-                
+                # 追加 DotPlot 与细胞亚群比例柱状图（不替换原有图表）
+                extra_plots = _append_dotplot_and_barplot(adata, output_dir, "predicted_labels", sc)
                 return {
                     "status": "success",
                     "method": "celltypist",
@@ -349,6 +408,8 @@ def run_cell_annotation(
                     "n_cell_types": n_cell_types,
                     "cell_types": label_counts.to_dict(),
                     "plot_path": plot_path,
+                    "dotplot_path": extra_plots.get("dotplot_path"),
+                    "barplot_path": extra_plots.get("barplot_path"),
                     "output_h5ad": output_h5ad,
                     "summary": f"细胞类型注释完成: 识别到 {n_cell_types} 种细胞类型"
                 }

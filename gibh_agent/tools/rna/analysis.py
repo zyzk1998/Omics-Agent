@@ -4,7 +4,7 @@
 import os
 import time
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from pathlib import Path
 import matplotlib
 matplotlib.use('Agg')
@@ -447,6 +447,60 @@ def run_clustering(
             "status": "error",
             "error": str(e)
         }
+
+
+@registry.register(
+    name="rna_clustering_comparison",
+    description="Multi-resolution Leiden clustering comparison: runs Leiden at 0.3, 0.5, 0.8 and plots 1x3 UMAP comparison. Adds only key_added columns; persists UMAP/neighbors to h5ad so downstream does not recompute.",
+    category="scRNA-seq",
+    output_type="mixed"
+)
+def run_clustering_comparison(
+    adata_path: str,
+    output_plot_path: str,
+    resolutions: Optional[List[float]] = None
+) -> Dict[str, Any]:
+    """
+    多分辨率聚类对比：在已降维的 adata 上以 0.3/0.5/0.8 跑 Leiden，绘制 1x3 UMAP 对比图。
+    仅添加 leiden_0.3/0.5/0.8，不覆盖默认 leiden。若在内存中计算了 UMAP/neighbors，会写回 h5ad 供下游复用，避免重复计算（隐患 4 修复）。
+    """
+    if resolutions is None:
+        resolutions = [0.3, 0.5, 0.8]
+    try:
+        import scanpy as sc
+        adata = sc.read_h5ad(adata_path)
+        if "X_umap" not in adata.obsm.keys():
+            if "neighbors" not in adata.uns:
+                sc.pp.neighbors(adata, use_rep="X_pca" if "X_pca" in adata.obsm else None)
+            sc.tl.umap(adata)
+        for res in resolutions:
+            sc.tl.leiden(adata, resolution=res, key_added=f"leiden_{res}")
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        for i, res in enumerate(resolutions):
+            sc.pl.umap(adata, color=f"leiden_{res}", ax=axes[i], show=False, title=f"Resolution {res}")
+        plt.tight_layout()
+        out_dir = os.path.dirname(output_plot_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        fig.savefig(output_plot_path, bbox_inches="tight", dpi=150)
+        plt.close()
+        # 持久化：下游 rna_find_markers 等可直接复用 X_umap/neighbors，避免 10 万+ 细胞重复计算
+        out_h5ad = adata_path
+        try:
+            adata.write_h5ad(out_h5ad)
+            logger.info("已写回 h5ad（含多分辨率 leiden 与 UMAP/neighbors）: %s", out_h5ad)
+        except Exception as write_err:
+            logger.warning("写回 h5ad 失败（下游可能重复计算 UMAP）: %s", write_err)
+        return {
+            "status": "success",
+            "message": "多分辨率聚类对比图已保存",
+            "plot_path": output_plot_path,
+            "resolutions": resolutions,
+            "output_h5ad": out_h5ad,
+        }
+    except Exception as e:
+        logger.error("rna_clustering_comparison failed: %s", e, exc_info=True)
+        return {"status": "error", "error": str(e)}
 
 
 @registry.register(

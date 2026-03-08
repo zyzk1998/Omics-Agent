@@ -51,3 +51,12 @@ SimpleITK>=2.3.0
 pyradiomics>=3.1.0
 opencv-python-headless>=4.8.0
 
+# Phase 1: 用户与资产中台 - MySQL + SQLAlchemy
+sqlalchemy>=2.0.0
+pymysql>=1.1.0
+cryptography>=41.0.0
+
+# Phase 2: 鉴权 - 密码哈希与 JWT
+passlib[bcrypt]>=1.7.4
+python-jose[cryptography]>=3.3.0
+

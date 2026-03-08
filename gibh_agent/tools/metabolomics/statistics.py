@@ -11,8 +11,11 @@ from sklearn.preprocessing import StandardScaler
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import seaborn as sns
 from scipy import stats
 from statsmodels.stats.multitest import multipletests
+from sklearn.cross_decomposition import PLSRegression
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 from ...core.tool_registry import registry
 
@@ -396,6 +399,29 @@ def run_differential_analysis(
                     abs(result["log2fc"]) >= np.log2(fold_change_threshold)
                 )
         
+        # 🔥 计算 VIP（PLS-DA）用于棒棒糖图与下游展示
+        vip_by_metabolite = {}
+        try:
+            X_mat = df[metabolite_cols].fillna(df[metabolite_cols].median()).values
+            if not np.isnan(X_mat).any() and X_mat.shape[1] >= 2:
+                y_enc = LabelEncoder().fit_transform(groups.astype(str))
+                X_sc = StandardScaler().fit_transform(X_mat)
+                pls = PLSRegression(n_components=2)
+                pls.fit(X_sc, y_enc)
+                T = pls.x_scores_
+                W = pls.x_weights_
+                ss_per_comp = np.sum(T ** 2, axis=0)
+                total_ss = ss_per_comp.sum()
+                if total_ss > 0:
+                    vip_arr = np.sqrt(len(metabolite_cols) * np.sum(W ** 2 * ss_per_comp, axis=1))
+                    vip_by_metabolite = dict(zip(metabolite_cols, vip_arr.tolist()))
+            for r in results:
+                r["vip"] = float(vip_by_metabolite.get(r["metabolite"], 0.0))
+        except Exception as e:
+            logger.warning("VIP 计算跳过: %s", e)
+            for r in results:
+                r["vip"] = 0.0
+        
         # 🔥 保存结果到 CSV 文件（用于数据流传递和可视化）
         output_path = None
         if output_dir:
@@ -418,6 +444,56 @@ def run_differential_analysis(
             results_df.to_csv(output_path, index=False)
             logger.info(f"💾 差异分析结果已保存: {output_path}")
         
+        # 🔥 追加：VIP 棒棒糖图 + 聚类热图（不替换原有火山图，火山图在 visualize_volcano 步骤）
+        lollipop_path = None
+        clustermap_path = None
+        if output_dir and results:
+            out_dir = Path(output_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            top_candidates = [r for r in results if r.get("vip", 0) > 1 and r.get("significant", False)]
+            top_candidates.sort(key=lambda x: (-x["vip"], x.get("p_value", 1)))
+            top_list = top_candidates[:20]
+            if len(top_list) < 5:
+                sig_list = [r for r in results if r.get("significant", False)]
+                sig_list.sort(key=lambda x: x.get("p_value", 1))
+                top_list = (top_list + sig_list)[:20]
+            if top_list:
+                try:
+                    # VIP 棒棒糖图：横轴 VIP，纵轴代谢物名，颜色/大小映射 Log2FC
+                    fig, ax = plt.subplots(figsize=(8, max(5, len(top_list) * 0.25)))
+                    names = [r["metabolite"][:40] for r in top_list]
+                    vips = [r["vip"] for r in top_list]
+                    log2fcs = [r["log2fc"] for r in top_list]
+                    colors = ["#e74c3c" if fc > 0 else "#3498db" for fc in log2fcs]
+                    y_pos = range(len(names))
+                    ax.hlines(y_pos, 0, vips, color="lightgray", lw=1.5)
+                    sc = ax.scatter(vips, y_pos, c=colors, s=np.clip(np.abs(log2fcs) * 8 + 30, 30, 150), alpha=0.8, zorder=2)
+                    ax.set_yticks(y_pos)
+                    ax.set_yticklabels(names, fontsize=9)
+                    ax.set_xlabel("VIP Score")
+                    ax.set_title("Top 差异代谢物 (VIP>1, P<0.05)")
+                    ax.axvline(x=1, color="gray", linestyle="--", alpha=0.7)
+                    plt.tight_layout()
+                    lollipop_path = str(out_dir / "differential_vip_lollipop.png")
+                    plt.savefig(lollipop_path, bbox_inches="tight", dpi=150)
+                    plt.close()
+                except Exception as e:
+                    logger.warning("棒棒糖图生成失败: %s", e)
+                try:
+                    # 聚类热图：Top 代谢物在所有样本中的表达
+                    top_metabolites = [r["metabolite"] for r in top_list]
+                    plot_cols = [c for c in top_metabolites if c in df.columns]
+                    if plot_cols:
+                        mat = df[plot_cols].T
+                        mat_z = (mat - mat.mean(axis=1).values.reshape(-1, 1)) / (mat.std(axis=1).values.reshape(-1, 1) + 1e-8)
+                        g = sns.clustermap(mat_z, cmap="vlag", figsize=(10, max(6, len(plot_cols) * 0.3)), cbar_kws={"label": "Z-score"})
+                        g.fig.suptitle("Top 差异代谢物表达 (Z-score)", y=1.02)
+                        clustermap_path = str(out_dir / "differential_clustermap.png")
+                        g.savefig(clustermap_path, bbox_inches="tight", dpi=150)
+                        plt.close()
+                except Exception as e:
+                    logger.warning("聚类热图生成失败: %s", e)
+        
         # 统计摘要
         significant_count = sum(1 for r in results if r.get("significant", False))
         significant_results = [r for r in results if r.get("significant", False)]
@@ -429,7 +505,7 @@ def run_differential_analysis(
         top_up_names = [r["metabolite"] for r in top_up]
         top_down_names = [r["metabolite"] for r in top_down]
         
-        return {
+        out = {
             "status": "success",
             "results": results,
             "output_path": output_path,
@@ -448,6 +524,11 @@ def run_differential_analysis(
                 "top_down": top_down_names
             }
         }
+        if lollipop_path:
+            out["lollipop_path"] = lollipop_path
+        if clustermap_path:
+            out["clustermap_path"] = clustermap_path
+        return out
     
     except Exception as e:
         logger.error(f"❌ 差异分析失败: {e}", exc_info=True)

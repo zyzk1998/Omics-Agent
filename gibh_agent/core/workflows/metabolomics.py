@@ -11,14 +11,16 @@ class MetabolomicsWorkflow(BaseWorkflow):
     """
     代谢组学工作流
     
-    标准7步流程：
-    1. inspect_data - 数据检查
-    2. preprocess_data - 数据预处理
-    3. pca_analysis - PCA 分析
-    4. metabolomics_plsda - PLS-DA 分析（如果有分组）
-    5. differential_analysis - 差异分析（如果有分组）
-    6. visualize_volcano - 火山图可视化（如果有分组）
-    7. metabolomics_pathway_enrichment - 通路富集分析（如果有分组）
+    标准流程（含工作量外显与可视化升维）：
+    1. metabo_data_validation - 数据校验与稀疏性检查（秀肌肉前置）
+    2. inspect_data - 数据检查
+    3. preprocess_data - 数据预处理
+    4. pca_analysis - PCA 分析
+    5. metabolomics_plsda - PLS-DA 分析（如果有分组）
+    6. metabo_model_comparison - 多维模型对比（PCA/PLS-DA/VIP 1x3 图）
+    7. differential_analysis - 差异分析（如果有分组）
+    8. visualize_volcano - 火山图可视化（如果有分组）
+    9. metabolomics_pathway_enrichment - 通路富集分析（如果有分组）
     """
     
     def get_name(self) -> str:
@@ -37,25 +39,31 @@ class MetabolomicsWorkflow(BaseWorkflow):
             依赖图字典
         """
         return {
-            # 步骤1: 数据检查（无依赖）
-            "inspect_data": [],
+            # 步骤1: 数据校验与稀疏性检查（无依赖，秀肌肉前置）
+            "metabo_data_validation": [],
             
-            # 步骤2: 数据预处理（依赖：inspect_data）
+            # 步骤2: 数据检查（依赖：metabo_data_validation）
+            "inspect_data": ["metabo_data_validation"],
+            
+            # 步骤3: 数据预处理（依赖：inspect_data）
             "preprocess_data": ["inspect_data"],
             
-            # 步骤3: PCA 分析（依赖：preprocess_data）
+            # 步骤4: PCA 分析（依赖：preprocess_data）
             "pca_analysis": ["preprocess_data"],
             
-            # 步骤4: PLS-DA 分析（依赖：preprocess_data，可选）
+            # 步骤5: PLS-DA 分析（依赖：preprocess_data，可选）
             "metabolomics_plsda": ["preprocess_data"],
             
-            # 步骤5: 差异分析（依赖：preprocess_data）
-            "differential_analysis": ["preprocess_data"],
+            # 步骤6: 多维模型对比（依赖：preprocess_data，输出 pass-through 给差异分析）
+            "metabo_model_comparison": ["preprocess_data"],
             
-            # 步骤6: 火山图可视化（依赖：differential_analysis）
+            # 步骤7: 差异分析（依赖：metabo_model_comparison，使用其 pass-through 的 data_path）
+            "differential_analysis": ["metabo_model_comparison"],
+            
+            # 步骤8: 火山图可视化（依赖：differential_analysis）
             "visualize_volcano": ["differential_analysis"],
             
-            # 步骤7: 通路富集分析（依赖：differential_analysis）
+            # 步骤9: 通路富集分析（依赖：differential_analysis）
             "metabolomics_pathway_enrichment": ["differential_analysis"],
         }
     
@@ -70,6 +78,12 @@ class MetabolomicsWorkflow(BaseWorkflow):
             步骤元数据字典
         """
         metadata_map = {
+            "metabo_data_validation": {
+                "name": "数据校验与稀疏性检查",
+                "description": "快速校验丰度矩阵与样本分组：shape、缺失率、零值比例，用于流程前置展示",
+                "tool_id": "metabo_data_validation",
+                "default_params": {}
+            },
             "inspect_data": {
                 "name": "数据检查",
                 "description": "SOP规则：必须首先进行数据质量评估，检查缺失值、数据范围等",
@@ -101,6 +115,16 @@ class MetabolomicsWorkflow(BaseWorkflow):
                 "tool_id": "metabolomics_plsda",
                 "default_params": {
                     "n_components": 2
+                }
+            },
+            "metabo_model_comparison": {
+                "name": "多维模型对比",
+                "description": "PCA + PLS-DA + VIP 1x3 对比图（无监督/有监督/特征重要性），输入需已插补与标准化",
+                "tool_id": "metabo_model_comparison",
+                "default_params": {
+                    "data_path": "<preprocess_data_output>",
+                    "meta_path": "<preprocess_data_output>",
+                    "output_plot_path": "<output_dir>/metabo_model_comparison.png"
                 }
             },
             "differential_analysis": {

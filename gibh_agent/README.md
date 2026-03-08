@@ -168,6 +168,21 @@ task_info = await dispatcher.submit_script(
 )
 ```
 
+## 📝 完全体扩展法则 (Future-Proofing Manifesto)
+
+**未来扩展任何新模态（如基因组、蛋白组），必须严格遵循「完全体原则」，缺一不可：**
+
+1. **新增底层 Tool** — 在 `tools/` 下实现原子工具并用 `@registry.register` 注册；参数以带默认值的 kwargs 暴露。
+2. **注册 DAG** — 在 `core/workflows/` 中在 `get_steps_dag()`、`get_step_metadata()`、`generate_template()` 中声明步骤依赖、名称与占位符。
+3. **更新 Agent Prompt 认知** — 在对应 Planner/Agent 的 system prompt 或 `_get_domain_knowledge` 中将新工具写入可用步骤；数据校验为第 1 步，多维对比为核心分析后独立步骤。
+4. **补全前端 Step 映射** — 在 `planner.py` 的 `_get_step_display_name` 的 `name_mapping` 与前端 `index.html` 的 `window.STEP_NAME_MAP` 中增加 tool_id → 中文展示名。
+5. **更新 UI 引导提示词** — 在前端 `OMICS_PROMPT_TEMPLATES` 对应模态的【分析内容和步骤】中显式加入新功能描述。
+6. **纳入全局容错循环** — 新工具内部 `try/except` 返回 `{ status, error, message }`；执行器将 Traceback 交给专家 Agent 翻译；可跳过步骤需支持占位符「前序步骤输出回退」。
+
+依赖：高级绘图/模型对比需在项目根 `requirements.txt` 中声明 `seaborn`、`scikit-learn`、`networkx` 等。
+
+---
+
 ## 📝 扩展指南
 
 ### 添加新的领域智能体

@@ -326,12 +326,18 @@ class OmicsGraph:
         
         # 映射节点类型
         type_mapping = {
+            "metabo_data_validation": NodeType.DATA_LOADER,
             "inspect_data": NodeType.DATA_LOADER,
             "preprocess_data": NodeType.PREPROCESSOR,
+            "metabo_model_comparison": NodeType.ANALYZER,
             "pca_analysis": NodeType.ANALYZER,
             "differential_analysis": NodeType.ANALYZER,
             "visualize_volcano": NodeType.VISUALIZER,
             "pathway_enrichment": NodeType.ANALYZER,
+            "spatial_data_validation": NodeType.DATA_LOADER,
+            "spatial_clustering_comparison": NodeType.ANALYZER,
+            "radiomics_data_validation": NodeType.DATA_LOADER,
+            "radiomics_model_comparison": NodeType.ANALYZER,
         }
         
         # 添加节点

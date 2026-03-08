@@ -1225,6 +1225,20 @@ class FileInspector:
             cwd_path = Path(os.getcwd()) / original_path
             searched_paths.append(str(cwd_path.resolve()))
         
+        # Step 1.5: 相对路径时优先在 upload_dir 下按完整路径查找（修复 guest/session/10x_data_xxx 无法识别）
+        if not original_path.is_absolute() and file_path and self.upload_dir:
+            upload_base = Path(self.upload_dir)
+            try:
+                candidate = (upload_base / file_path).resolve()
+                candidate = candidate.resolve()
+                if candidate.exists():
+                    searched_paths.append(str(candidate))
+                    logger.info(f"✅ [Smart Path Resolution] Found under upload_dir: {candidate}")
+                    return str(candidate), searched_paths
+                searched_paths.append(str(candidate))
+            except (OSError, ValueError) as e:
+                logger.debug(f"⚠️ upload_dir + file_path resolve failed: {e}")
+        
         # Step 2: 提取文件名或目录名
         path_name = original_path.name if original_path.name else str(original_path)
         if not path_name or path_name == '.':
@@ -1330,7 +1344,14 @@ class FileInspector:
             }
         
         # Step 5: 如果没有检查器可以处理，返回错误
-        error_msg = f"无法识别文件类型: {path.name}"
+        if not path.suffix and path.is_file():
+            error_msg = (
+                f"无法识别文件类型: {path.name}（无扩展名）。"
+                "请确认：若为数据文件请使用正确扩展名（如 .h5ad、.csv、.nii）；"
+                "若为 10x 目录请上传包含 matrix.mtx、barcodes.tsv、features.tsv 的目录或压缩包。"
+            )
+        else:
+            error_msg = f"无法识别文件类型: {path.name}"
         logger.error(f"❌ [FileInspector] {error_msg}")
         
         return {

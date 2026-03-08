@@ -6,6 +6,7 @@ import os
 import sys
 import json
 import logging
+import traceback
 import asyncio
 import re
 import secrets
@@ -14,7 +15,7 @@ from typing import List, Optional, Set, Dict, Any
 from datetime import datetime
 from collections import deque
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
@@ -92,8 +93,132 @@ app.add_middleware(
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type", "Authorization", "X-Guest-UUID"],
 )
+
+# Phase 2: 鉴权与游客资产继承（仅注册路由，不修改现有业务）
+try:
+    from gibh_agent.api.routers.auth import router as auth_router
+    app.include_router(auth_router, prefix="/api/auth")
+    logger.info("✅ Auth 路由已注册: /api/auth/register, /api/auth/login, /api/auth/merge_guest_data")
+except Exception as e:
+    logger.warning("⚠️ Auth 路由注册失败（鉴权功能不可用）: %s", e)
+
+# Phase 4: 侧栏数据读取（会话/消息/资产）
+try:
+    from gibh_agent.api.routers.user_data import router as user_data_router
+    app.include_router(user_data_router)
+    logger.info("✅ User Data 路由已注册: GET /api/sessions, /api/sessions/{id}/messages, /api/assets")
+except Exception as e:
+    logger.warning("⚠️ User Data 路由注册失败: %s", e)
+
+# Phase 4: 身份解析与 DB 依赖（upload/chat 持久化）
+from gibh_agent.core.deps import get_current_owner_id
+from gibh_agent.db.connection import get_db_session, engine, is_available, Base
+from sqlalchemy.orm import Session
+
+# 注册 ORM 模型以便 create_all 建表
+try:
+    from gibh_agent.db import models  # noqa: F401
+except Exception:
+    pass
+
+
+def _run_create_all():
+    """执行建表（幂等）。确保 models 已挂到 Base 后再调用 create_all。"""
+    import gibh_agent.db.models as _  # noqa: F401 强制注册所有表
+    Base.metadata.create_all(bind=engine)
+
+
+@app.on_event("startup")
+def _ensure_db_tables():
+    """MySQL 可用时自动创建缺失表；建表失败时记录完整堆栈，便于排查。"""
+    if not is_available() or engine is None or Base is None:
+        logger.warning("[DB] 启动时数据库不可用，跳过建表；可稍后调用 GET /api/db/init 建表")
+        return
+    try:
+        _run_create_all()
+        logger.info("✅ [DB] 表结构已就绪（如需建表已自动创建）")
+    except Exception as e:
+        logger.error(
+            "❌ [DB] 建表失败，后续查询可能 500。请调用 GET /api/db/init 重试或检查 MySQL 权限/版本。原因: %s\n%s",
+            e,
+            traceback.format_exc(),
+        )
+
+
+@app.get("/api/db/init")
+def init_db_tables():
+    """
+    手动触发建表（startup 未执行或失败时使用）。幂等，仅创建缺失表。
+    部署后若出现 Table 'xxx' doesn't exist，在浏览器访问: GET http://<host>:8028/api/db/init
+    """
+    if not is_available() or engine is None or Base is None:
+        return JSONResponse(status_code=503, content={"detail": "数据库不可用，无法建表"})
+    try:
+        _run_create_all()
+        return JSONResponse(status_code=200, content={"detail": "表已就绪", "ok": True})
+    except Exception as e:
+        logger.error("建表失败: %s\n%s", e, traceback.format_exc())
+        detail = _detail_for_db_error(e, str(e))
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": detail,
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "traceback": traceback.format_exc(),
+            },
+        )
+
+
+def _detail_for_db_error(exc: Exception, err_msg: str) -> str:
+    """对常见 MySQL 错误返回可读说明，便于运维排查。"""
+    try:
+        from sqlalchemy.exc import OperationalError
+        if isinstance(exc, OperationalError) and ("1030" in err_msg or "error 168" in err_msg or "error from engine" in err_msg.lower()):
+            return (
+                "MySQL 存储引擎错误(1030/168)：多为数据目录权限或磁盘问题。"
+                "请检查 MySQL 数据目录(如 /var/lib/mysql)权限、磁盘空间，并查看 MySQL 错误日志。"
+            )
+    except ImportError:
+        pass
+    return "服务器内部致命错误"
+
+
+# 全局异常显微镜：捕获所有未处理异常；若为「表不存在」则尝试自动建表并返回提示
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    traceback.print_exc()
+    err_msg = str(exc)
+    # 表不存在时尝试自动建表，避免 500 循环
+    if "doesn't exist" in err_msg and ("Table " in err_msg or "table " in err_msg.lower()):
+        try:
+            from sqlalchemy.exc import ProgrammingError
+            if isinstance(exc, ProgrammingError) and is_available() and engine is not None:
+                _run_create_all()
+                logger.info("[DB] 已根据表不存在错误自动建表")
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": "表已自动创建，请刷新页面后重试", "ok": True},
+                )
+        except Exception as e:
+            logger.warning("[DB] 自动建表失败: %s", e)
+            detail = _detail_for_db_error(e, str(e)) if "1030" in str(e) or "168" in str(e) else "自动建表失败，请检查 MySQL 权限与磁盘"
+            return JSONResponse(
+                status_code=503,
+                content={"detail": detail, "error_type": type(e).__name__, "error_message": str(e)},
+            )
+    detail = _detail_for_db_error(exc, err_msg)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": detail,
+            "error_type": type(exc).__name__,
+            "error_message": err_msg,
+            "traceback": traceback.format_exc(),
+        },
+    )
 
 # 创建上传目录（使用绝对路径，兼容容器环境）
 # 🔧 修复：优先使用环境变量，否则使用容器内的默认路径
@@ -194,10 +319,14 @@ def validate_file_path(file_path: Path, base_dir: Path) -> Path:
 # 初始化文件检测器
 file_inspector = FileInspector(str(UPLOAD_DIR))
 
-# 添加静态文件服务（用于访问结果图片）
+# 添加静态文件服务（用于访问结果图片、前端 Logo 等）
 from fastapi.staticfiles import StaticFiles
 app.mount("/results", StaticFiles(directory="results"), name="results")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# 前端静态资源（Logo 等）：与 index.html 同级的 static 目录
+_static_dir = Path(__file__).parent / "services" / "nginx" / "html" / "static"
+if _static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 # 初始化智能体
 agent = None
@@ -1284,17 +1413,15 @@ async def index():
 @app.post("/api/upload")
 async def upload_file(
     files: List[UploadFile] = File(...),
-    user_id: Optional[str] = None,
-    session_id: Optional[str] = None
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
 ):
     """
     文件上传接口（支持多文件上传）
-    
-    🔥 ARCHITECTURAL UPGRADE: 支持多用户隔离
-    - user_id: 用户ID（默认 "guest"）
-    - session_id: 会话ID（可选，如果未提供则自动生成）
-    - 文件保存路径: uploads/{user_id}/{session_id}/filename
+    Phase 4: 身份由 Authorization / X-Guest-UUID 解析为 owner_id，路径按 owner_id 隔离并写入 Asset 表。
     """
+    from gibh_agent.db.models import Asset as AssetModel
+
     try:
         if not files or len(files) == 0:
             raise HTTPException(status_code=400, detail="No files provided")
@@ -1303,14 +1430,14 @@ async def upload_file(
         if len(files) > 20:
             raise HTTPException(status_code=400, detail="一次最多上传20个文件")
         
-        # 🔥 多用户支持：设置默认值
-        if not user_id:
-            user_id = "guest"
-        if not session_id:
-            # 自动生成会话ID（基于时间戳）
-            session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Phase 4: 按 owner_id 隔离目录，用时间戳子目录避免重名
+        batch_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        user_dir = UPLOAD_DIR / owner_id / batch_id
+        user_dir.mkdir(parents=True, exist_ok=True)
+        user_id = owner_id  # 兼容下方日志与返回
+        session_id = batch_id
         
-        logger.info(f"📤 收到文件上传: {len(files)} 个文件 (User: {user_id}, Session: {session_id})")
+        logger.info(f"📤 收到文件上传: {len(files)} 个文件 (owner_id: {owner_id})")
         
         # 检测是否是10x Genomics文件（matrix.mtx, barcodes.tsv, features.tsv）
         is_10x_data = False
@@ -1346,9 +1473,7 @@ async def upload_file(
         
         uploaded_results = []
         
-        # 🔥 多用户支持：构建用户目录路径
-        user_dir = UPLOAD_DIR / user_id / session_id
-        user_dir.mkdir(parents=True, exist_ok=True)
+        # Phase 4: user_dir 已在上面按 owner_id 创建
         logger.info(f"📁 用户目录: {user_dir}")
         
         # 如果是10x数据，创建子目录并保存
@@ -1422,6 +1547,14 @@ async def upload_file(
             except Exception as e:
                 logger.warning("⚠️ 目录结构规范化失败（不影响上传）: %s", e)
             
+            # Phase 4: 10x 文件入库
+            if db is not None:
+                try:
+                    for r in uploaded_results:
+                        db.add(AssetModel(owner_id=owner_id, file_name=r.get("file_name", ""), file_path=r.get("file_path", ""), modality=None))
+                    db.commit()
+                except Exception as e:
+                    logger.warning("⚠️ [Upload] 10x Asset 入库失败: %s", e)
             # 返回10x目录路径（而不是单个文件路径）
             file_paths = [str(tenx_dir.relative_to(UPLOAD_DIR))]
             return {
@@ -1600,14 +1733,22 @@ async def upload_file(
                 "path": rel_path  # 使用相对路径
             })
         
+        # Phase 4: 非 10x 文件入库
+        if db is not None:
+            try:
+                for result in uploaded_results:
+                    db.add(AssetModel(owner_id=owner_id, file_name=result.get("file_name", ""), file_path=result.get("file_path", ""), modality=None))
+                db.commit()
+            except Exception as e:
+                logger.warning("⚠️ [Upload] Asset 入库失败: %s", e)
         # 🔥 统一返回格式：始终返回一致的 JSON 结构
         response = {
             "status": "success",
-            "file_paths": file_paths,  # 文件路径数组（相对路径，包含 user_id/session_id）
+            "file_paths": file_paths,  # 文件路径数组（相对路径，包含 owner_id/batch_id）
             "file_info": file_info,    # 文件信息数组
             "count": len(uploaded_results),
-            "user_id": user_id,        # 🔥 多用户支持：返回用户ID
-            "session_id": session_id    # 🔥 多用户支持：返回会话ID
+            "user_id": user_id,        # 兼容前端
+            "session_id": session_id   # 兼容前端
         }
         
         # 如果只有一个文件，添加单个文件的详细信息（向后兼容）
@@ -1653,8 +1794,14 @@ async def upload_file(
 
 
 @app.post("/api/chat")
-async def chat_endpoint(req: ChatRequest):
-    """聊天接口"""
+async def chat_endpoint(
+    req: ChatRequest,
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+):
+    """聊天接口。Phase 4: 身份解析、Session/Message 持久化，AI 消息在流结束后写入，不阻塞 SSE。"""
+    from gibh_agent.db.models import Session as SessionModel, Message as MessageModel
+
     # 🔥 CRITICAL DEBUG: 打印接收到的文件列表
     print(f"🔍 API RECEIVED FILES: {req.uploaded_files}")
     logger.info(f"🔍 [ChatEndpoint] 接收到的文件列表: {req.uploaded_files}")
@@ -1674,15 +1821,25 @@ async def chat_endpoint(req: ChatRequest):
         pass  # 即使日志写入失败也不影响主流程
     # #endregion
     
-    # 🔥 BUG FIX: 处理缺失的 session_id（向后兼容）
+    # Phase 4: 会话与身份
     if not req.session_id:
         req.session_id = str(uuid.uuid4())
-        logger.info(f"🔑 [ChatEndpoint] 自动生成 session_id: {req.session_id}")
-    
-    # 🔥 BUG FIX: 确保 user_id 有默认值
+        try:
+            title = (req.message or "新会话")[:20]
+            db.add(SessionModel(id=req.session_id, owner_id=owner_id, title=title))
+            db.commit()
+        except Exception as e:
+            logger.warning("⚠️ [Chat] Session 入库失败: %s", e)
+            db.rollback()
+        logger.info(f"🔑 [ChatEndpoint] 新建 session_id: {req.session_id}")
+    else:
+        # 校验已有 session 归属
+        existing = db.query(SessionModel).filter(SessionModel.id == req.session_id).first()
+        if existing and existing.owner_id != owner_id:
+            raise HTTPException(status_code=403, detail="无权使用该会话")
     if not req.user_id:
-        req.user_id = "guest"
-        logger.debug(f"🔑 [ChatEndpoint] 使用默认 user_id: {req.user_id}")
+        req.user_id = owner_id
+        logger.debug(f"🔑 [ChatEndpoint] user_id = owner_id: {req.user_id}")
     
     if not agent:
         error_msg = "智能体未初始化，请检查配置和日志。可能的原因：1) 配置文件路径错误 2) API Key未设置 3) 依赖包缺失"
@@ -1696,6 +1853,14 @@ async def chat_endpoint(req: ChatRequest):
                 "message": "智能体初始化失败，请查看服务器日志获取详细信息"
             }
         )
+    
+    # Phase 4: 用户消息入库（大模型生成前）
+    try:
+        db.add(MessageModel(session_id=req.session_id, role="user", content={"text": req.message or ""}))
+        db.commit()
+    except Exception as e:
+        logger.warning("⚠️ [Chat] 用户消息入库失败: %s", e)
+        db.rollback()
     
     # 🔥 SSE 流式传输模式
     if req.stream:
@@ -1768,10 +1933,13 @@ async def chat_endpoint(req: ChatRequest):
             # 创建编排器（传递 upload_dir）
             orchestrator = AgentOrchestrator(agent, upload_dir=str(UPLOAD_DIR))
             
-            # 返回 SSE 流式响应
+            # 返回 SSE 流式响应（Phase 4: 首包下发 session_id，流结束后写 agent 消息，不阻塞 SSE）
             async def generate_sse():
                 original_llm_clients = {}
                 override_llm = None
+                accumulated = []
+                # Phase 4: 第一个事件下发 session_id，供前端持久化
+                yield f"event: session\ndata: {json.dumps({'session_id': req.session_id}, ensure_ascii=False)}\n\n"
                 try:
                     # 🔥 动态模型路由：前端传入 model_name 时，临时替换所有 agent 的 LLM 为指定模型（硅基流动）
                     model_name = getattr(req, "model_name", None) or ""
@@ -1790,19 +1958,27 @@ async def chat_endpoint(req: ChatRequest):
                         query=req.message,
                         files=uploaded_files,
                         history=req.history or [],
-                        session_id=req.session_id or "default",  # 🔥 ARCHITECTURAL MERGE: 传递 session_id
+                        session_id=req.session_id or "default",
                         test_dataset_id=req.test_dataset_id,
                         workflow_data=req.workflow_data,
                         user_id=req.user_id or "guest"
                     ):
+                        accumulated.append(event)
                         yield event
                 except Exception as e:
                     logger.error(f"❌ SSE 流式传输错误: {e}", exc_info=True)
-                    import json
                     error_event = f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+                    accumulated.append(error_event)
                     yield error_event
                 finally:
-                    # 恢复各 agent 原有 LLM 客户端，避免影响后续请求
+                    # Phase 4: 流结束后写 agent 消息（不阻塞流，不写在 yield 循环内）
+                    try:
+                        db.add(MessageModel(session_id=req.session_id, role="agent", content={"events": accumulated}))
+                        db.commit()
+                    except Exception as persist_err:
+                        logger.warning("⚠️ [Chat] Agent 消息入库失败: %s", persist_err)
+                        db.rollback()
+                    # 恢复各 agent 原有 LLM 客户端
                     if original_llm_clients and hasattr(agent, "agents"):
                         for name, a in agent.agents.items():
                             if name in original_llm_clients:
@@ -1914,9 +2090,9 @@ async def chat_endpoint(req: ChatRequest):
                     for file_info in req.uploaded_files:
                         file_path = file_info.get("path") or file_info.get("file_name")
                         if file_path:
-                            # 如果是相对路径，转换为绝对路径
+                            # 如果是相对路径，转换为绝对路径（保留完整相对结构，如 guest/session/10x_data_xxx）
                             if not Path(file_path).is_absolute():
-                                file_path = str(UPLOAD_DIR / Path(file_path).name)
+                                file_path = str(UPLOAD_DIR / file_path)
                             file_paths.append(file_path)
                     
                     # 检测类别（简单启发式）
