@@ -10,6 +10,11 @@ import os
 import re
 import logging
 
+try:
+    import httpx
+except ImportError:
+    httpx = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,7 +45,7 @@ class LLMClient:
         model: str = "gpt-3.5-turbo",
         temperature: float = 0.7,
         max_tokens: int = 2048,
-        timeout: float = 180.0  # 🔥 修复：增加到180秒，支持DeepSeek-R1等推理模型的长时间响应
+        timeout: Optional[float] = None  # None = 无限期等待，不强制超时中断
     ):
         """
         初始化 LLM 客户端
@@ -60,7 +65,8 @@ class LLMClient:
         self.max_tokens = max_tokens
         self.timeout = timeout
         
-        # 初始化同步和异步客户端
+        # 取消强制超时，允许无限期等待（用户宁愿等待也不希望被中断）
+        # 不再使用 httpx.Timeout，直接传 timeout（None 表示不设超时）
         self._sync_client = OpenAI(
             base_url=base_url,
             api_key=api_key,
@@ -94,14 +100,14 @@ class LLMClient:
         logger = logging.getLogger(__name__)
         
         params = {
-            "model": self.model,
+            "model": kwargs.pop("model", self.model),
             "messages": messages,
             "temperature": kwargs.get("temperature", self.temperature),
             "max_tokens": kwargs.get("max_tokens", self.max_tokens),
             "stream": stream
         }
         params.update(kwargs)
-        
+        logger.info("🚀 [Model Router] 正在将请求路由至大模型: %s", params["model"])
         completion = self._sync_client.chat.completions.create(**params)
         
         # 🔥 Task 2: 强制记录原始 JSON 响应
@@ -162,16 +168,14 @@ class LLMClient:
         logger = logging.getLogger(__name__)
         
         params = {
-            "model": self.model,
+            "model": kwargs.pop("model", self.model),
             "messages": messages,
             "temperature": kwargs.get("temperature", self.temperature),
             "max_tokens": kwargs.get("max_tokens", self.max_tokens),
             "stream": stream
         }
         params.update(kwargs)
-        
-        import json
-        
+        logger.info("🚀 [Model Router] 正在将请求路由至大模型: %s", params["model"])
         completion = await self._async_client.chat.completions.create(**params)
         
         # 🔥 Task 2: 强制记录原始 JSON 响应
@@ -230,16 +234,14 @@ class LLMClient:
         logger = logging.getLogger(__name__)
         
         params = {
-            "model": self.model,
+            "model": kwargs.pop("model", self.model),
             "messages": messages,
             "temperature": kwargs.get("temperature", self.temperature),
             "max_tokens": kwargs.get("max_tokens", self.max_tokens),
             "stream": True
         }
         params.update(kwargs)
-        
-        import json
-        
+        logger.info("🚀 [Model Router] 正在将请求路由至大模型: %s", params["model"])
         # 🔥 Task 2: 收集流式响应并记录完整 JSON
         collected_content = []
         collected_chunks = []
@@ -388,7 +390,7 @@ class LLMClientFactory:
             model=model,
             temperature=0.7,
             max_tokens=4096,
-            timeout=180.0  # 🔥 修复：显式设置180秒超时时间，支持DeepSeek-R1等推理模型
+            timeout=None  # 不强制超时，允许无限期等待
         )
     
     @staticmethod
@@ -408,7 +410,7 @@ class LLMClientFactory:
             model=config.get("model", "gpt-3.5-turbo"),
             temperature=config.get("temperature", 0.7),
             max_tokens=config.get("max_tokens", 2048),
-            timeout=config.get("timeout", 180.0)  # 🔥 修复：使用180秒作为默认超时时间，支持DeepSeek-R1等推理模型
+            timeout=config.get("timeout")  # None = 无限期等待
         )
     
     @staticmethod
@@ -447,6 +449,6 @@ class LLMClientFactory:
             model=model,
             temperature=0.7,
             max_tokens=4096,
-            timeout=180.0  # 🔥 修复：显式设置180秒超时时间，支持DeepSeek-R1等推理模型
+            timeout=None  # 不强制超时，允许无限期等待
         )
 

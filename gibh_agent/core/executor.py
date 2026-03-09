@@ -8,6 +8,7 @@
 import inspect
 import os
 import logging
+import time
 import traceback
 from typing import Dict, Any, List, Optional, Callable, get_origin, get_args
 from pathlib import Path
@@ -1384,7 +1385,9 @@ class WorkflowExecutor:
             step["params"] = params
             
             # 执行步骤（内部会调用 _process_data_flow 处理占位符）
+            tool_start = time.time()
             step_result = self.execute_step(step, step_context)
+            logger.info("[Profiler] 工具[%s] 执行耗时: %.2fs", step_name, time.time() - tool_start)
             
             # 🔥 TASK 3 FIX: 更新 current_file_path 供下一个步骤使用
             # 对于 scRNA-seq 工具，所有产生 output_h5ad 的步骤都应该更新 current_file_path

@@ -1051,23 +1051,25 @@ class TabularHandler(BaseFileHandler):
             except Exception:
                 pass
             
-            # 读取预览（前10行）
+            # 读取预览（最多 100 行，避免规划阶段阻塞）
             LARGE_FILE_THRESHOLD_MB = 200
+            PREVIEW_MAX_ROWS = 100
             preview_rows = 10
-            
+
             if file_size_mb < LARGE_FILE_THRESHOLD_MB:
-                # 小文件：完整读取
-                df = pd.read_csv(absolute_path, sep=separator)
-                is_sampled = False
-                total_rows = len(df)
+                # 小文件：仅读前 100 行用于元数据，避免大 CSV 阻塞
+                df = pd.read_csv(absolute_path, sep=separator, nrows=PREVIEW_MAX_ROWS)
+                is_sampled = True
+                total_rows = self._count_csv_lines(path, separator)
+                if total_rows is None:
+                    total_rows = len(df)
             else:
                 # 大文件：采样读取
                 df = pd.read_csv(absolute_path, sep=separator, nrows=preview_rows)
                 is_sampled = True
-                # 尝试统计总行数
                 total_rows = self._count_csv_lines(path, separator)
                 if total_rows is None:
-                    total_rows = len(df)  # 回退到采样行数
+                    total_rows = len(df)
             
             # 识别列类型
             metadata_cols = []

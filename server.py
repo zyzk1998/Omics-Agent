@@ -7,6 +7,7 @@ import sys
 import json
 import logging
 import traceback
+import time
 import asyncio
 import re
 import secrets
@@ -116,6 +117,7 @@ except Exception as e:
 from gibh_agent.core.deps import get_current_owner_id
 from gibh_agent.db.connection import get_db_session, engine, is_available, Base
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 # 注册 ORM 模型以便 create_all 建表
 try:
@@ -132,10 +134,26 @@ def _run_create_all():
 
 @app.on_event("startup")
 def _ensure_db_tables():
-    """MySQL 可用时自动创建缺失表；建表失败时记录完整堆栈，便于排查。"""
+    """等待 MySQL 就绪（最多 30 秒）后建表，避免 Docker 下 API 先于 MySQL 启动导致假死。"""
     if not is_available() or engine is None or Base is None:
-        logger.warning("[DB] 启动时数据库不可用，跳过建表；可稍后调用 GET /api/db/init 建表")
         return
+    max_wait = 30
+    for attempt in range(max_wait):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            break
+        except Exception as e:
+            if attempt == 0:
+                logger.info("[DB] 等待 MySQL 就绪...")
+            if attempt >= max_wait - 1:
+                logger.warning(
+                    "[DB] MySQL 未在 %d 秒内就绪，跳过建表。可稍后调用 GET /api/db/init 建表: %s",
+                    max_wait,
+                    e,
+                )
+                return
+            time.sleep(1)
     try:
         _run_create_all()
         logger.info("✅ [DB] 表结构已就绪（如需建表已自动创建）")
@@ -438,7 +456,7 @@ class ChatRequest(BaseModel):
     stream: Optional[bool] = False  # 🔥 SSE 流式传输开关
     session_id: Optional[str] = None  # 🔥 BUG FIX: 添加 session_id 字段
     user_id: Optional[str] = "guest"  # 🔥 BUG FIX: 添加 user_id 字段，默认为 guest
-    model_name: Optional[str] = "deepseek-ai/DeepSeek-R1"  # 🔥 前端模型切换：传给硅基流动的真实模型 ID
+    model_name: Optional[str] = "deepseek-ai/DeepSeek-R1"  # 🔥 前端模型切换：硅基流动真实模型 ID，默认 DeepSeek-R1
 
 
 # 日志缓冲区（保留用于未来扩展）
@@ -1800,6 +1818,9 @@ async def chat_endpoint(
     db: Session = Depends(get_db_session),
 ):
     """聊天接口。Phase 4: 身份解析、Session/Message 持久化，AI 消息在流结束后写入，不阻塞 SSE。"""
+    _chat_start = time.time()
+    logger.info("[Profiler] /api/chat 请求进入 - 耗时: 0.00s")
+
     from gibh_agent.db.models import Session as SessionModel, Message as MessageModel
 
     # 🔥 CRITICAL DEBUG: 打印接收到的文件列表
@@ -1930,6 +1951,24 @@ async def chat_endpoint(
             logger.info(f"✅ [ChatEndpoint] 转换后的 uploaded_files: {uploaded_files}")
             logger.info(f"✅ [ChatEndpoint] uploaded_files 数量: {len(uploaded_files)}")
             
+            # 🔥 任务2：从 prompt 中提取「系统注入」的历史资产路径，并入 uploaded_files，供后续 DAG 直接使用
+            injected = re.findall(r'\[系统注入：用户选择了历史资产文件：(.*?)\]', (req.message or ""))
+            for p in injected:
+                p = (p or "").strip()
+                if not p:
+                    continue
+                if any((f.get("path") or "").rstrip("/") == p.rstrip("/") for f in uploaded_files):
+                    continue
+                path_obj = Path(p)
+                if not path_obj.is_absolute():
+                    path_obj = UPLOAD_DIR / p
+                if path_obj.exists():
+                    uploaded_files.append({"name": path_obj.name, "path": str(path_obj.resolve())})
+                    logger.info("✅ [ChatEndpoint] 注入历史资产路径: %s", path_obj)
+                else:
+                    uploaded_files.append({"name": os.path.basename(p), "path": str(path_obj)})
+                    logger.warning("⚠️ [ChatEndpoint] 注入路径不存在，仍加入列表: %s", p)
+            
             # 创建编排器（传递 upload_dir）
             orchestrator = AgentOrchestrator(agent, upload_dir=str(UPLOAD_DIR))
             
@@ -1941,8 +1980,8 @@ async def chat_endpoint(
                 # Phase 4: 第一个事件下发 session_id，供前端持久化
                 yield f"event: session\ndata: {json.dumps({'session_id': req.session_id}, ensure_ascii=False)}\n\n"
                 try:
-                    # 🔥 动态模型路由：前端传入 model_name 时，临时替换所有 agent 的 LLM 为指定模型（硅基流动）
-                    model_name = getattr(req, "model_name", None) or ""
+                    # 🔥 动态模型路由：前端 model_name 传入 stream_process，每次请求在调用处传入，避免单例竞态
+                    model_name = (getattr(req, "model_name", None) or "").strip() or "deepseek-ai/DeepSeek-R1"
                     if model_name and hasattr(agent, "agents") and agent.agents:
                         try:
                             from gibh_agent.core.llm_client import LLMClientFactory
@@ -1961,7 +2000,10 @@ async def chat_endpoint(
                         session_id=req.session_id or "default",
                         test_dataset_id=req.test_dataset_id,
                         workflow_data=req.workflow_data,
-                        user_id=req.user_id or "guest"
+                        user_id=req.user_id or "guest",
+                        owner_id=owner_id,
+                        db=db,
+                        model_name=model_name
                     ):
                         accumulated.append(event)
                         yield event
@@ -1971,10 +2013,14 @@ async def chat_endpoint(
                     accumulated.append(error_event)
                     yield error_event
                 finally:
-                    # Phase 4: 流结束后写 agent 消息（不阻塞流，不写在 yield 循环内）
+                    # Phase 4: 流结束后写 agent 消息（不阻塞流，不写在 yield 循环内），并下发 message_id 供前端绑定
                     try:
-                        db.add(MessageModel(session_id=req.session_id, role="agent", content={"events": accumulated}))
+                        msg = MessageModel(session_id=req.session_id, role="agent", content={"events": accumulated})
+                        db.add(msg)
                         db.commit()
+                        # 下发 message_saved 事件，前端可绑定到当前 AI 气泡的 dataset.messageId（commit 后 msg.id 已填充）
+                        if getattr(msg, "id", None) is not None:
+                            yield f"event: message_saved\ndata: {json.dumps({'message_id': msg.id}, ensure_ascii=False)}\n\n"
                     except Exception as persist_err:
                         logger.warning("⚠️ [Chat] Agent 消息入库失败: %s", persist_err)
                         db.rollback()

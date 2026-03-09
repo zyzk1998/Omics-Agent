@@ -150,3 +150,8 @@ test_rect.vsdx
 # 临时技术清单/文档（可选提交）
 File_System_Technical_Inventory.md
 The_Tech_Arsenal.md
+
+# 本地演示与 Mermaid 生成物（不提交）
+chart-demo/
+mermaid-workflows/
+mermaid-workflows.html

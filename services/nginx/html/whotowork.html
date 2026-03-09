@@ -1,0 +1,2709 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Omics Agent - How to Work 全流程数据流向图</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            line-height: 1.6;
+            margin: 0;
+        }
+        
+        .container {
+            max-width: 98vw;
+            width: 98%;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            padding: 32px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            border: 3px solid rgba(255,255,255,0.8);
+        }
+        
+        /* Master-Detail 布局 - Grid 强制左右并排，防止换行 */
+        .main-layout {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .diagram-section {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            container-type: inline-size;
+        }
+        
+        .detail-panel {
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            position: sticky;
+            top: 20px;
+            max-height: calc(100vh - 40px);
+            overflow-y: auto;
+            overflow-x: hidden;
+            scrollbar-width: thin;
+            scrollbar-color: #667eea #f1f3f5;
+        }
+        
+        .detail-panel::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .detail-panel::-webkit-scrollbar-track {
+            background: #f1f3f5;
+            border-radius: 4px;
+        }
+        
+        .detail-panel::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 4px;
+        }
+        
+        .detail-panel::-webkit-scrollbar-thumb:hover {
+            background: #5568d3;
+        }
+        
+        /* 控制栏 */
+        .control-bar {
+            background: #ffffff;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .control-bar h3 {
+            margin: 0;
+            font-size: 14px;
+            color: #495057;
+            font-weight: 600;
+            margin-right: 10px;
+        }
+        
+        .scenario-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .scenario-btn:hover {
+            background: #5568d3;
+            transform: translateY(-1px);
+        }
+        
+        .scenario-btn.active {
+            background: #764ba2;
+            box-shadow: 0 2px 8px rgba(118, 75, 162, 0.3);
+        }
+        
+        .scenario-btn:active {
+            transform: translateY(0);
+        }
+        
+        /* 侧边栏样式 */
+        .detail-panel h2 {
+            color: #333;
+            font-size: 20px;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        
+        .detail-panel .default-state {
+            color: #6c757d;
+            font-style: italic;
+            text-align: center;
+            padding: 40px 20px;
+        }
+        
+        .detail-content {
+            display: none;
+        }
+        
+        .detail-content.active {
+            display: block;
+        }
+        
+        .detail-item {
+            margin-bottom: 20px;
+        }
+        
+        .detail-item-label {
+            font-weight: 600;
+            color: #495057;
+            font-size: 13px;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .detail-item-value {
+            color: #212529;
+            font-size: 14px;
+            line-height: 1.7;
+            background: white;
+            padding: 12px;
+            border-radius: 4px;
+            border-left: 3px solid #667eea;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+        
+        .detail-item-value code {
+            background: #f1f3f5;
+            padding: 3px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #d63384;
+            word-break: break-all;
+        }
+        
+        /* Synapse Inspector - 参数映射表 */
+        .param-mapping-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            margin-top: 8px;
+        }
+        
+        .param-mapping-table th,
+        .param-mapping-table td {
+            border: 1px solid #dee2e6;
+            padding: 10px 12px;
+            text-align: left;
+        }
+        
+        .param-mapping-table th {
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+            width: 35%;
+        }
+        
+        .param-mapping-table tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+        
+        .param-mapping-table tr:hover {
+            background: #e9ecef;
+        }
+        
+        /* 打字机效果代码块 */
+        .typewriter-code {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            background: #1e1e1e;
+            color: #9cdcfe;
+            padding: 14px 16px;
+            border-radius: 6px;
+            border-left: 4px solid #4CAF50;
+            white-space: pre-wrap;
+            overflow: hidden;
+            border-right: 1px solid #333;
+        }
+        
+        .typewriter-code .cursor {
+            display: inline-block;
+            width: 8px;
+            height: 14px;
+            background: #4CAF50;
+            animation: blink 0.8s step-end infinite;
+            vertical-align: text-bottom;
+        }
+        
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+        
+        /* 学术引用样式 */
+        .detail-item-value[style*="font-size: 12px"] {
+            white-space: pre-line;
+        }
+        
+        .detail-item-value br {
+            display: block;
+            margin: 4px 0;
+        }
+        
+        /* LLM Logic 部分特殊样式（浅紫色背景） */
+        .detail-item-value.llm-logic-section {
+            background: linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 100%) !important;
+            border-left: 4px solid #9333ea !important;
+            padding: 15px !important;
+            border-radius: 6px !important;
+            box-shadow: 0 2px 4px rgba(147, 51, 234, 0.1);
+        }
+        
+        .detail-item-value.llm-logic-section strong {
+            color: #7c3aed;
+            font-weight: 700;
+        }
+        
+        .detail-item-value.llm-logic-section code {
+            background: rgba(147, 51, 234, 0.1) !important;
+            color: #6b21a8 !important;
+            border: 1px solid rgba(147, 51, 234, 0.2);
+        }
+        
+        /* 场景数据流特殊样式 */
+        .detail-content .detail-item {
+            page-break-inside: avoid;
+        }
+        
+        .detail-content .detail-item strong {
+            color: #495057;
+            font-weight: 600;
+        }
+        
+        /* SVG 覆盖层 - pointer-events: none 让空白区域点击穿透到卡片，path 保持 stroke 可点击 */
+        .svg-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+            overflow: visible;
+        }
+        
+        /* 基底路径：加粗便于点击 */
+        .svg-overlay path.synapse-base {
+            fill: none;
+            stroke-width: 6;
+            opacity: 0.25;
+            pointer-events: stroke;
+            cursor: pointer;
+            transition: stroke-width 0.2s, opacity 0.2s;
+        }
+        
+        .svg-overlay path.synapse-base:hover {
+            stroke-width: 6;
+            opacity: 0.5;
+        }
+        
+        /* 控制流 - 蓝色 */
+        .svg-overlay path.synapse-base.synapse-control { stroke: #2196F3; }
+        .svg-overlay path.synapse-pulse.synapse-control {
+            stroke: #2196F3;
+            filter: drop-shadow(0 0 6px #2196F3) drop-shadow(0 0 12px rgba(33, 150, 243, 0.6));
+        }
+        
+        /* 数据流 - 绿色 */
+        .svg-overlay path.synapse-base.synapse-data { stroke: #4CAF50; }
+        .svg-overlay path.synapse-pulse.synapse-data {
+            stroke: #4CAF50;
+            filter: drop-shadow(0 0 6px #4CAF50) drop-shadow(0 0 12px rgba(76, 175, 80, 0.6));
+        }
+        
+        /* 错误/修正循环 - 红色 */
+        .svg-overlay path.synapse-base.synapse-error { stroke: #F44336; }
+        .svg-overlay path.synapse-pulse.synapse-error {
+            stroke: #F44336;
+            filter: drop-shadow(0 0 6px #F44336) drop-shadow(0 0 12px rgba(244, 67, 54, 0.6));
+        }
+        
+        /* LLM 调用 - 紫色虚线 */
+        .svg-overlay path.synapse-base.synapse-llm {
+            stroke: #9333ea;
+            stroke-dasharray: 8, 6;
+        }
+        .svg-overlay path.synapse-pulse.synapse-llm {
+            stroke: #9333ea;
+            stroke-dasharray: 8, 6;
+            filter: drop-shadow(0 0 6px #9333ea) drop-shadow(0 0 12px rgba(147, 51, 234, 0.5));
+        }
+        
+        /* 脉冲：沿路径移动的光点（可点击） */
+        .svg-overlay path.synapse-pulse {
+            fill: none;
+            stroke-width: 5;
+            stroke-dasharray: 12, 1000;
+            stroke-dashoffset: 0;
+            opacity: 1;
+            pointer-events: stroke;
+            cursor: pointer;
+            animation: synapsePulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes synapsePulse {
+            0% { stroke-dashoffset: 0; }
+            100% { stroke-dashoffset: -1012; }
+        }
+        
+        /* 浮动标签 */
+        .svg-overlay .synapse-label {
+            font-size: 11px;
+            font-weight: 600;
+            fill: #333;
+            text-anchor: middle;
+            dominant-baseline: middle;
+            pointer-events: none;
+            paint-order: stroke;
+            stroke: white;
+            stroke-width: 3px;
+        }
+        
+        .synapse-label-group {
+            pointer-events: none;
+        }
+        
+        /* 高亮和暗淡效果 */
+        .flow-step-card.dimmed {
+            opacity: 0.3;
+            filter: grayscale(0.7);
+        }
+        
+        .flow-step-card.active-flow {
+            border-width: 5px;
+            box-shadow: 0 0 20px rgba(102, 126, 234, 0.5);
+            transform: scale(1.05);
+        }
+        
+        .flow-step-card.clickable {
+            cursor: pointer;
+            pointer-events: auto;
+        }
+        
+        .flow-step-card.clickable:hover {
+            border-width: 4px;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 32px;
+            text-align: center;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 40px;
+            font-size: 16px;
+        }
+        
+        .flow-diagram {
+            background: linear-gradient(180deg, #f8f9fa 0%, #e9ecef 100%);
+            border: 4px solid #dee2e6;
+            border-radius: 12px;
+            padding: 28px 36px;
+            margin: 0;
+            overflow-x: auto;
+            position: relative;
+            box-shadow: inset 0 2px 8px rgba(0,0,0,0.04);
+        }
+        
+        /* CSS Grid 2D 流程图布局 - 12 列居中，Planner/Retriever 对称 */
+        .flow-grid {
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
+            grid-template-rows: auto;
+            gap: clamp(10px, 2vw, 24px);
+            max-width: 100%;
+            margin: 0 auto;
+            position: relative;
+            padding: clamp(8px, 1.5vw, 20px) 0;
+            pointer-events: auto;
+        }
+        
+        .flow-grid > * {
+            min-width: 0;
+        }
+        
+        /* 流程卡片基础样式（内容决定高度） */
+        .flow-step-card {
+            background: white;
+            border: 3px solid #667eea;
+            border-radius: 10px;
+            padding: clamp(8px, 1.2vw, 16px);
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            position: relative;
+            z-index: 2;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        
+        .flow-step-card.scenario-active {
+            pointer-events: none;
+        }
+        
+        /* Infrastructure 模式：按容器/服务分组高亮 */
+        .flow-step-card.group-api {
+            border-color: #7c3aed !important;
+            border-width: 4px !important;
+            box-shadow: 0 0 16px rgba(124, 58, 237, 0.4);
+        }
+        .flow-step-card.group-worker {
+            border-color: #dc2626 !important;
+            border-width: 4px !important;
+            box-shadow: 0 0 16px rgba(220, 38, 38, 0.4);
+        }
+        .flow-step-card.group-service {
+            border-color: #2563eb !important;
+            border-width: 4px !important;
+            box-shadow: 0 0 16px rgba(37, 99, 235, 0.4);
+        }
+        
+        .flow-step-card:hover {
+            transform: translateY(-5px) scale(1.02);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+            border-width: 4px;
+        }
+        
+        /* 学术论文引用徽章 */
+        .academic-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 12px;
+            margin-top: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+            letter-spacing: 0.3px;
+            line-height: 1.4;
+        }
+        
+        .academic-badge::before {
+            content: '📄 ';
+            font-size: 11px;
+        }
+        
+        .academic-badge.small {
+            font-size: 9px;
+            padding: 3px 8px;
+        }
+        
+        /* 用户层 - 居中跨 10 列 */
+        .flow-step-card.user-layer {
+            grid-column: 2 / 12;
+            border-color: #4CAF50;
+            background: linear-gradient(135deg, #e8f5e9 0%, #ffffff 100%);
+        }
+        
+        /* API 层 */
+        .flow-step-card.api-layer {
+            grid-column: 2 / 12;
+            border-color: #2196F3;
+            background: linear-gradient(135deg, #e3f2fd 0%, #ffffff 100%);
+        }
+        
+        /* 编排层 */
+        .flow-step-card.orchestrator-layer {
+            grid-column: 2 / 12;
+            border-color: #9C27B0;
+            background: linear-gradient(135deg, #f3e5f5 0%, #ffffff 100%);
+            border-width: 4px;
+        }
+        
+        /* 核心逻辑层 - 并排显示，Planner 左 / Retriever 右，中间留 2 列空隙 */
+        .flow-step-card.brain-layer {
+            border-color: #FF6B35;
+            background: linear-gradient(135deg, #fff5f0 0%, #ffffff 100%);
+            border-width: 4px;
+            position: relative;
+        }
+        
+        .flow-step-card.router-planner {
+            grid-column: 2 / 6;
+        }
+        
+        .flow-step-card.tool-retriever {
+            grid-column: 8 / 12;
+        }
+        
+        /* LLM 服务层 - 与 Retriever 同宽同右对齐，跨行垂直居中 */
+        .flow-step-card.llm-layer {
+            grid-column: 8 / 12;
+            grid-row: 2 / 6;
+            align-self: center;
+            border-color: #9333ea;
+            background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
+            border-style: dashed;
+            border-width: 3px;
+        }
+        
+        
+        /* 执行层 */
+        .flow-step-card.executor-layer {
+            grid-column: 2 / 12;
+            border-color: #F44336;
+            background: linear-gradient(135deg, #ffebee 0%, #ffffff 100%);
+        }
+        
+        /* 工具层 - 图书馆样式 */
+        .flow-step-card.tool-layer {
+            grid-column: 2 / 6;
+            border-color: #F44336;
+            background: 
+                repeating-linear-gradient(
+                    0deg,
+                    transparent,
+                    transparent 20px,
+                    rgba(244, 67, 54, 0.1) 20px,
+                    rgba(244, 67, 54, 0.1) 22px
+                ),
+                linear-gradient(135deg, #ffebee 0%, #ffffff 100%);
+            position: relative;
+        }
+        
+        
+        /* 领域智能体层 */
+        .flow-step-card.agent-layer {
+            grid-column: 2 / 12;
+            border-color: #FF9800;
+            background: linear-gradient(135deg, #fff3e0 0%, #ffffff 100%);
+        }
+        
+        /* 结果层 */
+        .flow-step-card.result-layer {
+            grid-column: 8 / 12;
+            border-color: #00BCD4;
+            background: linear-gradient(135deg, #e0f7fa 0%, #ffffff 100%);
+        }
+        
+        /* 最终输出层 */
+        .flow-step-card.output-layer {
+            grid-column: 2 / 12;
+            border-color: #4CAF50;
+            background: linear-gradient(135deg, #e8f5e9 0%, #ffffff 100%);
+        }
+        
+        .step-title {
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 4px;
+            font-size: clamp(12px, 0.9vw, 14px);
+            text-wrap: balance;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+        
+        .step-desc {
+            font-size: clamp(12px, 0.9vw, 14px);
+            text-wrap: balance;
+            color: #666;
+            line-height: 1.5;
+            margin-top: 6px;
+        }
+        
+        .step-components {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 4px;
+            margin-top: 6px;
+        }
+        
+        .component-tag {
+            background: rgba(102, 126, 234, 0.1);
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 10px;
+            color: #667eea;
+            font-weight: 500;
+        }
+        
+        /* 响应式设计 - 中等屏幕保持 12 列，LLM 移至下方 */
+        @media (max-width: 1200px) {
+            .flow-grid {
+                gap: clamp(10px, 2vw, 24px);
+            }
+            
+            .flow-step-card.user-layer,
+            .flow-step-card.orchestrator-layer,
+            .flow-step-card.agent-layer,
+            .flow-step-card.executor-layer,
+            .flow-step-card.output-layer {
+                grid-column: 2 / 12;
+            }
+            
+            .flow-step-card.router-planner {
+                grid-column: 2 / 6;
+            }
+            
+            .flow-step-card.tool-retriever {
+                grid-column: 8 / 12;
+            }
+            
+            .flow-step-card.llm-layer {
+                grid-column: 8 / 12;
+                grid-row: 2 / 6;
+                align-self: center;
+            }
+        }
+        
+        /* 侧边栏在中等屏幕下堆叠 */
+        @media (max-width: 900px) {
+            .main-layout {
+                grid-template-columns: 1fr;
+            }
+            
+            .diagram-section {
+                min-width: 0;
+            }
+            
+            .detail-panel {
+                max-width: none;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .flow-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .flow-step-card {
+                grid-column: 1 / -1 !important;
+                grid-row: auto !important;
+            }
+            
+            .flow-step-card.llm-layer {
+                grid-column: 1 / -1 !important;
+                grid-row: auto !important;
+                align-self: auto !important;
+            }
+            
+            .academic-badge {
+                font-size: 9px;
+                padding: 3px 8px;
+            }
+        }
+        
+        .flow-step .mermaid {
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .flow-step .mermaid svg {
+            max-width: 100%;
+            height: auto;
+        }
+        
+        .flow-text-summary {
+            margin-top: 24px;
+            padding: 20px 24px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #fff 100%);
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+            font-size: 14px;
+            line-height: 1.8;
+            color: #212529;
+        }
+        
+        .flow-text-summary h4 {
+            color: #495057;
+            margin-bottom: 12px;
+            font-size: 15px;
+        }
+        
+        .flow-text-summary ol {
+            margin: 0;
+            padding-left: 24px;
+        }
+        
+        .flow-text-summary li {
+            margin: 8px 0;
+        }
+        
+        .flow-text-summary strong {
+            color: #333;
+        }
+        
+        .flow-text-summary code {
+            background: rgba(102, 126, 234, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #667eea;
+        }
+        
+        .flow-step {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .flow-step h3 {
+            color: #856404;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+        
+        .flow-step ol {
+            margin-left: 20px;
+        }
+        
+        .flow-step li {
+            margin: 8px 0;
+            color: #333;
+        }
+        
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+        
+        .section {
+            margin: 40px 0;
+        }
+        
+        .section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 24px;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+        }
+        
+        .data-format {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .data-format h4 {
+            color: #1976D2;
+            margin-bottom: 8px;
+        }
+        
+        .tour-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 4px 8px rgba(245, 158, 11, 0.4);
+            z-index: 1000;
+            transition: all 0.2s;
+        }
+        .tour-btn:hover {
+            background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+            transform: translateY(-1px);
+        }
+        
+        /* driver.js 自定义主题 - 白底蓝钮 */
+        .driver-popover-custom .driver-popover-title,
+        .driver-popover-custom .driver-popover-description { color: #333 !important; }
+        .driver-popover-custom .driver-popover { background: #fff !important; }
+        .driver-popover-custom .driver-popover-arrow { border-color: #fff !important; }
+        .driver-popover-custom .driver-popover-prev-btn,
+        .driver-popover-custom .driver-popover-next-btn,
+        .driver-popover-custom .driver-popover-close-btn {
+            background: #667eea !important;
+            color: #fff !important;
+            border: none !important;
+        }
+        .driver-popover-custom .driver-popover-prev-btn:hover,
+        .driver-popover-custom .driver-popover-next-btn:hover {
+            background: #5568d3 !important;
+        }
+        .driver-popover-custom .driver-popover-progress-text { color: #667eea !important; }
+        .driver-popover, .driver-overlay { z-index: 1100 !important; }
+        
+        /* Code Pop-up Modal */
+        .code-modal {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(30, 30, 30, 0.95);
+            backdrop-filter: blur(8px);
+            color: #00ff00;
+            font-family: 'Courier New', Consolas, monospace;
+            font-size: 13px;
+            z-index: 1000;
+            padding: 24px;
+            border-radius: 8px;
+            max-width: 80%;
+            max-height: 80%;
+            overflow: auto;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            border: 1px solid rgba(0, 255, 0, 0.3);
+            cursor: pointer;
+        }
+        
+        .code-modal.active {
+            display: block;
+        }
+        
+        .code-modal pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        /* 数据解剖 - 人性化说明框 */
+        .code-modal-anatomy {
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            color: #1565c0;
+            padding: 16px 18px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+            border-left: 4px solid #2196F3;
+        }
+        
+        .code-modal-anatomy strong {
+            color: #0d47a1;
+        }
+        
+        @media print {
+            /* 页面设置 */
+            @page {
+                size: A4 landscape;
+                margin: 1cm;
+            }
+            
+            /* 强制打印背景颜色 */
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            
+            body {
+                background: white !important;
+                padding: 0;
+                margin: 0;
+            }
+            
+            /* 隐藏 UI 元素 */
+            .tour-btn,
+            .code-modal,
+            .control-bar,
+            .detail-panel {
+                display: none !important;
+            }
+            
+            /* 容器样式 */
+            .container {
+                box-shadow: none !important;
+                padding: 20px !important;
+                background: white !important;
+                border-radius: 0 !important;
+            }
+            
+            /* Master-Detail 布局在打印时变为单列 */
+            .main-layout {
+                display: grid !important;
+                grid-template-columns: 1fr !important;
+            }
+            
+            .diagram-section {
+                width: 100% !important;
+            }
+            
+            /* 隐藏 SVG 覆盖层 */
+            .svg-overlay {
+                display: none !important;
+            }
+            
+            /* 流程图样式 */
+            .flow-diagram {
+                page-break-inside: avoid !important;
+                background: #f8f9fa !important;
+                border: 2px solid #dee2e6 !important;
+                padding: 30px !important;
+                margin: 20px 0 !important;
+            }
+            
+            .flow-grid {
+                gap: 25px 15px !important;
+            }
+            
+            /* 卡片样式 - 确保背景和边框打印 */
+            .flow-step-card {
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+                background: white !important;
+                border: 3px solid !important;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.1) !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            
+            /* 确保渐变背景打印 */
+            .flow-step-card.user-layer {
+                background: linear-gradient(135deg, #e8f5e9 0%, #ffffff 100%) !important;
+                border-color: #4CAF50 !important;
+            }
+            
+            .flow-step-card.orchestrator-layer {
+                background: linear-gradient(135deg, #f3e5f5 0%, #ffffff 100%) !important;
+                border-color: #9C27B0 !important;
+            }
+            
+            .flow-step-card.brain-layer {
+                background: linear-gradient(135deg, #fff5f0 0%, #ffffff 100%) !important;
+                border-color: #FF6B35 !important;
+            }
+            
+            .flow-step-card.agent-layer {
+                background: linear-gradient(135deg, #fff3e0 0%, #ffffff 100%) !important;
+                border-color: #FF9800 !important;
+            }
+            
+            .flow-step-card.executor-layer {
+                background: linear-gradient(135deg, #ffebee 0%, #ffffff 100%) !important;
+                border-color: #F44336 !important;
+            }
+            
+            /* 学术徽章样式 */
+            .academic-badge {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+                color: white !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            
+            
+            /* 标题和文本 */
+            h1, h2, h3 {
+                color: #333 !important;
+                page-break-after: avoid !important;
+            }
+            
+            .section {
+                page-break-inside: avoid !important;
+            }
+            
+            /* 代码块 */
+            .code-block {
+                background: #1e1e1e !important;
+                color: #d4d4d4 !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            
+            /* 数据格式框 */
+            .data-format {
+                background: #e7f3ff !important;
+                border-left: 4px solid #2196F3 !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/driver.js@1.0.1/dist/driver.css"/>
+    <script src="https://cdn.jsdelivr.net/npm/driver.js@1.0.1/dist/driver.js.iife.js"></script>
+</head>
+<body>
+    <button class="tour-btn" onclick="startTour()">👋 新手引导 (Start Tour)</button>
+    
+    <!-- Code Pop-up Modal (点击连接线显示，点击任意处关闭) -->
+    <div class="code-modal" id="code-modal" onclick="event.stopPropagation()">
+        <div id="code-modal-body"></div>
+    </div>
+    
+    <div class="container">
+        <h1>🚀 Omics Agent - Interactive Architecture Dashboard</h1>
+        <p class="subtitle">交互式白盒架构仪表板：从用户需求到分析结果的完整流程</p>
+        
+        <!-- Master-Detail 布局 -->
+        <div class="main-layout">
+            <!-- 主区域：架构图 -->
+            <div class="diagram-section">
+                <!-- 控制栏：场景模式 -->
+                <div class="control-bar">
+                    <h3>📊 场景模式 (Scenario Mode):</h3>
+                    <button class="scenario-btn" onclick="renderScenario('planning', this)">规划流程 (Planning Flow)</button>
+                    <button class="scenario-btn" onclick="renderScenario('execution', this)">执行流程 (Execution Flow)</button>
+                    <button class="scenario-btn" onclick="renderScenario('error', this)">错误循环 (Error Loop)</button>
+                    <button class="scenario-btn" onclick="renderScenario('chat', this)">直接聊天 (Direct Chat)</button>
+                    <button class="scenario-btn" onclick="renderScenario('infra', this)">📦 部署架构 (Infrastructure)</button>
+                    <button class="scenario-btn" onclick="renderScenario('reset', this)">重置 (Reset)</button>
+                </div>
+                
+                <!-- 流程图 - 数字实验室类比 (CSS Grid 2D 布局) -->
+                <div class="flow-diagram">
+                    <div class="flow-grid">
+                        <!-- 第1行: 用户 (全宽) -->
+                        <div class="flow-step-card user-layer clickable" data-module="user" onclick="showModuleDetails('user')">
+                            <div class="step-title">👩‍🔬 用户 (User)</div>
+                            <div class="step-desc">提出需求："帮我分析这个数据"</div>
+                            <div class="step-components">
+                                <span class="component-tag">Web UI</span>
+                                <span class="component-tag">文件上传</span>
+                                <span class="component-tag">自然语言查询</span>
+                            </div>
+                        </div>
+                        
+                        <!-- 第2行: 总控编排 (全宽) -->
+                        <div class="flow-step-card orchestrator-layer clickable" data-module="orchestrator" onclick="showModuleDetails('orchestrator')">
+                            <div class="step-title">🤖 总控编排 (Orchestrator)</div>
+                            <div class="step-desc">负责理解意图，分发任务，协调对话流程</div>
+                            <div class="step-components">
+                                <span class="component-tag">意图分类</span>
+                                <span class="component-tag">任务分发</span>
+                                <span class="component-tag">流程协调</span>
+                            </div>
+                        </div>
+                        
+                        <!-- 第3行: 大脑层 (并排) -->
+                        <div class="flow-step-card brain-layer router-planner clickable" data-module="planner" onclick="showModuleDetails('planner')">
+                            <div class="step-title">🧠 首席科学家 (Lead Scientist)</div>
+                            <div class="step-desc">拆解科学问题，生成实验步骤，规划分析流程</div>
+                            <div class="step-components">
+                                <span class="component-tag">Workflow Planner</span>
+                                <span class="component-tag">科学推理</span>
+                                <span class="component-tag">步骤生成</span>
+                            </div>
+                        </div>
+                        
+                        <div class="flow-step-card brain-layer tool-retriever clickable" data-module="retriever" onclick="showModuleDetails('retriever')">
+                            <div class="step-title">📚 图书馆员 (Librarian)</div>
+                            <div class="step-desc">在工具库中寻找合适的工具，语义检索匹配</div>
+                            <div class="step-components">
+                                <span class="component-tag">Tool Retriever</span>
+                                <span class="component-tag">ChromaDB</span>
+                                <span class="component-tag">语义检索</span>
+                            </div>
+                        </div>
+                        
+                        <!-- LLM 服务节点 (右侧浮动，跨行) -->
+                        <div class="flow-step-card llm-layer clickable" data-module="llm" onclick="showModuleDetails('llm')">
+                            <div class="step-title">⚡ DeepSeek-R1</div>
+                            <div class="step-desc">大语言模型推理引擎</div>
+                            <div class="step-components">
+                                <span class="component-tag">意图分类</span>
+                                <span class="component-tag">工作流规划</span>
+                                <span class="component-tag">诊断报告</span>
+                            </div>
+                        </div>
+                        
+                        <!-- 第4行: 领域专家 (全宽) -->
+                        <div class="flow-step-card agent-layer clickable" data-module="agent" onclick="showModuleDetails('agent')">
+                            <div class="step-title">🧬 领域专家 (Domain Agents)</div>
+                            <div class="step-desc">拥有 RNA/代谢组学的专业知识，执行领域特定分析</div>
+                            <div class="step-components">
+                                <span class="component-tag">RNA Agent</span>
+                                <span class="component-tag">Metabolomics Agent</span>
+                                <span class="component-tag">领域知识</span>
+                            </div>
+                        </div>
+                        
+                        <!-- 第5行: 执行引擎 (全宽) -->
+                        <div class="flow-step-card executor-layer clickable" data-module="executor" onclick="showModuleDetails('executor')">
+                            <div class="step-title">🦾 执行引擎 (Executor)</div>
+                            <div class="step-desc">编写代码，操作软件，生成图表，执行具体分析步骤</div>
+                            <div class="step-components">
+                                <span class="component-tag">WorkflowExecutor</span>
+                                <span class="component-tag">参数验证</span>
+                                <span class="component-tag">工具调用</span>
+                                <span class="component-tag">结果生成</span>
+                            </div>
+                        </div>
+                        
+                        <!-- 第6行: 最终输出 (全宽) -->
+                        <div class="flow-step-card output-layer clickable" data-module="output" onclick="showModuleDetails('output')">
+                            <div class="step-title">📊 分析结果 (Analysis Results)</div>
+                            <div class="step-desc">通过 Server-Sent Events 实时推送分析进度和结果，前端实时渲染</div>
+                            <div class="step-components">
+                                <span class="component-tag">SSE 流式输出</span>
+                                <span class="component-tag">工作流卡片</span>
+                                <span class="component-tag">步骤结果</span>
+                                <span class="component-tag">AI 诊断报告</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- SVG 覆盖层用于动态连接线 -->
+                    <svg class="svg-overlay" id="flow-svg">
+                        <!-- 动态路径将通过 JavaScript 添加 -->
+                    </svg>
+                </div>
+            </div>
+            
+            <!-- 侧边栏：系统解剖与逻辑追踪面板 -->
+            <div class="detail-panel">
+                <h2>🔬 System Anatomy & Logic Trace<br><span style="font-size: 14px; color: #666;">系统解剖与逻辑追踪</span></h2>
+                <div class="default-state" id="default-state">
+                    Select a module or click a connection line to inspect data flow and parameter mapping.
+                </div>
+                <div class="detail-content" id="detail-content">
+                    <!-- 内容将通过 JavaScript 动态填充 -->
+                </div>
+            </div>
+        </div>
+        
+        <script>
+            // 模块技术规格数据对象（双语 + IEEE 格式引用）
+            const moduleDetails = {
+                user: {
+                    component: "用户 (User)",
+                    coreFunction: "用户交互接口",
+                    dataIO: "Input: 自然语言查询 + 文件上传 → Output: HTTP POST 请求",
+                    technologyDescription: "实现基于 React/Vanilla JS 的前端界面，使用 FormData API 处理文件上传，通过 fetch API 发送 HTTP POST 请求到后端。前端负责用户输入验证、文件预览和错误提示。",
+                    keyLogic: "用户在 Web UI 中输入查询文本或上传文件，前端收集用户输入并发送到后端 API。",
+                    designRationale: "分离用户界面层与业务逻辑层，实现前后端解耦。前端负责交互和展示，后端负责计算和决策。这种架构支持前后端独立开发和部署，提高系统可维护性。",
+                    upstreamDownstream: "Upstream: N/A (用户入口) | Downstream: Orchestrator (接收用户请求)",
+                    llmLogic: "N/A - User Interface Layer（不直接调用 LLM API）",
+                    academicBasis: "N/A - User Interface Layer (标准 Web 架构模式，基于 RESTful API 设计原则)"
+                },
+                orchestrator: {
+                    component: "总控编排 (Orchestrator)",
+                    coreFunction: "core.orchestrator.AgentOrchestrator.stream_process()",
+                    dataIO: "Input: UserQuery + ConversationHistory + UploadedFiles → Output: SSE Events (status, workflow, step_result, diagnosis, result)",
+                    technologyDescription: "实现基于 SOP（Standard Operating Procedure）的协调机制。使用 Celery 进行异步任务调度，Redis 作为消息代理（message broker）处理高并发请求。通过 FastAPI 的 StreamingResponse 实现 SSE 流式输出，使用 Python async/await 异步生成器逐条 yield SSE 事件。使用 LLM API 进行意图分类，基于规则和 LLM 输出进行路由决策。",
+                    keyLogic: "管理对话历史，进行意图分类（Chat vs Task），协调多智能体协作。使用 LLM 进行全局意图判断，根据结果路由到规划流程或直接聊天。维护会话状态和上下文。",
+                    designRationale: "为什么需要 Orchestrator？实现单一入口点，统一管理多智能体协作。分离意图分类与具体执行，允许在规划前进行 Human-in-the-loop 验证。支持流式输出，提升用户体验。防止多个智能体直接通信导致的混乱，确保数据流的一致性。",
+                    upstreamDownstream: "Upstream: User (接收用户请求) | Downstream: Planner (任务模式) / LLM (聊天模式) / Executor (执行模式)",
+                    llmLogic: "<strong>触发点:</strong> <code>_classify_global_intent()</code> → <code>llm_client.achat(messages, temperature=0.1, max_tokens=50)</code><br><br><strong>Prompt 策略:</strong> Zero-shot Classification。System Prompt: \"你是一个意图分类助手。只返回JSON格式的意图类型。\" User Prompt: 包含用户查询和分类规则（聊天 vs 任务）。<br><br><strong>上下文窗口:</strong> UserQuery（原始文本）+ 关键词规则（task_keywords: [\"分析\", \"处理\", \"运行\", \"执行\"]）。如果关键词匹配则直接返回，否则调用 LLM。<br><br><strong>输出解析:</strong> 1) 移除 Markdown 代码块（```json），2) JSON.parse() 提取 <code>{\"type\": \"chat\" | \"task\"}</code>，3) 如果解析失败，检查响应文本中是否包含 \"task\" 关键词作为后备方案。",
+                    academicBasis: "[1] H. Hong et al., \"MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework,\" ICLR, 2024. (SOPs)<br>[2] P. Soare et al., \"Scalable Distributed Task Queues,\" IEEE Trans. Cloud Comput., 2023. (Celery/Async Architecture)"
+                },
+                planner: {
+                    component: "首席科学家 (Lead Scientist / Planner)",
+                    coreFunction: "core.planner.SOPPlanner.plan_workflow()",
+                    dataIO: "Input: UserQuery + FileMetadata + ToolSchemas → Output: JSON_Workflow: {workflow_name, steps: [{step_id, tool_id, name, params}]}",
+                    technologyDescription: "使用 Chain-of-Thought (CoT) Prompting 分解生物问题。由 deepseek-R1（MoE 架构）提供推理能力。将工具 Schema 注入到 LLM 提示词中，使用 JSON Schema 验证 LLM 输出，确保工作流格式正确。实现参数推荐算法，基于数据统计信息（如样本数、特征数）推荐最佳参数。使用 Few-shot Learning 提供示例工作流。",
+                    keyLogic: "使用 Chain-of-Thought (CoT) 推理拆解科学问题。将用户需求分解为可执行的步骤序列。每个步骤包含工具ID和参数配置。支持参数推荐和动态调整。",
+                    designRationale: "为什么分离 Planner 和 Executor？允许在昂贵执行前进行 Human-in-the-loop 验证，防止错误执行浪费计算资源。支持工作流的预览、修改和优化。实现规划与执行的解耦，提高系统灵活性。通过 Schema 验证防止 LLM 产生无效工作流，减少执行错误。",
+                    upstreamDownstream: "Upstream: Orchestrator (接收任务意图) + Retriever (获取工具 Schema) | Downstream: Executor (发送工作流配置) / Frontend (预览模式)",
+                    llmLogic: "<strong>触发点:</strong> <code>generate_plan()</code> → <code>_classify_intent()</code> → <code>llm_client.achat(messages, temperature=0.1)</code><br><br><strong>Prompt 策略:</strong> Chain-of-Thought (CoT) + Few-shot Learning。System Prompt 注入：1) 领域分类规则（Metabolomics vs RNA），2) 可用步骤列表（从 WorkflowRegistry 获取），3) 模式分类规则（PLANNING vs EXECUTION）。User Prompt 包含：UserQuery + FileMetadata（是否有文件）+ 目标步骤列表。<br><br><strong>上下文窗口:</strong> UserQuery + FileMetadata（has_file: bool）+ ToolSchemas（从 Retriever 获取的 top-k 工具 JSON Schema）+ WorkflowRegistry 的 DAG 依赖关系（作为 System Prompt 的一部分）。<br><br><strong>输出解析:</strong> 1) JSON.parse() 提取 <code>{\"domain_name\": \"Metabolomics\" | \"RNA\", \"mode\": \"EXECUTION\" | \"PLANNING\", \"target_steps\": [...]}</code>，2) 使用 Pydantic 模型验证格式，3) 如果 target_steps 为空数组，则使用完整工作流（从 WorkflowRegistry 获取所有步骤）。",
+                    academicBasis: "[3] DeepSeek-AI, \"deepseek-R1 Technical Report,\" arXiv, 2024.<br>[4] J. Wei et al., \"Chain-of-Thought Prompting Elicits Reasoning in LLMs,\" NeurIPS, 2022."
+                },
+                retriever: {
+                    component: "图书馆员 (Librarian / Tool Retriever)",
+                    coreFunction: "core.tool_retriever.ToolRetriever.query_tools()",
+                    dataIO: "Input: UserQuery (自然语言描述) → Output: List[ToolSchema] - 工具 JSON Schema 列表",
+                    technologyDescription: "实现 RAG（Retrieval-Augmented Generation）系统。使用 ChromaDB 存储工具 Schema 的 embedding，执行余弦相似度搜索（cosine similarity search）匹配用户意图与 50+ 生物工具。使用 OpenAI Embeddings 或 Ollama Embeddings 将用户查询和工具描述转换为向量。返回 top-k 最相似的工具，工具 Schema 使用 JSON Schema 格式，包含参数定义、类型、描述和示例。",
+                    keyLogic: "使用 ChromaDB 向量数据库进行语义检索。将用户查询转换为 embedding，在工具库中查找相似度最高的工具。返回工具的完整 Schema（参数定义、描述、示例）。",
+                    designRationale: "为什么使用语义检索而非关键词匹配？支持自然语言查询，用户无需了解具体工具名称。通过 embedding 相似度匹配，提高工具推荐的准确性。支持工具描述的模糊匹配，即使工具名称不完全匹配也能找到相关工具。",
+                    upstreamDownstream: "Upstream: Planner (接收工具查询请求) | Downstream: Planner (返回工具 Schema)",
+                    llmLogic: "<strong>触发点:</strong> <code>query_tools()</code> → <code>embedding_model.embed_query(query_text)</code><br><br><strong>API 类型:</strong> Embeddings API（非 Chat API）。使用 OpenAI Embeddings 或 Ollama Embeddings 模型（如 <code>nomic-embed-text</code>）。<br><br><strong>输入:</strong> UserQuery（自然语言文本，例如 \"分析单细胞RNA数据\"）。<br><br><strong>输出:</strong> Vector Float List（例如 768 维或 1536 维的浮点数数组）。<br><br><strong>处理流程:</strong> 1) 将查询文本转换为 embedding 向量，2) 在 ChromaDB 中计算与所有工具描述的余弦相似度（cosine similarity），3) 返回 top-k（默认 k=10）最相似的工具 Schema。注意：此模块不使用 Chat API，而是使用 Embeddings API 进行语义相似度计算。",
+                    academicBasis: "[5] Y. Qin et al., \"ToolLLM: Facilitating LLMs to Master 16000+ Real-world APIs,\" ICLR, 2024.<br>[6] J. Johnson et al., \"Billion-scale similarity search,\" IEEE Trans. Big Data, 2021. (Vector Search Theory)"
+                },
+                agent: {
+                    component: "领域专家 (Domain Agents)",
+                    coreFunction: "agents.rna.RNAAgent.execute_workflow() / agents.metabolomics.MetabolomicsAgent.execute_workflow()",
+                    dataIO: "Input: WorkflowConfig + FilePaths → Output: AnalysisResults: {steps_details, steps_results, summary}",
+                    technologyDescription: "每个领域 Agent 封装特定组学领域的 SOP（Standard Operating Procedure）模板。使用 Python 类继承 BaseAgent，重写 execute_workflow 方法。领域知识通过提示词模板和工具选择策略体现。使用 LLM 生成领域特定的诊断报告，基于步骤结果提取关键指标（如 RNA-seq 的细胞数、基因数、线粒体比例等）。",
+                    keyLogic: "拥有特定组学领域的专业知识（RNA-seq, Metabolomics）。根据工作流配置创建 WorkflowExecutor，执行分析步骤。聚合步骤结果，生成领域特定的诊断报告。",
+                    designRationale: "为什么需要领域特定的 Agent？不同组学领域有不同的分析流程和专业知识。通过领域 Agent 封装领域知识，实现关注点分离。支持领域特定的错误处理和参数推荐。允许系统扩展新的组学领域，无需修改核心架构。",
+                    upstreamDownstream: "Upstream: Orchestrator (接收工作流配置) | Downstream: Executor (委托执行) + Output (返回分析结果)",
+                    llmLogic: "<strong>触发点:</strong> <code>_detect_intent_with_llm()</code> → <code>llm_client.achat(messages)</code> 和 <code>generate_diagnosis_report()</code> → <code>llm_client.achat(messages)</code><br><br><strong>Prompt 策略:</strong> 1) 意图检测：Zero-shot Classification，System Prompt: \"You are an intent classification assistant. Return JSON only.\" 2) 诊断报告生成：Few-shot Learning，System Prompt 包含领域特定的诊断模板（例如 RNA-seq 的细胞数、基因数、线粒体比例等指标提取规则）。<br><br><strong>上下文窗口:</strong> 1) 意图检测：UserQuery + UploadedFiles（文件名列表），2) 诊断报告：StepsResults（JSON 格式的步骤执行结果）+ 领域特定的指标提取规则（作为 System Prompt 的一部分）。<br><br><strong>输出解析:</strong> 1) 意图检测：JSON.parse() 提取 <code>{\"intent\": \"explain_file\" | \"run_workflow\" | \"chat\", \"reasoning\": \"...\"}</code>，2) 诊断报告：Markdown 格式的文本，包含关键指标（细胞数、基因数等）和诊断建议。",
+                    academicBasis: "[10] A. M. Bran et al., \"ChemCrow: Augmenting large language models with chemistry tools,\" Nature Machine Intelligence, vol. 6, pp. 525-535, 2024. [11] K. Zhou et al., \"GeneGPT: Augmenting Large Language Models with Domain Tools for Improved Access to Biomedical Information,\" arXiv:2404.09667, 2024. [12] H. Yang et al., \"scGPT: Towards Building a Foundation Model for Single-Cell Multi-omics Using Generative AI,\" bioRxiv, 2023."
+                },
+                executor: {
+                    component: "执行引擎 (Executor)",
+                    coreFunction: "core.executor.WorkflowExecutor.execute_step()",
+                    dataIO: "Input: StepConfig: {step_id, tool_id, params} → Output: StepResult: {status, logs, data, images}",
+                    technologyDescription: "实现沙箱化执行环境。通过 Python 反射机制（Reflection，使用 getattr, importlib）动态加载工具函数。使用 Pydantic 模型验证步骤参数，确保类型和格式正确。集成 Scanpy 和 DESeq2 进行组学数据处理。工具执行可能涉及：1) 同步 Python 函数调用，2) Subprocess 调用外部程序（如 Cell Ranger），3) Celery 异步任务队列处理耗时操作。处理步骤间数据流：前一步的输出文件路径作为下一步的输入参数。",
+                    keyLogic: "从 ToolRegistry 动态查找工具函数。使用 Pydantic 验证参数。调用工具函数（可能涉及 Subprocess 或 Celery 异步任务）。处理步骤间的数据流（前一步输出作为下一步输入）。收集执行结果和错误信息。",
+                    designRationale: "为什么分离 Executor 和 Planner？允许在规划后、执行前进行验证，防止无效参数导致执行失败。支持错误恢复和重试机制（Executor → Planner 反馈循环）。实现执行逻辑的通用化，无需为每个工具编写特定代码。通过参数验证减少运行时错误。",
+                    upstreamDownstream: "Upstream: Agent (接收工作流配置) | Downstream: Tools (调用工具函数) / Planner (错误反馈循环) / Output (返回执行结果)",
+                    llmLogic: "<strong>触发点:</strong> Executor 本身不直接调用 LLM API。但在错误恢复场景中，错误信息会反馈给 Planner，Planner 使用 LLM 生成修正后的工作流。<br><br><strong>间接 LLM 使用:</strong> 当执行失败时，Executor 返回 ErrorResult，Orchestrator 触发重规划流程，Planner 使用 LLM 分析错误原因并生成修正后的工作流（参见 Planner 的 llmLogic）。<br><br><strong>代码生成场景（未来扩展）:</strong> 如果工具需要动态代码生成，Executor 可能调用 LLM 生成 Python 代码块。输入：Step description + Dataframe .head()（数据预览），输出：Python Code block（使用正则表达式提取 ```python 代码块）。",
+                    academicBasis: "[7] F. A. Wolf et al., \"SCANPY: large-scale single-cell gene expression data analysis,\" Genome Biology, 2018.<br>[8] H. Li et al., \"SheetCopilot: Bringing Software Productivity to the Next Level,\" NeurIPS, 2023."
+                },
+                llm: {
+                    component: "大语言模型服务 (LLM Service)",
+                    coreFunction: "llm_client.achat() / llm_client.astream()",
+                    dataIO: "Input: List[Message] + temperature, max_tokens → Output: JSON / Stream",
+                    technologyDescription: "deepseek-R1 (MoE 架构) 提供推理能力。Orchestrator 用于意图分类；Planner 用于工作流规划与错误修正；Agent 用于诊断报告生成。通过统一 LLM Client 封装 API 调用。",
+                    keyLogic: "意图分类 (Zero-shot)、工作流规划 (CoT + Few-shot)、错误分析、诊断报告生成。",
+                    designRationale: "LLM 是系统的推理引擎，但作为外部服务不参与数据流主路径，故以虚线连接表示「调用关系」。",
+                    upstreamDownstream: "Upstream: Orchestrator (意图分类) | Planner (规划/修正) | Agent (诊断) | Downstream: 各模块接收 LLM 响应",
+                    llmLogic: "本模块即为 LLM 服务本身。被 Orchestrator、Planner、Agent 调用。",
+                    academicBasis: "deepseek-R1 Technical Report, arXiv 2024."
+                },
+                output: {
+                    component: "分析结果 (Analysis Results)",
+                    coreFunction: "SSE Streaming + Frontend Rendering",
+                    dataIO: "Input: AnalysisResults + AI Report → Output: Rendered UI: Workflow Cards + Step Results + AI Diagnosis",
+                    technologyDescription: "使用 Server-Sent Events (SSE) 实现实时渲染。后端使用 FastAPI StreamingResponse，通过 async generator 逐条发送 JSON 格式的事件。通过 NGINX 反向代理（reverse proxy）在生产环境中提供负载均衡（load balancing）。前端使用 EventSource API 或 fetch API 的 ReadableStream 解析 SSE 流。前端实现状态机解析不同事件类型（status, workflow, step_result, diagnosis），实时更新 DOM。使用 Marked.js 或 marked 库渲染 Markdown 格式的 AI 报告。",
+                    keyLogic: "通过 Server-Sent Events (SSE) 实时推送分析进度。前端解析 SSE 事件流，实时渲染工作流卡片、步骤结果、图表和 AI 诊断报告。支持流式文本输出和增量更新。",
+                    designRationale: "为什么使用 SSE 而非轮询？实时推送，降低延迟。单向通信，简化实现。支持流式输出，提升用户体验。相比 WebSocket，SSE 更简单，无需双向通信。使用 NGINX 反向代理提供生产级负载均衡和高可用性。",
+                    upstreamDownstream: "Upstream: Executor (接收执行结果) + Agent (接收分析报告) | Downstream: User (最终展示)",
+                    llmLogic: "N/A - Output Layer（不直接调用 LLM API，仅渲染 LLM 生成的诊断报告）",
+                    academicBasis: "[9] W. Tarneberg et al., \"Dynamic Application-Aware Load Balancing for NGINX,\" IEEE Access, 2021."
+                }
+            };
+            
+            // Synapse Inspector 数据规格（含 human_desc, function_sig, payload_preview, param_mapping）
+            const dataFlowSpecs = {
+                'user-orch': {
+                    source: 'User', target: 'Orchestrator', sourceZh: '用户', targetZh: '编排器',
+                    anatomy: '<strong>上下文：</strong>用户在前端输入自然语言并上传文件。<strong>意义：</strong>这是整个流程的入口，将非结构化输入转为可处理的请求。<strong>关键变量：</strong>message（用户意图）、uploaded_files（文件引用）、stream（开启流式输出）。',
+                    human_desc: 'The user sends their message and uploaded files to the Orchestrator via the chat API.',
+                    function_sig: 'POST /api/chat(request: ChatRequest) -> StreamingResponse',
+                    payload_preview: '{"message":"Analyze this","uploaded_files":[{"name":"example.h5ad","path":"..."}],"stream":true  // 开启流式输出}',
+                    param_mapping: {
+                        'message': 'Natural language query from the user (e.g., "Analyze this data")',
+                        'uploaded_files': 'List of file references with name and server path after upload',
+                        'stream': 'When true, enables SSE streaming for real-time updates',
+                        'user_id': 'Identifies the user session for multi-tenant isolation',
+                        'session_id': 'Correlates requests within a single conversation'
+                    }
+                },
+                'orch-planner': {
+                    source: 'Orchestrator', target: 'Planner', sourceZh: '编排器', targetZh: '规划器',
+                    anatomy: '<strong>上下文：</strong>编排器已完成意图分类，确认为「任务」模式。<strong>意义：</strong>将用户需求与对话历史交给规划器，以便生成可执行的工作流。<strong>关键变量：</strong>query（原始查询）、history（对话上下文）、file_metadata（文件类型等）。',
+                    human_desc: 'The Orchestrator forwards the classified task intent and conversation history to the Planner.',
+                    function_sig: 'planner.plan_workflow(query: str, history: List[Message], file_metadata: FileMetadata) -> WorkflowSchema',
+                    payload_preview: '{"query":"分析RNA数据","history":[...],"file_metadata":{"has_file":true,"file_type":"h5ad"}}',
+                    param_mapping: {
+                        'query': 'User\'s original natural language request',
+                        'history': 'Previous messages in the conversation for context',
+                        'file_metadata': 'Metadata about uploaded files (type, sample count) for planning'
+                    }
+                },
+                'planner-retriever': {
+                    source: 'Planner', target: 'Retriever', sourceZh: '规划器', targetZh: '检索器',
+                    anatomy: '<strong>上下文：</strong>规划器需要为工作流选择合适工具。<strong>意义：</strong>通过语义检索从工具库中匹配与用户意图最相关的工具定义。<strong>关键变量：</strong>query（任务描述）、top_k（返回前 5 个最相关工具）。',
+                    human_desc: 'The Planner asks the Retriever for relevant tools based on the user\'s query.',
+                    function_sig: 'retriever.query_tools(text: str, top_k: int = 5) -> List[ToolDef]',
+                    payload_preview: '{"query":"分析RNA-seq数据","top_k":5}',
+                    param_mapping: {
+                        'text': 'Natural language description of the task for semantic search',
+                        'top_k': 'Retrieves top 5 most relevant tools by embedding similarity',
+                        'threshold': 'Filters out low-confidence matches (optional)'
+                    }
+                },
+                'retriever-planner': {
+                    source: 'Retriever', target: 'Planner', sourceZh: '检索器', targetZh: '规划器',
+                    anatomy: '<strong>上下文：</strong>检索器已完成向量相似度搜索。<strong>意义：</strong>将工具定义（参数、描述）返回给规划器，供 LLM 生成合规的工作流 JSON。<strong>关键变量：</strong>tool_id、params（JSON Schema）、description。',
+                    human_desc: 'The Retriever returns the tool schemas so the Planner can build a valid workflow.',
+                    function_sig: 'List[ToolDef] (return value)',
+                    payload_preview: '[{"tool_id":"rna_qc","params":{...},"description":"..."}]',
+                    param_mapping: {
+                        'tool_id': 'Unique identifier for the tool in the registry',
+                        'params': 'JSON Schema of expected parameters',
+                        'description': 'Human-readable tool description for LLM context'
+                    }
+                },
+                'planner-output': {
+                    source: 'Planner', target: 'Output', sourceZh: '规划器', targetZh: '输出',
+                    anatomy: '<strong>上下文：</strong>规划器已生成工作流配置。<strong>意义：</strong>通过 SSE 推送到前端，供用户预览并确认后再执行。<strong>关键变量：</strong>workflow_name、steps（步骤列表，含 tool_id 与 params）。',
+                    human_desc: 'The Planner sends the generated workflow to the frontend for user confirmation.',
+                    function_sig: 'SSE event: workflow',
+                    payload_preview: '{"type":"workflow","workflow_config":{"workflow_name":"RNA-seq","steps":[...]  // 步骤列表}}',
+                    param_mapping: {
+                        'workflow_name': 'Human-readable pipeline name',
+                        'steps': 'Ordered list of step configs (step_id, tool_id, params)'
+                    }
+                },
+                'orch-executor': {
+                    source: 'Orchestrator', target: 'Executor', sourceZh: '编排器', targetZh: '执行器',
+                    anatomy: '<strong>上下文：</strong>用户已确认工作流。<strong>意义：</strong>将工作流配置与文件路径交给执行器（经领域智能体）执行。<strong>关键变量：</strong>workflow_config、file_paths。',
+                    human_desc: 'The Orchestrator routes the approved workflow to the Executor (via Agent).',
+                    function_sig: 'agent.execute_workflow(workflow_config: WorkflowSchema, file_paths: List[str])',
+                    payload_preview: '{"workflow_config":{...},"file_paths":["/data/xxx.h5ad"]}',
+                    param_mapping: {
+                        'workflow_config': 'Validated workflow with steps and parameters',
+                        'file_paths': 'Server paths to user-uploaded data files'
+                    }
+                },
+                'orch-agent': {
+                    source: 'Orchestrator', target: 'Agent', sourceZh: '编排器', targetZh: '领域智能体',
+                    anatomy: '<strong>上下文：</strong>编排器根据工作流类型选择领域智能体。<strong>意义：</strong>将任务委派给具备专业知识的 Agent（如 RNA、代谢组学）。<strong>关键变量：</strong>workflow_config、file_paths。',
+                    human_desc: 'The Orchestrator delegates to a domain-specific Agent (RNA, Metabolomics).',
+                    function_sig: 'agent.execute_workflow(workflow_config: WorkflowSchema, file_paths: List[str]) -> AnalysisResult',
+                    payload_preview: '{"workflow_config":{...},"file_paths":["/data/session_xxx/sample.h5ad"]}',
+                    param_mapping: {
+                        'workflow_config': 'Complete workflow schema with steps',
+                        'file_paths': 'Paths to uploaded files for analysis'
+                    }
+                },
+                'agent-executor': {
+                    source: 'Agent', target: 'Executor', sourceZh: '领域智能体', targetZh: '执行器',
+                    anatomy: '<strong>上下文：</strong>领域智能体持有工作流配置。<strong>意义：</strong>将每个步骤（工具 ID + 参数）交给执行器依次调用。<strong>关键变量：</strong>step_id、tool_id、params。',
+                    human_desc: 'The Agent passes each step to the Executor for tool invocation.',
+                    function_sig: 'executor.execute_step(step: StepConfig) -> StepResult',
+                    payload_preview: '{"step_id":"rna_qc","tool_id":"rna_qc","params":{"min_genes":200}}',
+                    param_mapping: {
+                        'step_id': 'Unique ID for this step in the workflow',
+                        'tool_id': 'Registry key to look up the tool function',
+                        'params': 'Validated parameters for the tool call'
+                    }
+                },
+                'executor-tools': {
+                    source: 'Executor', target: 'Tools', sourceZh: '执行器', targetZh: '工具库',
+                    anatomy: '<strong>上下文：</strong>执行器已从注册表查找工具函数。<strong>意义：</strong>将验证后的参数传入工具（如 QC、绘图），执行实际分析。<strong>关键变量：</strong>file_path、min_genes、min_cells。',
+                    human_desc: 'The Executor invokes the actual tool function with the validated parameters.',
+                    function_sig: 'tool_fn(**params) -> ResultObject',
+                    payload_preview: '{"file_path":"/data/xxx.h5ad","min_genes":200}',
+                    param_mapping: {
+                        'file_path': 'Path to input data file (e.g., H5AD)',
+                        'min_genes': 'Minimum genes per cell to retain (QC filter)',
+                        'min_cells': 'Minimum cells per gene to retain'
+                    }
+                },
+                'executor-output': {
+                    source: 'Executor', target: 'Output', sourceZh: '执行器', targetZh: '输出',
+                    anatomy: '<strong>上下文：</strong>某一步骤执行完成。<strong>意义：</strong>通过 SSE 实时推送步骤结果（日志、图表路径）到前端。<strong>关键变量：</strong>step_id、status、data。',
+                    human_desc: 'The Executor streams each step result to the frontend via SSE.',
+                    function_sig: 'SSE event: step_result',
+                    payload_preview: '{"type":"step_result","report_data":{"step_id":"rna_qc","status":"success","data":{...}}}',
+                    param_mapping: {
+                        'step_id': 'Identifies which step produced this result',
+                        'status': 'success | error',
+                        'data': 'Step output (logs, images, summary)'
+                    }
+                },
+                'executor-planner': {
+                    source: 'Executor', target: 'Planner', sourceZh: '执行器', targetZh: '规划器',
+                    anatomy: '<strong>上下文：</strong>执行器检测到参数错误或运行时异常。<strong>意义：</strong>将错误信息反馈给规划器，触发 LLM 分析并生成修正方案。<strong>关键变量：</strong>error_type、message、original_plan。',
+                    human_desc: 'When execution fails, the Executor sends the error context back to the Planner for correction.',
+                    function_sig: 'ReplanRequest(error_context: ErrorContext, original_plan: WorkflowSchema)',
+                    payload_preview: '{"error_type":"ParameterError","message":"...","original_plan":{...}}',
+                    param_mapping: {
+                        'error_type': 'Exception class (e.g., ParameterError, FileNotFoundError)',
+                        'message': 'Human-readable error description',
+                        'original_plan': 'The workflow that failed, for LLM to analyze'
+                    }
+                },
+                'planner-executor': {
+                    source: 'Planner', target: 'Executor', sourceZh: '规划器', targetZh: '执行器',
+                    anatomy: '<strong>上下文：</strong>规划器已根据错误分析生成修正后的工作流。<strong>意义：</strong>将修正后的参数交回执行器重新执行。<strong>关键变量：</strong>corrected_params。',
+                    human_desc: 'The Planner sends the corrected workflow back to the Executor for retry.',
+                    function_sig: 'Revised WorkflowSchema',
+                    payload_preview: '{"workflow_name":"RNA-seq","steps":[{"step_id":"rna_qc","params":{"min_genes":300}}]}',
+                    param_mapping: {
+                        'corrected_params': 'LLM-generated parameter fixes based on error analysis'
+                    }
+                },
+                'orch-output': {
+                    source: 'Orchestrator', target: 'Output', sourceZh: '编排器', targetZh: '输出',
+                    anatomy: '<strong>上下文：</strong>意图分类为「聊天」模式。<strong>意义：</strong>LLM 的流式回答直接推送到前端，无需规划与执行。<strong>关键变量：</strong>type（chat）、content（文本块）。',
+                    human_desc: 'In chat mode, the Orchestrator streams the LLM response directly to the user.',
+                    function_sig: 'llm.astream(messages) -> AsyncIterator[ChatChunk]',
+                    payload_preview: '{"type":"chat","content":"单细胞RNA测序是一种..."}',
+                    param_mapping: {
+                        'type': 'Event type: "chat" for direct LLM output',
+                        'content': 'Streamed text chunk from the LLM'
+                    }
+                },
+                'orch-llm': {
+                    source: 'Orchestrator', target: 'LLM', sourceZh: '编排器', targetZh: 'LLM',
+                    anatomy: '<strong>上下文：</strong>编排器收到用户请求，需判断是聊天还是任务。<strong>意义：</strong>调用 LLM 做零样本意图分类，temperature=0.1 保证输出稳定。<strong>关键变量：</strong>messages、temperature、max_tokens。',
+                    human_desc: 'The Orchestrator calls the LLM for intent classification (Chat vs Task).',
+                    function_sig: 'llm_client.achat(messages, temperature=0.1, max_tokens=50) -> JSON',
+                    payload_preview: '{"messages":[...],"temperature":0.1  // 低温度保证稳定输出,"max_tokens":50  // 限制为简短JSON}',
+                    param_mapping: {
+                        'messages': 'System + User prompt for zero-shot classification',
+                        'temperature': 'Low (0.1) for deterministic intent output',
+                        'max_tokens': 'Limit response to JSON only'
+                    }
+                },
+                'planner-llm': {
+                    source: 'Planner', target: 'LLM', sourceZh: '规划器', targetZh: 'LLM',
+                    anatomy: '<strong>上下文：</strong>规划器持有工具 Schema 与用户查询。<strong>意义：</strong>LLM 用 CoT 推理生成工作流 JSON，或分析错误并输出修正方案。<strong>关键变量：</strong>messages（含工具定义）、temperature。',
+                    human_desc: 'The Planner calls the LLM for workflow generation (CoT) or error analysis.',
+                    function_sig: 'llm_client.achat(messages, temperature=0.1) -> WorkflowSchema | RevisedPlan',
+                    payload_preview: '{"messages":[...],"temperature":0.1}',
+                    param_mapping: {
+                        'messages': 'System (tool schemas) + User (query, file_metadata)',
+                        'temperature': 'Low for structured JSON output'
+                    }
+                },
+                'agent-llm': {
+                    source: 'Agent', target: 'LLM', sourceZh: '领域智能体', targetZh: 'LLM',
+                    anatomy: '<strong>上下文：</strong>所有分析步骤已完成。<strong>意义：</strong>将步骤结果摘要交给 LLM，生成 Markdown 格式的专家诊断报告。<strong>关键变量：</strong>messages（含领域模板与结果摘要）。',
+                    human_desc: 'The Agent calls the LLM to generate the diagnosis report from step results.',
+                    function_sig: 'llm_client.achat(messages) -> Markdown',
+                    payload_preview: '{"messages":[{"role":"system","content":"..."},{"role":"user","content":"steps_summary"}]}',
+                    param_mapping: {
+                        'messages': 'Domain-specific template + step results summary',
+                        'output': 'Markdown diagnosis report'
+                    }
+                },
+                'llm-orch': {
+                    source: 'LLM', target: 'Orchestrator', sourceZh: 'LLM', targetZh: '编排器',
+                    anatomy: '<strong>上下文：</strong>LLM 完成意图分类。<strong>意义：</strong>返回 JSON 格式的意图类型（chat/task），供编排器路由决策。<strong>关键变量：</strong>type（chat|task）。',
+                    human_desc: 'LLM returns intent classification result to Orchestrator.',
+                    function_sig: 'JSON {"type": "chat"|"task"}',
+                    payload_preview: '{"type":"task"}',
+                    param_mapping: { 'type': 'Intent type for routing' }
+                },
+                'llm-planner': {
+                    source: 'LLM', target: 'Planner', sourceZh: 'LLM', targetZh: '规划器',
+                    anatomy: '<strong>上下文：</strong>LLM 完成工作流生成或错误分析。<strong>意义：</strong>返回 JSON 工作流或修正后的参数，供规划器验证并下发。<strong>关键变量：</strong>domain_name、mode、target_steps。',
+                    human_desc: 'LLM returns workflow schema or revised plan to Planner.',
+                    function_sig: 'JSON WorkflowSchema | RevisedPlan',
+                    payload_preview: '{"domain_name":"RNA","mode":"PLANNING","target_steps":[...]}',
+                    param_mapping: { 'target_steps': 'List of step configs' }
+                },
+                'llm-agent': {
+                    source: 'LLM', target: 'Agent', sourceZh: 'LLM', targetZh: '领域智能体',
+                    anatomy: '<strong>上下文：</strong>LLM 完成诊断报告生成。<strong>意义：</strong>返回 Markdown 格式的专家分析报告，供 Agent 通过 SSE 推送给前端。<strong>关键变量：</strong>diagnosis（Markdown 文本）。',
+                    human_desc: 'LLM returns diagnosis report to Agent.',
+                    function_sig: 'Markdown string',
+                    payload_preview: '"## 分析结果摘要\\n\\n### 关键发现..."',
+                    param_mapping: { 'diagnosis': 'Markdown report content' }
+                }
+            };
+            
+            // Code Pop-up Modal：点击连接线显示（含数据解剖 + 伪代码）
+            function showCodeModal(connectionId) {
+                const spec = dataFlowSpecs[connectionId];
+                if (!spec) return;
+                const modal = document.getElementById('code-modal');
+                const body = document.getElementById('code-modal-body');
+                if (!modal || !body) return;
+                const anatomy = spec.anatomy || `从 ${spec.sourceZh} 到 ${spec.targetZh} 的数据传输。`;
+                let codeText = `# ${spec.sourceZh} → ${spec.targetZh}\n\n`;
+                codeText += `// ${spec.human_desc || ''}\n\n`;
+                codeText += `${spec.function_sig || ''}\n\n`;
+                codeText += `// Payload Preview\n`;
+                codeText += spec.payload_preview || '';
+                body.innerHTML = `
+                    <div class="code-modal-anatomy">
+                        <strong>🔍 Data Anatomy (数据解剖)</strong><br>
+                        ${anatomy}
+                    </div>
+                    <pre>${escapeHtml(codeText)}</pre>
+                `;
+                modal.classList.add('active');
+            }
+            
+            function closeCodeModal() {
+                const modal = document.getElementById('code-modal');
+                if (modal) modal.classList.remove('active');
+            }
+            
+            document.addEventListener('click', function(e) {
+                const modal = document.getElementById('code-modal');
+                if (modal && modal.classList.contains('active') && !modal.contains(e.target)) {
+                    closeCodeModal();
+                }
+            });
+            
+            // Synapse Inspector：点击连接线时显示结构化解剖（侧边栏，保留供其他入口使用）
+            function showDataFlow(connectionId) {
+                const spec = dataFlowSpecs[connectionId];
+                if (!spec) return;
+                
+                const defaultState = document.getElementById('default-state');
+                const detailContent = document.getElementById('detail-content');
+                
+                defaultState.style.display = 'none';
+                detailContent.classList.add('active');
+                
+                let paramRows = '';
+                if (spec.param_mapping) {
+                    for (const [key, meaning] of Object.entries(spec.param_mapping)) {
+                        paramRows += `<tr><td><code>${key}</code></td><td>${meaning}</td></tr>`;
+                    }
+                }
+                
+                detailContent.innerHTML = `
+                    <div class="detail-item" style="margin-bottom: 20px;">
+                        <div class="detail-item-label">🔬 Synapse Inspector</div>
+                        <div class="detail-item-value" style="font-size: 15px; font-weight: 600;">
+                            ${spec.sourceZh} (${spec.source}) → ${spec.targetZh} (${spec.target})
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">Human Description</div>
+                        <div class="detail-item-value">${spec.human_desc || '-'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">Function Signature</div>
+                        <div class="detail-item-value"><code>${spec.function_sig || '-'}</code></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">Payload Preview</div>
+                        <div class="detail-item-value typewriter-code" id="typewriter-block"><span class="cursor"></span></div>
+                    </div>
+                    ${paramRows ? `
+                    <div class="detail-item">
+                        <div class="detail-item-label">Parameter Mapping (参数含义)</div>
+                        <div class="detail-item-value">
+                            <table class="param-mapping-table">
+                                <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+                                <tbody>${paramRows}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                    ` : ''}
+                `;
+                
+                typewriterEffect(document.getElementById('typewriter-block'), spec.payload_preview || '', 18);
+            }
+            
+            function escapeHtml(s) {
+                const div = document.createElement('div');
+                div.textContent = s;
+                return div.innerHTML;
+            }
+            
+            function typewriterEffect(container, text, speed) {
+                if (!container) return;
+                container.innerHTML = '';
+                let i = 0;
+                const cursor = document.createElement('span');
+                cursor.className = 'cursor';
+                container.appendChild(cursor);
+                const interval = setInterval(() => {
+                    if (i < text.length) {
+                        const span = document.createElement('span');
+                        span.textContent = text[i];
+                        container.insertBefore(span, cursor);
+                        i++;
+                    } else {
+                        clearInterval(interval);
+                    }
+                }, speed);
+            }
+            
+            // 显示模块详情
+            // 场景数据流对象（端到端数据追踪）
+            const scenarioDataFlows = {
+                planning: {
+                    title: "规划流程数据追踪 (Planning Flow Data Trace)",
+                    steps: [
+                        {
+                            step: 1,
+                            module: "用户 (User)",
+                            input: "自然语言查询: \"帮我分析这个数据\"",
+                            process: "用户在前端界面输入查询文本",
+                            output: "HTTP POST 请求: {message: \"帮我分析这个数据\", uploaded_files: [...]}",
+                            dataType: "Raw Text → HTTP Request"
+                        },
+                        {
+                            step: 2,
+                            module: "总控编排 (Orchestrator)",
+                            input: "UserQuery + ConversationHistory",
+                            process: "调用关键词规则检查（task_keywords）",
+                            output: "Rule Check Result: 如果匹配关键词则直接返回，否则进入 LLM 分类",
+                            dataType: "Query → Rule Check"
+                        },
+                        {
+                            step: 2.5,
+                            module: "文件检查器 (File Inspector)",
+                            input: "Uploaded File Path(s)",
+                            process: "读取文件头 (Header) → 统计缺失值 (Missing Stats) → 识别数据规模 (Shape)",
+                            output: "FileMetadata: {columns, missing_rate, shape, n_samples, n_features, data_range, ...}",
+                            dataType: "Automatic Metadata Extraction & Data Health Check",
+                            significance: "数据感知：为 LLM 提供决策依据，而非盲目规划。支持 10x/AnnData/CSV 多模态，Graceful Degradation。"
+                        },
+                        {
+                            step: 3,
+                            module: "🤖 LLM API (Intent Classification)",
+                            input: "UserQuery + System Prompt: \"你是一个意图分类助手。只返回JSON格式的意图类型。\"",
+                            process: "llm_client.achat(messages, temperature=0.1, max_tokens=50)",
+                            output: "LLM Response: {\"type\": \"task\"} (JSON 格式)",
+                            dataType: "Natural Language → LLM API → JSON Response"
+                        },
+                        {
+                            step: 4,
+                            module: "总控编排 (Orchestrator)",
+                            input: "LLM JSON Response",
+                            process: "解析 JSON，提取 intent 类型，移除 Markdown 代码块",
+                            output: "Task Object: {intent: 'task', has_file: boolean, domain: 'rna', requires_planning: true, ...}",
+                            dataType: "LLM Response → Structured Intent"
+                        },
+                        {
+                            step: 5,
+                            module: "逻辑分支 (Logic Branch)",
+                            input: "Task Object (含 has_file 字段)",
+                            process: "检查文件状态 (Check File Context)",
+                            output: "Condition: has_file=False → Trigger Preview Mode (Template); has_file=True → Trigger Execution Mode (Deep Analysis).",
+                            dataType: "Conditional Logic"
+                        },
+                        {
+                            step: 6,
+                            module: "首席科学家 (Planner)",
+                            input: "UserQuery + FileMetadata (Real/Mock)",
+                            process: "基于文件状态的 Prompt 动态组装 (Dynamic Prompt Assembly)",
+                            output: "Planning Context: {user_query, file_metadata, needs_tools: true}",
+                            dataType: "Intent → Planning Context"
+                        },
+                        {
+                            step: 6.5,
+                            module: "参数推荐引擎 (Param Tuner)",
+                            input: "FileMetadata (n_samples, n_features, missing_rate, data_range)",
+                            process: "DataDiagnostician.analyze() → LLM 根据 Data Shape 动态调整算法参数",
+                            output: "ParameterRecommendation: {n_neighbors, p_value_threshold, ...} (e.g., Sample < 50 → LOESS; Sample > 1000 → UMAP)",
+                            dataType: "Data-Driven Parameter Injection",
+                            significance: "数据驱动：避免硬编码参数，根据样本量/稀疏度选择合适算法。"
+                        },
+                        {
+                            step: 7,
+                            module: "图书馆员 (Retriever)",
+                            input: "UserQuery: \"分析RNA数据\"",
+                            process: "Embeddings API: embedding_model.embed_query(query_text)",
+                            output: "Query Vector: [0.123, -0.456, ...] (768 维浮点数数组)",
+                            dataType: "Natural Language → Embedding Vector"
+                        },
+                        {
+                            step: 8,
+                            module: "图书馆员 (Retriever)",
+                            input: "Query Vector + ChromaDB Tool Embeddings",
+                            process: "余弦相似度搜索（cosine similarity），返回 top-k 工具",
+                            output: "Tool Schemas: [{tool_id: \"rna_cellranger_count\", params: {...}}, ...]",
+                            dataType: "Vector Similarity → Tool Schemas"
+                        },
+                        {
+                            step: 9,
+                            module: "🤖 LLM API (Workflow Generation)",
+                            input: "UserQuery + ToolSchemas + System Prompt (CoT + Few-shot)",
+                            process: "llm_client.achat(messages, temperature=0.1) - Chain-of-Thought 推理",
+                            output: "LLM Response: {\"domain_name\": \"RNA\", \"mode\": \"PLANNING\", \"target_steps\": [...]}",
+                            dataType: "Context + Schemas → LLM API → JSON Plan"
+                        },
+                        {
+                            step: 10,
+                            module: "首席科学家 (Planner)",
+                            input: "LLM JSON Response + WorkflowRegistry DAG",
+                            process: "解析 JSON，使用 Pydantic 验证，填充完整工作流参数",
+                            output: "JSON Workflow: {workflow_name, steps: [{step_id, tool_id, name, params}]}",
+                            dataType: "LLM Response + DAG → Complete Workflow"
+                        },
+                        {
+                            step: 11,
+                            module: "前端渲染 (Frontend)",
+                            input: "JSON Workflow (via SSE)",
+                            process: "渲染工作流卡片，等待用户确认",
+                            output: "Rendered UI: Interactive Workflow Card",
+                            dataType: "JSON → UI Component"
+                        }
+                    ]
+                },
+                execution: {
+                    title: "执行流程数据追踪 (Execution Flow Data Trace)",
+                    steps: [
+                        {
+                            step: 1,
+                            module: "用户 (User)",
+                            input: "用户点击\"执行\"按钮",
+                            process: "前端收集工作流配置和文件路径",
+                            output: "Execution Request: {workflow_data: {...}, file_paths: [...]}",
+                            dataType: "User Action → Execution Request"
+                        },
+                        {
+                            step: 2,
+                            module: "总控编排 (Orchestrator)",
+                            input: "Execution Request",
+                            process: "路由到对应的领域 Agent（基于 workflow domain_name）",
+                            output: "Agent Selection: RNAAgent / MetabolomicsAgent",
+                            dataType: "Request → Agent Instance"
+                        },
+                        {
+                            step: 2.5,
+                            module: "🤖 LLM API (Agent Intent Detection)",
+                            input: "UserQuery + UploadedFiles + System Prompt (Intent Classification)",
+                            process: "agent._detect_intent_with_llm() → llm_client.achat(messages)",
+                            output: "LLM Response: {\"intent\": \"run_workflow\", \"reasoning\": \"...\"}",
+                            dataType: "Query + Files → LLM API → Intent JSON"
+                        },
+                        {
+                            step: 3,
+                            module: "执行引擎 (Executor)",
+                            input: "WorkflowConfig: {steps: [{step_id, tool_id, params}]}",
+                            process: "从 ToolRegistry 查找工具，验证参数，调用工具函数",
+                            output: "Step Result: {status: 'success', logs: '...', data: {...}, images: [...]}",
+                            dataType: "Workflow Config → Execution Result"
+                        },
+                        {
+                            step: 4,
+                            module: "工具层 (Tools)",
+                            input: "Tool Call: {tool_id: \"rna_cellranger_count\", params: {...}}",
+                            process: "执行 Cell Ranger 命令，生成 H5AD 文件",
+                            output: "Tool Output: {output_file: \"/results/.../count.h5ad\", logs: \"...\"}",
+                            dataType: "Tool Config → Analysis Output"
+                        },
+                        {
+                            step: 5,
+                            module: "执行引擎 (Executor)",
+                            input: "Tool Output (作为下一步的输入)",
+                            process: "处理数据流，将前一步输出作为下一步输入；step_results 存储每步输出",
+                            output: "Aggregated Results: {steps_details: [...], steps_results: [...], output_dir}",
+                            dataType: "Tool Outputs → Aggregated Results"
+                        },
+                        {
+                            step: 5.5,
+                            module: "上下文回滚 (Context Rollback)",
+                            input: "steps_results + output_dir (CSV 路径、图片路径)",
+                            process: "_read_execution_results() 读取 CSV 摘要和图片路径 → 注入 LLM Context Window",
+                            output: "Evidence Context: {csv_files: [{head_rows, statistics}], image_files: [...]}",
+                            dataType: "Context Injection",
+                            significance: "闭环反馈：确保诊断报告是基于真实数据的，而非通用模板。Evidence-Based Reporting。"
+                        },
+                        {
+                            step: 6,
+                            module: "领域智能体 (Domain Agent)",
+                            input: "Evidence Context + steps_results + summary_context",
+                            process: "_generate_analysis_summary() → LLM 基于 CSV 摘要和图片生成专家解读",
+                            output: "AI Diagnosis Report: Markdown 格式分析摘要",
+                            dataType: "Evidence → LLM API → Expert Report"
+                        },
+                        {
+                            step: 7,
+                            module: "分析结果 (Output)",
+                            input: "Aggregated Results + AI Report",
+                            process: "SSE 流式推送，前端实时渲染",
+                            output: "Rendered UI: Workflow Cards + Step Results + AI Diagnosis",
+                            dataType: "Results → Rendered UI"
+                        }
+                    ]
+                },
+                error: {
+                    title: "错误循环数据追踪 (Error Loop Data Trace)",
+                    steps: [
+                        {
+                            step: 1,
+                            module: "执行引擎 (Executor)",
+                            input: "StepConfig: {tool_id: \"rna_qc\", params: {...}}",
+                            process: "执行工具，检测到错误",
+                            output: "Error Result: {status: 'error', error_type: 'ParameterError', message: '...'}",
+                            dataType: "Step Config → Error"
+                        },
+                        {
+                            step: 2,
+                            module: "总控编排 (Orchestrator)",
+                            input: "Error Result",
+                            process: "检测错误，触发重规划流程",
+                            output: "Replan Request: {error_context: {...}, original_plan: {...}}",
+                            dataType: "Error → Replan Request"
+                        },
+                        {
+                            step: 3,
+                            module: "🤖 LLM API (Error Analysis & Replanning)",
+                            input: "Error Context + Original Plan + System Prompt (Error Recovery)",
+                            process: "planner.generate_plan() → llm_client.achat(messages) - 分析错误并生成修正方案",
+                            output: "LLM Response: {\"domain_name\": \"RNA\", \"mode\": \"EXECUTION\", \"target_steps\": [...], \"corrected_params\": {...}}",
+                            dataType: "Error Context → LLM API → Revised Plan JSON"
+                        },
+                        {
+                            step: 4,
+                            module: "首席科学家 (Planner)",
+                            input: "LLM Revised Plan JSON",
+                            process: "解析 JSON，使用 Pydantic 验证，应用修正后的参数",
+                            output: "Revised Workflow: {workflow_name, steps: [{...corrected_params...}]}",
+                            dataType: "LLM Response → Validated Revised Plan"
+                        },
+                        {
+                            step: 5,
+                            module: "执行引擎 (Executor)",
+                            input: "Revised Workflow",
+                            process: "使用修正后的参数重新执行",
+                            output: "Success Result: {status: 'success', ...}",
+                            dataType: "Revised Plan → Success"
+                        }
+                    ]
+                },
+                chat: {
+                    title: "直接聊天数据追踪 (Direct Chat Data Trace)",
+                    steps: [
+                        {
+                            step: 1,
+                            module: "用户 (User)",
+                            input: "自然语言查询: \"什么是单细胞RNA测序？\"",
+                            process: "用户输入一般性问题",
+                            output: "HTTP POST 请求: {message: \"什么是单细胞RNA测序？\"}",
+                            dataType: "Natural Language → HTTP Request"
+                        },
+                        {
+                            step: 2,
+                            module: "总控编排 (Orchestrator)",
+                            input: "UserQuery",
+                            process: "调用关键词规则检查，如果匹配 task_keywords 则进入任务模式，否则进入聊天模式",
+                            output: "Intent Check: {intent: 'chat', skip_planning: true}",
+                            dataType: "Query → Intent Check"
+                        },
+                        {
+                            step: 3,
+                            module: "🤖 LLM API (Chat Response)",
+                            input: "Chat Query + System Prompt: \"You are a helpful bioinformatics assistant.\"",
+                            process: "agent.chat() → llm_client.astream(messages) - 流式生成回答",
+                            output: "LLM Stream: \"单细胞RNA测序是一种...\" (逐块流式输出)",
+                            dataType: "Query → LLM API Stream → Text Response"
+                        },
+                        {
+                            step: 4,
+                            module: "分析结果 (Output)",
+                            input: "LLM Response (via SSE)",
+                            process: "前端实时渲染流式文本",
+                            output: "Rendered UI: Chat Message with Markdown",
+                            dataType: "LLM Response → Rendered Text"
+                        }
+                    ]
+                }
+            };
+            
+            // 显示 Infrastructure & Atomicity 报告（部署架构模式）
+            function showInfraReport() {
+                const defaultState = document.getElementById('default-state');
+                const detailContent = document.getElementById('detail-content');
+                defaultState.style.display = 'none';
+                detailContent.classList.add('active');
+                detailContent.innerHTML = `
+                    <div class="detail-item" style="margin-bottom: 25px;">
+                        <div class="detail-item-label" style="font-size: 18px; font-weight: 700; color: #333; border-bottom: 2px solid #667eea; padding-bottom: 10px;">
+                            🏗️ 容器化部署与原子化设计 (Containerization &amp; Atomicity)
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">Docker 容器化策略 (Containerization Strategy)</div>
+                        <div class="detail-item-value">
+                            <p style="margin-bottom: 12px;"><strong>核心架构：</strong>采用微服务拆分模式，通过 docker-compose 编排。</p>
+                            <ul style="margin: 0; padding-left: 20px; line-height: 1.9;">
+                                <li><strong>容器 A (Gateway)：</strong>Nginx。负责静态资源托管与反向代理，统一 CORS 策略，保障生产环境安全。</li>
+                                <li><strong>容器 B (Brain)：</strong>FastAPI Server (Orchestrator + Planner)。锁定 Python 运行环境，隔离业务逻辑与计算资源。</li>
+                                <li><strong>容器 C (Muscle)：</strong>Celery Worker (Executor + Tools)。这是解耦的核心。生信分析依赖复杂的系统库（gcc, gfortran），将其封装在独立容器中，实现了「计算环境隔离」。支持水平扩展（Horizontal Scaling），高并发时可启动多个 Worker 容器。</li>
+                                <li><strong>容器 D (Memory)：</strong>Redis + ChromaDB。负责消息队列与向量存储，数据持久化。</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">工具原子化设计 (Atomic Tool Design)</div>
+                        <div class="detail-item-value">
+                            <p style="margin-bottom: 10px;"><strong>定义：</strong>每个生信工具（如 <code>run_pca</code>, <code>plot_volcano</code>）都被封装为无状态的原子函数。</p>
+                            <p style="margin-bottom: 10px;"><strong>实现：</strong>使用 Python 装饰器 <code>@register_tool</code> 注册到全局注册表。</p>
+                            <p style="margin-bottom: 8px;"><strong>解耦优势：</strong></p>
+                            <ul style="margin: 0; padding-left: 20px; line-height: 1.9;">
+                                <li><strong>LLM 友好：</strong>大模型可以像搭积木一样，根据需求动态检索并组装原子工具，而非调用死板的脚本。</li>
+                                <li><strong>故障隔离：</strong>单个工具的崩溃（如内存溢出）被 Worker 捕获，不会导致主服务（API）宕机。</li>
+                                <li><strong>热插拔：</strong>新增工具只需编写函数并注册，无需修改核心架构代码。</li>
+                            </ul>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // 显示场景数据流
+            function showScenarioFlow(scenarioId) {
+                if (scenarioId === 'infra') {
+                    showInfraReport();
+                    return;
+                }
+                const flow = scenarioDataFlows[scenarioId];
+                if (!flow) return;
+                
+                const defaultState = document.getElementById('default-state');
+                const detailContent = document.getElementById('detail-content');
+                
+                defaultState.style.display = 'none';
+                detailContent.classList.add('active');
+                
+                let html = `<div class="detail-item" style="margin-bottom: 25px;">
+                    <div class="detail-item-label" style="font-size: 16px; font-weight: 700; color: #667eea;">${flow.title}</div>
+                </div>`;
+                
+                flow.steps.forEach((step, index) => {
+                    // 检查是否是 LLM API 调用步骤
+                    const isLLMCall = step.module.includes('🤖 LLM API') || step.module.includes('LLM API');
+                    const borderColor = isLLMCall ? '#9333ea' : '#667eea';
+                    const bgColor = isLLMCall ? 'linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 100%)' : '#f1f3f5';
+                    const textColor = isLLMCall ? '#7c3aed' : '#495057';
+                    
+                    html += `
+                        <div class="detail-item" style="margin-bottom: 20px; border-left: 3px solid ${borderColor}; padding-left: 15px; ${isLLMCall ? 'background: linear-gradient(135deg, rgba(243, 232, 255, 0.3) 0%, rgba(233, 213, 255, 0.3) 100%); border-radius: 6px; padding: 15px;' : ''}">
+                            <div class="detail-item-label" style="color: ${borderColor}; font-weight: 600;">Step ${step.step}: ${step.module}</div>
+                            <div class="detail-item-value" style="margin-top: 8px;">
+                                <div style="margin-bottom: 6px;"><strong>Input:</strong> ${step.input}</div>
+                                <div style="margin-bottom: 6px;"><strong>Process:</strong> ${step.process}</div>
+                                <div style="margin-bottom: 6px;"><strong>Output:</strong> <code>${step.output}</code></div>
+                                <div style="margin-top: 8px; padding: 6px; background: ${bgColor}; border-radius: 4px; font-size: 12px; color: ${textColor}; border: ${isLLMCall ? '1px solid rgba(147, 51, 234, 0.2)' : 'none'};">
+                                    <strong>Data Transformation:</strong> ${step.dataType}
+                                </div>
+                                ${step.significance ? `<div style="margin-top: 8px; padding: 8px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-radius: 4px; font-size: 12px; color: #2e7d32; border-left: 3px solid #4CAF50;"><strong>Significance:</strong> ${step.significance}</div>` : ''}
+                            </div>
+                        </div>
+                        ${index < flow.steps.length - 1 ? '<div style="text-align: center; color: #667eea; font-size: 20px; margin: 10px 0;">↓</div>' : ''}
+                    `;
+                });
+                
+                detailContent.innerHTML = html;
+            }
+            
+            function showModuleDetails(moduleId) {
+                const detail = moduleDetails[moduleId];
+                if (!detail) return;
+                
+                const defaultState = document.getElementById('default-state');
+                const detailContent = document.getElementById('detail-content');
+                
+                defaultState.style.display = 'none';
+                detailContent.classList.add('active');
+                
+                detailContent.innerHTML = `
+                    <div class="detail-item">
+                        <div class="detail-item-label">组件名称 (Component)</div>
+                        <div class="detail-item-value">${detail.component}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">核心函数 (Core Function)</div>
+                        <div class="detail-item-value"><code>${detail.coreFunction}</code></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">数据输入/输出 (Data I/O)</div>
+                        <div class="detail-item-value">${detail.dataIO}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">技术实现与原理 (Technology Description)</div>
+                        <div class="detail-item-value">${detail.technologyDescription}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">关键逻辑 (Key Logic)</div>
+                        <div class="detail-item-value">${detail.keyLogic}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">设计依据与意义 (Design Rationale)</div>
+                        <div class="detail-item-value">${detail.designRationale}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">上游/下游 (Upstream / Downstream)</div>
+                        <div class="detail-item-value">${detail.upstreamDownstream}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">🤖 LLM 调用与交互机制 (LLM Integration Logic)</div>
+                        <div class="detail-item-value llm-logic-section" style="font-size: 13px; line-height: 1.8;">${detail.llmLogic || "N/A - 此模块不直接调用 LLM API"}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item-label">学术理论依据 (Academic Basis)</div>
+                        <div class="detail-item-value" style="font-size: 12px; line-height: 1.8;">${detail.academicBasis}</div>
+                    </div>
+                `;
+                
+                // 高亮选中的卡片
+                document.querySelectorAll('.flow-step-card').forEach(card => {
+                    card.classList.remove('active-flow');
+                });
+                document.querySelector(`[data-module="${moduleId}"]`).classList.add('active-flow');
+            }
+            
+            // 场景模式渲染
+            let currentScenario = null;
+            let animationTimeout = null;
+            
+            // 计算三次贝塞尔曲线在 t 处的点
+            function bezierPoint(t, p0, p1, p2, p3) {
+                const u = 1 - t, u2 = u*u, u3 = u2*u, t2 = t*t, t3 = t2*t;
+                return {
+                    x: u3*p0.x + 3*u2*t*p1.x + 3*u*t2*p2.x + t3*p3.x,
+                    y: u3*p0.y + 3*u2*t*p1.y + 3*u*t2*p2.y + t3*p3.y
+                };
+            }
+            
+            // 绘制 Bio-Synapse 有机曲线（贝塞尔 + 脉冲 + 浮动标签）
+            // options: { curvature } - C 形弧线，沿垂直于连线的方向偏移控制点
+            // 正数/负数决定弧线凸向；用于 Planning（水平眼形）和 Error（垂直椭圆）环路
+            function drawSynapse(startId, endId, type, label, connectionId, delay = 0, options = {}) {
+                return new Promise((resolve) => {
+                    setTimeout(() => {
+                        const svg = document.getElementById('flow-svg');
+                        if (!svg) return resolve();
+                        
+                        const startElem = document.querySelector(`[data-module="${startId}"]`);
+                        const endElem = document.querySelector(`[data-module="${endId}"]`);
+                        if (!startElem || !endElem) return resolve();
+                        
+                        const startPos = getCardCenter(startElem);
+                        const endPos = getCardCenter(endElem);
+                        if (!startPos || !endPos) return resolve();
+                        
+                        const dx = endPos.x - startPos.x;
+                        const dy = endPos.y - startPos.y;
+                        const midX = (startPos.x + endPos.x) / 2;
+                        const midY = (startPos.y + endPos.y) / 2;
+                        const curvature = options.curvature ?? 0;
+                        
+                        // 垂直于 (dx,dy) 的单位向量：(-dy, dx)，curvature 正=沿此方向偏移
+                        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+                        const perpX = -dy / len;
+                        const perpY = dx / len;
+                        const offX = curvature * perpX;
+                        const offY = curvature * perpY;
+                        
+                        let c1x, c1y, c2x, c2y;
+                        if (curvature !== 0) {
+                            // C 形弧线：两控制点沿连线分布，同向偏移
+                            c1x = startPos.x + dx * 0.25 + offX;
+                            c1y = startPos.y + dy * 0.25 + offY;
+                            c2x = endPos.x - dx * 0.25 + offX;
+                            c2y = endPos.y - dy * 0.25 + offY;
+                        } else if (Math.abs(dy) > Math.abs(dx)) {
+                            c1x = startPos.x + dx * 0.2;
+                            c1y = startPos.y + dy * 0.3;
+                            c2x = endPos.x - dx * 0.2;
+                            c2y = endPos.y - dy * 0.3;
+                        } else {
+                            c1x = midX - dy * 0.25;
+                            c1y = midY + dx * 0.25;
+                            c2x = midX + dy * 0.25;
+                            c2y = midY - dx * 0.25;
+                        }
+                        
+                        const d = `M ${startPos.x} ${startPos.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endPos.x} ${endPos.y}`;
+                        const mid = bezierPoint(0.5, startPos, {x:c1x,y:c1y}, {x:c2x,y:c2y}, endPos);
+                        const labelX = mid.x, labelY = mid.y;
+                        
+                        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                        g.dataset.connectionId = connectionId || '';
+                        
+                        const basePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                        basePath.setAttribute('d', d);
+                        basePath.setAttribute('class', `synapse-base synapse-${type}`);
+                        basePath.setAttribute('marker-end', `url(#arrowhead-${type})`);
+                        const clickHandler = (e) => {
+                            e.stopPropagation();
+                            if (connectionId && dataFlowSpecs[connectionId]) showCodeModal(connectionId);
+                        };
+                        if (connectionId && dataFlowSpecs[connectionId]) {
+                            basePath.style.cursor = 'pointer';
+                            basePath.addEventListener('click', clickHandler);
+                        }
+                        g.appendChild(basePath);
+                        
+                        const pulsePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                        pulsePath.setAttribute('d', d);
+                        pulsePath.setAttribute('class', `synapse-pulse synapse-${type}`);
+                        pulsePath.setAttribute('marker-end', `url(#arrowhead-${type})`);
+                        if (connectionId && dataFlowSpecs[connectionId]) {
+                            pulsePath.style.cursor = 'pointer';
+                            pulsePath.addEventListener('click', clickHandler);
+                        }
+                        g.appendChild(pulsePath);
+                        
+                        if (label) {
+                            const labelG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                            labelG.setAttribute('class', 'synapse-label-group');
+                            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                            text.setAttribute('class', 'synapse-label');
+                            text.setAttribute('x', labelX);
+                            text.setAttribute('y', labelY);
+                            text.textContent = label;
+                            labelG.appendChild(text);
+                            g.appendChild(labelG);
+                        }
+                        
+                        g.style.opacity = '0';
+                        svg.appendChild(g);
+                        requestAnimationFrame(() => {
+                            g.style.transition = 'opacity 0.5s';
+                            g.style.opacity = '1';
+                        });
+                        
+                        resolve();
+                    }, delay);
+                });
+            }
+            
+            // 兼容旧调用：drawConnection(startElem, endElem, ..., connectionId, options?) -> 转为 drawSynapse
+            function drawConnection(startElem, endElem, color, delay, connectionId, options) {
+                const startId = startElem?.dataset?.module;
+                const endId = endElem?.dataset?.module;
+                if (!startId || !endId) return Promise.resolve();
+                const typeMap = { 'user-orch':'control', 'orch-output':'control', 'orch-planner':'control', 'orch-executor':'control', 'orch-agent':'control',
+                    'planner-retriever':'data', 'retriever-planner':'data', 'planner-output':'data', 'agent-executor':'data', 'executor-tools':'data', 'executor-output':'data',
+                    'executor-planner':'error', 'planner-executor':'error' };
+                const labelMap = { 'user-orch':'发送意图', 'orch-planner':'下发规划任务', 'planner-retriever':'工具检索', 'retriever-planner':'返回工具定义',
+                    'planner-output':'推送工作流配置', 'orch-executor':'执行指令', 'executor-output':'步骤结果', 'executor-planner':'上报执行错误',
+                    'planner-executor':'修正方案', 'orch-output':'流式对话', 'orch-agent':'任务委派', 'agent-executor':'执行步骤', 'executor-tools':'调用工具' };
+                const type = typeMap[connectionId] || 'control';
+                const label = labelMap[connectionId] || '';
+                return drawSynapse(startId, endId, type, label, connectionId, delay, options);
+            }
+            
+            // 获取卡片中心位置（相对于 flow-diagram 的 SVG 坐标空间）
+            function getCardCenter(card) {
+                if (!card) return null;
+                const diagram = document.querySelector('.flow-diagram');
+                if (!diagram) return null;
+                let x = 0, y = 0;
+                let el = card;
+                while (el && el !== diagram) {
+                    x += el.offsetLeft || 0;
+                    y += el.offsetTop || 0;
+                    el = el.offsetParent;
+                }
+                return {
+                    x: x + (card.offsetWidth || card.clientWidth) / 2,
+                    y: y + (card.offsetHeight || card.clientHeight) / 2
+                };
+            }
+            
+            // 顺序高亮模块（connectionIds: 每条边的连接ID数组；curvatureMap: 可选，{ connId: curvature } 用于 C 形弧线）
+            async function highlightModuleSequence(modules, delay = 500, connectionIds = [], curvatureMap = {}) {
+                for (let i = 0; i < modules.length; i++) {
+                    const module = modules[i];
+                    if (module.card) {
+                        module.card.classList.add('active-flow');
+                        if (module.card.scrollIntoView) {
+                            module.card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        }
+                    }
+                    
+                    if (i < modules.length - 1 && modules[i + 1]) {
+                        const connId = connectionIds[i] || null;
+                        const opts = (connId && curvatureMap[connId] != null) ? { curvature: curvatureMap[connId] } : undefined;
+                        await drawConnection(module.card, modules[i + 1].card, '#00f2ff', delay, connId, opts);
+                    }
+                    
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+            
+            function renderScenario(mode, buttonElement) {
+                // 清除之前的动画
+                if (animationTimeout) {
+                    clearTimeout(animationTimeout);
+                }
+                
+                // 重置所有状态
+                document.querySelectorAll('.flow-step-card').forEach(card => {
+                    card.classList.remove('active-flow', 'dimmed', 'group-api', 'group-worker', 'group-service');
+                });
+                document.querySelectorAll('.scenario-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                
+                // 清除 SVG 路径（保留 defs）
+                const svg = document.getElementById('flow-svg');
+                const defs = svg.querySelector('defs');
+                svg.innerHTML = '';
+                if (defs) svg.appendChild(defs);
+                
+                if (mode === 'reset') {
+                    currentScenario = null;
+                    document.querySelectorAll('.flow-step-card').forEach(c => c.classList.remove('scenario-active', 'group-api', 'group-worker', 'group-service'));
+                    const defaultState = document.getElementById('default-state');
+                    const detailContent = document.getElementById('detail-content');
+                    defaultState.style.display = 'block';
+                    detailContent.classList.remove('active');
+                    return;
+                }
+                
+                // 激活当前按钮
+                if (buttonElement) {
+                    buttonElement.classList.add('active');
+                }
+                currentScenario = mode;
+                
+                // 🔥 立即更新侧边栏显示场景数据流（不等待卡片点击）
+                showScenarioFlow(mode);
+                
+                const cards = {
+                    user: document.querySelector('[data-module="user"]'),
+                    orchestrator: document.querySelector('[data-module="orchestrator"]'),
+                    planner: document.querySelector('[data-module="planner"]'),
+                    retriever: document.querySelector('[data-module="retriever"]'),
+                    agent: document.querySelector('[data-module="agent"]'),
+                    executor: document.querySelector('[data-module="executor"]'),
+                    output: document.querySelector('[data-module="output"]'),
+                    llm: document.querySelector('[data-module="llm"]')
+                };
+                
+                document.querySelectorAll('.flow-step-card').forEach(c => c.classList.add('scenario-active'));
+                const allCards = Object.values(cards).filter(c => c);
+                const activeCards = [];
+                
+                if (mode === 'planning') {
+                    // 规划流程：User -> Orchestrator -> Planner <-> Retriever -> Planner -> Frontend
+                    activeCards.push(
+                        { card: cards.user, color: '#4CAF50' },
+                        { card: cards.orchestrator, color: '#9C27B0' },
+                        { card: cards.planner, color: '#FF6B35' },
+                        { card: cards.retriever, color: '#FF6B35' },
+                        { card: cards.planner, color: '#FF6B35' },
+                        { card: cards.output, color: '#4CAF50' }
+                    );
+                    const connIds = ['user-orch', 'orch-planner', 'planner-retriever', 'retriever-planner', 'planner-output'];
+                    const curvatureMap = { 'planner-retriever': -60, 'retriever-planner': -60 };
+                    [cards.agent, cards.executor].forEach(card => {
+                        if (card) card.classList.add('dimmed');
+                    });
+                    
+                    highlightModuleSequence(activeCards, 600, connIds, curvatureMap);
+                    drawSynapse('orchestrator', 'llm', 'llm', '意图分类', 'orch-llm', 800);
+                    drawSynapse('planner', 'llm', 'llm', '工作流规划', 'planner-llm', 2400);
+                    
+                } else if (mode === 'execution') {
+                    // 执行流程：User -> Orchestrator -> Executor -> Output
+                    activeCards.push(
+                        { card: cards.user, color: '#4CAF50' },
+                        { card: cards.orchestrator, color: '#9C27B0' },
+                        { card: cards.executor, color: '#F44336' },
+                        { card: cards.output, color: '#4CAF50' }
+                    );
+                    const connIds = ['user-orch', 'orch-executor', 'executor-output'];
+                    [cards.planner, cards.retriever, cards.agent].forEach(card => {
+                        if (card) card.classList.add('dimmed');
+                    });
+                    
+                    highlightModuleSequence(activeCards, 600, connIds);
+                    drawSynapse('agent', 'llm', 'llm', '诊断报告', 'agent-llm', 1200);
+                    
+                } else if (mode === 'error') {
+                    [cards.executor, cards.planner].forEach(card => {
+                        if (card) card.classList.add('active-flow');
+                    });
+                    [cards.user, cards.orchestrator, cards.retriever, cards.agent, cards.output].forEach(card => {
+                        if (card) card.classList.add('dimmed');
+                    });
+                    
+                    drawSynapse('executor', 'planner', 'error', '上报执行错误', 'executor-planner', 0, { curvature: -180 });
+                    drawSynapse('planner', 'executor', 'error', '修正方案', 'planner-executor', 500, { curvature: -180 });
+                    drawSynapse('planner', 'llm', 'llm', '错误分析', 'planner-llm', 1000);
+                    
+                } else if (mode === 'chat') {
+                    // 直接聊天：User -> Orchestrator -> Output
+                    activeCards.push(
+                        { card: cards.user, color: '#4CAF50' },
+                        { card: cards.orchestrator, color: '#9C27B0' },
+                        { card: cards.output, color: '#4CAF50' }
+                    );
+                    const connIds = ['user-orch', 'orch-output'];
+                    [cards.planner, cards.retriever, cards.agent, cards.executor].forEach(card => {
+                        if (card) card.classList.add('dimmed');
+                    });
+                    
+                    highlightModuleSequence(activeCards, 600, connIds);
+                    drawSynapse('orchestrator', 'llm', 'llm', '流式对话', 'orch-llm', 800);
+                } else if (mode === 'infra') {
+                    // 部署架构：不绘制连线，按容器/服务分组高亮
+                    [cards.user, cards.orchestrator, cards.planner, cards.retriever].forEach(card => {
+                        if (card) card.classList.add('group-api');
+                    });
+                    [cards.agent, cards.executor].forEach(card => {
+                        if (card) card.classList.add('group-worker');
+                    });
+                    if (cards.llm) cards.llm.classList.add('group-service');
+                    [cards.output].forEach(card => {
+                        if (card) card.classList.add('dimmed');
+                    });
+                }
+            }
+            
+            // 初始化 SVG 箭头标记和大小
+            function initSVG() {
+                const svg = document.getElementById('flow-svg');
+                const diagram = document.querySelector('.flow-diagram');
+                
+                // 设置 SVG 大小
+                if (diagram && svg) {
+                    const rect = diagram.getBoundingClientRect();
+                    svg.setAttribute('width', rect.width);
+                    svg.setAttribute('height', rect.height);
+                }
+                
+                // 创建箭头标记（control=蓝, data=绿, error=红）
+                if (!svg.querySelector('defs')) {
+                    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+                    const addMarker = (id, fill) => {
+                        const m = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+                        m.setAttribute('id', id);
+                        m.setAttribute('markerWidth', '10');
+                        m.setAttribute('markerHeight', '10');
+                        m.setAttribute('refX', '9');
+                        m.setAttribute('refY', '3');
+                        m.setAttribute('orient', 'auto');
+                        const p = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                        p.setAttribute('points', '0 0, 10 3, 0 6');
+                        p.setAttribute('fill', fill);
+                        m.appendChild(p);
+                        defs.appendChild(m);
+                    };
+                    addMarker('arrowhead-control', '#2196F3');
+                    addMarker('arrowhead-data', '#4CAF50');
+                    addMarker('arrowhead-error', '#F44336');
+                    addMarker('arrowhead-llm', '#9333ea');
+                    svg.appendChild(defs);
+                }
+            }
+            
+            function debounce(fn, ms) {
+                let t;
+                return function() {
+                    clearTimeout(t);
+                    t = setTimeout(fn, ms);
+                };
+            }
+            
+            function onResize() {
+                initSVG();
+                if (currentScenario && currentScenario !== 'reset') {
+                    const svg = document.getElementById('flow-svg');
+                    const defs = svg?.querySelector('defs');
+                    if (svg && defs) {
+                        svg.innerHTML = '';
+                        svg.appendChild(defs);
+                        renderScenario(currentScenario);
+                    }
+                }
+            }
+            
+            document.addEventListener('DOMContentLoaded', initSVG);
+            window.addEventListener('resize', debounce(onResize, 150));
+            
+            // ========== 新手引导 Tour (driver.js) ==========
+            window.startTour = function() {
+                console.log("Starting tour...");
+                try {
+                    const driver = (window.driver && window.driver.js && window.driver.js.driver)
+                        ? window.driver.js.driver
+                        : (window["driver.js"] && window["driver.js"].driver)
+                            ? window["driver.js"].driver
+                            : null;
+                    if (!driver) {
+                        console.error("Driver.js not loaded. Check: window.driver =", window.driver);
+                        alert("引导库加载失败，请检查网络或刷新页面");
+                        return;
+                    }
+                    const driverObj = driver({
+                        showProgress: true,
+                        nextBtnText: '下一步',
+                        prevBtnText: '上一步',
+                        doneBtnText: '完成',
+                        progressText: '{{current}} / {{total}}',
+                        popoverClass: 'driver-popover-custom',
+                        steps: [
+                            {
+                                element: 'body',
+                                popover: {
+                                    title: '欢迎',
+                                    description: '欢迎来到 Omics Agent 架构仪表板。系统支持多模态（RNA、代谢组学、空间组学 Visium、影像组学 NIfTI 等），具备文件治理（自动解压与模态检测）、动态规划（按意图勾选/跳过步骤）与内生安全（BLAKE3+Ed25519 签名）。本页为全交互式白盒演示。'
+                                }
+                            },
+                            {
+                                element: '.control-bar',
+                                popover: {
+                                    title: '场景模式与基础设施',
+                                    description: '规划流程 / 执行流程 / 错误循环 / 直接聊天：查看不同状态下的数据流向。重置：恢复初始状态。基础设施与安全：查看内生安全体系（异步签名、Sidecar 校验、Fail-Open 设计）。'
+                                },
+                                onHighlightStarted: () => {
+                                    console.log("Tour: Switching to Planning mode");
+                                    renderScenario('planning', document.querySelector('.scenario-btn'));
+                                }
+                            },
+                            {
+                                element: '.flow-diagram',
+                                popover: {
+                                    title: '动态数据流',
+                                    description: '观察发光的脉冲线条，它们代表真实的数据传输路径（含文件治理 → 编排器 → 规划器 → 领域智能体 → 执行器 → 输出）。'
+                                }
+                            },
+                            {
+                                element: '.flow-diagram',
+                                popover: {
+                                    title: '伪代码透视',
+                                    description: '系统会自动点击连接线，展示底层的函数签名和参数结构。'
+                                },
+                                onHighlightStarted: () => {
+                                    setTimeout(() => {
+                                        let line = document.querySelector('#flow-svg g[data-connection-id="orch-planner"] path');
+                                        if (!line) {
+                                            line = document.querySelector('.synapse-base.synapse-control');
+                                        }
+                                        if (line) {
+                                            console.log("Tour: Simulating line click");
+                                            line.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                                        } else {
+                                            console.warn("Tour: Line not found yet, SVG may still be drawing");
+                                        }
+                                    }, 800);
+                                }
+                            },
+                            {
+                                element: '[data-module="planner"]',
+                                popover: {
+                                    title: '模块解剖与动态规划',
+                                    description: '点击任意模块卡片，查看核心逻辑与学术引用。规划器支持 Dynamic Planning：根据用户意图（如「跳过预处理」「不要通路富集」）动态勾选/取消步骤。'
+                                },
+                                onHighlightStarted: () => {
+                                    closeCodeModal();
+                                    showModuleDetails('planner');
+                                }
+                            },
+                            {
+                                element: '.detail-panel',
+                                popover: {
+                                    title: '深度白盒化',
+                                    description: '此处展示模块的详细技术规格：输入输出、设计依据与论文支撑。多模态领域专家（RNA、代谢、空间、影像组学）各有专属摘要模板，避免话术混淆。'
+                                }
+                            },
+                            {
+                                element: '.control-bar .scenario-btn:last-of-type',
+                                popover: {
+                                    title: '基础设施与安全',
+                                    description: '点击可查看内生安全体系：Celery Worker 异步 BLAKE3 哈希 + Ed25519 签名、.sig 旁路校验、Fail-Open 设计。'
+                                },
+                                onHighlightStarted: () => {
+                                    showInfraReport();
+                                }
+                            },
+                            {
+                                element: '.control-bar .scenario-btn:nth-child(6)',
+                                popover: {
+                                    title: '演示结束',
+                                    description: '点击「重置」可恢复初始状态，重新选择场景或模块。'
+                                },
+                                onHighlightStarted: () => {
+                                    const resetBtn = document.querySelector('.control-bar .scenario-btn:nth-child(6)');
+                                    if (resetBtn) resetBtn.focus();
+                                }
+                            }
+                        ],
+                        onDestroyed: () => {
+                            renderScenario('reset');
+                        }
+                    });
+                    driverObj.drive();
+                } catch (err) {
+                    console.error("Tour error:", err);
+                    alert("引导启动失败: " + (err.message || String(err)));
+                }
+            };
+        </script>
+        
+        <!-- 详细流程说明 - V2 架构白盒技术文档 -->
+        <div class="section">
+            <h2>📋 全流程数据流向详解 (V2 Architecture)</h2>
+            <p style="color: #666; margin-bottom: 24px;">本文档与上方交互式场景模式（Planning / Execution / Error Loop / Direct Chat）一一对应，采用白盒视角描述系统内部机制。</p>
+            
+            <h3>一、核心机制解析 (Core Mechanisms)</h3>
+            
+            <div class="flow-step">
+                <h4>1. 文件治理与数据感知 (File Governance &amp; Data Perception)</h4>
+                <ul>
+                    <li><strong>Structure Normalizer</strong>：自动解压 .zip / .tar.gz 并重组目录（如配对 .h5 与 spatial/），下游接收解压后路径。</li>
+                    <li><strong>Modality Sniffer</strong>：按文件内容与结构自动检测模态（Spatial / Radiomics / RNA / Metabolomics 等），支持 HITL 在未知时由用户选择。</li>
+                    <li><strong>File Inspector</strong>：多模态文件检查器（策略模式），如 <code>SpatialVisiumHandler</code>、<code>RadiomicsHandler</code> 等，支持 10x Visium、AnnData、NIfTI、CSV/TSV、FASTQ 等，输出 <code>FileMetadata</code>。</li>
+                    <li><strong>Logic Branch</strong>：根据 <code>has_file</code> / <code>dominant_modality</code> 触发 Preview 或 Execution 模式。</li>
+                </ul>
+            </div>
+            
+            <div class="flow-step">
+                <h4>2. 动态规划 (Dynamic Planning)</h4>
+                <ul>
+                    <li><strong>CoT + RAG</strong>：Planner 结合 Chain-of-Thought 与 RAG（Tool Retriever 语义检索），生成工作流。</li>
+                    <li><strong>Step 勾选/取消</strong>：根据用户意图（如「跳过预处理」「不要通路富集」「只提特征」）解析 <code>target_steps</code> 与 <code>skip_steps</code>，对应步骤 <code>selected: false</code>，实现 Dynamic Planning。</li>
+                    <li><strong>Param Tuner</strong>：基于 <code>FileMetadata</code> 与 Data Shape 动态推荐参数（如 LOESS/UMAP、Leiden 分辨率等）。</li>
+                </ul>
+            </div>
+            
+            <div class="flow-step">
+                <h4>3. 闭环反馈与领域专属摘要 (Closed-Loop &amp; Domain-Specific Summary)</h4>
+                <ul>
+                    <li><strong>Result Rollback</strong>：<code>_read_execution_results(output_dir)</code> 读取摘要与图片路径，注入 LLM 上下文。</li>
+                    <li><strong>Domain-Specific Summary</strong>：各领域 Agent（Radiomics、Spatial 等）重写 <code>_generate_analysis_summary()</code>，使用本领域专属 Prompt，避免出现代谢组学等跨领域话术。</li>
+                    <li><strong>Error Self-Healing</strong>：Executor 将 <code>error_context</code> 反馈 Planner，LLM 生成 <code>corrected_params</code> 后重试。</li>
+                </ul>
+            </div>
+            
+            <h3>二、场景化流程拆解 (Scenario Walkthroughs)</h3>
+            
+            <div class="flow-step">
+                <h4>Phase 1: 文件治理与规划推理 (File Governance &amp; Planning)</h4>
+                <p>对应场景按钮：<strong>规划流程 (Planning Flow)</strong></p>
+                <ul>
+                    <li><strong>User</strong> → 发送查询与文件（含压缩包/医学影像）→ <strong>Orchestrator</strong></li>
+                    <li><strong>File Governance</strong> → StructureNormalizer 解压归档 → ModalitySniffer 检测模态 → FileInspector（SpatialVisiumHandler / RadiomicsHandler 等）→ <code>effective_root</code>, <code>dominant_modality</code>, <code>FileMetadata</code></li>
+                    <li><strong>Orchestrator</strong> → 规则检查 + <code>FileMetadata</code> → 决定 Preview / Execution 模式</li>
+                    <li><strong>Planner</strong> → Dynamic Planning（解析 skip_steps / target_steps）→ <strong>Retriever</strong>（ChromaDB）→ Tool Schemas</li>
+                    <li><strong>LLM</strong> → CoT 推理 → JSON Workflow（含 <code>selected</code>）→ 前端渲染工作流卡片</li>
+                </ul>
+            </div>
+            
+            <div class="flow-step">
+                <h4>Phase 2: 执行与自愈 (Execution &amp; Self-Healing)</h4>
+                <p>对应场景按钮：<strong>执行流程 (Execution Flow)</strong> / <strong>错误循环 (Error Loop)</strong></p>
+                <ul>
+                    <li><strong>Agent</strong> → 按模态路由到领域智能体（RNA / Metabolomics / <strong>Spatial</strong> / <strong>Radiomics</strong> 等）→ <strong>Executor</strong></li>
+                    <li><strong>Executor</strong> → ToolRegistry 查找工具 → Pydantic 验证 → 调用工具（含步骤间 h5ad_path 等链式传递）</li>
+                    <li><strong>Tools</strong> → 执行分析 → 返回 <code>step_result</code>；前端对非图片结果使用 <strong>Universal File Card</strong> 渲染</li>
+                    <li><strong>Error Loop</strong>：Executor 上报错误 → Planner + LLM 修正方案 → Executor 重试</li>
+                    <li><strong>Result Aggregation</strong> → <code>steps_details</code>, <code>steps_results</code>, <code>output_dir</code></li>
+                </ul>
+            </div>
+            
+            <div class="flow-step">
+                <h4>Phase 3: 领域专属报告生成 (Domain-Specific Report)</h4>
+                <p>对应场景：执行完成后的 <code>diagnosis</code> 事件</p>
+                <ul>
+                    <li><strong>Execution Summary</strong> → <code>steps_results</code> + <code>output_dir</code></li>
+                    <li><strong>Domain-Specific Summary</strong> → 各 Agent 使用本领域 <code>_generate_analysis_summary()</code>（如 Radiomics / Spatial 专属 Prompt），非通用代谢组学话术</li>
+                    <li><strong>SSE Stream</strong> → <code>diagnosis</code> 事件 → 前端渲染 Markdown 报告与 Universal File Card / 图片</li>
+                </ul>
+            </div>
+            
+            <h3>三、技术栈映射 (Tech Stack Mapping)</h3>
+            
+            <div class="flow-step">
+                <ul>
+                    <li><strong>Modalities</strong>：RNA、代谢组学、<strong>空间组学 (Visium)</strong>、<strong>影像组学 (NIfTI)</strong> 等多模态领域 Agent</li>
+                    <li><strong>Reasoning</strong>：DeepSeek-R1 (MoE) — 意图分类、Dynamic Planning、错误分析、领域专属诊断报告</li>
+                    <li><strong>Memory</strong>：ChromaDB — 工具语义检索、RAG</li>
+                    <li><strong>Scheduling</strong>：Celery + Redis — 异步任务调度</li>
+                    <li><strong>Streaming</strong>：SSE — status / workflow / step_result / diagnosis；前端 Universal File Card 渲染非图片结果</li>
+                    <li><strong>Safety</strong>：Pydantic + Docker 沙箱；<strong>内生安全</strong>：Celery 异步 BLAKE3 + Ed25519 签名、.sig 旁路校验、Fail-Open 设计</li>
+                </ul>
+            </div>
+        </div>
+        
+        <!-- 关键技术点 -->
+        <div class="section">
+            <h2>🔑 关键技术点</h2>
+            
+            <div class="flow-step">
+                <h3>1. 工具自动发现与注册</h3>
+                <p>系统通过 Python 装饰器和反射机制，自动发现和注册工具到 <code>ToolRegistry</code>。新增工具只需创建文件并添加 <code>@registry.register</code> 装饰器，无需修改核心代码。</p>
+            </div>
+            
+            <div class="flow-step">
+                <h3>2. 语义工具检索</h3>
+                <p>使用 ChromaDB 向量数据库和 Ollama Embeddings，实现基于语义相似度的工具推荐。用户可以用自然语言描述需求，系统自动推荐相关工具。</p>
+            </div>
+            
+            <div class="flow-step">
+                <h3>3. 动态规划 (Dynamic Planning)</h3>
+                <p>将工具 Schema 注入 LLM 提示词，根据用户意图（如「跳过预处理」「不要通路富集」）解析 target_steps / skip_steps，动态勾选或取消步骤，生成可定制工作流，支持 Spatial、Radiomics 等模态的 Few-shot 示例。</p>
+            </div>
+            
+            <div class="flow-step">
+                <h3>4. 通用执行引擎与多模态工具</h3>
+                <p>基于策略模式与依赖注入，实现工具无关的执行框架。支持 RNA、代谢组学、空间组学、影像组学等多模态工具（Scanpy、Squidpy、PyRadiomics 等），步骤间数据链式传递（如 h5ad_path）。前端对非图片结果使用 Universal File Card 渲染。</p>
+            </div>
+            
+            <div class="flow-step">
+                <h3>5. SSE 流式输出</h3>
+                <p>使用 Server-Sent Events (SSE) 实时推送分析进度、步骤结果与领域专属 AI 报告，前端解析事件并渲染工作流卡片、步骤结果与 Markdown 报告。</p>
+            </div>
+            
+            <div class="flow-step">
+                <h3>6. 多用户隔离与内生安全</h3>
+                <p>多用户独立目录（<code>{user_id}/{session_id}/</code>）。内生安全：Celery Worker 异步 BLAKE3 哈希 + Ed25519 签名，.sig 旁路文件做完整性校验，Fail-Open 设计保证业务可用。</p>
+            </div>
+        </div>
+        
+        <!-- 数据流总结 - Mermaid 流程图 -->
+        <div class="section">
+            <h2>📊 数据流总结</h2>
+            <div class="flow-step">
+                <h3>完整数据流向</h3>
+                <div class="mermaid">
+graph TB
+    classDef user fill:#e8f5e9,stroke:#4CAF50,stroke-width:2px,rx:5,ry:5
+    classDef core fill:#f3e5f5,stroke:#9C27B0,stroke-width:2px,rx:5,ry:5
+    classDef exec fill:#fff3e0,stroke:#FF9800,stroke-width:2px,rx:5,ry:5
+    classDef tool fill:#e3f2fd,stroke:#2196F3,stroke-width:2px,rx:5,ry:5
+
+    subgraph UI_Layer["前端交互层"]
+        direction TB
+        FE["前端 UI"]:::user
+    end
+
+    subgraph Backend["后端核心层"]
+        direction TB
+        API["API 网关"]:::core
+        Orch["总控编排器"]:::core
+        Plan["首席科学家"]:::core
+        RAG["图书馆员"]:::core
+    end
+
+    subgraph Engine["执行引擎层"]
+        direction TB
+        Agent["领域智能体"]:::exec
+        Exec["执行器"]:::exec
+        Tools["生信工具库"]:::tool
+    end
+
+    FE -->|"1.上传/指令"| API
+    API -->|"2.异步任务"| Orch
+    Orch -->|"3.意图路由"| Plan
+    Plan <-->|"4.语义检索"| RAG
+    Plan -->|"5.生成工作流"| Agent
+    Agent -->|"6.初始化"| Exec
+    Exec <-->|"7.动态调用"| Tools
+    Exec -.->|"8.结果回滚"| Plan
+    Agent -->|"9.生成报告"| Orch
+    Orch -->|"10.SSE推送"| FE
+                </div>
+                <div class="flow-text-summary">
+                    <h4>📋 步骤详解</h4>
+                    <ol>
+                        <li><strong>前端 → API 服务器</strong>：HTTP POST 请求（文件上传含压缩包/医学影像、聊天请求）</li>
+                        <li><strong>文件治理</strong>：StructureNormalizer 解压 → ModalitySniffer 检测模态 → FileInspector 提取元数据</li>
+                        <li><strong>API 服务器 → 编排器</strong>：创建 <code>AgentOrchestrator</code>，调用 <code>stream_process()</code></li>
+                        <li><strong>编排器 → 智能体/规划器</strong>：意图分类、按模态路由到领域智能体（RNA/代谢/空间/影像组学等）、调用规划器（Dynamic Planning）</li>
+                        <li><strong>规划器 ↔ 工具检索器/LLM</strong>：语义检索工具、LLM 生成工作流（含 skip_steps/selected）</li>
+                        <li><strong>领域智能体 → 执行器</strong>：创建 <code>WorkflowExecutor</code>，执行工作流</li>
+                        <li><strong>执行器 → 工具</strong>：动态查找工具、验证参数、步骤间数据链式传递、调用工具函数</li>
+                        <li><strong>工具 → 执行器</strong>：返回 step_result（数据、图表路径）；前端非图片用 Universal File Card 渲染</li>
+                        <li><strong>执行器 ⇢ 规划器</strong>：错误时反馈 Traceback，触发重规划</li>
+                        <li><strong>领域智能体 → 编排器</strong>：领域专属摘要（<code>_generate_analysis_summary</code>）生成报告</li>
+                        <li><strong>编排器 → 前端</strong>：SSE 流式输出（status, workflow, step_result, diagnosis, result, done）</li>
+                        <li><strong>前端渲染</strong>：解析 SSE 事件，渲染工作流卡片、步骤结果、AI 报告</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'base',
+            flowchart: {
+                curve: 'basis',
+                padding: 15
+            },
+            themeVariables: {
+                primaryColor: '#f8f9fa',
+                primaryTextColor: '#333',
+                primaryBorderColor: '#667eea',
+                lineColor: '#b197fc',
+                secondaryColor: '#f3e5f5',
+                tertiaryColor: '#fff'
+            }
+        });
+    </script>
+</body>
+</html>

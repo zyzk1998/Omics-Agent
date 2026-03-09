@@ -56,7 +56,7 @@ sqlalchemy>=2.0.0
 pymysql>=1.1.0
 cryptography>=41.0.0
 
-# Phase 2: 鉴权 - 密码哈希与 JWT
-passlib[bcrypt]>=1.7.4
+# Phase 2: 鉴权 - 密码哈希与 JWT（pwdlib 替代 passlib，兼容最新 bcrypt，无 72 字节自检 Bug）
+pwdlib[bcrypt]
 python-jose[cryptography]>=3.3.0
 

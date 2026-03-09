@@ -96,8 +96,9 @@ manage_services() {
     echo -e "${CYAN}${BOLD}🚀 服务管理${NC}\n"
     echo "1) 启动服务"
     echo "2) 停止服务"
-    echo "3) 🔄 快速重启 (代码生效)"
-    echo "4) 🔨 重建并重启 (无缓存，依赖/配置生效)"
+    echo "3) 🔄 常规重启 (Restart Only) — 仅 restart，速度最快，不重新打包镜像"
+    echo "4) 📦 有缓存重建并启动 (Build with Cache & Up - 推荐) — 日常改代码/依赖时用，速度快"
+    echo "5) 💣 无缓存彻底重建 (No-Cache Rebuild - 耗时极长) — 仅环境彻底崩溃时使用"
     echo "0) 返回"
     echo ""
     read -p "请选择: " choice
@@ -122,22 +123,33 @@ manage_services() {
             print_status "ok" "服务已停止"
             ;;
         3)
-            echo "🔄 快速重启 (代码生效)..."
-            docker_compose_cmd restart api-server worker
+            echo "🔄 常规重启 (Restart Only)..."
+            docker_compose_cmd restart
             wait_for_service
             docker_compose_cmd ps
             ;;
         4)
-            echo "🔨 重建并重启 (无缓存，依赖/配置生效)..."
-            echo -e "${YELLOW}⚠️  将完全停止、无缓存重新构建并启动，可能需要几分钟...${NC}"
-            echo "🛑 停止所有服务..."
-            sudo docker compose down
-            echo "🔨 无缓存重新构建（保证 requirements.txt 等依赖被重新安装）..."
-            sudo docker compose build --no-cache
-            echo "🚀 启动容器..."
-            sudo docker compose up -d
+            echo "📦 有缓存重建并启动 (Build with Cache & Up - 推荐)..."
+            mkdir -p ${PROJECT_DIR}/data/uploads ${PROJECT_DIR}/results ${PROJECT_DIR}/data/redis
+            docker_compose_cmd up -d --build
             wait_for_service
-            sudo docker compose ps
+            docker_compose_cmd ps
+            ;;
+        5)
+            echo -e "${YELLOW}💣 无缓存彻底重建 (No-Cache Rebuild - 耗时极长)${NC}"
+            echo -e "${YELLOW}⚠️  将无缓存重新构建并启动，可能需要数分钟，仅在环境彻底崩溃时使用。${NC}"
+            read -p "确认继续？(y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                echo "🛑 停止所有服务..."
+                docker_compose_cmd down
+                echo "🔨 无缓存重新构建..."
+                docker_compose_cmd build --no-cache
+                echo "🚀 启动容器..."
+                docker_compose_cmd up -d
+                wait_for_service
+                docker_compose_cmd ps
+            fi
             ;;
     esac
     read -p "按 Enter 继续..."
@@ -439,6 +451,22 @@ for line in sys.stdin:
 }
 
 # ============================================
+# 6. 后端性能与耗时日志 (Profiler)
+# ============================================
+
+profiler_logs() {
+    if ! check_docker_permission; then
+        print_status "error" "无法访问 Docker"
+        read -p "按 Enter 继续..."
+        return
+    fi
+    echo -e "${CYAN}正在监听后端实时日志，按 Ctrl+C 退出...${NC}"
+    echo ""
+    docker_compose_cmd logs -f --tail=200 api-server
+    read -p "按 Enter 继续..."
+}
+
+# ============================================
 # 主菜单
 # ============================================
 
@@ -454,10 +482,11 @@ show_menu() {
     echo "  3) 📋 系统日志"
     echo "  4) 🧹 清理数据"
     echo "  5) 🧠 实时监听 LLM JSON"
+    echo "  6) ⏱️  查看后端性能与耗时日志 (Profiler)"
     echo ""
     echo "  0) ❌ 退出"
     echo ""
-    echo -e "${YELLOW}请选择 (0-5): ${NC}"
+    echo -e "${YELLOW}请选择 (0-6): ${NC}"
 }
 
 main() {
@@ -476,6 +505,7 @@ main() {
             3) system_logs; ;;
             4) clean_data; ;;
             5) llm_json_monitor; ;;
+            6) profiler_logs; ;;
             0)
                 print_status "ok" "再见！"
                 exit 0

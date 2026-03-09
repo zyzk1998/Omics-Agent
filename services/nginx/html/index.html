@@ -212,9 +212,26 @@
             .sidebar-favorites-section { margin: 4px 0 !important; }
             .sidebar-history-block { margin: 4px 0 !important; }
             .sidebar-assets-block { margin: 4px 0 !important; }
+            .sidebar-favorites-section summary:hover { background: #f3f4f6; border-radius: 8px; cursor: pointer; }
+            .sidebar-sub-list { padding-left: 12px; margin-top: 4px; }
             .sidebar-sessions-list, .sidebar-assets-list { margin-top: 4px; }
-            .sidebar-session-item, .sidebar-asset-item { padding: 8px 12px; border-radius: 8px; cursor: pointer; margin: 2px 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .sidebar-session-item, .sidebar-asset-item { position: relative; display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 8px; cursor: pointer; margin: 2px 0; font-size: 13px; overflow: visible; }
+            .sidebar-session-item .item-text, .sidebar-asset-item .item-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .sidebar-session-item:hover, .sidebar-asset-item:hover { background: #f3f4f6; }
+            .item-more-btn { opacity: 0; background: transparent; border: none; color: #9ca3af; cursor: pointer; padding: 4px; border-radius: 4px; transition: all 0.2s; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+            .sidebar-session-item:hover .item-more-btn, .sidebar-asset-item:hover .item-more-btn, .sidebar-favorite-item:hover .item-more-btn { opacity: 1; }
+            .item-more-btn:hover { background: #e5e7eb; color: #1f2329; }
+            .popover-menu { position: absolute; right: 10px; top: 30px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 100; display: none; flex-direction: column; min-width: 100px; overflow: hidden; }
+            .popover-menu.show { display: flex; }
+            .popover-item { padding: 8px 12px; font-size: 13px; color: #374151; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background 0.2s; }
+            .popover-item:hover { background: #f3f4f6; }
+            .popover-item.danger { color: #ef4444; }
+            .popover-item.danger:hover { background: #fef2f2; }
+            .asset-modality-group { margin-top: 6px; padding-left: 4px; }
+            .asset-modality-group summary { list-style: none; padding: 6px 10px; cursor: pointer; font-weight: 600; font-size: 12px; color: #374151; border-radius: 6px; }
+            .asset-modality-group summary::-webkit-details-marker, .asset-modality-group summary::marker { display: none; }
+            .asset-modality-group summary:hover { background: #f3f4f6; }
+            .asset-modality-files { padding-left: 16px; margin-top: 4px; }
             .empty-sidebar-hint { color: #9ca3af; font-size: 12px; padding: 10px 16px; }
             #sidebar-pane .sidebar-history-title,
             #sidebar-pane .sidebar-assets-title {
@@ -441,6 +458,8 @@
                 transition: all 0.2s ease;
             }
             .skill-use-btn:hover { background: #2563eb; border-color: #2563eb; }
+            .skill-card .skill-use-btn { opacity: 0; transform: translateY(10px); transition: all 0.3s ease; }
+            .skill-card:hover .skill-use-btn { opacity: 1; transform: translateY(0); }
             /* ================= 右栏按需滑出 ================= */
             #workspace-pane {
                 width: 0;
@@ -525,7 +544,7 @@
                 pointer-events: none;
             }
             #hero-branding .hero-logo {
-                height: 60px;
+                height: 40px;
                 width: auto;
                 object-fit: contain;
                 flex-shrink: 0;
@@ -723,6 +742,12 @@
                 opacity: 0.9;
             }
 
+            .message-action-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; opacity: 0; transition: opacity 0.2s ease; }
+            .message-row:hover .message-action-bar { opacity: 1; }
+            .message-action-bar .action-btn { padding: 4px 8px; font-size: 12px; color: #6b7280; background: transparent; border: none; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+            .message-action-bar .action-btn:hover { background: #f3f4f6; color: #111827; }
+            .message-action-bar .action-btn i { font-size: 14px; }
+
             .bubble { font-size: 15px; line-height: 1.6; color: #374151; position: relative; }
             .message-row.user .bubble {
                 background-color: #f4f4f4;
@@ -875,6 +900,13 @@
             .process-step-text {
                 flex: 1;
                 line-height: 1.5;
+            }
+            /* Part 2 任务2：中栏“向右看”引导 */
+            .look-right-hint { font-size: 12px; color: #3b82f6; display: flex; align-items: center; gap: 4px; white-space: nowrap; flex-shrink: 0; }
+            .arrow-bounce { animation: bounceRight 1.5s infinite; }
+            @keyframes bounceRight {
+                0%, 100% { transform: translateX(0); }
+                50% { transform: translateX(4px); }
             }
             
             /* 🔥 TASK 2: Cell Ranger 等待气泡样式 */
@@ -1278,6 +1310,68 @@
                 * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
             }
 
+            /* ================= 深度思考区 (Agentic CoT) - QoderWork 风格 ================= */
+            .agent-thought-block {
+                margin-bottom: 16px;
+                border-left: 3px solid #e5e7eb;
+                padding-left: 12px;
+            }
+            .agent-thought-block summary {
+                cursor: pointer;
+                color: #6b7280;
+                font-size: 13px;
+                font-weight: 500;
+                list-style: none;
+            }
+            .agent-thought-block summary::-webkit-details-marker { display: none; }
+            .thought-content {
+                margin-top: 8px;
+                font-size: 13px;
+                color: #9ca3af;
+                font-style: italic;
+                line-height: 1.6;
+                max-height: 300px;
+                overflow-y: auto;
+                white-space: pre-wrap;
+            }
+            /* ================= 待办清单式任务流 (Checklist Task Flow UI) ================= */
+            .checklist-container {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+                margin-top: 16px;
+            }
+            .checklist-item {
+                display: flex;
+                align-items: flex-start;
+                gap: 12px;
+            }
+            .checklist-icon {
+                font-size: 16px;
+                margin-top: 2px;
+                flex-shrink: 0;
+            }
+            .checklist-icon.icon-pending { color: #d1d5db; }
+            .checklist-icon.icon-running { color: #3b82f6; animation: spin 1s linear infinite; }
+            .checklist-icon.icon-success { color: #10b981; }
+            .checklist-icon.icon-error { color: #ef4444; }
+            @keyframes spin { 100% { transform: rotate(360deg); } }
+            .checklist-content { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+            .checklist-title { font-size: 14px; font-weight: 600; color: #1f2329; }
+            .checklist-subtitle { font-size: 12px; color: #6b7280; margin-top: 4px; }
+            .checklist-item .step-body { margin-top: 8px; margin-left: 28px; width: calc(100% - 28px); }
+            .checklist-item .step-body .accordion { margin: 0; }
+            .checklist-item .step-body .accordion-item { border: none; border-top: 1px solid #eee; }
+            .checklist-item .step-body .accordion-button { font-size: 13px; padding: 8px 12px; }
+            .checklist-item .step-body .accordion-collapse { font-size: 13px; }
+            .checklist-item .step-body .accordion-body { padding: 12px; }
+
+            /* 任务3：数据资产附件标签（输入框上方） */
+            .asset-tags-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; min-height: 0; }
+            .asset-tag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; background: #f3f4f6; border-radius: 8px; font-size: 12px; color: #374151; }
+            .asset-tag .remove-tag { cursor: pointer; color: #9ca3af; padding: 0 2px; }
+            .asset-tag .remove-tag:hover { color: #ef4444; }
+
             /* ================= 输入框区域（状态机：居中宽大 / 沉底收窄 + 丝滑过渡） ================= */
             #inputWrapper {
                 margin: 0 auto;
@@ -1483,7 +1577,7 @@
             <!-- 左栏：Logo + 折叠 + 导航与历史 -->
             <aside id="sidebar-pane">
                 <div class="sidebar-logo-row" id="sidebarLogoRow" title="点击折叠/展开侧栏">
-                    <img src="./static/logo.png?v=2" alt="Logo" class="sidebar-logo">
+                    <img src="./static/logo.png?v=3" alt="Logo" class="sidebar-logo">
                     <span class="sidebar-title">Omics Agent</span>
                     <button type="button" class="sidebar-toggle-btn" id="sidebarToggleBtn" aria-label="折叠侧栏"><svg class="sidebar-pane-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button>
                 </div>
@@ -1500,14 +1594,14 @@
                         <summary class="sidebar-item sidebar-item-unified sidebar-favorites-title"><i class="bi bi-star"></i><span class="sidebar-item-label">工作流收藏夹</span></summary>
                         <div id="sidebar-favorite-list" class="sidebar-favorite-list"></div>
                     </details>
-                    <div class="sidebar-history-block">
-                        <div class="sidebar-item-unified sidebar-history-title">🕒 历史会话</div>
-                        <div id="sidebar-sessions-list" class="sidebar-sessions-list"></div>
-                    </div>
-                    <div class="sidebar-assets-block">
-                        <div class="sidebar-item-unified sidebar-assets-title">🗄️ 数据资产</div>
-                        <div id="sidebar-assets-list" class="sidebar-assets-list"></div>
-                    </div>
+                    <details class="sidebar-favorites-section">
+                        <summary class="sidebar-item sidebar-item-unified sidebar-favorites-title">🕒 <span class="sidebar-item-label">历史会话</span></summary>
+                        <div id="sidebar-sessions-list" class="sidebar-sub-list"></div>
+                    </details>
+                    <details class="sidebar-favorites-section">
+                        <summary class="sidebar-item sidebar-item-unified sidebar-favorites-title">🗄️ <span class="sidebar-item-label">数据资产</span></summary>
+                        <div id="sidebar-assets-list" class="sidebar-sub-list"></div>
+                    </details>
                 </div>
                 <div class="sidebar-bottom">
                     <div class="sidebar-user" id="sidebar-user-area" title="点击登录/注册" style="cursor:pointer;">
@@ -1531,10 +1625,13 @@
                 </div>
                 <div class="skills-square-tabs" id="skillsTabs">
                     <button class="skills-tab active" data-cat="全部">全部</button>
-                    <button class="skills-tab" data-cat="单细胞转录组">单细胞转录组</button>
-                    <button class="skills-tab" data-cat="空间转录组">空间转录组</button>
+                    <button class="skills-tab" data-cat="转录组学">转录组学</button>
+                    <button class="skills-tab" data-cat="空间组学">空间组学</button>
                     <button class="skills-tab" data-cat="代谢组学">代谢组学</button>
                     <button class="skills-tab" data-cat="医学影像组学">医学影像组学</button>
+                    <button class="skills-tab" data-cat="基因组学">基因组学</button>
+                    <button class="skills-tab" data-cat="表观遗传组学">表观遗传组学</button>
+                    <button class="skills-tab" data-cat="蛋白质组学">蛋白质组学</button>
                 </div>
                 <div class="skills-square-scroll">
                     <div class="skills-grid" id="skillsGrid"></div>
@@ -1560,7 +1657,7 @@
         <!-- 空状态容器（无对话时居中展示，发送首条消息后隐藏） -->
         <div id="empty-state-wrapper">
             <div id="hero-branding" class="hero-branding">
-                <img src="./static/logo.png?v=2" alt="Omics Agent" class="hero-logo">
+                <img src="./static/logo.png?v=3" alt="Omics Agent" class="hero-logo">
                 <h1 class="hero-title">Omics Agent</h1>
             </div>
             <div class="input-wrapper input-center" id="inputWrapper">
@@ -1579,11 +1676,10 @@
                             <input type="file" id="fileInput" class="file-input-hidden" onchange="handleFileSelect(this.files)" multiple accept="*">
                             <label for="fileInput" class="ghost-btn file-upload-label" title="上传文件"><i class="bi bi-paperclip"></i></label>
                             <div class="model-select-wrap" title="模型切换">
-                                <select id="modelSelect" class="model-select-native" title="模型切换">
-                                    <option value="deepseek-ai/DeepSeek-R1">DeepSeek-R1</option>
-                                    <option value="Pro/zai-org/GLM-5">智谱 GLM-5</option>
-                                    <option value="Pro/deepseek-ai/DeepSeek-V3.2">DeepSeek-V3.2 Pro</option>
-                                    <option value="Qwen/Qwen3-VL-235B-A22B-Instruct">Qwen3.0</option>
+                                <select id="modelSelect" class="ghost-btn model-select-native" title="模型切换" style="appearance: none; outline: none; cursor: pointer;">
+                                    <option value="deepseek-ai/DeepSeek-R1" selected>🧠 DeepSeek-R1 (深度思考)</option>
+                                    <option value="Qwen/Qwen3.5-397B-A17B">⚡ Qwen 3.5 (极速全能)</option>
+                                    <option value="Pro/zai-org/GLM-5">⚡ GLM-5 Pro (极速全能)</option>
                                 </select>
                                 <span class="model-chevron">▼</span>
                             </div>
@@ -1682,19 +1778,67 @@
 
         <script>
             // ================= Phase 3: 鉴权状态（LocalStorage & 统一请求头） =================
-            (function initAuthState() {
-                var stored = localStorage.getItem('guest_uuid');
-                if (!stored) {
-                    stored = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'guest_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-                    localStorage.setItem('guest_uuid', stored);
-                }
-                window.GUEST_UUID = stored;
-            })();
-            function getAuthHeaders() {
-                var token = localStorage.getItem('access_token');
-                if (token) return { 'Authorization': 'Bearer ' + token };
-                return { 'X-Guest-UUID': window.GUEST_UUID || localStorage.getItem('guest_uuid') || '' };
+            // 任务1：同步执行于脚本最顶层，确保在任何 fetch 之前 guest_uuid 已存在
+            function generateGuestUuid() {
+                return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'guest_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
             }
+            // Task1: 有 Token 时绝不生成/覆盖 guest_uuid，绝不清空 Token
+            function initAuthState() {
+                try {
+                    if (localStorage.getItem('access_token')) {
+                        window.GUEST_UUID = localStorage.getItem('guest_uuid') || window.GUEST_UUID || '';
+                        return;
+                    }
+                    var stored = localStorage.getItem('guest_uuid');
+                    if (!stored) {
+                        stored = generateGuestUuid();
+                        try { localStorage.setItem('guest_uuid', stored); } catch (e) { }
+                    }
+                    window.GUEST_UUID = stored;
+                } catch (e) {
+                    window.GUEST_UUID = window.GUEST_UUID || generateGuestUuid();
+                }
+            }
+            initAuthState();
+
+            // Task1: 请求头 100% 来自 localStorage 实时读取，不依赖任何全局变量
+            function getAuthHeaders() {
+                var headers = {};
+                var token, guestUuid;
+                try {
+                    token = localStorage.getItem('access_token');
+                    guestUuid = localStorage.getItem('guest_uuid');
+                } catch (e) { token = null; guestUuid = null; }
+                if (token) {
+                    headers['Authorization'] = 'Bearer ' + token;
+                    return headers;
+                }
+                if (guestUuid) {
+                    headers['X-Guest-UUID'] = guestUuid;
+                    return headers;
+                }
+                var newUuid = generateGuestUuid();
+                try { localStorage.setItem('guest_uuid', newUuid); } catch (e) { }
+                headers['X-Guest-UUID'] = newUuid;
+                return headers;
+            }
+            // 🔥 401 优雅降级：静默清除 token、恢复游客 UI、提示重新登录
+            (function() {
+                var orig = window.fetch;
+                window.fetch = function(url, opts) {
+                    return orig.apply(this, arguments).then(function(r) {
+                        if (r.status === 401 && (typeof url === 'string' && url.indexOf('/api/') !== -1)) {
+                            try {
+                                localStorage.removeItem('access_token');
+                                localStorage.removeItem('username');
+                            } catch (e) {}
+                            if (typeof updateSidebarUser === 'function') updateSidebarUser();
+                            alert('登录已过期，请重新登录');
+                        }
+                        return r;
+                    });
+                };
+            })();
             function parseJsonOrReject(r) {
                 return r.text().then(function(text) {
                     if (r.ok) { try { return JSON.parse(text); } catch (e) { return Promise.reject({ detail: '响应格式错误' }); } }
@@ -1788,47 +1932,21 @@
                 spatial: "【角色设定】你是一位顶尖的空间转录组学生信专家。\n\n【组学类型】空间转录组 (Spatial Transcriptomics)\n\n【分析内容和步骤】\n(注：以下步骤为默认推荐，您可根据需求自由修改、删减或增加)\n1. [空间数据校验]（影像与坐标预检）\n2. [数据质控与过滤]\n3. [空间高变基因提取]\n4. [降维与空间聚类]\n5. [多分辨率空间域物理映射对比]\n6. [空间域识别与通路富集]\n\n【输出要求】请调用相关工具，输出包含空间分布图、UMAP图、多分辨率对比图的数据诊断报告，并给出专家解读。",
                 transcriptomics: "【角色设定】你是一位顶尖的单细胞转录组数据分析专家。\n\n【组学类型】单细胞转录组 (scRNA-seq)\n\n【分析内容和步骤】\n(注：以下步骤为默认推荐，您可根据需求自由修改、删减或增加)\n1. [数据结构与内存预检]\n2. [质控与去双细胞]\n3. [降维聚类 (PCA/UMAP)]\n4. [多分辨率聚类鲁棒性对比]\n5. [细胞类型自动注释与核心 Marker 气泡图、亚群比例分析]\n6. [差异表达基因分析 (DEG)]\n7. [通路富集分析 (GO/KEGG)]\n\n【输出要求】请提供细胞分群 UMAP 图、多分辨率对比图、Marker 基因热图及通路富集气泡图，并对关键细胞亚群进行详细解读。",
                 radiomics: "【角色设定】你是一位资深的医学影像组学与机器学习专家。\n\n【组学类型】医学影像组学 (Radiomics)\n\n【分析内容和步骤】\n(注：以下步骤为默认推荐，您可根据需求自由修改、删减或增加)\n1. [数据与 ROI 校验]\n2. [图像预处理]\n3. [影像组学特征提取 (PyRadiomics)]\n4. [多算法 (LR/SVM/RF) ROC 诊断效能对比]\n5. [特征相关性聚类热图与特征权重棒棒糖图]\n6. [Rad-Score 与风险概率]\n\n【输出要求】请输出 ROC 对比图、特征权重图、聚类热图，并结合临床背景给出辅助诊断建议。",
-                metabolomics: "【角色设定】你是一位资深的非靶向代谢组学分析专家。\n\n【组学类型】非靶向代谢组学 (Untargeted Metabolomics)\n\n【分析内容和步骤】\n(注：以下步骤为默认推荐，您可根据需求自由修改、删减或增加)\n1. [数据与稀疏性校验]\n2. [缺失值插补与数据归一化]\n3. [多元统计分析 (PCA/PLS-DA) 与多维模型效能对比]\n4. [差异代谢物筛选 (VIP>1, P<0.05)]\n5. [代谢通路拓扑分析]\n\n【输出要求】请输出 PCA/PLS-DA/VIP 对比图、差异代谢物火山图，并重点解读关键生物标志物的潜在临床/病理意义。"
+                metabolomics: "【角色设定】你是一位资深的非靶向代谢组学分析专家。\n\n【组学类型】非靶向代谢组学 (Untargeted Metabolomics)\n\n【分析内容和步骤】\n(注：以下步骤为默认推荐，您可根据需求自由修改、删减或增加)\n1. [数据与稀疏性校验]\n2. [缺失值插补与数据归一化]\n3. [多元统计分析 (PCA/PLS-DA) 与多维模型效能对比]\n4. [差异代谢物筛选 (VIP>1, P<0.05)]\n5. [代谢通路拓扑分析]\n\n【输出要求】请输出 PCA/PLS-DA/VIP 对比图、差异代谢物火山图，并重点解读关键生物标志物的潜在临床/病理意义。",
+                genomics: "【角色设定】你是一位资深的基因组学与生物信息学专家。\n\n【组学类型】基因组学 (Genomics)\n\n【分析内容和步骤】\n1. [原始数据质控与比对]\n2. [变异检测 (SNV/InDel/CNV)]\n3. [变异注释与过滤]\n4. [致病性评估与报告]\n\n【输出要求】请输出质控报告、变异汇总表与关键突变解读。",
+                epigenomics: "【角色设定】你是一位资深的表观遗传学分析专家。\n\n【组学类型】表观遗传组学 (Epigenomics)\n\n【分析内容和步骤】\n1. [原始数据质控]\n2. [峰 calling 与注释]\n3. [差异分析与 motif 富集]\n4. [与转录组/基因组整合解读]\n\n【输出要求】请输出峰图、差异区域与生物学解释。",
+                proteomics: "【角色设定】你是一位资深的蛋白质组学与质谱分析专家。\n\n【组学类型】蛋白质组学 (Proteomics)\n\n【分析内容和步骤】\n1. [原始谱图质控与搜库]\n2. [定量与归一化]\n3. [差异蛋白筛选与富集分析]\n4. [蛋白质互作网络与通路解读]\n\n【输出要求】请输出火山图、热图与互作网络，并解读关键蛋白与通路。"
             };
 
             // ================= Skills Square (平台化 Mock 数据 + Prompt 注入) =================
             const SKILLS_DATA = [
-                {
-                    id: 'sc_standard',
-                    name: '单细胞标准全流程',
-                    category: '单细胞转录组',
-                    icon: '🧬',
-                    tags: ['数据分析', '生命科学'],
-                    desc: '一键生成 scRNA-seq 质控、降维聚类、多分辨率鲁棒性对比、Marker 注释、差异与通路富集的标准工作流，适合新数据快速出报告。',
-                    prompt_key: 'transcriptomics'
-                },
-                {
-                    id: 'sp_domain',
-                    name: '空间域识别与聚类',
-                    category: '空间转录组',
-                    icon: '🗺️',
-                    tags: ['数据分析', '空间组学'],
-                    desc: '聚焦空间域识别：坐标/影像校验、空间高变基因、降维聚类、多分辨率空间域物理映射对比，并联动 SVG 与通路富集做解释。',
-                    prompt_key: 'spatial'
-                },
-                {
-                    id: 'mb_biomarker',
-                    name: '差异标志物发现',
-                    category: '代谢组学',
-                    icon: '🧪',
-                    tags: ['数据分析', '生物标志物'],
-                    desc: '面向代谢物 biomarker：缺失值与归一化、PCA/PLS-DA、多维模型效能对比、VIP 与显著性筛选、通路拓扑解释与候选标志物清单。',
-                    prompt_key: 'metabolomics'
-                },
-                {
-                    id: 'rd_modeling',
-                    name: '多算法诊断模型构建',
-                    category: '医学影像组学',
-                    icon: '🩻',
-                    tags: ['机器学习', '医学影像'],
-                    desc: '影像组学建模模板：ROI/数据校验、特征提取、LR/SVM/RF 多算法 ROC 对比、特征相关性聚类热图、权重可视化与 Rad-Score 风险评估。',
-                    prompt_key: 'radiomics'
-                }
+                { id: 'sc_standard', name: '转录组学标准全流程', category: '转录组学', icon: '🧬', tags: ['数据分析', '生命科学'], desc: '一键生成 scRNA-seq 质控、降维聚类、多分辨率鲁棒性对比、Marker 注释、差异与通路富集的标准工作流。', prompt_key: 'transcriptomics' },
+                { id: 'sp_domain', name: '空间域识别与聚类', category: '空间组学', icon: '🗺️', tags: ['数据分析', '空间组学'], desc: '聚焦空间域识别：坐标/影像校验、空间高变基因、降维聚类、多分辨率空间域物理映射对比。', prompt_key: 'spatial' },
+                { id: 'mb_biomarker', name: '差异标志物发现', category: '代谢组学', icon: '🧪', tags: ['数据分析', '生物标志物'], desc: '面向代谢物 biomarker：缺失值与归一化、PCA/PLS-DA、多维模型效能对比、VIP 与显著性筛选、通路拓扑解释。', prompt_key: 'metabolomics' },
+                { id: 'rd_modeling', name: '多算法诊断模型构建', category: '医学影像组学', icon: '🩻', tags: ['机器学习', '医学影像'], desc: '影像组学建模：ROI/数据校验、特征提取、LR/SVM/RF 多算法 ROC 对比、特征相关性聚类热图与 Rad-Score。', prompt_key: 'radiomics' },
+                { id: 'genomics_variant', name: '基因组变异检测', category: '基因组学', icon: '🧬', tags: ['基因组学', '变异'], desc: '从原始测序数据到变异 calling、注释与致病性评估，输出质控与变异解读报告。', prompt_key: 'genomics' },
+                { id: 'epigenomics_peak', name: '表观遗传峰与 motif 分析', category: '表观遗传组学', icon: '📊', tags: ['表观遗传', 'ChIP/ATAC'], desc: '峰 calling、差异分析、motif 富集与转录组/基因组整合解读。', prompt_key: 'epigenomics' },
+                { id: 'proteomics_network', name: '蛋白质互作网络分析', category: '蛋白质组学', icon: '🔗', tags: ['蛋白质组学', '互作网络'], desc: '质谱定量、差异蛋白、富集分析与蛋白质互作网络构建与通路解读。', prompt_key: 'proteomics' }
             ];
 
             function showSkillsView() {
@@ -2078,9 +2196,12 @@
                 var el = document.getElementById('auth-modal');
                 if (el) { el.style.display = 'none'; el.setAttribute('aria-hidden', 'true'); }
             }
+            function closeAllPopovers() {
+                document.querySelectorAll('.popover-menu.show').forEach(function(m) { m.classList.remove('show'); });
+            }
             // ================= Phase 5: 历史会话与数据资产 =================
             function fetchSessions() {
-                fetch('/api/sessions', { headers: getAuthHeaders() })
+                fetch('/api/sessions', { method: 'GET', headers: getAuthHeaders() })
                     .then(function(r) { return r.ok ? r.json() : r.text().then(function(t) { try { return Promise.reject(JSON.parse(t)); } catch (e) { return Promise.reject({ detail: t || ('HTTP ' + r.status) }); } }); })
                     .then(function(list) {
                         var el = document.getElementById('sidebar-sessions-list');
@@ -2097,73 +2218,218 @@
                             var item = document.createElement('div');
                             item.className = 'sidebar-session-item';
                             item.title = s.title || s.id;
-                            item.textContent = (s.title || s.id || '未命名').slice(0, 24) + ((s.title && s.title.length > 24) ? '...' : '');
                             item.dataset.sessionId = s.id;
-                            item.onclick = function() { loadSessionAndRestore(s.id, s.title); };
+                            var text = (s.title || s.id || '未命名').slice(0, 24) + ((s.title && s.title.length > 24) ? '...' : '');
+                            var textSpan = document.createElement('span');
+                            textSpan.className = 'item-text';
+                            textSpan.textContent = text;
+                            var moreBtn = document.createElement('button');
+                            moreBtn.type = 'button';
+                            moreBtn.className = 'item-more-btn';
+                            moreBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>';
+                            moreBtn.onclick = function(ev) { ev.preventDefault(); ev.stopPropagation(); closeAllPopovers(); var p = this.nextElementSibling; p.classList.toggle('show'); setTimeout(function() { document.addEventListener('click', function _once() { closeAllPopovers(); document.removeEventListener('click', _once); }); }, 0); };
+                            var popover = document.createElement('div');
+                            popover.className = 'popover-menu';
+                            popover.innerHTML = '<div class="popover-item danger" data-action="delete"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg> 删除</div>';
+                            popover.querySelector('.popover-item').onclick = function(ev) {
+                                ev.preventDefault(); ev.stopPropagation();
+                                if (!confirm('确定要删除此记录吗？')) return;
+                                var sid = item.dataset.sessionId;
+                                fetch('/api/sessions/' + encodeURIComponent(sid), { method: 'DELETE', headers: getAuthHeaders() })
+                                    .then(function(r) { if (r.ok) { item.remove(); if (el.children.length === 0) { var h = document.createElement('div'); h.className = 'empty-sidebar-hint'; h.textContent = '暂无记录'; el.appendChild(h); } } else return r.json().then(function(d) { throw d; }); })
+                                    .catch(function(e) { console.warn('[deleteSession]', e); alert(e.detail || '删除失败'); });
+                                closeAllPopovers();
+                            };
+                            item.appendChild(textSpan);
+                            item.appendChild(moreBtn);
+                            item.appendChild(popover);
+                            item.onclick = function(ev) { if (ev.target.closest && !ev.target.closest('.item-more-btn') && !ev.target.closest('.popover-menu')) { ev.preventDefault(); ev.stopPropagation(); loadSessionAndRestore(s.id, s.title); } };
                             el.appendChild(item);
                         });
                     })
                     .catch(function(e) { console.warn('[fetchSessions]', e); var el = document.getElementById('sidebar-sessions-list'); if (el && e && e.detail) { el.innerHTML = ''; var h = document.createElement('div'); h.className = 'empty-sidebar-hint'; h.textContent = e.detail; el.appendChild(h); } });
             }
+            var FIXED_MODALITY_KEYS = ['rna', 'spatial', 'metabolomics', 'radiomics', 'genomics', 'epigenomics', 'proteomics', 'uncategorized'];
+            var FIXED_MODALITY_LABELS = { rna: '转录组学', spatial: '空间组学', metabolomics: '代谢组学', radiomics: '医学影像组学', genomics: '基因组学', epigenomics: '表观遗传组学', proteomics: '蛋白质组学', uncategorized: '其他文件' };
             function fetchAssets() {
-                fetch('/api/assets', { headers: getAuthHeaders() })
+                fetch('/api/assets', { method: 'GET', headers: getAuthHeaders() })
                     .then(function(r) { return r.ok ? r.json() : r.text().then(function(t) { try { return Promise.reject(JSON.parse(t)); } catch (e) { return Promise.reject({ detail: t || ('HTTP ' + r.status) }); } }); })
                     .then(function(list) {
                         var el = document.getElementById('sidebar-assets-list');
                         if (!el) return;
                         el.innerHTML = '';
-                        if (!list || list.length === 0) {
-                            var hint = document.createElement('div');
-                            hint.className = 'empty-sidebar-hint';
-                            hint.textContent = '暂无记录';
-                            el.appendChild(hint);
-                            return;
-                        }
+                        list = list || [];
+                        var byGroup = {};
+                        FIXED_MODALITY_KEYS.forEach(function(k) { byGroup[k] = []; });
                         list.forEach(function(a) {
-                            var item = document.createElement('div');
-                            item.className = 'sidebar-asset-item';
-                            item.title = a.file_name + (a.modality ? ' (' + a.modality + ')' : '');
-                            item.textContent = (a.file_name || a.file_path || '文件').slice(0, 20) + ((a.file_name && a.file_name.length > 20) ? '...' : '');
-                            item.dataset.filePath = a.file_path;
-                            item.dataset.fileName = a.file_name;
-                            el.appendChild(item);
+                            var raw = (a.modality || '').trim().toLowerCase();
+                            var groupKey = (raw === 'transcriptomics') ? 'rna' : (raw && FIXED_MODALITY_LABELS[raw]) ? raw : 'uncategorized';
+                            if (!byGroup[groupKey]) byGroup[groupKey] = [];
+                            byGroup[groupKey].push(a);
+                        });
+                        FIXED_MODALITY_KEYS.forEach(function(groupKey) {
+                            var items = byGroup[groupKey] || [];
+                            var label = FIXED_MODALITY_LABELS[groupKey];
+                            var details = document.createElement('details');
+                            details.className = 'asset-modality-group';
+                            var summary = document.createElement('summary');
+                            summary.textContent = (groupKey === 'uncategorized' ? '📁 ' : '🧬 ') + label + ' (' + items.length + ')';
+                            details.appendChild(summary);
+                            var fileList = document.createElement('div');
+                            fileList.className = 'asset-modality-files';
+                            items.forEach(function(a) {
+                                var item = document.createElement('div');
+                                item.className = 'sidebar-asset-item';
+                                item.title = (a.file_name || '') + (a.modality ? ' (' + a.modality + ')' : '');
+                                item.dataset.filePath = a.file_path;
+                                item.dataset.fileName = a.file_name;
+                                item.dataset.assetId = a.id;
+                                var text = (a.file_name || a.file_path || '文件').slice(0, 20) + ((a.file_name && a.file_name.length > 20) ? '...' : '');
+                                var textSpan = document.createElement('span');
+                                textSpan.className = 'item-text';
+                                textSpan.textContent = text;
+                                var moreBtn = document.createElement('button');
+                                moreBtn.type = 'button';
+                                moreBtn.className = 'item-more-btn';
+                                moreBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>';
+                                moreBtn.onclick = function(ev) { ev.preventDefault(); ev.stopPropagation(); closeAllPopovers(); var p = this.nextElementSibling; p.classList.toggle('show'); setTimeout(function() { document.addEventListener('click', function _once() { closeAllPopovers(); document.removeEventListener('click', _once); }); }, 0); };
+                                var popover = document.createElement('div');
+                                popover.className = 'popover-menu';
+                                popover.innerHTML = '<div class="popover-item danger" data-action="delete"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg> 删除</div>';
+                                popover.querySelector('.popover-item').onclick = function(ev) {
+                                    ev.preventDefault(); ev.stopPropagation();
+                                    if (!confirm('确定要删除此记录吗？')) return;
+                                    var aid = item.dataset.assetId;
+                                    if (!aid) return;
+                                    fetch('/api/assets/' + aid, { method: 'DELETE', headers: getAuthHeaders() })
+                                        .then(function(r) { if (r.ok) { item.remove(); if (fileList.children.length === 0) { var h = document.createElement('div'); h.className = 'empty-sidebar-hint'; h.textContent = '暂无记录'; fileList.appendChild(h); } } else return r.json().then(function(d) { throw d; }); })
+                                        .catch(function(e) { console.warn('[deleteAsset]', e); alert(e.detail || '删除失败'); });
+                                    closeAllPopovers();
+                                };
+                                item.appendChild(textSpan);
+                                item.appendChild(moreBtn);
+                                item.appendChild(popover);
+                                item.onclick = function(ev) { if (ev.target.closest && !ev.target.closest('.item-more-btn') && !ev.target.closest('.popover-menu')) { ev.preventDefault(); ev.stopPropagation(); addAssetAsAttachment(a.file_path, a.file_name || a.file_path || '文件'); } };
+                                fileList.appendChild(item);
+                            });
+                            details.appendChild(fileList);
+                            el.appendChild(details);
                         });
                     })
                     .catch(function(e) { console.warn('[fetchAssets]', e); var el = document.getElementById('sidebar-assets-list'); if (el && e && e.detail) { el.innerHTML = ''; var h = document.createElement('div'); h.className = 'empty-sidebar-hint'; h.textContent = e.detail; el.appendChild(h); } });
             }
+            // 任务3：点击数据资产挂载为输入框上方附件标签，不清空当前对话
+            function ensureAssetTagsRow() {
+                var iw = document.getElementById('inputWrapper');
+                if (!iw) return null;
+                var row = iw.querySelector('.asset-tags-row');
+                if (!row) {
+                    row = document.createElement('div');
+                    row.className = 'asset-tags-row';
+                    var panel = iw.querySelector('.chat-input-panel');
+                    var fileArea = iw.querySelector('#filePreviewArea');
+                    if (panel) panel.insertBefore(row, fileArea ? fileArea.nextSibling : panel.firstChild);
+                }
+                return row;
+            }
+            function addAssetAsAttachment(filePath, fileName) {
+                if (!filePath) return;
+                var row = ensureAssetTagsRow();
+                if (!row) return;
+                var existing = row.querySelector('.asset-tag[data-filepath="' + (filePath.replace(/"/g, '&quot;') || '') + '"]');
+                if (existing) return;
+                var tag = document.createElement('div');
+                tag.className = 'asset-tag';
+                tag.dataset.filepath = filePath;
+                tag.dataset.fileName = fileName || filePath;
+                var displayName = (fileName || filePath || '文件').replace(/</g, '&lt;').replace(/&/g, '&amp;');
+                if (displayName.length > 24) displayName = displayName.slice(0, 24) + '...';
+                tag.innerHTML = '📄 ' + displayName + ' <span class="remove-tag" title="移除">✕</span>';
+                var removeSpan = tag.querySelector('.remove-tag');
+                if (removeSpan) removeSpan.onclick = function(e) { e.stopPropagation(); tag.remove(); checkInput(); };
+                row.appendChild(tag);
+                checkInput();
+            }
+            // Task2: 真·时光机：仅恢复历史，绝不触发 sendMessage
             function loadSessionAndRestore(sessionId, title) {
                 currentSessionId = sessionId;
-                clearChatAndReset();
-                currentSessionId = sessionId;
-                var titleEl = document.getElementById('chat-conversation-title');
-                if (titleEl) titleEl.textContent = (title || sessionId).slice(0, 24);
+                var chatContent = document.getElementById('chatContent');
+                var workspaceContent = document.getElementById('active-workspace-content');
+                var wrapper = document.getElementById('empty-state-wrapper');
+                var iw = document.getElementById('inputWrapper');
+                var bottomSlot = document.getElementById('input-wrapper-bottom');
                 var wp = document.getElementById('workspace-pane');
+                var titleEl = document.getElementById('chat-conversation-title');
+
+                if (currentAbortController) { currentAbortController.abort(); currentAbortController = null; }
+                toggleLoadingState(false);
+                if (chatContent) { while (chatContent.firstChild) chatContent.removeChild(chatContent.firstChild); }
+                if (workspaceContent) workspaceContent.innerHTML = '';
+                if (wrapper) wrapper.classList.add('hidden');
+                if (iw && bottomSlot && !bottomSlot.contains(iw)) { bottomSlot.appendChild(iw); iw.classList.remove('input-center'); iw.classList.add('input-bottom'); }
+                if (titleEl) titleEl.textContent = (title || sessionId).slice(0, 24);
                 if (wp) wp.classList.add('workspace-active');
-                fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/messages', { headers: getAuthHeaders() })
+                chatHistory = [];
+
+                fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/messages', { method: 'GET', headers: getAuthHeaders() })
                     .then(function(r) { return r.ok ? r.json() : Promise.reject(new Error(r.status)); })
                     .then(function(messages) {
                         if (!Array.isArray(messages)) return;
-                        var wrapper = document.getElementById('empty-state-wrapper');
-                        var iw = document.getElementById('inputWrapper');
-                        var bottomSlot = document.getElementById('input-wrapper-bottom');
-                        if (wrapper) wrapper.classList.add('hidden');
-                        if (iw && bottomSlot && !bottomSlot.contains(iw)) { bottomSlot.appendChild(iw); iw.classList.remove('input-center'); iw.classList.add('input-bottom'); }
-                        messages.forEach(function(msg) {
+                        if (chatContent) chatContent.style.visibility = 'hidden';
+                        if (workspaceContent) workspaceContent.style.visibility = 'hidden';
+                        window.currentSessionMessageIds = messages.map(function(m) { return m.id; });
+                        for (var i = 0; i < messages.length; i++) {
+                            var msg = messages[i];
                             if (msg.role === 'user') {
                                 var text = (msg.content && msg.content.text) || (typeof msg.content === 'string' ? msg.content : '');
-                                appendMessage('user', text || '');
+                                appendMessage('user', text || '', null, null, false, null, msg.id);
                             } else if (msg.role === 'agent' && msg.content && msg.content.events && Array.isArray(msg.content.events)) {
-                                createRestoreAIMessageRowAndReplay(msg.content.events);
+                                createRestoreAIMessageRowWithSnapshot(msg.content.events, msg.id);
                             }
-                        });
+                        }
+                        if (chatContent) chatContent.style.visibility = '';
+                        if (workspaceContent) workspaceContent.style.visibility = '';
                     })
-                    .catch(function(e) { console.warn('[loadSessionAndRestore]', e); });
+                    .catch(function(e) { console.warn('[loadSessionAndRestore]', e); if (chatContent) chatContent.style.visibility = ''; if (workspaceContent) workspaceContent.style.visibility = ''; });
             }
-            function createRestoreAIMessageRowAndReplay(events) {
+            // 🔥 从 events 数组提取最终态（最后一次出现的 steps_details / diagnosis_report 获胜），用于瞬间渲染
+            function extractFinalStateFromEvents(events) {
+                var out = { stepsDetails: null, diagnosisReport: null, reportData: null, lastMessage: '' };
+                if (!Array.isArray(events) || events.length === 0) return out;
+                for (var i = 0; i < events.length; i++) {
+                    var raw = events[i];
+                    if (typeof raw !== 'string') continue;
+                    var parts = raw.split('\n\n');
+                    for (var j = 0; j < parts.length; j++) {
+                        var part = parts[j].trim();
+                        if (!part) continue;
+                        var lines = part.split('\n');
+                        var eventType = 'message';
+                        var dataLines = [];
+                        for (var k = 0; k < lines.length; k++) {
+                            if (lines[k].indexOf('event: ') === 0) eventType = lines[k].substring(7).trim();
+                            else if (lines[k].indexOf('data: ') === 0) dataLines.push(lines[k].substring(6));
+                        }
+                        if (dataLines.length === 0) continue;
+                        try {
+                            var data = JSON.parse(dataLines.join('\n'));
+                            if (data.report_data && data.report_data.steps_details && data.report_data.steps_details.length > 0)
+                                out.stepsDetails = data.report_data.steps_details;
+                            if (data.steps_details && data.steps_details.length > 0) out.stepsDetails = data.steps_details;
+                            if (data.diagnosis_report != null) out.diagnosisReport = data.diagnosis_report;
+                            if (data.report_data) out.reportData = data.report_data;
+                            if (eventType === 'message' && data.content) out.lastMessage = (out.lastMessage || '') + (data.content || '');
+                        } catch (err) { /* skip malformed */ }
+                    }
+                }
+                return out;
+            }
+            function createRestoreAIMessageRowWithSnapshot(events, messageId) {
                 var chatContent = document.getElementById('chatContent');
                 if (!chatContent) return;
                 var row = document.createElement('div');
                 row.className = 'message-row ai';
+                if (messageId != null) row.dataset.messageId = String(messageId);
                 var avatar = document.createElement('div');
                 avatar.className = 'avatar ai';
                 avatar.innerHTML = '<i class="bi bi-robot"></i>';
@@ -2184,6 +2450,7 @@
                 messageContent.appendChild(cardZone);
                 var footer = document.createElement('div');
                 footer.className = 'message-footer';
+                footer.innerHTML = '<div class="message-action-bar"><button type="button" class="action-btn" onclick="copyText(this)" title="复制"><i class="bi bi-copy"></i>复制</button><button type="button" class="action-btn" onclick="regenerateMessage(this)" title="重新生成"><i class="bi bi-arrow-clockwise"></i>重新生成</button><button type="button" class="action-btn" onclick="deleteMessage(this)" title="删除"><i class="bi bi-trash"></i>删除</button></div>';
                 container.appendChild(bubble);
                 container.appendChild(messageContent);
                 container.appendChild(footer);
@@ -2191,13 +2458,28 @@
                 row.appendChild(container);
                 chatContent.appendChild(row);
                 window.currentMessageZones = { logZone: logZone, textZone: textZone, cardZone: cardZone };
-                var workspaceRoot = document.getElementById('active-workspace-content');
-                if (workspaceRoot) workspaceRoot.style.visibility = 'hidden';
-                try {
-                    replayHistoryEvents(events);
-                } finally {
-                    if (workspaceRoot) workspaceRoot.style.visibility = '';
+                var final_ = extractFinalStateFromEvents(events);
+                var stepsDetails = final_.stepsDetails;
+                if (stepsDetails && stepsDetails.length > 0) {
+                    var normalized = stepsDetails.map(function(s) {
+                        var c = {};
+                        for (var k in s) c[k] = s[k];
+                        c.status = 'success';
+                        return c;
+                    });
+                    if (typeof renderExecutionSteps === 'function') renderExecutionSteps(normalized);
+                    if (typeof syncMiddlePaneChecklistIcons === 'function') syncMiddlePaneChecklistIcons(normalized);
                 }
+                if (final_.diagnosisReport != null && typeof renderReportSection === 'function')
+                    renderReportSection('diagnosis', final_.diagnosisReport, final_.reportData || {});
+                if (final_.reportData && final_.reportData.diagnosis != null && typeof renderReportSection === 'function')
+                    renderReportSection('summary', final_.reportData.diagnosis, final_.reportData);
+                if (final_.lastMessage && textZone) {
+                    try { textZone.innerHTML = typeof safeMarkedParse === 'function' ? safeMarkedParse(final_.lastMessage) : final_.lastMessage; } catch (e) { textZone.textContent = final_.lastMessage; }
+                }
+            }
+            function createRestoreAIMessageRowAndReplay(events) {
+                createRestoreAIMessageRowWithSnapshot(events);
             }
             function replayHistoryEvents(events) {
                 if (!Array.isArray(events) || !window.handleServerEvent) return;
@@ -2223,7 +2505,63 @@
                     }
                 }
             }
+            // 🔥 事件委托：一键应用推荐参数（id="btn-apply-params"），多选择器 + 展开折叠 + 视觉高亮
+            document.addEventListener('click', function(e) {
+                if (!e.target || e.target.id !== 'btn-apply-params') return;
+                e.preventDefault();
+                var recParams = (window.currentRecommendation && window.currentRecommendation.params) ? window.currentRecommendation.params : {};
+                var formEl = e.target.closest('[data-form-id]');
+                var formId = formEl ? formEl.getAttribute('data-form-id') : '';
+                var stepsLength = formEl ? (formEl.querySelectorAll('.step-checkbox').length || 20) : 20;
+                var appliedCount = 0;
+                for (var key in recParams) {
+                    if (!recParams.hasOwnProperty(key)) continue;
+                    var data = recParams[key];
+                    var val = (data && typeof data === 'object' && 'value' in data) ? data.value : data;
+                    var inputEl = null;
+                    if (formEl) {
+                        inputEl = formEl.querySelector('[name="' + key + '"]') || formEl.querySelector('[data-param-name="' + key + '"]') || document.getElementById(key);
+                        if (!inputEl) {
+                            for (var i = 0; i < stepsLength; i++) {
+                                inputEl = formEl.querySelector('[name="param_' + i + '_' + key + '"]');
+                                if (inputEl) break;
+                            }
+                        }
+                    }
+                    if (!inputEl) inputEl = document.querySelector('[name="' + key + '"]') || document.querySelector('[data-param-name="' + key + '"]');
+                    if (inputEl) {
+                        if (inputEl.type === 'checkbox') {
+                            inputEl.checked = !!val && val !== 'false' && val !== '0';
+                        } else {
+                            inputEl.value = val != null ? String(val) : '';
+                        }
+                        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+                        var parentDetails = inputEl.closest('details');
+                        if (parentDetails) parentDetails.setAttribute('open', '');
+                        var parentCollapse = inputEl.closest('.accordion-collapse, .collapse, .collapse-content, .step-body');
+                        if (parentCollapse) { parentCollapse.classList.add('show'); parentCollapse.style.display = ''; }
+                        inputEl.style.transition = 'background-color 0.5s';
+                        inputEl.style.backgroundColor = '#dcfce3';
+                        (function(el) { setTimeout(function() { el.style.backgroundColor = ''; }, 1500); })(inputEl);
+                        appliedCount++;
+                    }
+                }
+                var btn = e.target;
+                if (appliedCount > 0) {
+                    btn.innerHTML = '✅ 成功应用 ' + appliedCount + ' 个参数';
+                    btn.style.backgroundColor = '#dcfce3';
+                    setTimeout(function() {
+                        btn.innerHTML = '✨ 一键应用推荐参数';
+                        btn.style.backgroundColor = 'transparent';
+                    }, 2000);
+                } else {
+                    alert('未找到可应用的参数输入框，请检查参数名称是否匹配。');
+                }
+            });
             window.onload = function() {
+                // 任务1：有 Token 时不再生成 guest_uuid；先恢复侧栏登录态再拉取数据
+                if (!window.GUEST_UUID) initAuthState();
+                if (typeof updateSidebarUser === 'function') updateSidebarUser();
                 autoResize(userInput);
                 var sidebarLogo = document.getElementById('sidebarLogoRow');
                 var sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
@@ -2286,11 +2624,12 @@
 
                 updateFavoriteWorkflowsList();
 
-                // Phase 5: 侧栏数据首次加载
+                // Phase 5: 侧栏数据首次加载（登录态已在 onload 开头恢复）
                 fetchSessions();
                 fetchAssets();
+                if (typeof fetchFavoriteWorkflows === 'function') fetchFavoriteWorkflows();
 
-                // Phase 3: 侧栏用户区与登录/注册弹窗
+                // Phase 3: 侧栏用户区与登录/注册弹窗（再次确保与点击逻辑一致）
                 updateSidebarUser();
                 var sidebarUserArea = document.getElementById('sidebar-user-area');
                 if (sidebarUserArea) {
@@ -2363,6 +2702,7 @@
                             }
                             fetchSessions();
                             fetchAssets();
+                            if (typeof fetchFavoriteWorkflows === 'function') fetchFavoriteWorkflows();
                         }).catch(function(err) {
                             if (submitBtn) submitBtn.disabled = false;
                             errEl.textContent = (err && (err.detail || err.message)) || '登录失败，请重试';
@@ -2675,10 +3015,13 @@
                 } 
             }
 
-            async function sendMessage(selectedTool = null, originalQuery = null, toolParams = null, workflowData = null, useHistoryFiles = false, filesOverride = null) {
+            async function sendMessage(selectedTool = null, originalQuery = null, toolParams = null, workflowData = null, useHistoryFiles = false, filesOverride = null, hiddenPayload = null) {
                 if (isProcessing) return;
                 let text = userInput.value.trim();
                 if (originalQuery) text = originalQuery;
+                // 🔥 当传入 hiddenPayload 时：气泡显示 originalQuery（即 text），发给后端的 message 使用 hiddenPayload
+                var messageForPayload = (hiddenPayload != null && hiddenPayload !== '') ? hiddenPayload : text;
+                var displayText = (hiddenPayload != null && hiddenPayload !== '') ? (originalQuery || text) : text;
                 
                 // 🔥 CRITICAL: 初始化状态和时间戳（在所有分支中都需要）
                 toggleLoadingState(true);
@@ -2696,8 +3039,9 @@
                         console.log(`  [${i}] name: ${f.name || 'N/A'}, path: ${f.path || 'N/A'}`);
                     });
                 } else {
-                    // 🔥 更新：检查文本、待上传文件或已上传文件
-                    if (!text && pendingFiles.length === 0 && uploadedFiles.length === 0 && !workflowData && !useHistoryFiles) {
+                    // 🔥 更新：检查文本、待上传文件、已上传文件、hiddenPayload 或历史资产标签
+                    var hasAssetTags = document.querySelectorAll('#inputWrapper .asset-tag').length > 0;
+                    if (!text && pendingFiles.length === 0 && uploadedFiles.length === 0 && !workflowData && !useHistoryFiles && !hasAssetTags && !hiddenPayload) {
                         toggleLoadingState(false);
                         return;
                     }
@@ -2745,29 +3089,30 @@
                     }
                 }
                 
-                // 显示用户消息
+                // 显示用户消息（hiddenPayload 时显示 displayText，否则沿用原逻辑）
                 if (!selectedTool && !workflowData && !useHistoryFiles) {
-                    // 🔥 INTENT CONSISTENCY: 在清空输入前保存用户查询，供模板上传后重新发送时使用
-                    if (text) {
+                    if (!hiddenPayload && text) {
                         window.lastSentQuery = text;
                     }
-                    // 🔥 Task 2: 显示文件卡片
-                    // 🔥 CRITICAL: 使用 filesToSend（可能是 filesOverride 或全局 uploadedFiles）
                     const filesToShow = filesToSend.length > 0 ? filesToSend : uploadedFiles;
                     const fileCount = filesToShow.length;
-                    
-                    // 🔧 修复：如果只有文件没有文本，显示更友好的消息
-                    if (!text && fileCount > 0) {
+                    if (hiddenPayload != null && hiddenPayload !== '') {
+                        appendMessage('user', displayText || '正在复用工作流…', null, null, false, filesToShow);
+                    } else if (!text && fileCount > 0) {
                         appendMessage('user', `[发送了 ${fileCount} 个文件]`, null, null, false, filesToShow);
                     } else if (text) {
                         appendMessage('user', text, null, null, false, filesToShow);
                     }
-                    userInput.value = ''; 
-                    userInput.style.height = '44px'; 
-                    userInput.style.overflowY = 'auto';
-                    checkInput();
+                    if (!hiddenPayload) {
+                        userInput.value = ''; 
+                        userInput.style.height = '44px'; 
+                        userInput.style.overflowY = 'auto';
+                        checkInput();
+                    }
                 }
                 
+                // 🔥 新回合开始：清空深度思考区，避免上一轮思考残留
+                if (typeof clearThoughtBlock === 'function') clearThoughtBlock();
                 // 🔥 BUG FIX: 创建 AI 消息并确保 DOM 结构完整
                 // 🔥 PHASE 3: Fix spinner crash - Use unique ID instead of querySelector
                 const spinnerId = `spinner-${Date.now()}`;
@@ -2866,13 +3211,31 @@
 
                 currentAbortController = new AbortController();
 
+                // 任务3：合并左侧栏选择的历史资产（.asset-tag）并注入系统提示；有 hiddenPayload 时不改写发送内容
+                var assetTags = document.querySelectorAll('#inputWrapper .asset-tag');
+                if (assetTags && assetTags.length > 0) {
+                    var assetFiles = [];
+                    var assetPaths = [];
+                    assetTags.forEach(function(t) {
+                        var p = t.dataset.filepath;
+                        if (p) { assetFiles.push({ path: p, name: (t.dataset.fileName || p) }); assetPaths.push(p); }
+                    });
+                    if (assetFiles.length) {
+                        filesToSend = (filesToSend || []).concat(assetFiles);
+                        if (hiddenPayload == null || hiddenPayload === '') {
+                            text = '[系统注入：用户选择了历史资产文件：' + assetPaths.join('; ') + ']\n用户需求：' + (text || '');
+                        }
+                    }
+                }
+                var finalMessage = (hiddenPayload != null && hiddenPayload !== '') ? hiddenPayload : text;
+
                 // 🔥 Step 2: 发送聊天请求（包含已上传的文件）
                 console.log('💬 [sendMessage] 准备发送聊天请求');
                 console.log('🚀 [sendMessage] filesToSend:', filesToSend);
                 console.log('🚀 [sendMessage] filesToSend 数量:', filesToSend.length);
                 
                 const payload = { 
-                    message: text, 
+                    message: finalMessage, 
                     history: chatHistory, 
                     selected_tool: selectedTool, 
                     uploaded_files: filesToSend, // 🔥 CRITICAL: 使用 filesToSend（优先级：filesOverride > 全局 uploadedFiles）
@@ -2921,15 +3284,16 @@
                         // 🔥 CRITICAL: 使用 logZone（如果存在）
                         const logZoneRef = window.currentMessageZones?.logZone || messageContent?.querySelector('.process-log-zone');
                         
-                        // 创建 ProcessLog 容器
+                        // Part 2 任务1：中栏执行记录使用与右栏一致的 checklist 结构（仅步骤名+状态，无图表）
                         processLogContainer = document.createElement('div');
                         processLogContainer.className = 'process-log-container';
                         processLogContainer.innerHTML = `
                             <div class="process-header" onclick="this.classList.toggle('collapsed'); this.nextElementSibling.classList.toggle('collapsed');">
                                 <span>⚡ 执行记录 (<span class="step-count">0</span>)</span>
+                                <span class="look-right-hint">  <span class="arrow-bounce">➔</span></span>
                                 <span class="icon">▼</span>
                             </div>
-                            <div class="process-steps"></div>
+                            <div class="process-steps checklist-container"></div>
                         `;
                         
                         processStepsDiv = processLogContainer.querySelector('.process-steps');
@@ -2951,33 +3315,48 @@
                         // 添加初始步骤
                         addProcessStep('正在接收请求...', 'active');
                         
-                        // 🔥 辅助函数：添加执行步骤
+                        // Part 2 任务1 + Task2 状态同步：中栏 checklist 在 done/error 时先把上一项图标替换为 ✓/✕
                         function addProcessStep(text, status = 'active') {
                             if (!processStepsDiv) return;
-                            
-                            processStepCount++;
-                            const stepDiv = document.createElement('div');
-                            stepDiv.className = `process-step ${status}`;
-                            
-                            let icon = '🔄';
-                            if (status === 'done') icon = '✅';
-                            else if (status === 'pending') icon = '⏳';
-                            else if (status === 'error') icon = '❌';
-                            
-                            stepDiv.innerHTML = `
-                                <div class="process-step-icon">${icon}</div>
-                                <div class="process-step-text">${escapeHtml(text)}</div>
-                            `;
-                            
-                            processStepsDiv.appendChild(stepDiv);
-                            
-                            // 更新步骤计数
-                            const countSpan = processLogContainer.querySelector('.step-count');
-                            if (countSpan) {
-                                countSpan.textContent = processStepCount;
+                            var stepIconChar = '○';
+                            var stepIconClass = 'pending';
+                            if (status === 'done' || status === 'completed') {
+                                stepIconChar = '✓';
+                                stepIconClass = 'success';
+                            } else if (status === 'error') {
+                                stepIconChar = '✕';
+                                stepIconClass = 'error';
+                            } else if (status === 'active' || status === 'running') {
+                                stepIconChar = '↻';
+                                stepIconClass = 'running';
+                            } else {
+                                stepIconClass = 'pending';
                             }
-                            
-                            // 自动滚动到底部
+                            var isSuccessStatus = ['success', 'completed', 'done', 'warning'].includes((status || '').toLowerCase());
+                            if (isSuccessStatus || status === 'error') {
+                                var prev = processStepsDiv.lastElementChild;
+                                if (prev && prev.classList.contains('checklist-item')) {
+                                    var iconEl = prev.querySelector('.checklist-icon');
+                                    if (iconEl) {
+                                        iconEl.className = 'checklist-icon ' + (status === 'error' ? 'icon-error' : 'icon-success');
+                                        iconEl.textContent = status === 'error' ? '✕' : '✓';
+                                    }
+                                }
+                            }
+                            processStepCount++;
+                            var sublabel = (status === 'active' || status === 'running') ? '执行中...' : (status === 'done' || status === 'completed') ? '' : (status === 'error' ? '失败' : '排队中');
+                            const stepDiv = document.createElement('div');
+                            stepDiv.className = 'checklist-item';
+                            stepDiv.innerHTML = `
+                                <span class="checklist-icon icon-${stepIconClass}">${stepIconChar}</span>
+                                <div class="checklist-content">
+                                    <div class="checklist-title">${escapeHtml(text)}</div>
+                                    ${sublabel ? '<div class="checklist-subtitle">' + escapeHtml(sublabel) + '</div>' : ''}
+                                </div>
+                            `;
+                            processStepsDiv.appendChild(stepDiv);
+                            const countSpan = processLogContainer.querySelector('.step-count');
+                            if (countSpan) countSpan.textContent = processStepCount;
                             processStepsDiv.scrollTop = processStepsDiv.scrollHeight;
                         }
                         
@@ -3060,6 +3439,34 @@
                             }
                         }
                         
+                        // 🔥 深度思考区：挂载到当前 AI 聊天气泡内部（中栏），不依赖右侧工作台是否展开
+                        function ensureThoughtBlock() {
+                            var messageContent = null;
+                            if (window.currentMessageZones && window.currentMessageZones.logZone && window.currentMessageZones.logZone.parentElement)
+                                messageContent = window.currentMessageZones.logZone.parentElement;
+                            if (!messageContent)
+                                messageContent = document.querySelector('#chatContent .message-row.ai:last-of-type .message-content');
+                            if (!messageContent) return null;
+                            var block = messageContent.querySelector('.agent-thought-block');
+                            if (!block) {
+                                block = document.createElement('details');
+                                block.className = 'agent-thought-block';
+                                block.setAttribute('open', '');
+                                block.innerHTML = '<summary>🧠 深度思考中...</summary><div class="thought-content"></div>';
+                                messageContent.insertBefore(block, messageContent.firstChild);
+                            }
+                            return block.querySelector('.thought-content');
+                        }
+                        function clearThoughtBlock() {
+                            var messageContent = (window.currentMessageZones && window.currentMessageZones.logZone && window.currentMessageZones.logZone.parentElement)
+                                || (document.querySelector('#chatContent .message-row.ai:last-of-type .message-content'));
+                            var block = messageContent && messageContent.querySelector('.agent-thought-block');
+                            if (block) {
+                                var content = block.querySelector('.thought-content');
+                                if (content) content.textContent = '';
+                            }
+                        }
+
                         // 🔥 核心函数：事件分发器 - 将 SSE 事件分发到 UI 更新函数
                         function handleServerEvent(eventType, data) {
                             console.log(`📡 [SSE Event] ${eventType}:`, data);
@@ -3092,16 +3499,23 @@
                                 case 'thought':
                                     thoughtBuffer += data.content || '';
                                     console.log('💭 思考过程:', data.content);
-                                    // 可选：显示思考过程到 UI
+                                    try {
+                                        var el = ensureThoughtBlock();
+                                        if (el) {
+                                            el.appendChild(document.createTextNode(data.content || ''));
+                                            el.scrollTop = el.scrollHeight;
+                                            var block = el.closest('.agent-thought-block');
+                                            if (block && block.tagName === 'DETAILS') block.open = true;
+                                        }
+                                    } catch (e) { console.warn('[thought] 渲染失败:', e); }
                                     break;
                                     
                                 case 'message':
-                                    // 🔥 CRITICAL FIX: Handle delta tokens correctly
-                                    // Backend now sends ONLY delta (new token), so we accumulate here
-                                    const deltaContent = data.content || '';
+                                    // 兜底：后端流式截断可能导致 <think>/</think> 碎片漏到前端，静默抹除
+                                    var rawContent = data.content || '';
+                                    var deltaContent = (typeof rawContent === 'string') ? rawContent.replace(/<\/?think>/g, '') : rawContent;
                                     if (deltaContent) {
-                                        // Use advanced stream parser to handle <think> tags
-                                        const parsed = parseReasoningTagsStream(deltaContent);
+                                        var parsed = parseReasoningTagsStream(deltaContent);
                                         if (parsed.hasNewContent) {
                                             updateChatBubbleWithReasoning(parsed);
                                         }
@@ -3169,10 +3583,25 @@
                                     renderSuggestions(data);
                                     break;
 
+                                case 'message_saved':
+                                    // 新生成的 AI 消息已入库，将 message_id 绑定到当前正在渲染的 AI 气泡（最后一个无 id 的 .message-row.ai）
+                                    if (data && data.message_id != null) {
+                                        var aiRows = document.querySelectorAll('#chatContent .message-row.ai');
+                                        for (var r = aiRows.length - 1; r >= 0; r--) {
+                                            if (!aiRows[r].dataset.messageId) {
+                                                aiRows[r].dataset.messageId = String(data.message_id);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    break;
+
                                 case 'done':
                                     // 🔥 TASK 2: 隐藏等待气泡
                                     hideWaitingBubble();
                                     handleDoneEvent(data);
+                                    // 🔥 任务4：工作流结束后静默刷新左侧资产树（后端已更新 modality）
+                                    if (typeof fetchAssets === 'function') fetchAssets();
                                     break;
                                     
                                 case 'question':
@@ -3226,23 +3655,22 @@
                             // 映射技术状态到用户友好文本
                             const userFriendlyText = mapStatusToUserFriendly(content, state);
                             
-                            // 🔥 TASK 2: Log de-duplication - Update instead of append if identical
+                            // 🔥 TASK 2: Log de-duplication - Update instead of append if identical（中栏已改为 checklist-item）
                             const processStepsDiv = document.querySelector('.process-steps');
                             if (processStepsDiv) {
                                 const lastStep = processStepsDiv.lastElementChild;
-                                if (lastStep) {
-                                    const lastText = lastStep.querySelector('.process-step-text')?.textContent || '';
-                                    // If the new message is identical to the last one, update timestamp/spinner instead
+                                if (lastStep && lastStep.classList.contains('checklist-item')) {
+                                    const lastText = (lastStep.querySelector('.checklist-title') || {}).textContent || '';
                                     if (lastText === userFriendlyText) {
                                         console.log(`🔄 [ProcessLog] 重复消息，更新最后一步: ${userFriendlyText}`);
-                                        // Update the spinner/icon for active state
                                         if (state === 'running') {
-                                            const icon = lastStep.querySelector('.process-step-icon');
-                                            if (icon) {
-                                                icon.innerHTML = '<i class="bi bi-arrow-repeat spin"></i>';
+                                            var iconEl = lastStep.querySelector('.checklist-icon');
+                                            if (iconEl) {
+                                                iconEl.className = 'checklist-icon icon-running';
+                                                iconEl.textContent = '↻';
                                             }
                                         }
-                                        return; // Don't append duplicate
+                                        return;
                                     }
                                 }
                             }
@@ -3603,6 +4031,29 @@
                             radiomics_data_validation: '正在执行数据与 ROI 校验...',
                             radiomics_model_comparison: '正在执行多算法 (LR/SVM/RF) ROC 诊断效能对比...'
                         };
+                        // Task2: 中栏 Checklist 与右栏状态同步（按索引替换 icon class 与内容）
+                        function syncMiddlePaneChecklistIcons(stepsDetails) {
+                            if (!stepsDetails || !Array.isArray(stepsDetails)) return;
+                            var all = document.querySelectorAll('.process-steps');
+                            var processStepsDiv = all.length ? all[all.length - 1] : null;
+                            if (!processStepsDiv) return;
+                            var items = processStepsDiv.querySelectorAll('.checklist-item');
+                            for (var i = 0; i < items.length && i < stepsDetails.length; i++) {
+                                var step = stepsDetails[i];
+                                var status = (step.status || 'pending').toLowerCase();
+                                var iconClass = 'icon-pending';
+                                var iconChar = '○';
+                                var isSuccess = ['success', 'completed', 'done', 'warning'].includes(status);
+                                if (isSuccess) { iconClass = 'icon-success'; iconChar = '✓'; }
+                                else if (status === 'error') { iconClass = 'icon-error'; iconChar = '✕'; }
+                                else if (status === 'running') { iconClass = 'icon-running'; iconChar = '↻'; }
+                                var iconEl = items[i].querySelector('.checklist-icon');
+                                if (iconEl) {
+                                    iconEl.className = 'checklist-icon ' + iconClass;
+                                    iconEl.textContent = iconChar;
+                                }
+                            }
+                        }
                         // 🔥 三栏工作台：执行步骤与报告挂载到右栏 #active-workspace-content，每次新执行清空右栏再渲染
                         function renderExecutionSteps(stepsDetails) {
                             var wp = document.getElementById('workspace-pane');
@@ -3637,13 +4088,15 @@
                                 <h6 class="mb-3">
                                     <i class="bi bi-list-check"></i> 执行结果详情
                                 </h6>
-                                <div class="accordion" id="${accordionId}">
+                                <div class="checklist-container" id="${accordionId}">
                             `;
                             
                             stepsDetails.forEach((step, index) => {
                                 const tid = step.step_id || step.tool_id;
                                 const stepName = (window.STEP_NAME_MAP && window.STEP_NAME_MAP[tid]) || step.step_name || step.name || tid || `步骤 ${index + 1}`;
-                                const stepStatus = step.status || 'pending';
+                                const rawStatus = ((step.status || 'pending') + '').toLowerCase();
+                                const isSuccess = ['success', 'completed', 'done', 'warning'].includes(rawStatus);
+                                const stepStatus = isSuccess ? 'success' : (rawStatus === 'error' ? 'error' : rawStatus === 'running' ? 'running' : 'pending');
                                 const stepError = step.error || step.message || '';
                                 const stepId = `step-${index}-${accordionId}`;
                                 
@@ -3657,24 +4110,29 @@
                                     }
                                 }
                                 
-                                // 状态图标和颜色
-                                let statusIcon = '⚪'; // 默认：待执行
-                                let statusClass = 'text-secondary';
-                                
-                                if (stepStatus === 'success') {
-                                    statusIcon = '✅';
-                                    statusClass = 'text-success';
+                                // 🔥 Checklist 状态图标：pending ○ / running ↻ / success ✓ / error ✕（兼容 success/completed/done）
+                                let stepIconChar = '○';
+                                let stepIconClass = 'pending';
+                                if (isSuccess) {
+                                    stepIconChar = '✓';
+                                    stepIconClass = 'success';
                                 } else if (stepStatus === 'error') {
-                                    statusIcon = '❌';
-                                    statusClass = 'text-danger';
-                                } else if (stepStatus === 'warning') {
-                                    statusIcon = '⚠️';
-                                    statusClass = 'text-warning';
+                                    stepIconChar = '✕';
+                                    stepIconClass = 'error';
                                 } else if (stepStatus === 'running') {
-                                    statusIcon = '🟡';
-                                    statusClass = 'text-warning';
+                                    stepIconChar = '↻';
+                                    stepIconClass = 'running';
                                 }
-                                
+                                var stepSublabel = '';
+                                if (stepStatus === 'success' || stepStatus === 'warning') {
+                                    var dur = step.duration || step.run_time || step.elapsed;
+                                    if (dur != null) stepSublabel = '耗时 ' + (typeof dur === 'number' ? dur.toFixed(1) : dur) + 's';
+                                    else if (step.summary) stepSublabel = step.summary;
+                                } else if (stepStatus === 'error') {
+                                    stepSublabel = stepError || step.message || '执行失败';
+                                } else if (stepStatus === 'running') stepSublabel = '执行中...';
+                                else stepSublabel = '排队中';
+
                                 // 🔥 TASK 1: Default expand PCA and Volcano Plot steps (independent expansion)
                                 const hasResults = stepStatus === 'success' || stepStatus === 'warning';
                                 const stepNameLower = stepName.toLowerCase();
@@ -3832,39 +4290,39 @@
                                     }
                                 }
                                 
-                                // 🔥 TASK 3: Use Accordion structure WITHOUT data-bs-parent (allows independent expansion)
+                                // 🔥 QoderWork Checklist：.checklist-icon + .icon-* | .checklist-title | .checklist-subtitle
+                                var iconHtml = stepIconClass === 'running' ? '↻' : stepIconChar;
                                 stepsHtml += `
-                                    <div class="accordion-item">
-                                        <h2 class="accordion-header">
-                                            <button class="accordion-button ${shouldExpand ? '' : 'collapsed'}" 
-                                                    type="button" 
-                                                    data-bs-toggle="collapse" 
-                                                    data-bs-target="#${stepId}"
-                                                    aria-expanded="${shouldExpand}">
-                                                <span class="me-2" style="font-size: 1.1em;">${statusIcon}</span>
-                                                <strong class="${statusClass}">${escapeHtml(stepName)}</strong>
-                                            </button>
-                                        </h2>
-                                        <div id="${stepId}" 
-                                            class="accordion-collapse collapse ${shouldExpand ? 'show' : ''}">
-                                            <div class="accordion-body">
-                                                ${step.summary ? `<div class="small text-muted mb-2">${escapeHtml(step.summary)}</div>` : ''}
-                                                ${stepError && stepStatus === 'error' ? `
-                                                    <div class="alert alert-danger alert-sm mb-2" style="font-size: 0.875rem; padding: 0.5rem;">
-                                                        <strong>❌ 执行失败：</strong>
-                                                        <div class="mt-2">
-                                                            ${step.user_message ? `<div class="mb-2"><strong>问题：</strong>${escapeHtml(step.user_message)}</div>` : `<div class="mb-2">${escapeHtml(stepError)}</div>`}
-                                                            ${step.error_category ? `<div class="small text-muted mb-1"><strong>错误类型：</strong>${escapeHtml(step.error_category)}</div>` : ''}
-                                                            ${step.suggestion ? `<div class="small text-info mb-1"><strong>💡 建议：</strong>${escapeHtml(step.suggestion)}</div>` : ''}
-                                                            ${step.can_skip ? `<div class="small text-success mb-1"><strong>✓ 可跳过：</strong>此步骤可以跳过，不影响其他分析</div>` : ''}
-                                                            ${step.technical_details ? `
-                                                                <details class="mt-2">
-                                                                    <summary class="small text-muted" style="cursor: pointer;">查看技术细节</summary>
-                                                                    <pre class="small mt-2 p-2 bg-light rounded" style="max-height: 200px; overflow-y: auto; font-size: 11px;">${escapeHtml(step.technical_details)}</pre>
-                                                                </details>
-                                                            ` : ''}
-                                                            ${(step.traceback || step.debug_info) ? `
-                                                                <details class="mt-2">
+                                    <div class="checklist-item">
+                                        <span class="checklist-icon icon-${stepIconClass}">${iconHtml}</span>
+                                        <div class="checklist-content">
+                                            <div class="checklist-title">${escapeHtml(stepName)}</div>
+                                            <div class="checklist-subtitle">${escapeHtml(stepSublabel)}</div>
+                                            <div class="step-body">
+                                                <div class="accordion" id="${stepId}-acc">
+                                                    <div class="accordion-item" style="border:none;">
+                                                        <h2 class="accordion-header">
+                                                            <button class="accordion-button collapsed py-2" type="button" data-bs-toggle="collapse" data-bs-target="#${stepId}" aria-expanded="${shouldExpand}" style="font-size:13px;">查看详情</button>
+                                                        </h2>
+                                                        <div id="${stepId}" class="accordion-collapse collapse ${shouldExpand ? 'show' : ''}">
+                                                            <div class="accordion-body">
+                                                                ${step.summary ? `<div class="small text-muted mb-2">${escapeHtml(step.summary)}</div>` : ''}
+                                                                ${stepError && stepStatus === 'error' ? `
+                                                                    <div class="alert alert-danger alert-sm mb-2" style="font-size: 0.875rem; padding: 0.5rem;">
+                                                                        <strong>❌ 执行失败：</strong>
+                                                                        <div class="mt-2">
+                                                                            ${step.user_message ? `<div class="mb-2"><strong>问题：</strong>${escapeHtml(step.user_message)}</div>` : `<div class="mb-2">${escapeHtml(stepError)}</div>`}
+                                                                            ${step.error_category ? `<div class="small text-muted mb-1"><strong>错误类型：</strong>${escapeHtml(step.error_category)}</div>` : ''}
+                                                                            ${step.suggestion ? `<div class="small text-info mb-1"><strong>💡 建议：</strong>${escapeHtml(step.suggestion)}</div>` : ''}
+                                                                            ${step.can_skip ? `<div class="small text-success mb-1"><strong>✓ 可跳过：</strong>此步骤可以跳过，不影响其他分析</div>` : ''}
+                                                                            ${step.technical_details ? `
+                                                                                <details class="mt-2">
+                                                                                    <summary class="small text-muted" style="cursor: pointer;">查看技术细节</summary>
+                                                                                    <pre class="small mt-2 p-2 bg-light rounded" style="max-height: 200px; overflow-y: auto; font-size: 11px;">${escapeHtml(step.technical_details)}</pre>
+                                                                                </details>
+                                                                            ` : ''}
+                                                                            ${(step.traceback || step.debug_info) ? `
+                                                                                <details class="mt-2">
                                                                     <summary class="small text-muted" style="cursor: pointer;">完整 Traceback（调试用）</summary>
                                                                     <pre class="small mt-2 p-2 bg-dark text-light rounded" style="max-height: 300px; overflow-y: auto; font-size: 10px; white-space: pre-wrap;">${escapeHtml(step.traceback || step.debug_info)}</pre>
                                                                 </details>
@@ -3872,7 +4330,11 @@
                                                         </div>
                                                     </div>
                                                 ` : ''}
-                                                ${resultContentHtml || '<p class="text-muted small">暂无结果数据</p>'}
+                                                                ${resultContentHtml || '<p class="text-muted small">暂无结果数据</p>'}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -3882,6 +4344,7 @@
                             stepsHtml += `</div>`;
                             
                             executionSection.innerHTML = stepsHtml;
+                            syncMiddlePaneChecklistIcons(stepsDetails);
                             console.log(`✅ [renderExecutionSteps] 已渲染 ${stepsDetails.length} 个步骤到统一报告容器`);
                         }
                         
@@ -4229,12 +4692,11 @@
                                 
                                 formHtml += `</div>`;
                                 
-                                // 🔥 Task 4: Execute Button + 一键应用推荐参数（仅在有 recommendation 时显示）
+                                // 🔥 Task 4: 在「执行工作流」正前方强制注入 id="btn-apply-params" 按钮
                                 if (!isTemplateMode) {
-                                    const hasRec = recommendation && recommendation.params && Object.keys(recommendation.params).length > 0;
                                     formHtml += `
                                         <div class="mt-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
-                                            ${hasRec ? `<button type="button" class="header-action-btn" id="btn-apply-params-${formId}" style="margin-right: 10px; color: #3b82f6; border: 1px solid #3b82f6;">✨ 一键应用推荐参数</button>` : ''}
+                                            <button type="button" id="btn-apply-params" class="ghost-btn" style="color: #3b82f6; border: 1px solid #3b82f6; padding: 6px 12px; border-radius: 6px; margin-right: 12px; font-size: 13px; cursor: pointer; background: transparent;">✨ 一键应用推荐参数</button>
                                             <button type="button" class="icon-btn icon-btn-star" onclick="addFavoriteWorkflowFromCard('${formId}')" title="收藏工作流">
                                                 <i class="bi bi-star"></i>
                                             </button>
@@ -4264,20 +4726,11 @@
                             // 🔥 CRITICAL: 追加到 cardZone
                             cardZoneRef.insertAdjacentHTML('beforeend', formHtml);
                             
-                            // 🔥 存储推荐参数并绑定「一键应用」按钮（仅在有 recommendation 时）
+                            // 🔥 存储推荐参数供「一键应用」事件委托使用；供 btn-apply-params 读取
                             if (typeof window.workflowRecommendations === 'undefined') window.workflowRecommendations = {};
                             if (recommendation && recommendation.params && Object.keys(recommendation.params).length > 0) {
                                 window.workflowRecommendations[formId] = recommendation;
-                                setTimeout(function() {
-                                    const applyBtn = document.getElementById('btn-apply-params-' + formId);
-                                    if (applyBtn) {
-                                        applyBtn.addEventListener('click', function() {
-                                            if (typeof window.applyRecommendedParams === 'function') {
-                                                window.applyRecommendedParams(formId, workflowSteps.length);
-                                            }
-                                        });
-                                    }
-                                }, 100);
+                                window.currentRecommendation = recommendation;
                             }
                             
                             // 🔥 PHASE 1 FIX: Return the formId so caller can use it
@@ -4361,8 +4814,15 @@
                             if (filePaths.length === 0 && uploadedFiles.length > 0) {
                                 filePaths.push(...uploadedFiles.map(f => f.path || f.file_path || f.name).filter(p => p));
                             }
-                            
-                            // 3. 从工作流缓存中提取（如果存在）
+                            // 3. 从输入框上方【数据资产】标签 .asset-tag 提取
+                            if (filePaths.length === 0) {
+                                var assetTags = document.querySelectorAll('#inputWrapper .asset-tag');
+                                for (var a = 0; a < assetTags.length; a++) {
+                                    var fp = assetTags[a].getAttribute('data-filepath');
+                                    if (fp && fp !== '<待上传数据>' && fp !== '<PENDING_UPLOAD>') filePaths.push(fp);
+                                }
+                            }
+                            // 4. 从工作流缓存中提取（如果存在）
                             if (filePaths.length === 0 && window.workflowCache && window.workflowCache[formId]) {
                                 const cachedData = window.workflowCache[formId].workflowData;
                                 const cachedFilePaths = cachedData?.file_paths || cachedData?.workflow_data?.file_paths || [];
@@ -4370,29 +4830,36 @@
                                     filePaths.push(...cachedFilePaths.filter(p => p && p !== '<PENDING_UPLOAD>' && p !== '<待上传数据>'));
                                 }
                             }
-                            
-                            // 4. 从当前消息的文件中提取
+                            // 5. 从当前消息的文件中提取
                             if (filePaths.length === 0) {
                                 const messageRow = formElement.closest('.message-row');
                                 if (messageRow) {
                                     const fileChips = messageRow.querySelectorAll('.file-chip');
                                     fileChips.forEach(chip => {
                                         const fileName = chip.textContent.trim();
-                                        // 尝试从全局 uploadedFiles 中找到对应的路径
                                         const matchedFile = uploadedFiles.find(f => f.name === fileName || f.file_name === fileName);
-                                        if (matchedFile && matchedFile.path) {
-                                            filePaths.push(matchedFile.path);
-                                        }
+                                        if (matchedFile && matchedFile.path) filePaths.push(matchedFile.path);
                                     });
                                 }
                             }
-                            
+                            // 🔥 空弹夹拦截：无上传、无资产选择则禁止执行
+                            var hasUploaded = uploadedFiles.length > 0;
+                            var hasAssetTag = document.querySelectorAll('#inputWrapper .asset-tag').length > 0;
                             if (filePaths.length === 0) {
-                                alert("⚠️ 请先上传数据文件再执行工作流！");
-                                document.getElementById('fileInput')?.click();
+                                alert("⚠️ 缺少数据文件！请先上传文件，或从左侧【数据资产】中选择一个文件作为输入，然后再执行工作流。");
+                                if (!hasUploaded && !hasAssetTag) document.getElementById('fileInput')?.click();
                                 return;
                             }
-                            
+                            // 🔥 路径覆盖：用当前选择的文件覆盖卡片中的 file_path/adata_path 等，确保使用新文件
+                            var pathKeys = ['file_path', 'adata_path', 'data_path', 'data_path_2', 'input_path'];
+                            for (var si = 0; si < updatedSteps.length; si++) {
+                                var sp = updatedSteps[si].params || {};
+                                for (var ki = 0; ki < pathKeys.length; ki++) {
+                                    if (Object.prototype.hasOwnProperty.call(sp, pathKeys[ki]) && filePaths[0]) {
+                                        updatedSteps[si].params[pathKeys[ki]] = filePaths[0];
+                                    }
+                                }
+                            }
                             console.log("📁 [executeWorkflowFromForm] 最终文件路径:", filePaths);
                             
                             // 🔥 CRITICAL REGRESSION FIX: Construct workflow payload correctly
@@ -4521,6 +4988,12 @@
                             
                             // 🔥 REQUIREMENT 1: Update status log only, no separate bubble
                             addProcessStep(`完成 (${duration}s)`, 'done');
+                            
+                            // 🔥 强制扫尾：将所有还在转圈的图标变成打钩（防止流程结束后中栏仍显示 ↻）
+                            document.querySelectorAll('.icon-running').forEach(function(icon) {
+                                icon.className = 'checklist-icon icon-success';
+                                icon.textContent = '✓';
+                            });
                             
                             // 🔥 CRITICAL: 重置停止按钮
                             const stopBtn = document.getElementById('stopBtn');
@@ -5086,30 +5559,24 @@
                 }
             }
 
-            function appendMessage(role, content, thoughtContent = null, duration = null, isHtml = false, files = null) {
+            function appendMessage(role, content, thoughtContent = null, duration = null, isHtml = false, files = null, messageId = null) {
                 const row = document.createElement('div');
                 row.className = `message-row ${role}`;
+                if (messageId != null) row.dataset.messageId = String(messageId);
                 let avatarHtml = role === 'ai' ? `<div class="avatar ai"><i class="bi bi-robot"></i></div>` : '';
-                
+                var actionBarHtml = '<div class="message-action-bar">';
+                actionBarHtml += '<button type="button" class="action-btn" onclick="copyText(this)" title="复制"><i class="bi bi-copy"></i>复制</button>';
+                if (role === 'user') actionBarHtml += '<button type="button" class="action-btn" onclick="editMessage(this)" title="编辑"><i class="bi bi-pencil"></i>编辑</button>';
+                if (role === 'ai') actionBarHtml += '<button type="button" class="action-btn" onclick="regenerateMessage(this)" title="重新生成"><i class="bi bi-arrow-clockwise"></i>重新生成</button>';
+                actionBarHtml += '<button type="button" class="action-btn" onclick="deleteMessage(this)" title="删除"><i class="bi bi-trash"></i>删除</button>';
+                actionBarHtml += '</div>';
                 let footerHtml = '';
                 if (role === 'ai') {
-                    footerHtml = `
-                    <div class="message-footer">
-                        ${duration ? `<span class="generation-timer"><i class="bi bi-stopwatch"></i> ${duration}s</span>` : ''}
-                        <div style="display:flex; gap:10px;">
-                            <i class="bi bi-copy" style="cursor:pointer" onclick="copyText(this)" title="复制回答"></i>
-                        </div>
-                    </div>`;
+                    footerHtml = `<div class="message-footer">${duration ? `<span class="generation-timer"><i class="bi bi-stopwatch"></i> ${duration}s</span>` : ''}${actionBarHtml}</div>`;
+                } else {
+                    footerHtml = actionBarHtml;
                 }
-                
-                let userActionsHtml = '';
-                if (role === 'user') {
-                    userActionsHtml = `
-                    <div class="user-actions">
-                        <div class="action-item" onclick="editMessage(this)"><i class="bi bi-pencil"></i> 编辑</div>
-                        <div class="action-item" onclick="copyText(this)"><i class="bi bi-copy"></i> 复制</div>
-                    </div>`;
-                }
+                let userActionsHtml = role === 'user' ? actionBarHtml : '';
 
                 // 🔥 Task 2: 文件卡片可视化（安全转义，独立于 Markdown 渲染）
                 let fileCardsHtml = '';
@@ -5137,8 +5604,8 @@
 
                 // 🔒 安全：确保 Markdown 渲染和思考过程不受影响
                 const bubbleContent = isHtml ? content : safeMarkedParse(content);
-                // 文件卡片独立于 bubble，不会影响 Markdown 渲染
-                row.innerHTML = `${role === 'ai' ? avatarHtml : ''}<div class="message-container">${fileCardsHtml}<div class="bubble">${bubbleContent}</div>${userActionsHtml}${footerHtml}</div>`;
+                // 文件卡片独立于 bubble；操作栏统一在 message-action-bar
+                row.innerHTML = `${role === 'ai' ? avatarHtml : ''}<div class="message-container">${fileCardsHtml}<div class="bubble">${bubbleContent}</div>${role === 'user' ? userActionsHtml : ''}${role === 'ai' ? footerHtml : ''}</div>`;
                 chatContent.appendChild(row);
                 if (role === 'user') {
                     var wrapper = document.getElementById('empty-state-wrapper');
@@ -5342,7 +5809,16 @@
                 const stored = localStorage.getItem(key);
                 return stored ? JSON.parse(stored) : [];
             }
-            
+            // 🔥 从服务端拉取工作流收藏列表并刷新侧栏（POST 收藏成功后调用）
+            function fetchFavoriteWorkflows() {
+                fetch('/api/workflow_templates', { method: 'GET', headers: getAuthHeaders() })
+                    .then(function(r) { return r.ok ? r.json() : Promise.reject(new Error(r.status)); })
+                    .then(function(list) {
+                        window.favoriteWorkflowsFromServer = Array.isArray(list) ? list : [];
+                        updateFavoriteWorkflowsList();
+                    })
+                    .catch(function(e) { console.warn('[fetchFavoriteWorkflows]', e); window.favoriteWorkflowsFromServer = []; updateFavoriteWorkflowsList(); });
+            }
             function saveFavoriteWorkflows(workflows) {
                 const userId = getUserId();
                 const key = `favorite_workflows_${userId}`;
@@ -5407,77 +5883,66 @@
                 alert('收藏成功！');
             }
             
-            // 🔥 从工作流卡片添加收藏
+            // 🔥 从工作流卡片添加收藏：弹窗命名 -> POST 后端 -> 刷新侧栏
             function addFavoriteWorkflowFromCard(formId) {
                 const formElement = document.querySelector(`[data-form-id="${formId}"]`);
                 if (!formElement) {
                     alert('未找到工作流卡片');
                     return;
                 }
-                
-                // 🔥 TASK 4 FIX: 优先从工作流缓存中获取完整数据
+                var configJson = null;
                 if (window.workflowCache && window.workflowCache[formId]) {
-                    const cachedData = window.workflowCache[formId].workflowData;
-                    // 确保保存完整的workflowData结构
-                    const workflowDataToSave = {
+                    var cachedData = window.workflowCache[formId].workflowData;
+                    configJson = {
                         workflow_config: cachedData.workflow_config || cachedData,
                         workflow_data: cachedData.workflow_data || cachedData.workflow_config?.workflow_data || cachedData,
                         file_paths: cachedData.file_paths || [],
                         recommendation: cachedData.recommendation || null,
                         diagnosis_report: cachedData.diagnosis_report || null
                     };
-                    addFavoriteWorkflow(workflowDataToSave);
-                    return;
                 }
-                
-                // 如果没有缓存，尝试从DOM中提取
-                const workflowName = formElement.querySelector('h5')?.textContent?.replace('📋 ', '').replace(' [模版预览 Mode]', '') || '工作流';
-                const steps = [];
-                const stepCheckboxes = formElement.querySelectorAll('.step-checkbox:checked');
-                
-                stepCheckboxes.forEach(checkbox => {
-                    const index = parseInt(checkbox.getAttribute('data-index'));
-                    const toolId = formElement.querySelector(`input[name="tool_id_${index}"]`)?.value || '';
-                    const stepName = formElement.querySelector(`input[name="step_name_${index}"]`)?.value || '';
-                    const stepId = formElement.querySelector(`input[name="step_id_${index}"]`)?.value || '';
-                    const params = {};
-                    
-                    // 提取参数
-                    formElement.querySelectorAll(`input[name^="param_${index}_"], select[name^="param_${index}_"]`).forEach(input => {
-                        const paramName = input.name.replace(`param_${index}_`, '');
-                        if (input.type === 'checkbox') {
-                            params[paramName] = input.checked;
-                        } else if (input.type === 'number') {
-                            params[paramName] = parseFloat(input.value) || 0;
-                        } else {
-                            params[paramName] = input.value;
-                        }
-                    });
-                    
-                    steps.push({
-                        step_id: stepId,
-                        tool_id: toolId,
-                        name: stepName,
-                        params: params
-                    });
-                });
-                
-                // 🔥 TASK 4 FIX: 保存完整的workflowData结构
-                const workflowData = {
-                    workflow_config: {
-                        workflow_data: {
-                            workflow_name: workflowName,
-                            steps: steps
-                        }
-                    },
-                    workflow_data: {
-                        workflow_name: workflowName,
-                        steps: steps
-                    },
-                    file_paths: []
-                };
-                
-                addFavoriteWorkflow(workflowData);
+                if (!configJson) {
+                    var workflowName = formElement.querySelector('h5') && formElement.querySelector('h5').textContent ? formElement.querySelector('h5').textContent.replace('📋 ', '').replace(' [模版预览 Mode]', '') : '工作流';
+                    var steps = [];
+                    var stepCheckboxes = formElement.querySelectorAll('.step-checkbox:checked');
+                    for (var ci = 0; ci < stepCheckboxes.length; ci++) {
+                        var checkbox = stepCheckboxes[ci];
+                        var index = parseInt(checkbox.getAttribute('data-index'), 10);
+                        var toolId = (formElement.querySelector('input[name="tool_id_' + index + '"]') && formElement.querySelector('input[name="tool_id_' + index + '"]').value) || '';
+                        var stepName = (formElement.querySelector('input[name="step_name_' + index + '"]') && formElement.querySelector('input[name="step_name_' + index + '"]').value) || '';
+                        var stepId = (formElement.querySelector('input[name="step_id_' + index + '"]') && formElement.querySelector('input[name="step_id_' + index + '"]').value) || '';
+                        var params = {};
+                        formElement.querySelectorAll('input[name^="param_' + index + '_"], select[name^="param_' + index + '_"]').forEach(function(input) {
+                            var paramName = input.name.replace('param_' + index + '_', '');
+                            if (input.type === 'checkbox') params[paramName] = input.checked;
+                            else if (input.type === 'number') params[paramName] = parseFloat(input.value) || 0;
+                            else params[paramName] = input.value;
+                        });
+                        steps.push({ step_id: stepId, tool_id: toolId, name: stepName, params: params });
+                    }
+                    configJson = {
+                        workflow_config: { workflow_data: { workflow_name: workflowName, steps: steps } },
+                        workflow_data: { workflow_name: workflowName, steps: steps },
+                        file_paths: []
+                    };
+                }
+                if (!configJson) { alert('无法获取工作流配置'); return; }
+                var templateName = prompt('请输入工作流模板名称：', '我的自定义分析');
+                if (templateName === null || (templateName && templateName.trim()) === '') return;
+                templateName = (templateName && templateName.trim()) || '我的自定义分析';
+                fetch('/api/workflow_templates', {
+                    method: 'POST',
+                    headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ name: templateName, config_json: configJson })
+                }).then(function(r) {
+                    if (!r.ok) return r.json().then(function(j) { throw new Error(j.detail || r.statusText); });
+                    return r.json();
+                }).then(function(res) {
+                    if (res && res.template_id != null) {
+                        fetchFavoriteWorkflows();
+                        alert('收藏成功！');
+                    }
+                }).catch(function(e) { console.error(e); alert('收藏失败：' + (e.message || '请稍后重试')); });
             }
             
             function removeFavoriteWorkflow(workflowId) {
@@ -5488,24 +5953,34 @@
             }
             
             function useFavoriteWorkflow(workflowId) {
-                showChatView(); // 若当前在技能广场，先切回聊天视图再渲染工作流
-                const favorites = getFavoriteWorkflows();
-                const favorite = favorites.find(f => f.id === workflowId);
+                showChatView();
+                // 🔥 优先从服务端列表查找（含 template_id），用于「复用」时发送系统注入指令
+                var favorite = null;
+                if (window.favoriteWorkflowsFromServer && window.favoriteWorkflowsFromServer.length > 0) {
+                    for (var i = 0; i < window.favoriteWorkflowsFromServer.length; i++) {
+                        if (window.favoriteWorkflowsFromServer[i].id == workflowId) {
+                            favorite = { id: window.favoriteWorkflowsFromServer[i].id, name: window.favoriteWorkflowsFromServer[i].name, fromServer: true };
+                            break;
+                        }
+                    }
+                }
+                if (!favorite) {
+                    var favorites = getFavoriteWorkflows();
+                    favorite = favorites.filter(function(f) { return f.id === workflowId; })[0];
+                }
                 if (!favorite) {
                     alert('工作流不存在');
                     return;
                 }
-                var workflowData = favorite.workflowData || {
-                    workflow_config: {
-                        workflow_data: {
-                            workflow_name: favorite.name,
-                            steps: favorite.steps || []
-                        }
-                    },
-                    workflow_data: {
-                        workflow_name: favorite.name,
-                        steps: favorite.steps || []
+                if (favorite.fromServer && favorite.id != null) {
+                    if (typeof sendMessage === 'function') {
+                        sendMessage(null, '正在复用工作流：' + favorite.name, null, null, false, null, '[系统注入：用户请求复用工作流模板：' + favorite.id + ']');
                     }
+                    return;
+                }
+                var workflowData = favorite.workflowData || {
+                    workflow_config: { workflow_data: { workflow_name: favorite.name, steps: favorite.steps || [] } },
+                    workflow_data: { workflow_name: favorite.name, steps: favorite.steps || [] }
                 };
                 var chatContent = document.getElementById('chatContent');
                 var emptyWrapper = document.getElementById('empty-state-wrapper');
@@ -5546,26 +6021,42 @@
             }
             
             function updateFavoriteWorkflowsList() {
-                const listContainer = document.getElementById('sidebar-favorite-list');
+                var listContainer = document.getElementById('sidebar-favorite-list');
                 if (!listContainer) return;
-                
-                const favorites = getFavoriteWorkflows();
                 listContainer.innerHTML = '';
-                
+                // 🔥 优先使用服务端列表；若无则用 localStorage 兼容旧数据
+                var favorites = (window.favoriteWorkflowsFromServer && window.favoriteWorkflowsFromServer.length > 0)
+                    ? window.favoriteWorkflowsFromServer.map(function(t) {
+                        var cfg = t.config_json || {};
+                        var wd = cfg.workflow_data || cfg;
+                        var steps = wd.steps || cfg.steps || [];
+                        return { id: t.id, name: t.name, steps: steps, config_json: cfg, template_id: t.id };
+                    })
+                    : getFavoriteWorkflows();
                 if (favorites.length === 0) {
                     listContainer.innerHTML = '<p class="text-muted text-center" style="font-size: 12px; padding: 8px;">暂无收藏</p>';
                     return;
                 }
-                
-                favorites.forEach(favorite => {
-                    const steps = favorite.steps || [];
+                for (var fi = 0; fi < favorites.length; fi++) {
+                    var favorite = favorites[fi];
+                    var steps = favorite.steps || [];
                     const stepNames = steps.map(function(s) { return s.name || s.step_id || ''; }).filter(Boolean);
                     const item = document.createElement('div');
                     item.className = 'sidebar-favorite-item';
+                    item.dataset.fid = favorite.id;
                     item.innerHTML = `
-                        <div class="sidebar-favorite-row" data-fid="${favorite.id}">
-                            <span class="sidebar-favorite-name" title="${escapeHtml(favorite.name)}">${escapeHtml(favorite.name)}</span>
+                        <div class="sidebar-favorite-row" data-fid="${favorite.id}" style="position:relative; display:flex; align-items:center; overflow:visible;">
+                            <span class="sidebar-favorite-name item-text" title="${escapeHtml(favorite.name)}" style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(favorite.name)}</span>
                             <span class="sidebar-favorite-toggle">▼</span>
+                            <button type="button" class="item-more-btn" title="更多" aria-label="更多" style="padding:2px 4px;">
+                                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+                            </button>
+                            <div class="popover-menu">
+                                <button type="button" class="popover-item danger">
+                                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                                    删除
+                                </button>
+                            </div>
                         </div>
                         <div class="sidebar-favorite-steps" style="display:none;">
                             ${stepNames.map(function(n) { return '<div class="sidebar-favorite-step">' + escapeHtml(n) + '</div>'; }).join('')}
@@ -5576,15 +6067,59 @@
                     var row = item.querySelector('.sidebar-favorite-row');
                     var stepsDiv = item.querySelector('.sidebar-favorite-steps');
                     var toggle = item.querySelector('.sidebar-favorite-toggle');
+                    var moreBtn = item.querySelector('.item-more-btn');
+                    var popover = item.querySelector('.popover-menu');
                     function toggleSteps() {
                         var open = stepsDiv.style.display !== 'none';
                         stepsDiv.style.display = open ? 'none' : 'block';
                         toggle.textContent = open ? '▼' : '▲';
                     }
                     toggle.onclick = function(e) { e.stopPropagation(); toggleSteps(); };
-                    row.onclick = function() { toggleSteps(); };
+                    row.onclick = function(ev) {
+                        if (ev.target.closest && (ev.target.closest('.item-more-btn') || ev.target.closest('.popover-menu'))) return;
+                        toggleSteps();
+                    };
                     item.querySelector('.sidebar-favorite-use').onclick = function(e) { e.stopPropagation(); useFavoriteWorkflow(favorite.id); };
-                });
+                    moreBtn.onclick = function(ev) {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        closeAllPopovers();
+                        popover.classList.toggle('show');
+                        setTimeout(function() {
+                            document.addEventListener('click', function _close() {
+                                document.removeEventListener('click', _close);
+                                popover.classList.remove('show');
+                            }, { once: true });
+                        }, 0);
+                    };
+                    popover.querySelector('.popover-item').onclick = function(ev) {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        if (!confirm('确定要删除此收藏吗？')) return;
+                        var templateId = favorite.template_id != null ? favorite.template_id : favorite.id;
+                        if (templateId != null && templateId !== '') {
+                            fetch('/api/workflow_templates/' + templateId, { method: 'DELETE', headers: getAuthHeaders() })
+                                .then(function(r) { if (!r.ok) throw new Error(r.statusText); })
+                                .then(function() { if (window.favoriteWorkflowsFromServer) fetchFavoriteWorkflows(); })
+                                .catch(function() { if (window.favoriteWorkflowsFromServer) fetchFavoriteWorkflows(); });
+                        }
+                        if (window.favoriteWorkflowsFromServer && window.favoriteWorkflowsFromServer.length > 0) {
+                            item.remove();
+                            fetchFavoriteWorkflows();
+                        } else {
+                            var list = getFavoriteWorkflows().filter(function(f) { return f.id !== favorite.id; });
+                            saveFavoriteWorkflows(list);
+                            item.remove();
+                            if (listContainer.children.length === 0) {
+                                var hint = document.createElement('p');
+                                hint.className = 'text-muted text-center empty-sidebar-hint';
+                                hint.style.cssText = 'font-size: 12px; padding: 8px; margin: 0;';
+                                hint.textContent = '暂无收藏';
+                                listContainer.appendChild(hint);
+                            }
+                        }
+                    };
+                }
             }
             
             function toggleDebugSidebar() {
@@ -6514,9 +7049,53 @@
             }
 
             function editMessage(btn) {
-                const container = btn.closest('.message-container');
-                const text = container.querySelector('.bubble').innerText;
-                userInput.value = text; userInput.focus(); autoResize(userInput); checkInput();
+                var row = btn.closest('.message-row');
+                if (!row) return;
+                var bubble = row.querySelector('.bubble');
+                var text = bubble ? bubble.innerText : '';
+                userInput.value = text; userInput.focus(); if (typeof autoResize === 'function') autoResize(userInput); if (typeof checkInput === 'function') checkInput();
+                var chatContent = document.getElementById('chatContent');
+                if (!chatContent) return;
+                var rows = Array.prototype.slice.call(chatContent.querySelectorAll('.message-row'));
+                var idx = rows.indexOf(row);
+                if (idx === -1) return;
+                for (var i = idx; i < rows.length; i++) {
+                    var mid = rows[i].dataset.messageId;
+                    if (mid) {
+                        fetch('/api/messages/' + mid, { method: 'DELETE', headers: getAuthHeaders() }).catch(function() {});
+                    }
+                    rows[i].remove();
+                }
+                var workspaceContent = document.getElementById('active-workspace-content');
+                if (workspaceContent) workspaceContent.innerHTML = '';
+                if (window.currentSessionMessageIds && Array.isArray(window.currentSessionMessageIds)) {
+                    window.currentSessionMessageIds = window.currentSessionMessageIds.slice(0, idx);
+                }
+            }
+            function deleteMessage(btn) {
+                var row = btn.closest('.message-row');
+                if (!row) return;
+                var mid = row.dataset.messageId;
+                if (!mid) { row.remove(); return; }
+                fetch('/api/messages/' + mid, { method: 'DELETE', headers: getAuthHeaders() })
+                    .then(function(r) { if (r.ok) row.remove(); });
+            }
+            function regenerateMessage(btn) {
+                var row = btn.closest('.message-row');
+                if (!row || !row.classList.contains('ai')) return;
+                var chatContent = document.getElementById('chatContent');
+                if (!chatContent) return;
+                var rows = Array.prototype.slice.call(chatContent.querySelectorAll('.message-row'));
+                var idx = rows.indexOf(row);
+                if (idx <= 0) return;
+                var prevRow = rows[idx - 1];
+                if (!prevRow.classList.contains('user')) return;
+                var bubble = prevRow.querySelector('.bubble');
+                var prevText = bubble ? bubble.innerText : '';
+                var mid = row.dataset.messageId;
+                if (mid) fetch('/api/messages/' + mid, { method: 'DELETE', headers: getAuthHeaders() }).catch(function() {});
+                row.remove();
+                if (typeof sendMessage === 'function') sendMessage(prevText);
             }
             
             // 🔥 TASK 5: 参数推荐切换函数
@@ -6556,52 +7135,50 @@
                 console.log(`✅ [toggleParameterRecommendations] 参数已${useRecommended ? '切换到推荐值' : '切换回默认值'}`);
             };
 
-            // ✨ 一键应用推荐参数：将 recommendation.params 填入表单，无 DOM 则跳过（防回退）
+            // ✨ 一键应用推荐参数：按 key 查找 [name="key"]，判空后赋值并触发 change
             window.applyRecommendedParams = function(formId, stepsLength) {
-                const rec = window.workflowRecommendations && window.workflowRecommendations[formId];
+                var rec = window.workflowRecommendations && window.workflowRecommendations[formId];
                 if (!rec || !rec.params || Object.keys(rec.params).length === 0) {
                     console.warn('[applyRecommendedParams] 无推荐参数或表单未存储');
                     return;
                 }
-                let form = document.getElementById(formId);
-                if (!form) {
-                    form = document.querySelector('[data-form-id="' + formId + '"]');
-                }
+                var form = document.getElementById(formId) || document.querySelector('[data-form-id="' + formId + '"]');
                 if (!form) {
                     console.warn('[applyRecommendedParams] 未找到表单容器: ' + formId);
                     return;
                 }
-                let applied = 0;
-                for (let i = 0; i < (stepsLength || 20); i++) {
-                    for (const paramName of Object.keys(rec.params)) {
-                        const val = rec.params[paramName];
-                        const value = (val && typeof val === 'object' && 'value' in val) ? val.value : val;
-                        const input = form.querySelector('[name="param_' + i + '_' + paramName + '"]');
-                        if (input) {
-                            if (input.type === 'checkbox') {
-                                input.checked = !!value && value !== 'false' && value !== '0';
-                            } else {
-                                input.value = value != null ? String(value) : '';
-                            }
-                            try {
-                                input.dispatchEvent(new Event('input', { bubbles: true }));
-                                input.dispatchEvent(new Event('change', { bubbles: true }));
-                            } catch (e) { /* 兼容旧环境 */ }
-                            applied++;
+                var applied = 0;
+                for (var key in rec.params) {
+                    if (!rec.params.hasOwnProperty(key)) continue;
+                    var val = rec.params[key];
+                    var value = (val && typeof val === 'object' && 'value' in val) ? val.value : val;
+                    var element = form.querySelector('[name="' + key + '"]');
+                    if (!element) {
+                        for (var i = 0; i < (stepsLength || 20); i++) {
+                            element = form.querySelector('[name="param_' + i + '_' + key + '"]');
+                            if (element) break;
                         }
                     }
+                    if (element) {
+                        if (element.type === 'checkbox') {
+                            element.checked = !!value && value !== 'false' && value !== '0';
+                        } else {
+                            element.value = value != null ? String(value) : '';
+                        }
+                        try {
+                            element.dispatchEvent(new Event('change', { bubbles: true }));
+                        } catch (e) { }
+                        applied++;
+                    }
                 }
-                const btn = document.getElementById('btn-apply-params-' + formId);
+                var btn = document.getElementById('btn-apply-params-' + formId);
                 if (btn) {
-                    const orig = btn.textContent.trim();
-                    btn.textContent = '✅ 已应用成功！';
-                    btn.classList.add('btn-success'); btn.classList.remove('btn-outline-secondary');
-                    if (btn.style) { btn.style.color = ''; btn.style.borderColor = ''; }
+                    var orig = btn.textContent.trim();
+                    btn.textContent = '✅ 已应用';
+                    btn.style.pointerEvents = 'none';
                     setTimeout(function() {
                         btn.textContent = orig;
-                        btn.classList.remove('btn-success');
-                        btn.classList.add('btn-outline-secondary');
-                        if (btn.style) { btn.style.color = '#3b82f6'; btn.style.border = '1px solid #3b82f6'; }
+                        btn.style.pointerEvents = '';
                     }, 2000);
                 }
                 console.log('[applyRecommendedParams] 已应用 ' + applied + ' 个推荐参数');
@@ -6609,6 +7186,10 @@
 
             function selectTool(tool, query) { appendMessage('user', `我选择运行: <b>${tool.name}</b>`); sendMessage(tool, query); }
             function scrollToBottom() { chatScrollArea.scrollTop = chatScrollArea.scrollHeight; }
+        </script>
+    </body>
+    </html>
+lArea.scrollTop = chatScrollArea.scrollHeight; }
         </script>
     </body>
     </html>

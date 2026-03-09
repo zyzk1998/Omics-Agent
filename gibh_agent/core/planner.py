@@ -10,6 +10,7 @@
 """
 import json
 import logging
+import time
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 
@@ -561,8 +562,10 @@ class SOPPlanner:
             符合前端格式的工作流配置字典
         """
         try:
+            _t_plan_start = time.time()
             logger.info(f"🧠 [SOPPlanner] 开始生成计划: '{user_query}'")
-            
+            logger.info("[Profiler] 规划开始 - 耗时: 0.00s")
+
             # Step 1: Intent Classification (LLM) - 识别域名和模式（如果未提供）
             execution_mode = None  # 🔥 NEW: Track execution mode from intent classification
             
@@ -572,7 +575,9 @@ class SOPPlanner:
             if not domain_name:
                 logger.info("🔍 [SOPPlanner] Step 1: 意图分类（识别域名和模式）...")
                 logger.info(f"🔍 [SOPPlanner] file_metadata 存在: {has_file_metadata}")
+                _t_intent = time.time()
                 intent_result = await self._classify_intent(user_query, file_metadata)
+                logger.info("[Profiler] 意图分类(LLM)完成 - 耗时: %.2fs", time.time() - _t_intent)
                 domain_name = intent_result.get("domain_name")
                 execution_mode = intent_result.get("mode", "PLANNING")  # 🔥 NEW: Extract mode
                 
@@ -616,7 +621,9 @@ class SOPPlanner:
             steps_to_skip: List[str] = []
             if target_steps is None:
                 logger.info("🔍 [SOPPlanner] Step 2: 分析用户意图（选择目标步骤）...")
+                _t_intent2 = time.time()
                 intent_result = await self._analyze_user_intent(user_query, workflow)
+                logger.info("[Profiler] 用户意图分析(LLM)完成 - 耗时: %.2fs", time.time() - _t_intent2)
                 if isinstance(intent_result, dict):
                     steps_to_skip = intent_result.get("skip_steps") or []
                     target_steps = intent_result.get("target_steps") or []

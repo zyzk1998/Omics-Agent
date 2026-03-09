@@ -5,11 +5,14 @@ Agent 编排器 - 实时流式处理
 
 🔥 AGENTIC UPGRADE:
 集成 QueryRewriter、Clarifier 和 Reflector 实现智能查询处理。
+🔥 PERFORMANCE: 全链路耗时探针 [Profiler]，便于区分 LLM 思考耗时与本地执行耗时。
 """
 import json
 import logging
 import asyncio
 import os
+import re
+import time
 from typing import Dict, Any, List, Optional, AsyncIterator
 from pathlib import Path
 
@@ -183,7 +186,47 @@ class AgentOrchestrator:
         """
         files = files or []
         history = history or []
-        
+        owner_id = kwargs.get("owner_id") or kwargs.get("user_id")
+        db = kwargs.get("db")
+        model_name = (kwargs.get("model_name") or "").strip() or "deepseek-ai/DeepSeek-R1"
+        _t_start = time.time()
+        logger.info("[Profiler] stream_process 入口 - 开始处理请求 (model_name=%s)", model_name)
+
+        # 🔥 工作流收藏复用：正则拦截「用户请求复用工作流模板」，跳过 LLM 规划，直接下发 DB 中的 config_json 作为 workflow 事件
+        _query_str = (query or "").strip()
+        match = re.search(r"\[系统注入：用户请求复用工作流模板：\s*(\d+)\s*\]", _query_str)
+        logger.info("🔍 [Orchestrator] 尝试拦截复用指令: query=%s -> 匹配结果: %s", _query_str[:80] if _query_str else "", match)
+        if match and db and owner_id:
+            try:
+                template_id = int(match.group(1))
+                from gibh_agent.db.models import WorkflowTemplate
+                template = db.query(WorkflowTemplate).filter(
+                    WorkflowTemplate.id == template_id,
+                    WorkflowTemplate.owner_id == owner_id,
+                ).first()
+                if template and template.config_json:
+                    logger.info("✅ [Orchestrator] 复用工作流模板: id=%s name=%s", template_id, template.name)
+                    yield self._format_sse("status", {"content": "正在加载工作流模板...", "state": "loading"})
+                    await asyncio.sleep(0.02)
+                    # config_json 即前端 renderWorkflowCard 所需结构（event: workflow 一致）
+                    payload = template.config_json if isinstance(template.config_json, dict) else {}
+                    yield self._format_sse("workflow", payload)
+                    await asyncio.sleep(0.01)
+                    yield self._format_sse("message", {"content": f"已加载工作流「{template.name}」，请检查参数后点击执行。"})
+                    await asyncio.sleep(0.01)
+                    yield self._format_sse("status", {"content": "模板已就绪", "state": "completed"})
+                    await asyncio.sleep(0.01)
+                    yield self._format_sse("done", {"status": "success"})
+                    return
+                else:
+                    logger.warning("⚠️ [Orchestrator] 复用模板不存在或 config_json 为空: template_id=%s", template_id)
+            except (ValueError, TypeError) as e:
+                logger.warning("⚠️ [Orchestrator] 工作流模板复用解析失败: %s", e)
+            except Exception as e:
+                logger.warning("⚠️ [Orchestrator] 工作流模板加载失败: %s", e)
+            # 🔥 强制阻断：匹配到复用指令后无论成功与否都 return，绝不继续走 _classify_global_intent
+            return
+
         # 🔥 PHASE 1: Layer 0 - Global Intent Routing (Chat vs Task)
         # Check if this is general chat or a bioinformatics task BEFORE any file inspection or planning
         try:
@@ -192,8 +235,10 @@ class AgentOrchestrator:
                 "state": "analyzing"
             })
             await asyncio.sleep(0.01)
-            
+
+            _t_intent_start = time.time()
             intent_type = await self._classify_global_intent(query, files)
+            logger.info("[Profiler] 全局意图分类完成 - 耗时: %.2fs", time.time() - _t_intent_start)
             logger.info(f"🔍 [Orchestrator] 全局意图分类: {intent_type}")
             
             if intent_type == "chat":
@@ -228,28 +273,21 @@ class AgentOrchestrator:
                                 if content:
                                     messages.append({"role": role, "content": content})
                     
-                    # 🔥 DRY: Use shared stream parser to strip <<<SUGGESTIONS>>> and emit events
-                    accumulated_content = ""
+                    # 🔥 双轨提取：reasoning_content（官方）→ thought；content → message/suggestions；<think> 作 Fallback
+                    _t_llm_start = time.time()
+                    _llm_first_byte = None
 
-                    async def chat_chunk_iter():
-                        nonlocal accumulated_content
-                        async for chunk in llm_client.astream(messages, temperature=0.7, max_tokens=1000):
-                            if chunk.choices and len(chunk.choices) > 0:
-                                delta = chunk.choices[0].delta
-                                if delta and delta.content:
-                                    current_content = delta.content
-                                    if current_content.startswith(accumulated_content) and len(current_content) > len(accumulated_content):
-                                        delta_content = current_content[len(accumulated_content):]
-                                        accumulated_content = current_content
-                                    else:
-                                        delta_content = current_content
-                                        accumulated_content += current_content
-                                    if delta_content:
-                                        yield delta_content
-
-                    async for event_type, data in stream_with_suggestions(chat_chunk_iter()):
+                    from .stream_utils import stream_from_llm_chunks
+                    async for event_type, data in stream_from_llm_chunks(
+                        llm_client.astream(messages, temperature=0.7, max_tokens=1000, model=model_name),
+                        model_name=model_name,
+                    ):
+                        if _llm_first_byte is None:
+                            _llm_first_byte = time.time()
+                            logger.info("[Profiler] 收到 LLM 首字节 - 耗时: %.2fs", _llm_first_byte - _t_llm_start)
                         yield self._format_sse(event_type, data)
                         await asyncio.sleep(0.01)
+                    logger.info("[Profiler] LLM 思考与生成总耗时: %.2fs", time.time() - _t_llm_start)
 
                     yield self._format_sse("status", {
                         "content": "回答完成",
@@ -489,7 +527,6 @@ class AgentOrchestrator:
                     logger.info(f"🎯 [Orchestrator] 选择智能体: {domain_name}, target_agent: {target_agent.__class__.__name__ if target_agent else 'None'}")
                 
                 if target_agent and hasattr(target_agent, '_generate_analysis_summary'):
-                    import time
                     start_time = time.time()
                     yield self._format_sse("status", {
                         "content": "正在生成专家解读报告...",
@@ -958,8 +995,9 @@ class AgentOrchestrator:
                         logger.info(f"🔍 [Orchestrator] 解析后的绝对路径: {file_path}")
                             
                         try:
-                            # Inspect file to get metadata for intent classification
+                            _t_inspect_start = time.time()
                             file_metadata_for_intent = self.file_inspector.inspect_file(file_path)
+                            logger.info("[Profiler] 数据预检完成 - 耗时: %.2fs", time.time() - _t_inspect_start)
                             logger.info(f"✅ [Orchestrator] 文件检查成功，文件类型: {file_metadata_for_intent.get('file_type', 'unknown')}")
                             logger.info(f"✅ [Orchestrator] 文件元数据键: {list(file_metadata_for_intent.keys())[:10]}")
                         except Exception as e:
@@ -1067,6 +1105,7 @@ class AgentOrchestrator:
                             logger.info(f"✅ [Orchestrator] 意图预选: intent={intent_target_steps} -> recommended={recommended_steps}")
                         
                         # Path B: PREVIEW MODE - Generate FULL workflow, UI will pre-select recommended_steps
+                        _t_plan_start = time.time()
                         template_result = await planner.generate_plan(
                         user_query=refined_query,
                         file_metadata=None,  # 明确传递 None
@@ -1075,7 +1114,7 @@ class AgentOrchestrator:
                         target_steps=planner_target_steps,  # 🔥 FULL workflow (pre-select in UI)
                         is_template=True  # 🔥 CRITICAL: Explicitly IS a template
                         )
-                        
+                        logger.info("[Profiler] 规划(模板)完成 - 耗时: %.2fs", time.time() - _t_plan_start)
                         logger.info(f"✅ [Orchestrator] 模板生成完成: {len(all_steps)} 个步骤, 预选 {len(recommended_steps) or '全部'}")
                         
                         # 🔥 CRITICAL: Save pending_modality AND preview_target_steps for Intent Inheritance
@@ -1296,6 +1335,7 @@ class AgentOrchestrator:
                         # 🔥 TASK 2 FIX: 调用agent的诊断方法生成真正的诊断报告，而不是使用模板
                         diagnosis_message = None
                         recommendation_data = None
+                        agent_instance = None  # 安全垫底：走缓存分支时不会进入 else，后续 1427 行会引用，必须在此处初始化
                     
                         # 尝试从缓存加载诊断结果
                         from ..core.diagnosis_cache import DiagnosisCache
@@ -1451,6 +1491,7 @@ class AgentOrchestrator:
                     recommended_steps = workflow.resolve_dependencies(intent_target_steps)
                     logger.info(f"✅ [Orchestrator] Path A 意图预选: intent={intent_target_steps} -> recommended={recommended_steps}")
             
+                _t_plan_start = time.time()
                 result = await planner.generate_plan(
                     user_query=refined_query,
                     file_metadata=file_metadata,  # 🔥 CRITICAL: file_metadata exists
@@ -1459,7 +1500,7 @@ class AgentOrchestrator:
                     target_steps=planner_target_steps,  # 🔥 FULL workflow (pre-select in UI)
                     is_template=False  # 🔥 CRITICAL: Explicitly NOT a template
                 )
-            
+                logger.info("[Profiler] 规划(执行)完成 - 耗时: %.2fs", time.time() - _t_plan_start)
                 logger.info(f"✅ [Orchestrator] Path A: 工作流规划完成")
                 logger.info(f"✅ [Orchestrator] Path A: 返回结果 template_mode: {result.get('template_mode', 'N/A')}")
             
@@ -1615,6 +1656,33 @@ class AgentOrchestrator:
                             workflow_event_data["diagnosis_report"] = diagnosis_report
                             logger.info(f"✅ [Orchestrator] 添加诊断报告到工作流事件")
                 
+                    # 🔥 Task 4: 规划完成后按 workflow_type 更新未分类资产的 modality（仅当前用户）
+                    if db and owner_id and domain_name:
+                        try:
+                            file_paths = (workflow_data or {}).get("file_paths") or []
+                            if not file_paths and files:
+                                file_paths = [f.get("path") or f.get("file_path") or f.get("name") for f in files if f]
+                            file_paths = [p for p in file_paths if p]
+                            _dm = (domain_name or "").strip().lower()
+                            modality_map = {"rna": "rna", "metabolomics": "metabolomics", "spatial": "spatial", "radiomics": "radiomics", "genomics": "genomics", "epigenomics": "epigenomics", "proteomics": "proteomics"}
+                            workflow_type = modality_map.get(_dm) or (_dm if _dm in modality_map.values() else None)
+                            if workflow_type and file_paths:
+                                from gibh_agent.db.models import Asset
+                                updated = db.query(Asset).filter(
+                                    Asset.owner_id == owner_id,
+                                    Asset.file_path.in_(file_paths),
+                                    Asset.modality.is_(None)
+                                ).update({"modality": workflow_type}, synchronize_session=False)
+                                db.commit()
+                                if updated:
+                                    logger.info(f"✅ [Orchestrator] 已更新 {updated} 条未分类资产 modality -> {workflow_type}")
+                        except Exception as e:
+                            logger.warning("⚠️ [Orchestrator] 更新资产 modality 失败: %s", e)
+                            try:
+                                db.rollback()
+                            except Exception:
+                                pass
+
                     logger.info(f"✅ [Orchestrator] Path A: 发送workflow事件，包含 {len(steps)} 个步骤, recommended_steps={recommended_steps}")
                     yield self._format_sse("workflow", workflow_event_data)
                     await asyncio.sleep(0.01)

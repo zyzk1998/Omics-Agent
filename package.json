@@ -1,0 +1,12 @@
+{
+  "name": "gibh-agent",
+  "private": true,
+  "scripts": {
+    "build-images": "./scripts/build-images.sh",
+    "svg-to-png": "node scripts/svg-to-png.js",
+    "pie-chart": "node scripts/generate-pie-chart.js"
+  },
+  "devDependencies": {
+    "sharp": "^0.33.5"
+  }
+}
