@@ -74,3 +74,15 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+
+def get_current_admin_user(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """依赖：在 get_current_user 基础上校验 role == 'admin'，否则 403。"""
+    if (current_user.role or "").strip().lower() != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="需要管理员权限",
+        )
+    return current_user

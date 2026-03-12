@@ -6,7 +6,7 @@ Phase 1 - 用户与资产中台：核心数据表 ORM 模型
 - Message.content / WorkflowTemplate.config_json 使用 JSON 类型，无损兼容前端复杂嵌套结构。
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, Text
 from sqlalchemy.types import JSON
 
 # 使用 Part 1 建立的容错连接中的 Base（同包内引用）
@@ -70,4 +70,20 @@ class WorkflowTemplate(Base):
     owner_id = Column(String(255), nullable=False, index=True)
     name = Column(String(512), nullable=False)
     config_json = Column(JSON, nullable=True)  # 工作流参数配置，复杂嵌套无损
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class Skill(Base):
+    """UGC 技能表：用户上传技能，待管理员审核后展示。"""
+
+    __tablename__ = "skills"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(256), nullable=False)
+    description = Column(Text, nullable=True)
+    main_category = Column(String(128), nullable=True)
+    sub_category = Column(String(128), nullable=True)
+    prompt_template = Column(Text, nullable=True)
+    author_id = Column(String(255), nullable=False, index=True)  # username
+    status = Column(String(32), nullable=False, default="pending")  # pending | approved | rejected
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

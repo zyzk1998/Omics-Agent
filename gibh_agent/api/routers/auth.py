@@ -4,8 +4,10 @@ Phase 2 - 鉴权与游客资产继承 API
 - POST /register: 注册
 - POST /login: 登录，返回 JWT
 - POST /merge_guest_data: 已登录用户将 guest_uuid 下资产合并到当前用户（事务内 3 表 UPDATE）
+- INITIAL_ADMINS 冷启动：环境变量逗号分隔 username，注册/登录时若在其中则强制 role=admin
 """
 import logging
+import os
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -44,6 +46,27 @@ class MergeGuestBody(BaseModel):
 # bcrypt 算法限制：输入不得超过 72 字节
 BCRYPT_MAX_PASSWORD_BYTES = 72
 
+# 管理员冷启动：环境变量 INITIAL_ADMINS 逗号分隔的 username 列表
+INITIAL_ADMINS = frozenset(
+    s.strip() for s in (os.environ.get("INITIAL_ADMINS") or "").split(",") if s.strip()
+)
+
+
+def _sync_admin_role(db: Session, user: User) -> None:
+    """若 username 在 INITIAL_ADMINS 中，强制将 user.role 更新为 admin 并提交。"""
+    if not user or user.username not in INITIAL_ADMINS:
+        return
+    if user.role == "admin":
+        return
+    try:
+        user.role = "admin"
+        db.commit()
+        db.refresh(user)
+        logger.info("INITIAL_ADMINS 冷启动: 已将用户 %s 设为 admin", user.username)
+    except Exception as e:
+        db.rollback()
+        logger.warning("sync admin role 失败: %s", e)
+
 
 @router.post("/register")
 def register(body: RegisterBody, db: Session = Depends(get_db_session)):
@@ -74,8 +97,10 @@ def register(body: RegisterBody, db: Session = Depends(get_db_session)):
     db.add(user)
     db.commit()
     db.refresh(user)
+    _sync_admin_role(db, user)
+    db.refresh(user)
     logger.info("用户注册: %s", body.username)
-    return {"username": user.username, "message": "注册成功"}
+    return {"username": user.username, "message": "注册成功", "role": user.role}
 
 
 @router.post("/login")
@@ -91,13 +116,22 @@ def login(
             detail="用户名或密码错误",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    _sync_admin_role(db, user)
+    db.refresh(user)
     expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     token = create_access_token(data={"sub": user.username}, expires_delta=expires)
     return {
         "access_token": token,
         "token_type": "bearer",
         "username": user.username,
+        "role": user.role,
     }
+
+
+@router.get("/me")
+def me(current_user: User = Depends(get_current_user)):
+    """当前用户信息（含 role），供前端显隐管理员入口。"""
+    return {"username": current_user.username, "role": current_user.role or "user"}
 
 
 @router.post("/merge_guest_data")

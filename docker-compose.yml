@@ -74,6 +74,9 @@ services:
       - MYSQL_DATABASE=${MYSQL_DATABASE:-omics_agent}
       - MYSQL_USER=${MYSQL_USER:-omics}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD:-omics_agent_pwd}
+      # JWT 不随容器重启失效：从宿主机 .env 或挂载文件读取，不绑定容器
+      - SECRET_KEY=${SECRET_KEY:-}
+      - SECRET_KEY_FILE=${SECRET_KEY_FILE:-}
     volumes:
       - .:/app
       - ./data/uploads:/app/uploads

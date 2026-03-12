@@ -12,7 +12,7 @@ Phase 4 - 侧栏数据读取：会话列表、消息历史、资产列表、工�
 """
 import os
 import logging
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -20,13 +20,33 @@ from sqlalchemy.orm import Session
 
 from gibh_agent.core.deps import get_current_owner_id
 from gibh_agent.db.connection import get_db_session
-from gibh_agent.db.models import Session as SessionModel, Message as MessageModel, Asset as AssetModel, WorkflowTemplate as WorkflowTemplateModel
+from gibh_agent.db.models import (
+    Session as SessionModel,
+    Message as MessageModel,
+    Asset as AssetModel,
+    WorkflowTemplate as WorkflowTemplateModel,
+)
 
 
 class WorkflowTemplateCreate(BaseModel):
     """POST /api/workflow_templates 请求体"""
     name: str
     config_json: dict = {}
+
+
+class SessionRenameBody(BaseModel):
+    """PUT /api/sessions/{session_id} 请求体"""
+    title: str
+
+
+class AssetRenameBody(BaseModel):
+    """PUT /api/assets/{asset_id} 请求体"""
+    file_name: str
+
+
+class WorkflowTemplateRenameBody(BaseModel):
+    """PUT /api/workflow_templates/{template_id} 请求体"""
+    name: str
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +65,7 @@ def list_sessions(
         .order_by(SessionModel.created_at.desc())
         .all()
     )
+    logger.info("🔍 [DB] 查询到 Owner: %s 共有 %s 条历史会话", owner_id, len(rows))
     return [
         {
             "id": r.id,
@@ -109,6 +130,30 @@ def delete_message(
         raise HTTPException(status_code=500, detail="删除失败")
 
 
+def _infer_modality_from_file_name(file_name: str) -> Optional[str]:
+    """根据文件名推断组学类型，与前端 FIXED_MODALITY_LABELS 及 orchestrator 一致。"""
+    if not file_name or not isinstance(file_name, str):
+        return None
+    name = file_name.strip().lower()
+    # 10x 转录组三件套
+    if name in ("barcodes.tsv", "features.tsv", "matrix.mtx", "genes.tsv"):
+        return "rna"
+    if name.endswith(".h5ad"):
+        return "rna"
+    if name.endswith((".fastq", ".fq", ".fastq.gz", ".fq.gz")):
+        return "rna"
+    # 代谢组
+    if name.endswith(".csv"):
+        return "metabolomics"
+    # 影像组
+    if name.endswith((".nii", ".nii.gz", ".dcm")):
+        return "radiomics"
+    # 空间（常见后缀，保守归类）
+    if name.endswith(".h5") or "spatial" in name or "visium" in name:
+        return "spatial"
+    return None
+
+
 @router.get("/api/assets")
 def list_assets(
     owner_id: str = Depends(get_current_owner_id),
@@ -134,6 +179,34 @@ def list_assets(
     ]
 
 
+@router.post("/api/assets/reclassify")
+def reclassify_assets(
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    """对当前用户未分类的资产按文件名推断 modality，并刷新列表。"""
+    rows = (
+        db.query(AssetModel)
+        .filter(AssetModel.owner_id == owner_id, AssetModel.modality.is_(None))
+        .all()
+    )
+    updated = 0
+    for r in rows:
+        modality = _infer_modality_from_file_name(r.file_name)
+        if modality:
+            r.modality = modality
+            updated += 1
+    if updated:
+        try:
+            db.commit()
+            logger.info("🔁 [Assets] 重新分类: owner=%s, 更新 %s 条", owner_id, updated)
+        except Exception as e:
+            db.rollback()
+            logger.exception("重新分类提交失败: %s", e)
+            raise HTTPException(status_code=500, detail="重新分类保存失败")
+    return {"status": "success", "updated": updated}
+
+
 @router.delete("/api/sessions/{session_id}")
 def delete_session(
     session_id: str,
@@ -155,6 +228,32 @@ def delete_session(
         db.rollback()
         logger.exception("删除会话失败: %s", e)
         raise HTTPException(status_code=500, detail="删除失败")
+
+
+@router.put("/api/sessions/{session_id}")
+def rename_session(
+    session_id: str,
+    body: SessionRenameBody,
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    """重命名会话；仅当会话属于当前 owner_id 时允许。"""
+    session = (
+        db.query(SessionModel)
+        .filter(SessionModel.id == session_id, SessionModel.owner_id == owner_id)
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在或无权修改")
+    try:
+        session.title = (body.title or "").strip() or session.title
+        db.commit()
+        db.refresh(session)
+        return {"status": "success", "title": session.title}
+    except Exception as e:
+        db.rollback()
+        logger.exception("重命名会话失败: %s", e)
+        raise HTTPException(status_code=500, detail="更新失败")
 
 
 @router.delete("/api/assets/{asset_id}")
@@ -183,6 +282,32 @@ def delete_asset(
         db.rollback()
         logger.exception("删除资产失败: %s", e)
         raise HTTPException(status_code=500, detail="删除失败")
+
+
+@router.put("/api/assets/{asset_id}")
+def rename_asset(
+    asset_id: int,
+    body: AssetRenameBody,
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    """重命名资产（仅更新 file_name 显示名）；仅当资产属于当前 owner_id 时允许。"""
+    asset = (
+        db.query(AssetModel)
+        .filter(AssetModel.id == asset_id, AssetModel.owner_id == owner_id)
+        .first()
+    )
+    if not asset:
+        raise HTTPException(status_code=404, detail="资产不存在或无权修改")
+    try:
+        asset.file_name = (body.file_name or "").strip() or asset.file_name
+        db.commit()
+        db.refresh(asset)
+        return {"status": "success", "file_name": asset.file_name}
+    except Exception as e:
+        db.rollback()
+        logger.exception("重命名资产失败: %s", e)
+        raise HTTPException(status_code=500, detail="更新失败")
 
 
 @router.get("/api/workflow_templates")
@@ -252,3 +377,32 @@ def delete_workflow_template(
         db.rollback()
         logger.exception("删除工作流收藏失败: %s", e)
         raise HTTPException(status_code=500, detail="删除失败")
+
+
+@router.put("/api/workflow_templates/{template_id}")
+def rename_workflow_template(
+    template_id: int,
+    body: WorkflowTemplateRenameBody,
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    """重命名工作流收藏；仅当该记录属于当前 owner_id 时允许。"""
+    template = (
+        db.query(WorkflowTemplateModel)
+        .filter(
+            WorkflowTemplateModel.id == template_id,
+            WorkflowTemplateModel.owner_id == owner_id,
+        )
+        .first()
+    )
+    if not template:
+        raise HTTPException(status_code=404, detail="工作流收藏不存在或无权修改")
+    try:
+        template.name = (body.name or "").strip() or template.name
+        db.commit()
+        db.refresh(template)
+        return {"status": "success", "name": template.name}
+    except Exception as e:
+        db.rollback()
+        logger.exception("重命名工作流收藏失败: %s", e)
+        raise HTTPException(status_code=500, detail="更新失败")

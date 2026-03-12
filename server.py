@@ -93,7 +93,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Guest-UUID"],
 )
 
@@ -113,8 +113,16 @@ try:
 except Exception as e:
     logger.warning("⚠️ User Data 路由注册失败: %s", e)
 
+# UGC 技能上传与管理员审核
+try:
+    from gibh_agent.api.routers.skills import router as skills_router
+    app.include_router(skills_router)
+    logger.info("✅ Skills 路由已注册: POST /api/skills, GET/PUT /api/admin/skills")
+except Exception as e:
+    logger.warning("⚠️ Skills 路由注册失败: %s", e)
+
 # Phase 4: 身份解析与 DB 依赖（upload/chat 持久化）
-from gibh_agent.core.deps import get_current_owner_id
+from gibh_agent.core.deps import get_current_owner_id, get_current_admin_user
 from gibh_agent.db.connection import get_db_session, engine, is_available, Base
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -122,14 +130,168 @@ from sqlalchemy import text
 # 注册 ORM 模型以便 create_all 建表
 try:
     from gibh_agent.db import models  # noqa: F401
+    from gibh_agent.db.models import Skill as SkillModel
 except Exception:
-    pass
+    SkillModel = None
 
 
 def _run_create_all():
     """执行建表（幂等）。确保 models 已挂到 Base 后再调用 create_all。"""
     import gibh_agent.db.models as _  # noqa: F401 强制注册所有表
     Base.metadata.create_all(bind=engine)
+
+
+# 7 大核心组学技能：与前端 OMICS_PROMPT_TEMPLATES / 原 SKILLS_DATA 完全一致，优先入库
+CORE_OMICS_SKILLS = [
+    {
+        "name": "转录组学标准全流程",
+        "sub_category": "转录组学",
+        "description": "一键生成 scRNA-seq 质控、降维聚类、多分辨率鲁棒性对比、Marker 注释、差异与通路富集的标准工作流。",
+        "prompt_template": (
+            "【角色设定】你是一位顶尖的单细胞转录组数据分析专家。\n\n【组学类型】单细胞转录组 (scRNA-seq)\n\n"
+            "【分析内容和步骤】\n(注：以下步骤为默认推荐，您可根据需求自由修改、删减或增加)\n"
+            "1. [数据结构与内存预检]\n2. [质控与去双细胞]\n3. [降维聚类 (PCA/UMAP)]\n"
+            "4. [多分辨率聚类鲁棒性对比]\n5. [细胞类型自动注释与核心 Marker 气泡图、亚群比例分析]\n"
+            "6. [差异表达基因分析 (DEG)]\n7. [通路富集分析 (GO/KEGG)]\n\n"
+            "【输出要求】请提供细胞分群 UMAP 图、多分辨率对比图、Marker 基因热图及通路富集气泡图，并对关键细胞亚群进行详细解读。"
+        ),
+    },
+    {
+        "name": "空间域识别与聚类",
+        "sub_category": "空间组学",
+        "description": "聚焦空间域识别：坐标/影像校验、空间高变基因、降维聚类、多分辨率空间域物理映射对比。",
+        "prompt_template": (
+            "【角色设定】你是一位顶尖的空间转录组学生信专家。\n\n【组学类型】空间转录组 (Spatial Transcriptomics)\n\n"
+            "【分析内容和步骤】\n(注：以下步骤为默认推荐，您可根据需求自由修改、删减或增加)\n"
+            "1. [空间数据校验]（影像与坐标预检）\n2. [数据质控与过滤]\n3. [空间高变基因提取]\n"
+            "4. [降维与空间聚类]\n5. [多分辨率空间域物理映射对比]\n6. [空间域识别与通路富集]\n\n"
+            "【输出要求】请调用相关工具，输出包含空间分布图、UMAP图、多分辨率对比图的数据诊断报告，并给出专家解读。"
+        ),
+    },
+    {
+        "name": "差异标志物发现",
+        "sub_category": "代谢组学",
+        "description": "面向代谢物 biomarker：缺失值与归一化、PCA/PLS-DA、多维模型效能对比、VIP 与显著性筛选、通路拓扑解释。",
+        "prompt_template": (
+            "【角色设定】你是一位资深的非靶向代谢组学分析专家。\n\n【组学类型】非靶向代谢组学 (Untargeted Metabolomics)\n\n"
+            "【分析内容和步骤】\n(注：以下步骤为默认推荐，您可根据需求自由修改、删减或增加)\n"
+            "1. [数据与稀疏性校验]\n2. [缺失值插补与数据归一化]\n"
+            "3. [多元统计分析 (PCA/PLS-DA) 与多维模型效能对比]\n4. [差异代谢物筛选 (VIP>1, P<0.05)]\n"
+            "5. [代谢通路拓扑分析]\n\n【输出要求】请输出 PCA/PLS-DA/VIP 对比图、差异代谢物火山图，并重点解读关键生物标志物的潜在临床/病理意义。"
+        ),
+    },
+    {
+        "name": "多算法诊断模型构建",
+        "sub_category": "医学影像组学",
+        "description": "影像组学建模：ROI/数据校验、特征提取、LR/SVM/RF 多算法 ROC 对比、特征相关性聚类热图与 Rad-Score。",
+        "prompt_template": (
+            "【角色设定】你是一位资深的医学影像组学与机器学习专家。\n\n【组学类型】医学影像组学 (Radiomics)\n\n"
+            "【分析内容和步骤】\n(注：以下步骤为默认推荐，您可根据需求自由修改、删减或增加)\n"
+            "1. [数据与 ROI 校验]\n2. [图像预处理]\n3. [影像组学特征提取 (PyRadiomics)]\n"
+            "4. [多算法 (LR/SVM/RF) ROC 诊断效能对比]\n5. [特征相关性聚类热图与特征权重棒棒糖图]\n6. [Rad-Score 与风险概率]\n\n"
+            "【输出要求】请输出 ROC 对比图、特征权重图、聚类热图，并结合临床背景给出辅助诊断建议。"
+        ),
+    },
+    {
+        "name": "基因组变异检测",
+        "sub_category": "基因组学",
+        "description": "从原始测序数据到变异 calling、注释与致病性评估，输出质控与变异解读报告。",
+        "prompt_template": (
+            "【角色设定】你是一位资深的基因组学与生物信息学专家。\n\n【组学类型】基因组学 (Genomics)\n\n"
+            "【分析内容和步骤】\n1. [原始数据质控与比对]\n2. [变异检测 (SNV/InDel/CNV)]\n"
+            "3. [变异注释与过滤]\n4. [致病性评估与报告]\n\n"
+            "【输出要求】请输出质控报告、变异汇总表与关键突变解读。"
+        ),
+    },
+    {
+        "name": "表观遗传峰与 motif 分析",
+        "sub_category": "表观遗传组学",
+        "description": "峰 calling、差异分析、motif 富集与转录组/基因组整合解读。",
+        "prompt_template": (
+            "【角色设定】你是一位资深的表观遗传学分析专家。\n\n【组学类型】表观遗传组学 (Epigenomics)\n\n"
+            "【分析内容和步骤】\n1. [原始数据质控]\n2. [峰 calling 与注释]\n3. [差异分析与 motif 富集]\n"
+            "4. [与转录组/基因组整合解读]\n\n【输出要求】请输出峰图、差异区域与生物学解释。"
+        ),
+    },
+    {
+        "name": "蛋白质互作网络分析",
+        "sub_category": "蛋白质组学",
+        "description": "质谱定量、差异蛋白、富集分析与蛋白质互作网络构建与通路解读。",
+        "prompt_template": (
+            "【角色设定】你是一位资深的蛋白质组学与质谱分析专家。\n\n【组学类型】蛋白质组学 (Proteomics)\n\n"
+            "【分析内容和步骤】\n1. [原始谱图质控与搜库]\n2. [定量与归一化]\n"
+            "3. [差异蛋白筛选与富集分析]\n4. [蛋白质互作网络与通路解读]\n\n"
+            "【输出要求】请输出火山图、热图与互作网络，并解读关键蛋白与通路。"
+        ),
+    },
+]
+
+
+def _insert_skills_bootstrap_data(db: Session) -> None:
+    """向当前 Session 插入 7 大核心组学 + 43 条 Mock（不 commit，由调用方提交）。"""
+    for core in CORE_OMICS_SKILLS:
+        db.add(SkillModel(
+            name=core["name"],
+            description=core["description"],
+            main_category="多模态组学",
+            sub_category=core["sub_category"],
+            prompt_template=core["prompt_template"],
+            author_id="system",
+            status="approved",
+        ))
+    main_cats = ["多模态组学", "生命科学", "医药科学", "化学"]
+    sub_omics = ["转录组学", "空间组学", "代谢组学", "医学影像组学", "基因组学", "表观遗传组学", "蛋白质组学"]
+    sub_common = ["临床应用", "信息检索", "合规管理", "数据分析", "数据可视化", "数据处理", "文本处理", "预测与建模"]
+    names = [
+        "ADMETAI_predict", "单细胞轨迹推断", "空间转录组聚类", "代谢通路富集分析", "影像组学ROI分割",
+        "ChIP-seq峰注释", "变异注释与致病性", "scRNA-seq质控与聚类", "多组学整合关联", "药物靶点预测",
+        "生物标志物发现", "生存分析建模", "文献智能检索", "合规性检查引擎", "数据标准化流水线",
+        "交互式可视化看板", "NLP实体抽取", "分子对接打分", "通路拓扑分析", "差异表达与GSEA",
+        "代谢物鉴定与定量", "放射组学特征提取", "甲基化差异分析", "质谱搜库与定量", "基因组注释流程",
+        "单细胞拟时序", "多分辨率空间对比", "PLS-DA与VIP筛选", "LR/SVM/RF诊断模型", "ATAC-seq染色质开放性",
+        "蛋白质组差异与富集", "融合基因检测", "细胞类型注释", "空间高变基因", "代谢物通路映射",
+        "影像组学Rad-Score", "组蛋白修饰分析", "质谱DIA定量", "CNV calling", "细胞通讯推断",
+        "空间配体受体", "代谢物缺失值填补", "影像特征聚类热图", "甲基化与表达整合", "PPI网络模块",
+    ]
+    for i, name in enumerate(names[:43]):
+        main = main_cats[(i + 1) % len(main_cats)]
+        if main == "多模态组学":
+            sub = sub_omics[i % len(sub_omics)]
+        else:
+            sub = sub_common[i % len(sub_common)]
+        db.add(SkillModel(
+            name=name,
+            description="专业分析流程与智能建模。",
+            main_category=main,
+            sub_category=sub,
+            prompt_template="【角色】生命科学分析专家。请根据用户数据执行" + name + "相关流程。",
+            author_id="system",
+            status="approved",
+        ))
+
+
+def _bootstrap_skills_mock():
+    """若 Skill 表为空，先插入 7 大核心组学技能，再插入其余 Mock 至 50 条。不静默吞噬异常，完整打堆栈。"""
+    if not is_available() or engine is None or SkillModel is None:
+        logger.warning("[DB] 技能注入跳过: 数据库或 SkillModel 不可用")
+        return
+    from gibh_agent.db.connection import SessionLocal
+    db = SessionLocal()
+    try:
+        n = db.query(SkillModel).count()
+        logger.info("[DB] Skills 表当前条数: %d", n)
+        if n > 0:
+            logger.info("[DB] Skills 表已有数据，跳过冷启动注入")
+            return
+        logger.info("[DB] Skills 表为空，开始注入 7 大核心组学 + 43 条 Mock ...")
+        _insert_skills_bootstrap_data(db)
+        db.commit()
+        logger.info("✅ [DB] 已注入 7 大核心组学技能 + 43 条 Mock，共 50 条（Skill 表冷启动）")
+    except Exception as e:
+        db.rollback()
+        logger.error("技能注入失败: %s", e, exc_info=True)
+    finally:
+        db.close()
 
 
 @app.on_event("startup")
@@ -157,6 +319,7 @@ def _ensure_db_tables():
     try:
         _run_create_all()
         logger.info("✅ [DB] 表结构已就绪（如需建表已自动创建）")
+        _bootstrap_skills_mock()
     except Exception as e:
         logger.error(
             "❌ [DB] 建表失败，后续查询可能 500。请调用 GET /api/db/init 重试或检查 MySQL 权限/版本。原因: %s\n%s",
@@ -168,14 +331,16 @@ def _ensure_db_tables():
 @app.get("/api/db/init")
 def init_db_tables():
     """
-    手动触发建表（startup 未执行或失败时使用）。幂等，仅创建缺失表。
-    部署后若出现 Table 'xxx' doesn't exist，在浏览器访问: GET http://<host>:8028/api/db/init
+    手动触发建表（startup 未执行或失败时使用）。幂等，仅创建缺失表；
+    若 skills 表为空，会同时触发技能冷启动注入（7 大核心 + 43 Mock）。
+    部署后若出现 Table 'xxx' doesn't exist 或技能广场为空，访问: GET http://<host>:8028/api/db/init
     """
     if not is_available() or engine is None or Base is None:
         return JSONResponse(status_code=503, content={"detail": "数据库不可用，无法建表"})
     try:
         _run_create_all()
-        return JSONResponse(status_code=200, content={"detail": "表已就绪", "ok": True})
+        _bootstrap_skills_mock()
+        return JSONResponse(status_code=200, content={"detail": "表已就绪，技能表已检查/注入", "ok": True})
     except Exception as e:
         logger.error("建表失败: %s\n%s", e, traceback.format_exc())
         detail = _detail_for_db_error(e, str(e))
@@ -188,6 +353,29 @@ def init_db_tables():
                 "traceback": traceback.format_exc(),
             },
         )
+
+
+@app.post("/api/admin/bootstrap-skills")
+def admin_bootstrap_skills(
+    db: Session = Depends(get_db_session),
+    _admin=Depends(get_current_admin_user),
+):
+    """
+    管理员专用：清空 skills 表并重新注入 7 大核心组学 + 43 条 Mock（共 50 条）。
+    技能广场为空或需要恢复默认技能时，以管理员身份调用此接口即可。
+    """
+    if not is_available() or SkillModel is None:
+        raise HTTPException(status_code=503, detail="数据库不可用")
+    try:
+        db.execute(text("TRUNCATE TABLE skills"))
+        _insert_skills_bootstrap_data(db)
+        db.commit()
+        logger.info("✅ [DB] 管理员已触发技能表清空并重新注入 50 条")
+        return JSONResponse(status_code=200, content={"detail": "已清空并重新注入 50 条技能（7 大核心 + 43 Mock）", "ok": True})
+    except Exception as e:
+        db.rollback()
+        logger.exception("管理员注入技能失败: %s", e)
+        raise HTTPException(status_code=500, detail="注入失败: " + str(e))
 
 
 def _detail_for_db_error(exc: Exception, err_msg: str) -> str:
@@ -243,6 +431,17 @@ async def global_exception_handler(request: Request, exc: Exception):
 # 注意：在容器环境中，默认路径应该是 /app/uploads，而不是相对路径
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
 RESULTS_DIR = Path(os.getenv("RESULTS_DIR", "/app/results"))
+
+
+def _ensure_absolute_upload_path(path: str, base: Optional[Path] = None) -> str:
+    """将相对路径转为基于 base 的绝对路径；已是绝对路径则直接 resolve 返回，避免重复拼接。"""
+    if not path or not str(path).strip():
+        return path
+    base = base or UPLOAD_DIR
+    p = Path(path)
+    if p.is_absolute():
+        return str(p.resolve())
+    return str((base / p).resolve())
 
 # 确保目录存在且可写
 try:
@@ -337,10 +536,12 @@ def validate_file_path(file_path: Path, base_dir: Path) -> Path:
 # 初始化文件检测器
 file_inspector = FileInspector(str(UPLOAD_DIR))
 
-# 添加静态文件服务（用于访问结果图片、前端 Logo 等）
+# 添加静态文件服务（用于访问结果图片、前端 Logo 等）；使用绝对路径与 RESULTS_DIR/UPLOAD_DIR 一致，避免打印/预览时图片 404
 from fastapi.staticfiles import StaticFiles
-app.mount("/results", StaticFiles(directory="results"), name="results")
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+_results_dir = str(RESULTS_DIR.resolve()) if RESULTS_DIR.exists() else "results"
+_uploads_dir = str(UPLOAD_DIR.resolve()) if UPLOAD_DIR.exists() else "uploads"
+app.mount("/results", StaticFiles(directory=_results_dir), name="results")
+app.mount("/uploads", StaticFiles(directory=_uploads_dir), name="uploads")
 # 前端静态资源（Logo 等）：与 index.html 同级的 static 目录
 _static_dir = Path(__file__).parent / "services" / "nginx" / "html" / "static"
 if _static_dir.is_dir():
@@ -456,7 +657,7 @@ class ChatRequest(BaseModel):
     stream: Optional[bool] = False  # 🔥 SSE 流式传输开关
     session_id: Optional[str] = None  # 🔥 BUG FIX: 添加 session_id 字段
     user_id: Optional[str] = "guest"  # 🔥 BUG FIX: 添加 user_id 字段，默认为 guest
-    model_name: Optional[str] = "deepseek-ai/DeepSeek-R1"  # 🔥 前端模型切换：硅基流动真实模型 ID，默认 DeepSeek-R1
+    model_name: Optional[str] = "qwen3.5-plus"  # 🔥 前端模型切换：默认阿里百炼 Qwen3.5-Plus，qwen 走 DashScope，其余走 SiliconFlow
 
 
 # 日志缓冲区（保留用于未来扩展）
@@ -1573,14 +1774,16 @@ async def upload_file(
                     db.commit()
                 except Exception as e:
                     logger.warning("⚠️ [Upload] 10x Asset 入库失败: %s", e)
-            # 返回10x目录路径（而不是单个文件路径）
-            file_paths = [str(tenx_dir.relative_to(UPLOAD_DIR))]
+            # 返回10x目录路径（强制绝对路径，供下游与前端一致使用）
+            abs_tenx = str(tenx_dir.resolve())
+            for r in uploaded_results:
+                r["file_path"] = r.get("file_path") and _ensure_absolute_upload_path(r["file_path"]) or abs_tenx
             return {
                 "status": "success",
                 "is_10x_data": True,
                 "group_dir": str(tenx_dir.relative_to(UPLOAD_DIR)),
                 "files": uploaded_results,
-                "file_paths": file_paths,  # 🔥 添加 file_paths 数组
+                "file_paths": [abs_tenx],
                 "message": f"10x数据已保存到: {tenx_dir.relative_to(UPLOAD_DIR)}"
             }
         
@@ -1730,32 +1933,26 @@ async def upload_file(
         except Exception as e:
             logger.warning("⚠️ 目录结构规范化失败（不影响上传）: %s", e)
         
-        # 🔥 统一返回格式：始终返回 file_paths 数组和 file_info 数组（用于前端发送聊天请求）
-        # 注意：使用相对路径，因为前端需要相对于 UPLOAD_DIR 的路径
+        # 🔥 统一返回格式：强制使用绝对路径，避免底层工具收到相对路径导致 [Errno 2] No such file or directory
         file_paths = []
         file_info = []
         for result in uploaded_results:
-            # 转换为相对路径（相对于 UPLOAD_DIR）
-            file_path_abs = result["file_path"]
-            if isinstance(file_path_abs, str) and str(UPLOAD_DIR) in file_path_abs:
-                # 提取相对路径
-                rel_path = str(Path(file_path_abs).relative_to(UPLOAD_DIR))
-            else:
-                rel_path = result["file_id"]  # 回退到 file_id
-            file_paths.append(rel_path)
-            
-            # 构建 file_info 条目
+            raw = result.get("file_path") or result.get("file_id") or ""
+            abs_path = _ensure_absolute_upload_path(raw) if raw else ""
+            file_paths.append(abs_path)
             file_info.append({
-                "name": result["file_name"],
-                "size": result["file_size"],
-                "path": rel_path  # 使用相对路径
+                "name": result.get("file_name", ""),
+                "size": result.get("file_size", 0),
+                "path": abs_path
             })
         
-        # Phase 4: 非 10x 文件入库
+        # Phase 4: 非 10x 文件入库（Asset 表与返回前端均使用绝对路径）
         if db is not None:
             try:
                 for result in uploaded_results:
-                    db.add(AssetModel(owner_id=owner_id, file_name=result.get("file_name", ""), file_path=result.get("file_path", ""), modality=None))
+                    fp = result.get("file_path") or ""
+                    abs_fp = _ensure_absolute_upload_path(fp) if fp else ""
+                    db.add(AssetModel(owner_id=owner_id, file_name=result.get("file_name", ""), file_path=abs_fp, modality=None))
                 db.commit()
             except Exception as e:
                 logger.warning("⚠️ [Upload] Asset 入库失败: %s", e)
@@ -1769,15 +1966,15 @@ async def upload_file(
             "session_id": session_id   # 兼容前端
         }
         
-        # 如果只有一个文件，添加单个文件的详细信息（向后兼容）
+        # 如果只有一个文件，添加单个文件的详细信息（向后兼容，统一绝对路径）
         if len(uploaded_results) == 1:
             result = uploaded_results[0]
             response.update({
                 "file_id": result["file_id"],
                 "file_name": result["file_name"],
-                "file_path": result["file_path"],  # 绝对路径（向后兼容）
+                "file_path": file_paths[0] if file_paths else _ensure_absolute_upload_path(result.get("file_path", "")),
                 "file_size": result["file_size"],
-                "metadata": result["metadata"]
+                "metadata": result.get("metadata")
             })
         else:
             # 多个文件时，添加 files 数组（向后兼容）
@@ -1842,13 +2039,16 @@ async def chat_endpoint(
         pass  # 即使日志写入失败也不影响主流程
     # #endregion
     
-    # Phase 4: 会话与身份
+    # Phase 4: 会话与身份（新建会话必须立即 commit + refresh，避免“数据黑洞”）
     if not req.session_id:
         req.session_id = str(uuid.uuid4())
         try:
             title = (req.message or "新会话")[:20]
-            db.add(SessionModel(id=req.session_id, owner_id=owner_id, title=title))
+            new_session = SessionModel(id=req.session_id, owner_id=owner_id, title=title)
+            db.add(new_session)
             db.commit()
+            db.refresh(new_session)
+            logger.info(f"✅ [DB] 成功创建新会话: {new_session.id}, Owner: {owner_id}, Title: {new_session.title}")
         except Exception as e:
             logger.warning("⚠️ [Chat] Session 入库失败: %s", e)
             db.rollback()
@@ -1951,23 +2151,22 @@ async def chat_endpoint(
             logger.info(f"✅ [ChatEndpoint] 转换后的 uploaded_files: {uploaded_files}")
             logger.info(f"✅ [ChatEndpoint] uploaded_files 数量: {len(uploaded_files)}")
             
-            # 🔥 任务2：从 prompt 中提取「系统注入」的历史资产路径，并入 uploaded_files，供后续 DAG 直接使用
+            # 🔥 任务2：从 prompt 中提取「系统注入」的历史资产路径，并入 uploaded_files；强制绝对路径
             injected = re.findall(r'\[系统注入：用户选择了历史资产文件：(.*?)\]', (req.message or ""))
             for p in injected:
                 p = (p or "").strip()
                 if not p:
                     continue
-                if any((f.get("path") or "").rstrip("/") == p.rstrip("/") for f in uploaded_files):
+                abs_p = _ensure_absolute_upload_path(p)
+                if any((f.get("path") or "").rstrip("/") == abs_p.rstrip("/") for f in uploaded_files):
                     continue
-                path_obj = Path(p)
-                if not path_obj.is_absolute():
-                    path_obj = UPLOAD_DIR / p
+                path_obj = Path(abs_p)
                 if path_obj.exists():
-                    uploaded_files.append({"name": path_obj.name, "path": str(path_obj.resolve())})
-                    logger.info("✅ [ChatEndpoint] 注入历史资产路径: %s", path_obj)
+                    uploaded_files.append({"name": path_obj.name, "path": abs_p})
+                    logger.info("✅ [ChatEndpoint] 注入历史资产路径(绝对): %s", abs_p)
                 else:
-                    uploaded_files.append({"name": os.path.basename(p), "path": str(path_obj)})
-                    logger.warning("⚠️ [ChatEndpoint] 注入路径不存在，仍加入列表: %s", p)
+                    uploaded_files.append({"name": os.path.basename(p), "path": abs_p})
+                    logger.warning("⚠️ [ChatEndpoint] 注入路径不存在，仍加入列表: %s", abs_p)
             
             # 创建编排器（传递 upload_dir）
             orchestrator = AgentOrchestrator(agent, upload_dir=str(UPLOAD_DIR))
@@ -1976,16 +2175,16 @@ async def chat_endpoint(
             async def generate_sse():
                 original_llm_clients = {}
                 override_llm = None
-                accumulated = []
+                state_snapshot_for_db = None  # 🔥 有状态应用切片：从流中解析 event: state_snapshot 作为入库 content
                 # Phase 4: 第一个事件下发 session_id，供前端持久化
                 yield f"event: session\ndata: {json.dumps({'session_id': req.session_id}, ensure_ascii=False)}\n\n"
                 try:
                     # 🔥 动态模型路由：前端 model_name 传入 stream_process，每次请求在调用处传入，避免单例竞态
-                    model_name = (getattr(req, "model_name", None) or "").strip() or "deepseek-ai/DeepSeek-R1"
+                    model_name = (getattr(req, "model_name", None) or "").strip() or "qwen3.5-plus"
                     if model_name and hasattr(agent, "agents") and agent.agents:
                         try:
                             from gibh_agent.core.llm_client import LLMClientFactory
-                            override_llm = LLMClientFactory.create_cloud_siliconflow(model=model_name)
+                            override_llm = LLMClientFactory.create_for_model(model_name)
                             for name, a in agent.agents.items():
                                 if hasattr(a, "llm_client") and a.llm_client is not None:
                                     original_llm_clients[name] = a.llm_client
@@ -2005,17 +2204,24 @@ async def chat_endpoint(
                         db=db,
                         model_name=model_name
                     ):
-                        accumulated.append(event)
+                        if isinstance(event, str) and "event: state_snapshot" in event:
+                            try:
+                                for line in event.split("\n"):
+                                    if line.startswith("data:"):
+                                        state_snapshot_for_db = json.loads(line[5:].strip())
+                                        break
+                            except Exception:
+                                pass
                         yield event
                 except Exception as e:
                     logger.error(f"❌ SSE 流式传输错误: {e}", exc_info=True)
                     error_event = f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
-                    accumulated.append(error_event)
                     yield error_event
                 finally:
-                    # Phase 4: 流结束后写 agent 消息（不阻塞流，不写在 yield 循环内），并下发 message_id 供前端绑定
+                    # Phase 4: 流结束后写 agent 消息（有状态切片入库，废弃 content.events）
                     try:
-                        msg = MessageModel(session_id=req.session_id, role="agent", content={"events": accumulated})
+                        content = {"state_snapshot": state_snapshot_for_db if state_snapshot_for_db is not None else {"text": "", "workflow": None, "steps": [], "report": None}}
+                        msg = MessageModel(session_id=req.session_id, role="agent", content=content)
                         db.add(msg)
                         db.commit()
                         # 下发 message_saved 事件，前端可绑定到当前 AI 气泡的 dataset.messageId（commit 后 msg.id 已填充）

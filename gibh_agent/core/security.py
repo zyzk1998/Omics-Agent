@@ -12,13 +12,27 @@ from typing import Optional
 from pwdlib import PasswordHash
 from pwdlib.hashers.bcrypt import BcryptHasher
 
-# 从环境变量读取，固定默认值确保容器重启后 JWT 仍可验证（生产环境建议设置 SECRET_KEY）
-SECRET_KEY = os.environ.get(
-    "SECRET_KEY",
-    "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7",
-)
+def _load_secret_key() -> str:
+    """从环境或宿主机持久化来源读取 SECRET_KEY，不依赖容器生命周期，重启后不变。"""
+    key = (os.environ.get("SECRET_KEY") or "").strip()
+    if key:
+        return key
+    path = (os.environ.get("SECRET_KEY_FILE") or "").strip()
+    if path and os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                key = (f.read() or "").strip()
+            if key:
+                return key
+        except Exception:
+            pass
+    return "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
+
+
+SECRET_KEY = _load_secret_key()
 ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+# 默认 7 天（10080 分钟）；可通过环境变量 ACCESS_TOKEN_EXPIRE_MINUTES 覆盖
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))
 
 # 仅使用 bcrypt，不依赖 argon2（避免 HasherNotAvailable）
 pwd_context = PasswordHash((BcryptHasher(),))

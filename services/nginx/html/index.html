@@ -178,7 +178,10 @@
             .sidebar-item-unified::marker { content: none; }
             .sidebar-item-unified:hover { background-color: #f3f4f6; }
             #sidebar-pane .sidebar-item i,
-            #sidebar-pane .sidebar-item .icon { font-size: 1rem; color: #6b7280; flex-shrink: 0; width: 1rem; text-align: center; }
+            #sidebar-pane .sidebar-item .icon { font-size: 1rem; flex-shrink: 0; width: 1rem; text-align: center; }
+            /* 左边栏四大类：简约线条纯色黑色科技风格 */
+            #sidebar-pane .sidebar-middle .sidebar-item-unified .sidebar-main-icon,
+            #sidebar-pane .sidebar-middle .sidebar-favorites-title .sidebar-main-icon { color: #111 !important; font-size: 1.1rem !important; stroke-width: 1.5; }
             #sidebar-pane .sidebar-accordion { margin: 4px 0; }
             #sidebar-pane .sidebar-accordion summary { cursor: pointer; list-style: none; }
             #sidebar-pane .sidebar-accordion summary::-webkit-details-marker { display: none; }
@@ -221,7 +224,7 @@
             .item-more-btn { opacity: 0; background: transparent; border: none; color: #9ca3af; cursor: pointer; padding: 4px; border-radius: 4px; transition: all 0.2s; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
             .sidebar-session-item:hover .item-more-btn, .sidebar-asset-item:hover .item-more-btn, .sidebar-favorite-item:hover .item-more-btn { opacity: 1; }
             .item-more-btn:hover { background: #e5e7eb; color: #1f2329; }
-            .popover-menu { position: absolute; right: 10px; top: 30px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 100; display: none; flex-direction: column; min-width: 100px; overflow: hidden; }
+            .popover-menu { position: fixed; z-index: 99999; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: none; flex-direction: column; min-width: 120px; overflow: hidden; }
             .popover-menu.show { display: flex; }
             .popover-item { padding: 8px 12px; font-size: 13px; color: #374151; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background 0.2s; }
             .popover-item:hover { background: #f3f4f6; }
@@ -232,6 +235,13 @@
             .asset-modality-group summary::-webkit-details-marker, .asset-modality-group summary::marker { display: none; }
             .asset-modality-group summary:hover { background: #f3f4f6; }
             .asset-modality-files { padding-left: 16px; margin-top: 4px; }
+            .sidebar-assets-header { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px; }
+            .sidebar-assets-header .sidebar-item-label { flex: 1; }
+            .sidebar-asset-refresh-btn { flex-shrink: 0; width: 26px; height: 26px; padding: 0; border: none; border-radius: 6px; background: #f3f4f6; color: #6b7280; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; transition: background 0.2s, color 0.2s; }
+            .sidebar-asset-refresh-btn:hover { background: #e5e7eb; color: #374151; }
+            .sidebar-asset-refresh-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+            .sidebar-asset-refresh-btn.spinning { animation: spin 0.8s linear infinite; }
+            @keyframes spin { to { transform: rotate(360deg); } }
             .empty-sidebar-hint { color: #9ca3af; font-size: 12px; padding: 10px 16px; }
             #sidebar-pane .sidebar-history-title,
             #sidebar-pane .sidebar-assets-title {
@@ -375,91 +385,220 @@
                 gap: 6px;
             }
             .header-action-btn:hover { background-color: #f3f4f6; color: #111827; }
-            /* 技能广场视图 */
+            /* 技能广场视图 - 企业级应用市场 */
             #skills-square-pane {
                 flex: 1;
                 min-width: 0;
                 display: none;
                 flex-direction: column;
                 overflow: hidden;
-                background: #f9fafb;
+                background: #f8fafc;
+                position: relative;
             }
             .skills-square-header {
-                padding: 18px 20px 10px 20px;
+                position: sticky;
+                top: 0;
+                z-index: 10;
                 background: #fff;
-                border-bottom: 1px solid #e5e7eb;
-            }
-            .skills-square-title { font-size: 20px; font-weight: 700; color: #111827; margin: 0; }
-            .skills-square-desc { font-size: 13px; color: #6b7280; margin-top: 6px; }
-            .skills-square-tabs {
+                padding: 16px 20px 12px;
+                border-bottom: 1px solid #e2e8f0;
                 display: flex;
-                gap: 10px;
-                padding: 12px 20px;
-                background: #fff;
-                border-bottom: 1px solid #e5e7eb;
-                overflow-x: auto;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 16px;
+                flex-shrink: 0;
             }
-            .skills-tab {
-                border: 1px solid #e5e7eb;
-                background: #ffffff;
-                color: #111827;
-                padding: 8px 12px;
-                border-radius: 999px;
+            .skills-square-header .skills-square-title-wrap { flex: 1; min-width: 0; }
+            .skills-square-title { font-size: 20px; font-weight: 700; color: #0f172a; margin: 0; }
+            .skills-square-desc { font-size: 13px; color: #64748b; margin-top: 4px; }
+            .skills-square-upload-btn { flex-shrink: 0; padding: 8px 14px; border-radius: 8px; border: 1px solid #3b82f6; background: #fff; color: #3b82f6; cursor: pointer; font-size: 14px; }
+            .skills-square-upload-btn:hover { background: #eff6ff; }
+            .skills-square-nav {
+                position: sticky;
+                top: 0;
+                z-index: 10;
+                background: #fff;
+                border-bottom: 1px solid #e2e8f0;
+                flex-shrink: 0;
+            }
+            .skills-square-nav-row {
+                display: flex;
+                gap: 8px;
+                padding: 10px 20px;
+                overflow-x: auto;
+                align-items: center;
+            }
+            .skills-square-nav-row:first-child { padding-top: 12px; }
+            .skills-square-nav-row:last-child { padding-bottom: 12px; }
+            .skills-nav-tab {
+                flex-shrink: 0;
+                border: 1px solid #e2e8f0;
+                background: #fff;
+                color: #475569;
+                padding: 6px 14px;
+                border-radius: 20px;
                 font-size: 13px;
                 cursor: pointer;
                 white-space: nowrap;
                 transition: all 0.2s ease;
             }
-            .skills-tab:hover { border-color: #3b82f6; color: #1d4ed8; }
-            .skills-tab.active { background: #eff6ff; border-color: #3b82f6; color: #1d4ed8; }
+            .skills-nav-tab:hover { border-color: #94a3b8; color: #0f172a; }
+            .skills-nav-tab.active { background: #e0f2fe; border-color: #0ea5e9; color: #0369a1; }
+            #admin-console-btn { display: none; align-items: center; justify-content: center; padding: 10px 16px; margin-top: 8px; color: #6b7280; cursor: pointer; border-radius: 8px; font-size: 13px; }
+            #admin-console-btn:hover { background: #f3f4f6; color: #111827; }
+            #admin-console-btn.show { display: flex; }
             .skills-square-scroll {
                 flex: 1;
                 min-height: 0;
-                overflow: auto;
-                padding: 18px 20px 26px 20px;
+                overflow-y: auto;
+                padding: 24px 20px 100px;
             }
             .skills-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-                gap: 24px;
+                gap: 20px;
             }
             .skill-card {
+                position: relative;
                 background: #fff;
                 border: 1px solid #e5e7eb;
                 border-radius: 12px;
                 padding: 16px;
-                cursor: pointer;
-                transition: all 0.2s ease;
                 display: flex;
                 flex-direction: column;
-                gap: 10px;
-                min-height: 160px;
+                gap: 12px;
+                min-height: 200px;
+                transition: box-shadow 0.2s ease, border-color 0.2s ease;
             }
             .skill-card:hover {
-                border-color: #3b82f6;
+                border-color: #93c5fd;
                 box-shadow: 0 12px 28px rgba(17, 24, 39, 0.10);
-                transform: translateY(-1px);
             }
-            .skill-card-top { display: flex; align-items: center; gap: 10px; }
-            .skill-icon { font-size: 22px; width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: #eff6ff; color: #1d4ed8; flex-shrink: 0; }
-            .skill-name { font-size: 15px; font-weight: 700; color: #111827; margin: 0; }
-            .skill-tags { display: flex; gap: 8px; flex-wrap: wrap; }
-            .skill-tag { font-size: 12px; color: #374151; background: #f3f4f6; border: 1px solid #e5e7eb; padding: 2px 8px; border-radius: 999px; }
-            .skill-desc { font-size: 13px; color: #4b5563; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; min-height: 60px; }
-            .skill-actions { display: flex; justify-content: flex-end; margin-top: auto; }
-            .skill-use-btn {
-                border: 1px solid #3b82f6;
-                background: #3b82f6;
-                color: #fff;
-                padding: 8px 12px;
+            .skill-card-header {
+                display: flex;
+                align-items: flex-start;
+                gap: 12px;
+            }
+            .skill-card .skill-icon {
+                font-size: 20px;
+                width: 36px;
+                height: 36px;
                 border-radius: 10px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                background: #e0f2fe;
+                flex-shrink: 0;
+            }
+            .skill-title-group { min-width: 0; flex: 1; }
+            .skill-card .skill-title {
+                font-size: 15px;
+                font-weight: 600;
+                color: #0f172a;
+                margin: 0 0 6px 0;
+                line-height: 1.3;
+            }
+            .skill-categories { display: flex; gap: 6px; flex-wrap: wrap; }
+            .cat-badge {
+                font-size: 11px;
+                color: #1d4ed8;
+                background: #dbeafe;
+                padding: 3px 8px;
+                border-radius: 4px;
+                border: none;
+            }
+            .skill-card .skill-desc {
+                font-size: 13px;
+                color: #4b5563;
+                line-height: 1.45;
+                display: -webkit-box;
+                -webkit-line-clamp: 3;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+                flex: 1;
+                min-height: 0;
+            }
+            .skill-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+            .skill-card .tag {
+                font-size: 11px;
+                color: #6b7280;
+                background: #f3f4f6;
+                padding: 3px 8px;
+                border-radius: 4px;
+                border: none;
+            }
+            .skill-footer {
+                display: flex;
+                align-items: center;
+                justify-content: flex-end;
+                padding-top: 8px;
+                border-top: 1px solid #f1f5f9;
+                transition: opacity 0.25s ease;
+            }
+            .skill-card:hover .skill-footer { opacity: 0.65; }
+            .footer-actions { display: flex; gap: 4px; }
+            .icon-btn {
+                width: 32px;
+                height: 32px;
+                border: none;
+                background: transparent;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 14px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                transition: background 0.2s, color 0.2s;
+            }
+            .icon-btn:hover { background: #e5e7eb; color: #3b82f6; }
+            .skill-use-btn {
+                position: absolute;
+                bottom: 16px;
+                right: 16px;
+                opacity: 0;
+                transform: translateY(10px);
+                transition: all 0.3s ease;
+                background: #3b82f6;
+                color: white;
+                border: none;
+                padding: 6px 16px;
+                border-radius: 20px;
                 font-size: 13px;
                 cursor: pointer;
-                transition: all 0.2s ease;
+                z-index: 2;
             }
-            .skill-use-btn:hover { background: #2563eb; border-color: #2563eb; }
-            .skill-card .skill-use-btn { opacity: 0; transform: translateY(10px); transition: all 0.3s ease; }
+            .skill-use-btn:hover { background: #2563eb; color: white; }
             .skill-card:hover .skill-use-btn { opacity: 1; transform: translateY(0); }
+            .skills-square-pager {
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                flex-shrink: 0;
+                background: #fff;
+                border-top: 1px solid #e2e8f0;
+                padding: 12px 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                font-size: 13px;
+                color: #64748b;
+            }
+            .skills-square-pager .pager-btn {
+                padding: 6px 12px;
+                border: 1px solid #e2e8f0;
+                background: #fff;
+                border-radius: 6px;
+                cursor: pointer;
+                color: #475569;
+            }
+            .skills-square-pager .pager-btn:hover:not(:disabled) { border-color: #0ea5e9; color: #0ea5e9; }
+            .skills-square-pager .pager-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+            .skills-square-pager .pager-num { padding: 6px 10px; border-radius: 6px; cursor: pointer; color: #475569; }
+            .skills-square-pager .pager-num:hover { background: #f1f5f9; }
+            .skills-square-pager .pager-num.current { background: #e0f2fe; color: #0369a1; font-weight: 600; }
+            .skills-square-empty { text-align: center; padding: 48px 20px; color: #94a3b8; font-size: 15px; }
             /* ================= 右栏按需滑出 ================= */
             #workspace-pane {
                 width: 0;
@@ -473,8 +612,8 @@
                 flex-direction: column;
             }
             #workspace-pane.workspace-active {
-                width: 45%;
-                min-width: 400px;
+                width: 30%;
+                min-width: 267px;
                 opacity: 1;
                 border-left: 1px solid #e5e7eb;
                 overflow: hidden;
@@ -740,6 +879,36 @@
             .suggestion-chip-icon {
                 margin-right: 4px;
                 opacity: 0.9;
+            }
+
+            /* 推荐追问（从 <<>> 解析）：flex 芯片行，圆角 + hover */
+            .suggestion-chips {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                align-items: center;
+                margin-top: 12px;
+                padding-top: 10px;
+                border-top: 1px solid #e5e7eb;
+                width: 100%;
+            }
+            .suggestion-chips .chip {
+                display: inline-flex;
+                align-items: center;
+                padding: 6px 14px;
+                background: #f3f4f6;
+                color: #374151;
+                border: 1px solid #e5e7eb;
+                border-radius: 20px;
+                font-size: 13px;
+                cursor: pointer;
+                transition: background 0.2s, border-color 0.2s, transform 0.15s;
+            }
+            .suggestion-chips .chip:hover {
+                background: #eef2ff;
+                border-color: #c7d2fe;
+                color: var(--primary-color, #4f46e5);
+                transform: translateY(-1px);
             }
 
             .message-action-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; opacity: 0; transition: opacity 0.2s ease; }
@@ -1589,17 +1758,22 @@
                     </button>
                 </div>
                 <div class="sidebar-middle">
-                    <div class="sidebar-item sidebar-item-unified" id="btn-skills-square"><span class="icon">🧩</span><span class="sidebar-item-label">技能广场</span></div>
+                    <div class="sidebar-item sidebar-item-unified" id="btn-skills-square"><i class="bi bi-grid-3x3-gap sidebar-main-icon"></i><span class="sidebar-item-label">技能广场</span></div>
                     <details class="sidebar-favorites-section">
-                        <summary class="sidebar-item sidebar-item-unified sidebar-favorites-title"><i class="bi bi-star"></i><span class="sidebar-item-label">工作流收藏夹</span></summary>
+                        <summary class="sidebar-item sidebar-item-unified sidebar-favorites-title"><i class="bi bi-star sidebar-main-icon"></i><span class="sidebar-item-label">工作流收藏夹</span></summary>
                         <div id="sidebar-favorite-list" class="sidebar-favorite-list"></div>
                     </details>
                     <details class="sidebar-favorites-section">
-                        <summary class="sidebar-item sidebar-item-unified sidebar-favorites-title">🕒 <span class="sidebar-item-label">历史会话</span></summary>
+                        <summary class="sidebar-item sidebar-item-unified sidebar-favorites-title"><i class="bi bi-clock sidebar-main-icon"></i><span class="sidebar-item-label">历史会话</span></summary>
                         <div id="sidebar-sessions-list" class="sidebar-sub-list"></div>
                     </details>
                     <details class="sidebar-favorites-section">
-                        <summary class="sidebar-item sidebar-item-unified sidebar-favorites-title">🗄️ <span class="sidebar-item-label">数据资产</span></summary>
+                        <summary class="sidebar-item sidebar-item-unified sidebar-favorites-title">
+                            <span class="sidebar-assets-header">
+                                <span><i class="bi bi-folder2 sidebar-main-icon"></i><span class="sidebar-item-label">数据资产</span></span>
+                                <button type="button" id="sidebar-asset-refresh-btn" class="sidebar-asset-refresh-btn" title="刷新并重新分类：同步上传数据，将未分类文件归入对应类别" aria-label="刷新数据资产"><i class="bi bi-arrow-clockwise"></i></button>
+                            </span>
+                        </summary>
                         <div id="sidebar-assets-list" class="sidebar-sub-list"></div>
                     </details>
                 </div>
@@ -1612,30 +1786,51 @@
                         </div>
                         <i class="bi bi-chevron-down ms-auto sidebar-user-chevron" style="font-size:12px;color:#6b7280;"></i>
                     </div>
+                    <div id="admin-console-btn" class="sidebar-item" title="管理员审核技能">🛡️ 管理员控制台</div>
                 </div>
             </aside>
 
             <div class="resizer" id="resizer-left"></div>
 
-            <!-- 技能广场（平台化入口视图，替换中栏+右栏） -->
+            <!-- 技能广场（企业级应用市场：正交过滤 + 真分页） -->
             <div id="skills-square-pane">
                 <div class="skills-square-header">
-                    <div class="skills-square-title">技能广场</div>
-                    <div class="skills-square-desc">选择一个“技能”即可一键注入专业 Prompt，快速进入对应模态的标准分析工作流。</div>
+                    <div class="skills-square-title-wrap">
+                        <div class="skills-square-title">技能广场</div>
+                        <div class="skills-square-desc">选择技能一键注入专业 Prompt，快速进入标准分析工作流。</div>
+                    </div>
+                    <button type="button" class="skills-square-upload-btn" id="btn-upload-skill" title="上传技能（需登录）">⬆️ 上传技能</button>
                 </div>
-                <div class="skills-square-tabs" id="skillsTabs">
-                    <button class="skills-tab active" data-cat="全部">全部</button>
-                    <button class="skills-tab" data-cat="转录组学">转录组学</button>
-                    <button class="skills-tab" data-cat="空间组学">空间组学</button>
-                    <button class="skills-tab" data-cat="代谢组学">代谢组学</button>
-                    <button class="skills-tab" data-cat="医学影像组学">医学影像组学</button>
-                    <button class="skills-tab" data-cat="基因组学">基因组学</button>
-                    <button class="skills-tab" data-cat="表观遗传组学">表观遗传组学</button>
-                    <button class="skills-tab" data-cat="蛋白质组学">蛋白质组学</button>
+                <div class="skills-square-nav">
+                    <div class="skills-square-nav-row" id="skillsNavMain">
+                        <button type="button" class="skills-nav-tab active" data-main="">全部</button>
+                        <button type="button" class="skills-nav-tab" data-main="多模态组学">多模态组学</button>
+                        <button type="button" class="skills-nav-tab" data-main="生命科学">生命科学</button>
+                        <button type="button" class="skills-nav-tab" data-main="医药科学">医药科学</button>
+                        <button type="button" class="skills-nav-tab" data-main="化学">化学</button>
+                    </div>
+                    <div class="skills-square-nav-row" id="skillsNavSub">
+                        <!-- 动态渲染：多模态组学 -> 7 组学；其他/全部 -> 公共场景 -->
+                    </div>
                 </div>
                 <div class="skills-square-scroll">
                     <div class="skills-grid" id="skillsGrid"></div>
+                    <div id="skillsEmptyState" class="skills-square-empty" style="display: none;">暂无匹配技能</div>
                 </div>
+                <div class="skills-square-pager" id="skillsPager" style="display: none;"></div>
+            </div>
+
+            <!-- 历史会话专属页（与技能广场同级，点击「查看全部历史记录」时显示） -->
+            <div id="history-page-pane" style="display: none; flex: 1; padding: 40px; overflow-y: auto; background: #fff;">
+                <h2 style="margin-bottom: 16px; font-size: 1.5rem; color: #111827;">历史会话</h2>
+                <input type="text" id="history-search-input" placeholder="搜索历史会话..." style="padding: 8px 12px; border-radius: 6px; border: 1px solid #ccc; width: 300px; margin-bottom: 20px;">
+                <div id="full-history-list"></div>
+            </div>
+
+            <!-- 管理员控制台（待审核技能列表） -->
+            <div id="admin-console-pane" style="display: none; flex: 1; padding: 40px; overflow-y: auto; background: #fff;">
+                <h2 style="margin-bottom: 20px; font-size: 1.5rem; color: #111827;">🛡️ 待审核技能</h2>
+                <div id="admin-pending-skills-table-wrap"></div>
             </div>
 
             <!-- 中栏：对话 + 空状态引导 -->
@@ -1677,9 +1872,9 @@
                             <label for="fileInput" class="ghost-btn file-upload-label" title="上传文件"><i class="bi bi-paperclip"></i></label>
                             <div class="model-select-wrap" title="模型切换">
                                 <select id="modelSelect" class="ghost-btn model-select-native" title="模型切换" style="appearance: none; outline: none; cursor: pointer;">
-                                    <option value="deepseek-ai/DeepSeek-R1" selected>🧠 DeepSeek-R1 (深度思考)</option>
-                                    <option value="Qwen/Qwen3.5-397B-A17B">⚡ Qwen 3.5 (极速全能)</option>
-                                    <option value="Pro/zai-org/GLM-5">⚡ GLM-5 Pro (极速全能)</option>
+                                    <option value="qwen3.5-plus">🚀 Qwen3.5-Plus (阿里云旗舰)</option>
+                                    <option value="deepseek-ai/DeepSeek-R1" selected>🧠 DeepSeek-R1 (硅基流动)</option>
+                                    <option value="Pro/zai-org/GLM-5">⚡ GLM-5 Pro (硅基流动)</option>
                                 </select>
                                 <span class="model-chevron">▼</span>
                             </div>
@@ -1756,6 +1951,52 @@
                 <p id="auth-modal-error" class="auth-error" style="display: none;"></p>
             </div>
         </div>
+
+        <!-- 上传技能 Modal -->
+        <div id="skill-upload-modal" class="auth-modal-overlay" style="display: none;" aria-hidden="true">
+            <div class="auth-modal-backdrop" id="skill-upload-modal-backdrop"></div>
+            <div class="auth-modal-card" style="min-width: 480px; max-width: 90vw;">
+                <button type="button" class="auth-modal-close" id="skill-upload-modal-close" title="关闭">&times;</button>
+                <h3 style="margin: 0 0 16px 0; font-size: 18px;">上传技能</h3>
+                <form id="skill-upload-form">
+                    <div style="margin-bottom: 12px;">
+                        <label style="display: block; margin-bottom: 4px; font-size: 13px; color: #374151;">技能名称 <span style="color:#ef4444;">*</span></label>
+                        <input type="text" id="skill-upload-name" required maxlength="256" placeholder="例如：单细胞质控与聚类" style="width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box;">
+                    </div>
+                    <div style="margin-bottom: 12px;">
+                        <label style="display: block; margin-bottom: 4px; font-size: 13px; color: #374151;">大类</label>
+                        <select id="skill-upload-main-cat" style="width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px;">
+                            <option value="">请选择</option>
+                            <option value="转录组学">转录组学</option>
+                            <option value="空间组学">空间组学</option>
+                            <option value="代谢组学">代谢组学</option>
+                            <option value="医学影像组学">医学影像组学</option>
+                            <option value="基因组学">基因组学</option>
+                            <option value="表观遗传组学">表观遗传组学</option>
+                            <option value="蛋白质组学">蛋白质组学</option>
+                        </select>
+                    </div>
+                    <div style="margin-bottom: 12px;">
+                        <label style="display: block; margin-bottom: 4px; font-size: 13px; color: #374151;">小类</label>
+                        <input type="text" id="skill-upload-sub-cat" maxlength="128" placeholder="可选，如：质控与聚类" style="width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box;">
+                    </div>
+                    <div style="margin-bottom: 12px;">
+                        <label style="display: block; margin-bottom: 4px; font-size: 13px; color: #374151;">描述</label>
+                        <textarea id="skill-upload-desc" rows="3" maxlength="10000" placeholder="简要描述该技能的用途" style="width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 4px; font-size: 13px; color: #374151;">Prompt 模板</label>
+                        <textarea id="skill-upload-prompt" rows="5" maxlength="50000" placeholder="用户使用该技能时将被注入的 Prompt 内容" style="width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box; resize: vertical;"></textarea>
+                    </div>
+                    <p id="skill-upload-error" style="display: none; color: #ef4444; font-size: 13px; margin-bottom: 8px;"></p>
+                    <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                        <button type="button" class="skills-square-upload-btn" id="skill-upload-cancel" style="border-color:#9ca3af; color:#6b7280;">取消</button>
+                        <button type="submit" class="skills-square-upload-btn" id="skill-upload-submit" style="background:#3b82f6; color:#fff; border-color:#3b82f6;">提交</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <style>
             .auth-modal-overlay { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; }
             .auth-modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.45); backdrop-filter: blur(6px); }
@@ -1846,6 +2087,13 @@
                 });
             }
             function getStoredUsername() { return localStorage.getItem('username') || ''; }
+            function getStoredRole() { return localStorage.getItem('user_role') || 'user'; }
+            function showAdminConsoleIfNeeded() {
+                var btn = document.getElementById('admin-console-btn');
+                if (!btn) return;
+                if (getStoredRole() === 'admin') { btn.classList.add('show'); btn.style.display = 'flex'; }
+                else { btn.classList.remove('show'); btn.style.display = 'none'; }
+            }
             function isLoggedIn() { return !!localStorage.getItem('access_token'); }
 
             // 🔥 关键变量提前声明，避免暂时性死区错误
@@ -1938,24 +2186,157 @@
                 proteomics: "【角色设定】你是一位资深的蛋白质组学与质谱分析专家。\n\n【组学类型】蛋白质组学 (Proteomics)\n\n【分析内容和步骤】\n1. [原始谱图质控与搜库]\n2. [定量与归一化]\n3. [差异蛋白筛选与富集分析]\n4. [蛋白质互作网络与通路解读]\n\n【输出要求】请输出火山图、热图与互作网络，并解读关键蛋白与通路。"
             };
 
-            // ================= Skills Square (平台化 Mock 数据 + Prompt 注入) =================
-            const SKILLS_DATA = [
-                { id: 'sc_standard', name: '转录组学标准全流程', category: '转录组学', icon: '🧬', tags: ['数据分析', '生命科学'], desc: '一键生成 scRNA-seq 质控、降维聚类、多分辨率鲁棒性对比、Marker 注释、差异与通路富集的标准工作流。', prompt_key: 'transcriptomics' },
-                { id: 'sp_domain', name: '空间域识别与聚类', category: '空间组学', icon: '🗺️', tags: ['数据分析', '空间组学'], desc: '聚焦空间域识别：坐标/影像校验、空间高变基因、降维聚类、多分辨率空间域物理映射对比。', prompt_key: 'spatial' },
-                { id: 'mb_biomarker', name: '差异标志物发现', category: '代谢组学', icon: '🧪', tags: ['数据分析', '生物标志物'], desc: '面向代谢物 biomarker：缺失值与归一化、PCA/PLS-DA、多维模型效能对比、VIP 与显著性筛选、通路拓扑解释。', prompt_key: 'metabolomics' },
-                { id: 'rd_modeling', name: '多算法诊断模型构建', category: '医学影像组学', icon: '🩻', tags: ['机器学习', '医学影像'], desc: '影像组学建模：ROI/数据校验、特征提取、LR/SVM/RF 多算法 ROC 对比、特征相关性聚类热图与 Rad-Score。', prompt_key: 'radiomics' },
-                { id: 'genomics_variant', name: '基因组变异检测', category: '基因组学', icon: '🧬', tags: ['基因组学', '变异'], desc: '从原始测序数据到变异 calling、注释与致病性评估，输出质控与变异解读报告。', prompt_key: 'genomics' },
-                { id: 'epigenomics_peak', name: '表观遗传峰与 motif 分析', category: '表观遗传组学', icon: '📊', tags: ['表观遗传', 'ChIP/ATAC'], desc: '峰 calling、差异分析、motif 富集与转录组/基因组整合解读。', prompt_key: 'epigenomics' },
-                { id: 'proteomics_network', name: '蛋白质互作网络分析', category: '蛋白质组学', icon: '🔗', tags: ['蛋白质组学', '互作网络'], desc: '质谱定量、差异蛋白、富集分析与蛋白质互作网络构建与通路解读。', prompt_key: 'proteomics' }
-            ];
+            // ================= Skills Square (正交过滤 + 真分页 API) =================
+            var SKILLS_MAIN_CATS = ['', '多模态组学', '生命科学', '医药科学', '化学'];
+            var SKILLS_SUB_OMICS = ['', '转录组学', '空间组学', '代谢组学', '医学影像组学', '基因组学', '表观遗传组学', '蛋白质组学'];
+            var SKILLS_SUB_COMMON = ['', '临床应用', '信息检索', '合规管理', '数据分析', '数据可视化', '数据处理', '文本处理', '预测与建模'];
+            var skillsCurrentMain = '';
+            var skillsCurrentSub = '';
+            var skillsCurrentPage = 1;
+            var skillsTotal = 0;
+            var skillsPageSize = 12;
+
+            function renderSkillsSubTabs() {
+                var row = document.getElementById('skillsNavSub');
+                if (!row) return;
+                var tabs = (skillsCurrentMain === '多模态组学') ? SKILLS_SUB_OMICS : SKILLS_SUB_COMMON;
+                row.innerHTML = tabs.map(function(v) {
+                    var label = v || '全部';
+                    var active = (v === skillsCurrentSub) ? ' active' : '';
+                    return '<button type="button" class="skills-nav-tab' + active + '" data-sub="' + (v ? escapeHtmlForCard(v) : '') + '">' + escapeHtmlForCard(label) + '</button>';
+                }).join('');
+                row.querySelectorAll('.skills-nav-tab').forEach(function(btn) {
+                    btn.onclick = function() {
+                        skillsCurrentSub = (btn.getAttribute('data-sub') || '').trim();
+                        document.querySelectorAll('#skillsNavSub .skills-nav-tab').forEach(function(b) { b.classList.remove('active'); });
+                        btn.classList.add('active');
+                        fetchSkills(skillsCurrentMain, skillsCurrentSub, 1);
+                    };
+                });
+            }
+
+            function fetchSkills(mainCat, subCat, page) {
+                skillsCurrentMain = mainCat || '';
+                skillsCurrentSub = subCat || '';
+                skillsCurrentPage = page || 1;
+                var grid = document.getElementById('skillsGrid');
+                var emptyEl = document.getElementById('skillsEmptyState');
+                var pagerEl = document.getElementById('skillsPager');
+                if (grid) grid.innerHTML = '<div class="skills-square-empty">加载中...</div>';
+                if (emptyEl) emptyEl.style.display = 'none';
+                var params = new URLSearchParams();
+                if (skillsCurrentMain) params.set('main_cat', skillsCurrentMain);
+                if (skillsCurrentSub) params.set('sub_cat', skillsCurrentSub);
+                params.set('page', String(skillsCurrentPage));
+                params.set('size', String(skillsPageSize));
+                fetch('/api/skills?' + params.toString(), { method: 'GET', headers: getAuthHeaders() })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        var items = (data && data.items) || [];
+                        skillsTotal = (data && data.total) != null ? data.total : 0;
+                        if (!grid) return;
+                        if (items.length === 0) {
+                            grid.innerHTML = '';
+                            window._lastSkillsItems = [];
+                            if (emptyEl) { emptyEl.textContent = '暂无匹配技能'; emptyEl.style.display = 'block'; }
+                        } else {
+                            window._lastSkillsItems = items;
+                            if (emptyEl) emptyEl.style.display = 'none';
+                            var skillCardIcons = { '转录组学': '🧬', '空间组学': '🗺️', '代谢组学': '🧪', '医学影像组学': '🩻', '基因组学': '🧬', '表观遗传组学': '📊', '蛋白质组学': '🔗' };
+                            grid.innerHTML = items.map(function(s) {
+                                var name = (s.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                                var desc = (s.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                                var mainCat = (s.main_category || '').replace(/</g, '&lt;');
+                                var subCat = (s.sub_category || '').replace(/</g, '&lt;');
+                                var icon = skillCardIcons[s.sub_category] || '🧬';
+                                var catBadges = '';
+                                if (mainCat) catBadges += '<span class="cat-badge">' + mainCat + '</span>';
+                                if (subCat) catBadges += '<span class="cat-badge">' + subCat + '</span>';
+                                var tagsHtml = '<span class="tag">API</span><span class="tag">数据分析</span>';
+                                return '<div class="skill-card" data-skill-id="' + s.id + '">' +
+                                    '<div class="skill-card-header">' +
+                                    '<div class="skill-icon">' + icon + '</div>' +
+                                    '<div class="skill-title-group">' +
+                                    '<h3 class="skill-title">' + name + '</h3>' +
+                                    '<div class="skill-categories">' + catBadges + '</div></div></div>' +
+                                    '<div class="skill-desc">' + desc + '</div>' +
+                                    '<div class="skill-tags">' + tagsHtml + '</div>' +
+                                    '<div class="skill-footer">' +
+                                    '<div class="footer-actions">' +
+                                    '<button type="button" class="icon-btn" title="添加到我的工具">➕</button>' +
+                                    '<button type="button" class="icon-btn" title="分享">🔗</button>' +
+                                    '<button type="button" class="icon-btn" title="复制">📋</button></div></div>' +
+                                    '<button type="button" class="skill-use-btn" data-skill-id="' + s.id + '">🪄 使用此技能</button></div>';
+                            }).join('');
+                            grid.querySelectorAll('.skill-use-btn').forEach(function(btn) {
+                                btn.onclick = function(e) {
+                                    e.stopPropagation();
+                                    var id = btn.getAttribute('data-skill-id');
+                                    var item = items.find(function(s) { return String(s.id) === String(id); });
+                                    if (item) useSkillFromApi(item);
+                                };
+                            });
+                        }
+                        var totalPages = Math.max(1, Math.ceil(skillsTotal / skillsPageSize));
+                        if (pagerEl) {
+                            if (skillsTotal <= 0) { pagerEl.style.display = 'none'; return; }
+                            pagerEl.style.display = 'flex';
+                            var prevDisabled = skillsCurrentPage <= 1;
+                            var nextDisabled = skillsCurrentPage >= totalPages;
+                            var nums = [];
+                            for (var i = 1; i <= Math.min(totalPages, 7); i++) nums.push(i);
+                            if (totalPages > 7 && skillsCurrentPage > 4) {
+                                nums = [1, '...'].concat([skillsCurrentPage - 1, skillsCurrentPage, skillsCurrentPage + 1].filter(function(n) { return n >= 1 && n <= totalPages; }));
+                                if (skillsCurrentPage + 1 < totalPages) nums.push('...', totalPages);
+                            } else if (totalPages > 7) nums.push('...', totalPages);
+                            pagerEl.innerHTML = '<button type="button" class="pager-btn" data-action="prev"' + (prevDisabled ? ' disabled' : '') + '>&lt;</button>' +
+                                nums.map(function(n) {
+                                    if (n === '...') return '<span class="pager-num">...</span>';
+                                    var cur = n === skillsCurrentPage ? ' current' : '';
+                                    return '<button type="button" class="pager-num' + cur + '" data-page="' + n + '">' + n + '</button>';
+                                }).join('') +
+                                '<button type="button" class="pager-btn" data-action="next"' + (nextDisabled ? ' disabled' : '') + '>&gt;</button>' +
+                                '<span style="margin-left:12px;color:#64748b;">共 ' + skillsTotal + ' 条</span>';
+                            pagerEl.querySelectorAll('.pager-btn[data-action="prev"]').forEach(function(b) {
+                                b.onclick = function() { if (!prevDisabled) fetchSkills(skillsCurrentMain, skillsCurrentSub, skillsCurrentPage - 1); };
+                            });
+                            pagerEl.querySelectorAll('.pager-btn[data-action="next"]').forEach(function(b) {
+                                b.onclick = function() { if (!nextDisabled) fetchSkills(skillsCurrentMain, skillsCurrentSub, skillsCurrentPage + 1); };
+                            });
+                            pagerEl.querySelectorAll('.pager-num[data-page]').forEach(function(b) {
+                                b.onclick = function() { fetchSkills(skillsCurrentMain, skillsCurrentSub, parseInt(b.getAttribute('data-page'), 10)); };
+                            });
+                        }
+                    })
+                    .catch(function(e) {
+                        if (grid) grid.innerHTML = '';
+                        if (emptyEl) { emptyEl.textContent = '加载失败，请稍后重试'; emptyEl.style.display = 'block'; }
+                        if (pagerEl) pagerEl.style.display = 'none';
+                    });
+            }
+
+            function useSkillFromApi(skill) {
+                showChatView();
+                var inp = document.getElementById('userInput');
+                if (inp && skill && (skill.prompt_template || skill.name)) {
+                    inp.value = skill.prompt_template || ('请执行与「' + skill.name + '」相关的分析流程。');
+                    if (typeof autoResize === 'function') autoResize(inp);
+                    if (typeof checkInput === 'function') checkInput();
+                    inp.focus();
+                }
+            }
 
             function showSkillsView() {
                 const skillsPane = document.getElementById('skills-square-pane');
                 const chatPane = document.getElementById('chat-pane');
+                const historyPane = document.getElementById('history-page-pane');
+                const adminPane = document.getElementById('admin-console-pane');
                 const wsPane = document.getElementById('workspace-pane');
                 const rzR = document.getElementById('resizer-right');
                 if (skillsPane) skillsPane.style.display = 'flex';
                 if (chatPane) chatPane.style.display = 'none';
+                if (historyPane) historyPane.style.display = 'none';
+                if (adminPane) adminPane.style.display = 'none';
                 if (wsPane) wsPane.style.display = 'none';
                 if (rzR) rzR.style.display = 'none';
             }
@@ -1969,42 +2350,52 @@
                 if (wsPane) wsPane.style.display = 'flex';
                 if (rzR) rzR.style.display = 'block';
             }
-            function renderSkillsSquare(category) {
-                const grid = document.getElementById('skillsGrid');
-                if (!grid) return;
-                const cat = category || '全部';
-                const list = cat === '全部' ? SKILLS_DATA : SKILLS_DATA.filter(s => s.category === cat);
-                grid.innerHTML = list.map(s => {
-                    const tags = (s.tags || []).map(t => `<span class="skill-tag">${escapeHtmlForCard(t)}</span>`).join('');
-                    return `
-                        <div class="skill-card" data-skill-id="${escapeHtmlForCard(s.id)}">
-                            <div class="skill-card-top">
-                                <div class="skill-icon">${escapeHtmlForCard(s.icon || '🧩')}</div>
-                                <div style="min-width:0;">
-                                    <div class="skill-name">${escapeHtmlForCard(s.name)}</div>
-                                    <div class="skill-tags">${tags}</div>
-                                </div>
-                            </div>
-                            <div class="skill-desc">${escapeHtmlForCard(s.desc || '')}</div>
-                            <div class="skill-actions">
-                                <button class="skill-use-btn" data-skill-id="${escapeHtmlForCard(s.id)}">🪄 使用此技能</button>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
+            function switchToChatView() {
+                const skillsPane = document.getElementById('skills-square-pane');
+                const historyPane = document.getElementById('history-page-pane');
+                const adminPane = document.getElementById('admin-console-pane');
+                const chatPane = document.getElementById('chat-pane');
+                const wsPane = document.getElementById('workspace-pane');
+                const rzR = document.getElementById('resizer-right');
+                if (skillsPane) skillsPane.style.display = 'none';
+                if (historyPane) historyPane.style.display = 'none';
+                if (adminPane) adminPane.style.display = 'none';
+                if (chatPane) chatPane.style.display = 'flex';
+                if (wsPane) wsPane.style.display = 'flex';
+                if (rzR) rzR.style.display = 'block';
+            }
+            function switchToHistoryView() {
+                const skillsPane = document.getElementById('skills-square-pane');
+                const historyPane = document.getElementById('history-page-pane');
+                const chatPane = document.getElementById('chat-pane');
+                const adminPane = document.getElementById('admin-console-pane');
+                const wsPane = document.getElementById('workspace-pane');
+                const rzR = document.getElementById('resizer-right');
+                if (skillsPane) skillsPane.style.display = 'none';
+                if (chatPane) chatPane.style.display = 'none';
+                if (adminPane) adminPane.style.display = 'none';
+                if (historyPane) historyPane.style.display = 'flex';
+                if (wsPane) wsPane.style.display = 'none';
+                if (rzR) rzR.style.display = 'none';
+            }
+            function switchToAdminView() {
+                const skillsPane = document.getElementById('skills-square-pane');
+                const historyPane = document.getElementById('history-page-pane');
+                const chatPane = document.getElementById('chat-pane');
+                const adminPane = document.getElementById('admin-console-pane');
+                const wsPane = document.getElementById('workspace-pane');
+                const rzR = document.getElementById('resizer-right');
+                if (skillsPane) skillsPane.style.display = 'none';
+                if (chatPane) chatPane.style.display = 'none';
+                if (historyPane) historyPane.style.display = 'none';
+                if (adminPane) adminPane.style.display = 'flex';
+                if (wsPane) wsPane.style.display = 'none';
+                if (rzR) rzR.style.display = 'none';
+                if (typeof fetchAdminPendingSkills === 'function') fetchAdminPendingSkills();
             }
             function useSkillById(skillId) {
-                const skill = SKILLS_DATA.find(s => s.id === skillId);
-                if (!skill) return;
-                showChatView();
-                const inp = document.getElementById('userInput');
-                const key = skill.prompt_key;
-                if (inp && key && OMICS_PROMPT_TEMPLATES[key]) {
-                    inp.value = OMICS_PROMPT_TEMPLATES[key];
-                    autoResize(inp);
-                    checkInput();
-                    inp.focus();
-                }
+                var item = window._lastSkillsItems && window._lastSkillsItems.find(function(s) { return String(s.id) === String(skillId); });
+                if (item) useSkillFromApi(item);
             }
 
             function initResizablePanes() {
@@ -2186,6 +2577,7 @@
                     }
                 }
                 area.title = isLoggedIn() ? '点击退出登录' : '点击登录/注册';
+                if (typeof showAdminConsoleIfNeeded === 'function') showAdminConsoleIfNeeded();
             }
             function openAuthModal() {
                 var el = document.getElementById('auth-modal');
@@ -2199,6 +2591,21 @@
             function closeAllPopovers() {
                 document.querySelectorAll('.popover-menu.show').forEach(function(m) { m.classList.remove('show'); });
             }
+            function openPopoverAt(btnEl, popoverEl) {
+                if (!btnEl || !popoverEl) return;
+                closeAllPopovers();
+                var rect = btnEl.getBoundingClientRect();
+                popoverEl.style.top = (rect.bottom + 2) + 'px';
+                popoverEl.style.left = rect.left + 'px';
+                popoverEl.classList.add('show');
+                setTimeout(function() {
+                    document.addEventListener('click', function _once() { closeAllPopovers(); document.removeEventListener('click', _once); });
+                }, 0);
+            }
+            (function() {
+                var sidebarMiddle = document.querySelector('#sidebar-pane .sidebar-middle');
+                if (sidebarMiddle) sidebarMiddle.addEventListener('scroll', closeAllPopovers);
+            })();
             // ================= Phase 5: 历史会话与数据资产 =================
             function fetchSessions() {
                 fetch('/api/sessions', { method: 'GET', headers: getAuthHeaders() })
@@ -2214,7 +2621,8 @@
                             el.appendChild(hint);
                             return;
                         }
-                        list.forEach(function(s) {
+                        var displayList = list.slice(0, 5);
+                        displayList.forEach(function(s) {
                             var item = document.createElement('div');
                             item.className = 'sidebar-session-item';
                             item.title = s.title || s.id;
@@ -2227,11 +2635,22 @@
                             moreBtn.type = 'button';
                             moreBtn.className = 'item-more-btn';
                             moreBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>';
-                            moreBtn.onclick = function(ev) { ev.preventDefault(); ev.stopPropagation(); closeAllPopovers(); var p = this.nextElementSibling; p.classList.toggle('show'); setTimeout(function() { document.addEventListener('click', function _once() { closeAllPopovers(); document.removeEventListener('click', _once); }); }, 0); };
+                            moreBtn.onclick = function(ev) { ev.preventDefault(); ev.stopPropagation(); openPopoverAt(this, this.nextElementSibling); };
                             var popover = document.createElement('div');
                             popover.className = 'popover-menu';
-                            popover.innerHTML = '<div class="popover-item danger" data-action="delete"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg> 删除</div>';
-                            popover.querySelector('.popover-item').onclick = function(ev) {
+                            popover.innerHTML = '<div class="popover-item" data-action="rename">✏️ 重命名</div><div class="popover-item danger" data-action="delete"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg> 删除</div>';
+                            popover.querySelector('[data-action="rename"]').onclick = function(ev) {
+                                ev.preventDefault(); ev.stopPropagation();
+                                var sid = item.dataset.sessionId;
+                                var oldTitle = (s.title || s.id || '未命名').slice(0, 80);
+                                var newTitle = prompt('请输入新名称:', oldTitle);
+                                if (newTitle === null || (newTitle = (newTitle || '').trim()) === '') return;
+                                fetch('/api/sessions/' + encodeURIComponent(sid), { method: 'PUT', headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }), body: JSON.stringify({ title: newTitle }) })
+                                    .then(function(r) { if (!r.ok) return r.json().then(function(d) { throw d; }); return r.json(); })
+                                    .then(function() { closeAllPopovers(); if (typeof fetchSessions === 'function') fetchSessions(); })
+                                    .catch(function(e) { console.warn('[renameSession]', e); alert(e.detail || '重命名失败'); });
+                            };
+                            popover.querySelector('[data-action="delete"]').onclick = function(ev) {
                                 ev.preventDefault(); ev.stopPropagation();
                                 if (!confirm('确定要删除此记录吗？')) return;
                                 var sid = item.dataset.sessionId;
@@ -2246,11 +2665,107 @@
                             item.onclick = function(ev) { if (ev.target.closest && !ev.target.closest('.item-more-btn') && !ev.target.closest('.popover-menu')) { ev.preventDefault(); ev.stopPropagation(); loadSessionAndRestore(s.id, s.title); } };
                             el.appendChild(item);
                         });
+                        var btnAll = document.getElementById('btn-view-all-history');
+                        if (btnAll) btnAll.remove();
+                        var viewAllBtn = document.createElement('div');
+                        viewAllBtn.className = 'sidebar-item';
+                        viewAllBtn.id = 'btn-view-all-history';
+                        viewAllBtn.style.cssText = 'color: #3b82f6; justify-content: center; cursor: pointer;';
+                        viewAllBtn.textContent = '查看全部历史记录';
+                        viewAllBtn.onclick = function() {
+                            if (typeof switchToHistoryView === 'function') switchToHistoryView();
+                            fetch('/api/sessions', { method: 'GET', headers: getAuthHeaders() })
+                                .then(function(r) { return r.ok ? r.json() : Promise.reject(new Error(r.status)); })
+                                .then(function(fullList) {
+                                    window.cachedFullSessionsList = fullList || [];
+                                    if (typeof renderFullHistoryList === 'function') renderFullHistoryList(window.cachedFullSessionsList);
+                                    if (!window._historySearchBound) {
+                                        window._historySearchBound = true;
+                                        var searchInput = document.getElementById('history-search-input');
+                                        if (searchInput) searchInput.addEventListener('input', function() {
+                                            var q = (this.value || '').trim().toLowerCase();
+                                            document.querySelectorAll('#full-history-list .full-history-item').forEach(function(node) {
+                                                var title = (node.dataset.title || '').toLowerCase();
+                                                node.style.display = (q === '' || title.indexOf(q) >= 0) ? '' : 'none';
+                                            });
+                                        });
+                                    }
+                                })
+                                .catch(function(e) { console.warn('[viewAllHistory]', e); });
+                        };
+                        el.appendChild(viewAllBtn);
                     })
                     .catch(function(e) { console.warn('[fetchSessions]', e); var el = document.getElementById('sidebar-sessions-list'); if (el && e && e.detail) { el.innerHTML = ''; var h = document.createElement('div'); h.className = 'empty-sidebar-hint'; h.textContent = e.detail; el.appendChild(h); } });
             }
+            function renderFullHistoryList(sessions) {
+                var container = document.getElementById('full-history-list');
+                if (!container) return;
+                container.innerHTML = '';
+                if (!sessions || sessions.length === 0) {
+                    var hint = document.createElement('div');
+                    hint.className = 'empty-sidebar-hint';
+                    hint.textContent = '暂无记录';
+                    container.appendChild(hint);
+                    return;
+                }
+                sessions.forEach(function(s) {
+                    var item = document.createElement('div');
+                    item.className = 'full-history-item sidebar-session-item';
+                    item.style.cssText = 'display: flex; align-items: center; padding: 10px 12px; margin-bottom: 6px; border: 1px solid #e5e7eb; border-radius: 8px; cursor: pointer;';
+                    item.title = s.title || s.id;
+                    item.dataset.sessionId = s.id;
+                    item.dataset.title = (s.title || s.id || '未命名').toLowerCase();
+                    var text = (s.title || s.id || '未命名').slice(0, 80) + ((s.title && s.title.length > 80) ? '...' : '');
+                    var textSpan = document.createElement('span');
+                    textSpan.className = 'item-text';
+                    textSpan.style.flex = '1';
+                    textSpan.textContent = text;
+                    var moreBtn = document.createElement('button');
+                    moreBtn.type = 'button';
+                    moreBtn.className = 'item-more-btn';
+                    moreBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>';
+                    moreBtn.onclick = function(ev) { ev.preventDefault(); ev.stopPropagation(); openPopoverAt(this, this.nextElementSibling); };
+                    var popover = document.createElement('div');
+                    popover.className = 'popover-menu';
+                    popover.innerHTML = '<div class="popover-item" data-action="rename">✏️ 重命名</div><div class="popover-item danger" data-action="delete"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg> 删除</div>';
+                    popover.querySelector('[data-action="rename"]').onclick = function(ev) {
+                        ev.preventDefault(); ev.stopPropagation();
+                        var sid = s.id;
+                        var oldTitle = (s.title || s.id || '未命名').slice(0, 80);
+                        var newTitle = prompt('请输入新名称:', oldTitle);
+                        if (newTitle === null || (newTitle = (newTitle || '').trim()) === '') return;
+                        fetch('/api/sessions/' + encodeURIComponent(sid), { method: 'PUT', headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }), body: JSON.stringify({ title: newTitle }) })
+                            .then(function(r) { if (!r.ok) return r.json().then(function(d) { throw d; }); return r.json(); })
+                            .then(function() { closeAllPopovers(); if (typeof fetchSessions === 'function') fetchSessions(); fetch('/api/sessions', { method: 'GET', headers: getAuthHeaders() }).then(function(r) { return r.ok ? r.json() : []; }).then(function(list) { window.cachedFullSessionsList = list; if (typeof renderFullHistoryList === 'function') renderFullHistoryList(list); }); })
+                            .catch(function(e) { console.warn('[renameSession]', e); alert(e.detail || '重命名失败'); });
+                    };
+                    popover.querySelector('[data-action="delete"]').onclick = function(ev) {
+                        ev.preventDefault(); ev.stopPropagation();
+                        if (!confirm('确定要删除此记录吗？')) return;
+                        fetch('/api/sessions/' + encodeURIComponent(s.id), { method: 'DELETE', headers: getAuthHeaders() })
+                            .then(function(r) { if (!r.ok) return r.json().then(function(d) { throw d; }); return r.json(); })
+                            .then(function() { closeAllPopovers(); item.remove(); if (typeof fetchSessions === 'function') fetchSessions(); fetch('/api/sessions', { method: 'GET', headers: getAuthHeaders() }).then(function(r) { return r.ok ? r.json() : []; }).then(function(list) { window.cachedFullSessionsList = list; if (typeof renderFullHistoryList === 'function') renderFullHistoryList(list); }); })
+                            .catch(function(e) { console.warn('[deleteSession]', e); alert(e.detail || '删除失败'); });
+                    };
+                    item.appendChild(textSpan);
+                    item.appendChild(moreBtn);
+                    item.appendChild(popover);
+                    item.onclick = function(ev) { if (ev.target.closest && !ev.target.closest('.item-more-btn') && !ev.target.closest('.popover-menu')) { ev.preventDefault(); ev.stopPropagation(); loadSessionAndRestore(s.id, s.title); } };
+                    container.appendChild(item);
+                });
+                var searchInput = document.getElementById('history-search-input');
+                if (searchInput && (searchInput.value || '').trim()) {
+                    var q = searchInput.value.trim().toLowerCase();
+                    container.querySelectorAll('.full-history-item').forEach(function(node) {
+                        var title = (node.dataset.title || '').toLowerCase();
+                        node.style.display = (q === '' || title.indexOf(q) >= 0) ? '' : 'none';
+                    });
+                }
+            }
             var FIXED_MODALITY_KEYS = ['rna', 'spatial', 'metabolomics', 'radiomics', 'genomics', 'epigenomics', 'proteomics', 'uncategorized'];
-            var FIXED_MODALITY_LABELS = { rna: '转录组学', spatial: '空间组学', metabolomics: '代谢组学', radiomics: '医学影像组学', genomics: '基因组学', epigenomics: '表观遗传组学', proteomics: '蛋白质组学', uncategorized: '其他文件' };
+            var FIXED_MODALITY_LABELS = { rna: '转录组学', transcriptomics: '转录组学', single_cell: '转录组学', spatial: '空间组学', metabolomics: '代谢组学', radiomics: '医学影像组学', genomics: '基因组学', epigenomics: '表观遗传组学', proteomics: '蛋白质组学', uncategorized: '其他文件' };
+            // 与技能广场七类技能卡片图标一致，供数据资产小类使用
+            var FIXED_MODALITY_ICONS = { rna: '🧬', spatial: '🗺️', metabolomics: '🧪', radiomics: '🩻', genomics: '🧬', epigenomics: '📊', proteomics: '🔗', uncategorized: '📁' };
             function fetchAssets() {
                 fetch('/api/assets', { method: 'GET', headers: getAuthHeaders() })
                     .then(function(r) { return r.ok ? r.json() : r.text().then(function(t) { try { return Promise.reject(JSON.parse(t)); } catch (e) { return Promise.reject({ detail: t || ('HTTP ' + r.status) }); } }); })
@@ -2263,7 +2778,7 @@
                         FIXED_MODALITY_KEYS.forEach(function(k) { byGroup[k] = []; });
                         list.forEach(function(a) {
                             var raw = (a.modality || '').trim().toLowerCase();
-                            var groupKey = (raw === 'transcriptomics') ? 'rna' : (raw && FIXED_MODALITY_LABELS[raw]) ? raw : 'uncategorized';
+                            var groupKey = (raw === 'transcriptomics' || raw === 'single_cell') ? 'rna' : (raw && FIXED_MODALITY_LABELS[raw]) ? raw : 'uncategorized';
                             if (!byGroup[groupKey]) byGroup[groupKey] = [];
                             byGroup[groupKey].push(a);
                         });
@@ -2273,7 +2788,7 @@
                             var details = document.createElement('details');
                             details.className = 'asset-modality-group';
                             var summary = document.createElement('summary');
-                            summary.textContent = (groupKey === 'uncategorized' ? '📁 ' : '🧬 ') + label + ' (' + items.length + ')';
+                            summary.textContent = (FIXED_MODALITY_ICONS[groupKey] || '📁') + ' ' + label + ' (' + items.length + ')';
                             details.appendChild(summary);
                             var fileList = document.createElement('div');
                             fileList.className = 'asset-modality-files';
@@ -2292,11 +2807,23 @@
                                 moreBtn.type = 'button';
                                 moreBtn.className = 'item-more-btn';
                                 moreBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>';
-                                moreBtn.onclick = function(ev) { ev.preventDefault(); ev.stopPropagation(); closeAllPopovers(); var p = this.nextElementSibling; p.classList.toggle('show'); setTimeout(function() { document.addEventListener('click', function _once() { closeAllPopovers(); document.removeEventListener('click', _once); }); }, 0); };
+                                moreBtn.onclick = function(ev) { ev.preventDefault(); ev.stopPropagation(); openPopoverAt(this, this.nextElementSibling); };
                                 var popover = document.createElement('div');
                                 popover.className = 'popover-menu';
-                                popover.innerHTML = '<div class="popover-item danger" data-action="delete"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg> 删除</div>';
-                                popover.querySelector('.popover-item').onclick = function(ev) {
+                                popover.innerHTML = '<div class="popover-item" data-action="rename">✏️ 重命名</div><div class="popover-item danger" data-action="delete"><svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg> 删除</div>';
+                                popover.querySelector('[data-action="rename"]').onclick = function(ev) {
+                                    ev.preventDefault(); ev.stopPropagation();
+                                    var aid = item.dataset.assetId;
+                                    if (!aid) return;
+                                    var oldName = (a.file_name || a.file_path || '文件').slice(0, 80);
+                                    var newName = prompt('请输入新名称:', oldName);
+                                    if (newName === null || (newName = (newName || '').trim()) === '') return;
+                                    fetch('/api/assets/' + aid, { method: 'PUT', headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }), body: JSON.stringify({ file_name: newName }) })
+                                        .then(function(r) { if (!r.ok) return r.json().then(function(d) { throw d; }); return r.json(); })
+                                        .then(function() { closeAllPopovers(); if (typeof fetchAssets === 'function') fetchAssets(); })
+                                        .catch(function(e) { console.warn('[renameAsset]', e); alert(e.detail || '重命名失败'); });
+                                };
+                                popover.querySelector('[data-action="delete"]').onclick = function(ev) {
                                     ev.preventDefault(); ev.stopPropagation();
                                     if (!confirm('确定要删除此记录吗？')) return;
                                     var aid = item.dataset.assetId;
@@ -2318,6 +2845,31 @@
                     })
                     .catch(function(e) { console.warn('[fetchAssets]', e); var el = document.getElementById('sidebar-assets-list'); if (el && e && e.detail) { el.innerHTML = ''; var h = document.createElement('div'); h.className = 'empty-sidebar-hint'; h.textContent = e.detail; el.appendChild(h); } });
             }
+            // 数据资产栏刷新并重新分类：调用后端 reclassify 后刷新列表，将未分类文件归入对应类别
+            function refreshAndReclassifyAssets(ev) {
+                if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+                var btn = document.getElementById('sidebar-asset-refresh-btn');
+                if (btn && btn.disabled) return;
+                if (btn) { btn.disabled = true; btn.classList.add('spinning'); }
+                fetch('/api/assets/reclassify', { method: 'POST', headers: getAuthHeaders() })
+                    .then(function(r) {
+                        if (!r.ok) return r.json().then(function(d) { throw d; });
+                        return r.json();
+                    })
+                    .then(function(data) {
+                        if (typeof fetchAssets === 'function') fetchAssets();
+                        if (btn) { btn.disabled = false; btn.classList.remove('spinning'); }
+                        if (data && data.updated > 0) console.log('✅ [数据资产] 已重新分类 ' + data.updated + ' 个文件');
+                    })
+                    .catch(function(e) {
+                        if (btn) { btn.disabled = false; btn.classList.remove('spinning'); }
+                        console.warn('[refreshAndReclassifyAssets]', e);
+                        if (typeof fetchAssets === 'function') fetchAssets();
+                    });
+            }
+            document.addEventListener('click', function(e) {
+                if (e.target && e.target.closest && e.target.closest('#sidebar-asset-refresh-btn')) refreshAndReclassifyAssets(e);
+            });
             // 任务3：点击数据资产挂载为输入框上方附件标签，不清空当前对话
             function ensureAssetTagsRow() {
                 var iw = document.getElementById('inputWrapper');
@@ -2352,6 +2904,7 @@
             }
             // Task2: 真·时光机：仅恢复历史，绝不触发 sendMessage
             function loadSessionAndRestore(sessionId, title) {
+                if (typeof switchToChatView === 'function') switchToChatView();
                 currentSessionId = sessionId;
                 var chatContent = document.getElementById('chatContent');
                 var workspaceContent = document.getElementById('active-workspace-content');
@@ -2375,58 +2928,92 @@
                     .then(function(r) { return r.ok ? r.json() : Promise.reject(new Error(r.status)); })
                     .then(function(messages) {
                         if (!Array.isArray(messages)) return;
-                        if (chatContent) chatContent.style.visibility = 'hidden';
-                        if (workspaceContent) workspaceContent.style.visibility = 'hidden';
                         window.currentSessionMessageIds = messages.map(function(m) { return m.id; });
                         for (var i = 0; i < messages.length; i++) {
                             var msg = messages[i];
+                            var content = msg.content;
+                            if (typeof content === 'string') {
+                                try { content = JSON.parse(content); } catch (e) { content = { text: content }; }
+                            }
                             if (msg.role === 'user') {
-                                var text = (msg.content && msg.content.text) || (typeof msg.content === 'string' ? msg.content : '');
+                                var text = (content && content.text) || (typeof content === 'string' ? content : '');
                                 appendMessage('user', text || '', null, null, false, null, msg.id);
-                            } else if (msg.role === 'agent' && msg.content && msg.content.events && Array.isArray(msg.content.events)) {
-                                createRestoreAIMessageRowWithSnapshot(msg.content.events, msg.id);
+                            } else if (msg.role === 'agent' && content) {
+                                if (content.state_snapshot) {
+                                    createRestoreAIMessageRowWithSnapshot(content.state_snapshot, msg.id);
+                                } else if (content.events) {
+                                    createRestoreAIMessageRowWithSnapshot({ text: '【系统提示：该条为旧版历史记录，仅支持文本显示】', workflow: null, steps: [], report: null }, msg.id);
+                                } else {
+                                    var fallbackText = (content.text != null ? content.text : (content.message || ''));
+                                    createRestoreAIMessageRowWithSnapshot({ text: typeof fallbackText === 'string' ? fallbackText : '', workflow: null, steps: [], report: null }, msg.id);
+                                }
                             }
                         }
-                        if (chatContent) chatContent.style.visibility = '';
-                        if (workspaceContent) workspaceContent.style.visibility = '';
+                        if (wp && (document.querySelector('#active-workspace-content .report-section, #active-workspace-content .process-steps') != null) && typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
                     })
-                    .catch(function(e) { console.warn('[loadSessionAndRestore]', e); if (chatContent) chatContent.style.visibility = ''; if (workspaceContent) workspaceContent.style.visibility = ''; });
+                    .catch(function(e) { console.warn('[loadSessionAndRestore]', e); });
             }
-            // 🔥 从 events 数组提取最终态（最后一次出现的 steps_details / diagnosis_report 获胜），用于瞬间渲染
-            function extractFinalStateFromEvents(events) {
-                var out = { stepsDetails: null, diagnosisReport: null, reportData: null, lastMessage: '' };
-                if (!Array.isArray(events) || events.length === 0) return out;
-                for (var i = 0; i < events.length; i++) {
-                    var raw = events[i];
-                    if (typeof raw !== 'string') continue;
-                    var parts = raw.split('\n\n');
-                    for (var j = 0; j < parts.length; j++) {
-                        var part = parts[j].trim();
-                        if (!part) continue;
-                        var lines = part.split('\n');
-                        var eventType = 'message';
-                        var dataLines = [];
-                        for (var k = 0; k < lines.length; k++) {
-                            if (lines[k].indexOf('event: ') === 0) eventType = lines[k].substring(7).trim();
-                            else if (lines[k].indexOf('data: ') === 0) dataLines.push(lines[k].substring(6));
-                        }
-                        if (dataLines.length === 0) continue;
-                        try {
-                            var data = JSON.parse(dataLines.join('\n'));
-                            if (data.report_data && data.report_data.steps_details && data.report_data.steps_details.length > 0)
-                                out.stepsDetails = data.report_data.steps_details;
-                            if (data.steps_details && data.steps_details.length > 0) out.stepsDetails = data.steps_details;
-                            if (data.diagnosis_report != null) out.diagnosisReport = data.diagnosis_report;
-                            if (data.report_data) out.reportData = data.report_data;
-                            if (eventType === 'message' && data.content) out.lastMessage = (out.lastMessage || '') + (data.content || '');
-                        } catch (err) { /* skip malformed */ }
+            // 🔥 历史快照：清洗 <<<SUGGESTIONS>>> / <<>> 等标签，避免暴露在气泡中
+            function stripSuggestionsFromMessage(text) {
+                if (typeof text !== 'string') return text || '';
+                var s = text;
+                var start = '<<<SUGGESTIONS>>>';
+                var end = '<<<END_SUGGESTIONS>>>';
+                var i = s.indexOf(start);
+                var j = s.indexOf(end);
+                if (i !== -1 && j !== -1 && j > i) s = (s.substring(0, i) + s.substring(j + end.length)).replace(/\n{3,}/g, '\n\n').trim();
+                s = s.replace(/<<>>[\s\S]*?<<>>/g, '').replace(/\n{3,}/g, '\n\n').trim();
+                return s;
+            }
+            // 🔥 流式结束：提取 <<>> 内 JSON 数组并剔除标签，返回 { cleanText, suggestions }
+            function extractAndStripSuggestionTags(text) {
+                var cleanText = typeof text === 'string' ? text : '';
+                var suggestions = [];
+                try {
+                    var re = /<<>>\s*(\[[\s\S]*?\])\s*<<>>/g;
+                    var match = re.exec(cleanText);
+                    if (match && match[1]) {
+                        suggestions = JSON.parse(match[1]);
+                        if (!Array.isArray(suggestions)) suggestions = [];
                     }
-                }
-                return out;
+                    cleanText = cleanText.replace(/<<>>\s*\[[\s\S]*?\]\s*<<>>/g, '');
+                    var startTag = '<<<SUGGESTIONS>>>';
+                    var endTag = '<<<END_SUGGESTIONS>>>';
+                    var si = cleanText.indexOf(startTag);
+                    var ei = cleanText.indexOf(endTag);
+                    if (si !== -1 && ei !== -1 && ei > si)
+                        cleanText = (cleanText.substring(0, si) + cleanText.substring(ei + endTag.length)).replace(/\n{3,}/g, '\n\n').trim();
+                    cleanText = cleanText.replace(/<<>>[\s\S]*?<<>>/g, '').replace(/\n{3,}/g, '\n\n').trim();
+                } catch (e) { /* ignore parse error */ }
+                return { cleanText: cleanText, suggestions: suggestions };
             }
-            function createRestoreAIMessageRowWithSnapshot(events, messageId) {
+            // 🔥 静态 Checklist：仅渲染 ✓/✕，无转圈，挂载到指定 logZone（解耦全局）
+            function renderStaticChecklistToLogZone(logZone, steps) {
+                if (!logZone || !steps || steps.length === 0) return;
+                var container = document.createElement('div');
+                container.className = 'process-log-container';
+                container.innerHTML = '<div class="process-header"><span>⚡ 执行记录 (' + steps.length + ')</span></div><div class="process-steps checklist-container"></div>';
+                var list = container.querySelector('.checklist-container');
+                if (!list) return;
+                steps.forEach(function(step, idx) {
+                    var rawStatus = ((step.status || 'success') + '').toLowerCase();
+                    var isSuccess = ['success', 'completed', 'done', 'warning'].includes(rawStatus);
+                    var iconChar = isSuccess ? '✓' : (rawStatus === 'error' ? '✕' : '✓');
+                    var iconClass = isSuccess ? 'icon-success' : (rawStatus === 'error' ? 'icon-error' : 'icon-success');
+                    var name = step.step_name || step.name || step.step_id || step.tool_id || ('步骤 ' + (idx + 1));
+                    var sub = step.duration != null ? ('耗时 ' + (typeof step.duration === 'number' ? step.duration.toFixed(1) : step.duration) + 's') : (step.summary || '');
+                    var item = document.createElement('div');
+                    item.className = 'checklist-item';
+                    item.innerHTML = '<span class="checklist-icon ' + iconClass + '">' + iconChar + '</span><div class="checklist-content"><span class="checklist-title">' + (name || '').replace(/</g, '&lt;') + '</span>' + (sub ? '<span class="checklist-subtitle">' + (sub + '').replace(/</g, '&lt;') + '</span>' : '') + '</div>';
+                    list.appendChild(item);
+                });
+                logZone.appendChild(container);
+            }
+            // 🔥 历史恢复（状态快照注水）：入参为 msg.content.state_snapshot，瞬间渲染，无闪烁、无 visibility  hack
+            function createRestoreAIMessageRowWithSnapshot(state_snapshot, messageId) {
                 var chatContent = document.getElementById('chatContent');
                 if (!chatContent) return;
+                var snap = state_snapshot && typeof state_snapshot === 'object' ? state_snapshot : { text: '', workflow: null, steps: [], report: null };
                 var row = document.createElement('div');
                 row.className = 'message-row ai';
                 if (messageId != null) row.dataset.messageId = String(messageId);
@@ -2457,29 +3044,39 @@
                 row.appendChild(avatar);
                 row.appendChild(container);
                 chatContent.appendChild(row);
+
+                var prevZones = window.currentMessageZones;
                 window.currentMessageZones = { logZone: logZone, textZone: textZone, cardZone: cardZone };
-                var final_ = extractFinalStateFromEvents(events);
-                var stepsDetails = final_.stepsDetails;
-                if (stepsDetails && stepsDetails.length > 0) {
-                    var normalized = stepsDetails.map(function(s) {
-                        var c = {};
-                        for (var k in s) c[k] = s[k];
-                        c.status = 'success';
-                        return c;
-                    });
+
+                if (snap.text && textZone) {
+                    var text = typeof snap.text === 'string' ? stripSuggestionsFromMessage(snap.text) : '';
+                    if (text) {
+                        try { textZone.innerHTML = typeof safeMarkedParse === 'function' ? safeMarkedParse(text) : (typeof marked !== 'undefined' && marked.parse ? marked.parse(text) : text); } catch (e) { textZone.textContent = text; }
+                    }
+                }
+                if (snap.workflow && typeof renderWorkflowCard === 'function') {
+                    try { renderWorkflowCard(snap.workflow); } catch (e) { console.warn('[Snapshot] renderWorkflowCard:', e); }
+                }
+                if (snap.steps && Array.isArray(snap.steps) && snap.steps.length > 0) {
+                    var normalized = snap.steps.map(function(s) { var c = {}; for (var k in s) c[k] = s[k]; c.status = (s.status || 'success'); return c; });
+                    renderStaticChecklistToLogZone(logZone, normalized);
                     if (typeof renderExecutionSteps === 'function') renderExecutionSteps(normalized);
                     if (typeof syncMiddlePaneChecklistIcons === 'function') syncMiddlePaneChecklistIcons(normalized);
                 }
-                if (final_.diagnosisReport != null && typeof renderReportSection === 'function')
-                    renderReportSection('diagnosis', final_.diagnosisReport, final_.reportData || {});
-                if (final_.reportData && final_.reportData.diagnosis != null && typeof renderReportSection === 'function')
-                    renderReportSection('summary', final_.reportData.diagnosis, final_.reportData);
-                if (final_.lastMessage && textZone) {
-                    try { textZone.innerHTML = typeof safeMarkedParse === 'function' ? safeMarkedParse(final_.lastMessage) : final_.lastMessage; } catch (e) { textZone.textContent = final_.lastMessage; }
+                if (snap.report) {
+                    var wp = document.getElementById('workspace-pane');
+                    if (wp) wp.classList.add('workspace-active');
+                    var r = snap.report;
+                    if (r.diagnosis_report != null && typeof renderReportSection === 'function') renderReportSection('diagnosis', r.diagnosis_report, r);
+                    if (r.report_data && r.report_data.diagnosis != null && typeof renderReportSection === 'function') renderReportSection('summary', r.report_data.diagnosis, r);
+                    if (r.report_data && r.report_data.steps_details && r.report_data.steps_details.length > 0 && typeof renderExecutionSteps === 'function') renderExecutionSteps(r.report_data.steps_details);
                 }
+
+                if (prevZones !== undefined) window.currentMessageZones = prevZones;
+                else delete window.currentMessageZones;
             }
-            function createRestoreAIMessageRowAndReplay(events) {
-                createRestoreAIMessageRowWithSnapshot(events);
+            function createRestoreAIMessageRowAndReplay(state_snapshot) {
+                createRestoreAIMessageRowWithSnapshot(state_snapshot, null);
             }
             function replayHistoryEvents(events) {
                 if (!Array.isArray(events) || !window.handleServerEvent) return;
@@ -2562,6 +3159,12 @@
                 // 任务1：有 Token 时不再生成 guest_uuid；先恢复侧栏登录态再拉取数据
                 if (!window.GUEST_UUID) initAuthState();
                 if (typeof updateSidebarUser === 'function') updateSidebarUser();
+                if (isLoggedIn() && typeof getAuthHeaders === 'function') {
+                    fetch('/api/auth/me', { method: 'GET', headers: getAuthHeaders() }).then(function(r) { return r.ok ? r.json() : Promise.reject(); }).then(function(data) {
+                        localStorage.setItem('user_role', (data.role || 'user'));
+                        if (typeof showAdminConsoleIfNeeded === 'function') showAdminConsoleIfNeeded();
+                    }).catch(function() { if (typeof showAdminConsoleIfNeeded === 'function') showAdminConsoleIfNeeded(); });
+                } else if (typeof showAdminConsoleIfNeeded === 'function') showAdminConsoleIfNeeded();
                 autoResize(userInput);
                 var sidebarLogo = document.getElementById('sidebarLogoRow');
                 var sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
@@ -2589,24 +3192,30 @@
 
                 // 视图路由：技能广场 / 聊天
                 var btnSkills = document.getElementById('btn-skills-square');
-                if (btnSkills) btnSkills.onclick = function() { showSkillsView(); renderSkillsSquare('全部'); };
+                if (btnSkills) btnSkills.onclick = function() {
+                    showSkillsView();
+                    skillsCurrentMain = '';
+                    skillsCurrentSub = '';
+                    if (typeof renderSkillsSubTabs === 'function') renderSkillsSubTabs();
+                    if (typeof fetchSkills === 'function') fetchSkills('', '', 1);
+                };
+                var navMain = document.getElementById('skillsNavMain');
+                if (navMain) navMain.querySelectorAll('.skills-nav-tab').forEach(function(btn) {
+                    btn.onclick = function() {
+                        skillsCurrentMain = (btn.getAttribute('data-main') || '').trim();
+                        skillsCurrentSub = '';
+                        navMain.querySelectorAll('.skills-nav-tab').forEach(function(b) { b.classList.remove('active'); });
+                        btn.classList.add('active');
+                        if (typeof renderSkillsSubTabs === 'function') renderSkillsSubTabs();
+                        if (typeof fetchSkills === 'function') fetchSkills(skillsCurrentMain, '', 1);
+                    };
+                });
                 var histTitle = document.querySelector('.sidebar-history-title');
                 if (histTitle) histTitle.addEventListener('click', function() { showChatView(); }, true);
                 document.querySelectorAll('.sidebar-item.history-item').forEach(function(el) {
                     el.addEventListener('click', function() { showChatView(); }, true);
                 });
 
-                // Skills Square：Tabs + 卡片按钮事件（事件委托）
-                var tabs = document.getElementById('skillsTabs');
-                if (tabs) {
-                    tabs.addEventListener('click', function(e) {
-                        var btn = e.target && e.target.closest ? e.target.closest('.skills-tab') : null;
-                        if (!btn) return;
-                        tabs.querySelectorAll('.skills-tab').forEach(function(b) { b.classList.remove('active'); });
-                        btn.classList.add('active');
-                        renderSkillsSquare(btn.getAttribute('data-cat') || '全部');
-                    });
-                }
                 var grid = document.getElementById('skillsGrid');
                 if (grid) {
                     grid.addEventListener('click', function(e) {
@@ -2638,6 +3247,7 @@
                             if (confirm('确定退出登录？')) {
                                 localStorage.removeItem('access_token');
                                 localStorage.removeItem('username');
+                                localStorage.removeItem('user_role');
                                 updateSidebarUser();
                                 window.location.reload();
                             }
@@ -2683,6 +3293,7 @@
                             if (!token) { errEl.textContent = '登录失败：未返回 Token'; errEl.style.display = 'block'; if (submitBtn) submitBtn.disabled = false; return; }
                             localStorage.setItem('access_token', token);
                             localStorage.setItem('username', data.username || username);
+                            localStorage.setItem('user_role', (data.role || 'user'));
                             var guestUuid = window.GUEST_UUID || localStorage.getItem('guest_uuid') || '';
                             return fetch('/api/auth/merge_guest_data', {
                                 method: 'POST',
@@ -2738,7 +3349,97 @@
                         });
                     };
                 }
+                function openSkillUploadModal() {
+                    var el = document.getElementById('skill-upload-modal');
+                    if (el) { el.style.display = 'flex'; document.getElementById('skill-upload-error').style.display = 'none'; }
+                }
+                function closeSkillUploadModal() {
+                    var el = document.getElementById('skill-upload-modal');
+                    if (el) el.style.display = 'none';
+                }
+                var btnUploadSkill = document.getElementById('btn-upload-skill');
+                if (btnUploadSkill) btnUploadSkill.onclick = function() {
+                    if (!isLoggedIn()) { openAuthModal(); return; }
+                    openSkillUploadModal();
+                };
+                var skillUploadBackdrop = document.getElementById('skill-upload-modal-backdrop');
+                var skillUploadClose = document.getElementById('skill-upload-modal-close');
+                var skillUploadCancel = document.getElementById('skill-upload-cancel');
+                if (skillUploadBackdrop) skillUploadBackdrop.onclick = closeSkillUploadModal;
+                if (skillUploadClose) skillUploadClose.onclick = closeSkillUploadModal;
+                if (skillUploadCancel) skillUploadCancel.onclick = closeSkillUploadModal;
+                var skillUploadForm = document.getElementById('skill-upload-form');
+                if (skillUploadForm) skillUploadForm.onsubmit = function(e) {
+                    e.preventDefault();
+                    var errEl = document.getElementById('skill-upload-error');
+                    var name = (document.getElementById('skill-upload-name').value || '').trim();
+                    if (!name) { errEl.textContent = '请输入技能名称'; errEl.style.display = 'block'; return; }
+                    errEl.style.display = 'none';
+                    var mainCat = (document.getElementById('skill-upload-main-cat').value || '').trim();
+                    var subCat = (document.getElementById('skill-upload-sub-cat').value || '').trim();
+                    var desc = (document.getElementById('skill-upload-desc').value || '').trim();
+                    var prompt = (document.getElementById('skill-upload-prompt').value || '').trim();
+                    var submitBtn = document.getElementById('skill-upload-submit');
+                    if (submitBtn) submitBtn.disabled = true;
+                    fetch('/api/skills', {
+                        method: 'POST',
+                        headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ name: name, main_category: mainCat || null, sub_category: subCat || null, description: desc || null, prompt_template: prompt || null })
+                    }).then(function(r) {
+                        if (!r.ok) return r.json().then(function(d) { throw d; });
+                        return r.json();
+                    }).then(function() {
+                        closeSkillUploadModal();
+                        skillUploadForm.reset();
+                        alert('提交成功，等待管理员审核');
+                    }).catch(function(err) {
+                        errEl.textContent = (err && (err.detail || err.message)) || '提交失败';
+                        errEl.style.display = 'block';
+                    }).finally(function() { if (submitBtn) submitBtn.disabled = false; });
+                };
+                var adminConsoleBtn = document.getElementById('admin-console-btn');
+                if (adminConsoleBtn) adminConsoleBtn.onclick = function() { switchToAdminView(); };
             };
+
+            function fetchAdminPendingSkills() {
+                var wrap = document.getElementById('admin-pending-skills-table-wrap');
+                if (!wrap) return;
+                wrap.innerHTML = '<p style="color:#6b7280;">加载中...</p>';
+                fetch('/api/admin/skills', { method: 'GET', headers: getAuthHeaders() })
+                    .then(function(r) {
+                        if (r.status === 403) { wrap.innerHTML = '<p style="color:#ef4444;">无管理员权限</p>'; return []; }
+                        return r.ok ? r.json() : r.json().then(function(d) { throw d; });
+                    })
+                    .then(function(list) {
+                        if (!Array.isArray(list) || list.length === 0) { wrap.innerHTML = '<p style="color:#6b7280;">暂无待审核技能</p>'; return; }
+                        var table = '<table style="width:100%; border-collapse: collapse; font-size: 14px;"><thead><tr style="border-bottom: 2px solid #e5e7eb;"><th style="text-align:left; padding: 10px;">名称</th><th style="text-align:left; padding: 10px;">大类</th><th style="text-align:left; padding: 10px;">作者</th><th style="text-align:left; padding: 10px;">操作</th></tr></thead><tbody>';
+                        list.forEach(function(s) {
+                            var name = (s.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                            var cat = (s.main_category || '-').replace(/</g, '&lt;');
+                            var author = (s.author_id || '-').replace(/</g, '&lt;');
+                            table += '<tr style="border-bottom: 1px solid #e5e7eb;"><td style="padding: 10px;">' + name + '</td><td style="padding: 10px;">' + cat + '</td><td style="padding: 10px;">' + author + '</td><td style="padding: 10px;"><button type="button" class="skills-square-upload-btn" data-skill-id="' + s.id + '" data-action="approve" style="margin-right:6px; background:#22c55e; color:#fff; border-color:#22c55e;">通过</button><button type="button" class="skills-square-upload-btn" data-skill-id="' + s.id + '" data-action="reject" style="background:#ef4444; color:#fff; border-color:#ef4444;">驳回</button></td></tr>';
+                        });
+                        table += '</tbody></table>';
+                        wrap.innerHTML = table;
+                        wrap.querySelectorAll('button[data-skill-id]').forEach(function(btn) {
+                            btn.onclick = function() {
+                                var id = btn.getAttribute('data-skill-id');
+                                var action = btn.getAttribute('data-action');
+                                var status = action === 'approve' ? 'approved' : 'rejected';
+                                if (!id) return;
+                                btn.disabled = true;
+                                fetch('/api/admin/skills/' + id + '/status', {
+                                    method: 'PUT',
+                                    headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }),
+                                    body: JSON.stringify({ status: status })
+                                }).then(function(r) { if (!r.ok) return r.json().then(function(d) { throw d; }); return r.json(); })
+                                    .then(function() { fetchAdminPendingSkills(); })
+                                    .catch(function(e) { alert(e.detail || '操作失败'); btn.disabled = false; });
+                            };
+                        });
+                    })
+                    .catch(function(e) { wrap.innerHTML = '<p style="color:#ef4444;">' + (e.detail || e.message || '加载失败') + '</p>'; });
+            }
 
             function checkInput() {
                 if (isProcessing) { sendBtn.classList.remove('active'); return; }
@@ -2791,6 +3492,14 @@
                 const img = document.getElementById('lightbox-img');
                 img.src = src;
                 lightbox.style.display = 'flex';
+            }
+            // 打印/导出时图片需用绝对 URL，否则打印预览中会加载失败
+            function getAbsoluteMediaUrl(path) {
+                if (!path || typeof path !== 'string') return path || '';
+                if (path.indexOf('http://') === 0 || path.indexOf('https://') === 0) return path;
+                var origin = window.location.origin || '';
+                var p = path.indexOf('/') === 0 ? path : '/' + path.replace(/^\/+/, '');
+                return origin ? (origin + p) : p;
             }
             function closeLightbox() {
                 document.getElementById('lightbox').style.display = 'none';
@@ -3439,14 +4148,43 @@
                             }
                         }
                         
-                        // 🔥 深度思考区：挂载到当前 AI 聊天气泡内部（中栏），不依赖右侧工作台是否展开
+                        // 🔥 深度思考区：挂载到当前 AI 聊天气泡内部（中栏），多路回退确保拿到“当前正在生成的”AI 消息容器
                         function ensureThoughtBlock() {
                             var messageContent = null;
-                            if (window.currentMessageZones && window.currentMessageZones.logZone && window.currentMessageZones.logZone.parentElement)
-                                messageContent = window.currentMessageZones.logZone.parentElement;
-                            if (!messageContent)
-                                messageContent = document.querySelector('#chatContent .message-row.ai:last-of-type .message-content');
-                            if (!messageContent) return null;
+                            var zones = window.currentMessageZones;
+                            if (zones) {
+                                if (zones.logZone && zones.logZone.parentElement)
+                                    messageContent = zones.logZone.parentElement;
+                                if (!messageContent && zones.textZone && zones.textZone.parentElement)
+                                    messageContent = zones.textZone.parentElement;
+                                if (!messageContent && zones.cardZone && zones.cardZone.parentElement)
+                                    messageContent = zones.cardZone.parentElement;
+                            }
+                            if (!messageContent) {
+                                var lastAi = document.querySelector('#chatContent .message-row.ai:last-of-type');
+                                if (lastAi) {
+                                    messageContent = lastAi.querySelector('.message-content');
+                                    if (!messageContent) {
+                                        var container = lastAi.querySelector('.message-container');
+                                        if (container) {
+                                            messageContent = document.createElement('div');
+                                            messageContent.className = 'message-content';
+                                            var footer = container.querySelector('.message-footer');
+                                            var bubble = container.querySelector('.bubble');
+                                            if (bubble && footer)
+                                                container.insertBefore(messageContent, footer);
+                                            else if (bubble)
+                                                container.appendChild(messageContent);
+                                            else
+                                                container.insertBefore(messageContent, container.firstChild);
+                                        }
+                                    }
+                                }
+                            }
+                            if (!messageContent) {
+                                console.error('❌ [ensureThoughtBlock] 无法定位当前 AI 消息容器（messageContent 为 null）');
+                                return null;
+                            }
                             var block = messageContent.querySelector('.agent-thought-block');
                             if (!block) {
                                 block = document.createElement('details');
@@ -3455,7 +4193,12 @@
                                 block.innerHTML = '<summary>🧠 深度思考中...</summary><div class="thought-content"></div>';
                                 messageContent.insertBefore(block, messageContent.firstChild);
                             }
-                            return block.querySelector('.thought-content');
+                            var contentEl = block.querySelector('.thought-content');
+                            if (!contentEl) {
+                                console.error('❌ [ensureThoughtBlock] .thought-content 节点不存在');
+                                return null;
+                            }
+                            return contentEl;
                         }
                         function clearThoughtBlock() {
                             var messageContent = (window.currentMessageZones && window.currentMessageZones.logZone && window.currentMessageZones.logZone.parentElement)
@@ -3482,7 +4225,7 @@
                             // Phase 5: 捕获 session_id 供下次请求携带，并刷新历史列表
                             if (eventType === 'session' && data && data.session_id) {
                                 currentSessionId = data.session_id;
-                                console.log('📌 [SSE] 已捕获 session_id:', currentSessionId);
+                                console.log('✅ [SSE] 收到新会话 ID:', currentSessionId);
                                 if (typeof fetchSessions === 'function') fetchSessions();
                                 return false;
                             }
@@ -3497,17 +4240,27 @@
                                     break;
                                     
                                 case 'thought':
-                                    thoughtBuffer += data.content || '';
-                                    console.log('💭 思考过程:', data.content);
+                                    var thoughtText = (data && typeof data.content === 'string') ? data.content : (data && data.content != null ? String(data.content) : '');
+                                    thoughtBuffer += thoughtText;
+                                    console.log('💭 思考过程:', thoughtText ? thoughtText.substring(0, 80) + (thoughtText.length > 80 ? '...' : '') : '(空)');
+                                    var el = null;
                                     try {
-                                        var el = ensureThoughtBlock();
-                                        if (el) {
-                                            el.appendChild(document.createTextNode(data.content || ''));
-                                            el.scrollTop = el.scrollHeight;
-                                            var block = el.closest('.agent-thought-block');
-                                            if (block && block.tagName === 'DETAILS') block.open = true;
-                                        }
-                                    } catch (e) { console.warn('[thought] 渲染失败:', e); }
+                                        el = ensureThoughtBlock();
+                                    } catch (e) {
+                                        console.error('❌ [thought] ensureThoughtBlock 异常:', e);
+                                    }
+                                    if (!el) {
+                                        console.error('❌ [thought] ensureThoughtBlock 返回 null，思考内容无法渲染');
+                                        break;
+                                    }
+                                    try {
+                                        el.appendChild(document.createTextNode(thoughtText));
+                                        el.scrollTop = el.scrollHeight;
+                                        var block = el.closest('.agent-thought-block');
+                                        if (block && block.tagName === 'DETAILS') block.open = true;
+                                    } catch (e) {
+                                        console.error('❌ [thought] 追加文本到 DOM 失败:', e);
+                                    }
                                     break;
                                     
                                 case 'message':
@@ -3553,6 +4306,8 @@
                                         // Store the returned form ID for later use
                                         data._workflow_form_id = returnedFormId;
                                     }
+                                    // 仅规划不执行时也立刻刷新左侧数据资产（后端已按组学更新 modality）
+                                    if (typeof fetchAssets === 'function') fetchAssets();
                                     break;
                                     
                                 case 'result':
@@ -3611,6 +4366,21 @@
                                 case 'error':
                                     handleErrorEvent(data);
                                     break;
+
+                                case 'state_snapshot':
+                                    console.log('[SSE] 收到状态快照:', data);
+                                    try {
+                                        var snapshotStr = typeof data === 'object' ? JSON.stringify(data) : String(data);
+                                        var currentRow = null;
+                                        if (window.currentMessageZones && window.currentMessageZones.logZone)
+                                            currentRow = window.currentMessageZones.logZone.closest('.message-row.ai');
+                                        if (!currentRow && window.currentMessageZones && window.currentMessageZones.textZone)
+                                            currentRow = window.currentMessageZones.textZone.closest('.message-row.ai');
+                                        if (!currentRow)
+                                            currentRow = document.querySelector('#chatContent .message-row.ai:last-of-type');
+                                        if (currentRow) currentRow.dataset.snapshot = snapshotStr;
+                                    } catch (e) { console.warn('[state_snapshot] 写入 dataset 失败:', e); }
+                                    break;
                                     
                                 default:
                                     console.warn(`⚠️ [SSE] 未知事件类型: ${eventType}`, data);
@@ -3649,7 +4419,45 @@
                                 container.appendChild(btn);
                             });
                         }
-                        
+
+                        // 🔥 从 <<>> 提取的建议数组：在当前 AI 气泡底部渲染 .suggestion-chips + .chip，点击填入输入框并发送
+                        function renderSuggestionChipsInCurrentMessage(suggestions) {
+                            if (!Array.isArray(suggestions) || suggestions.length === 0) return;
+                            var messageContent = null;
+                            if (window.currentMessageZones) {
+                                var z = window.currentMessageZones;
+                                if (z.logZone) messageContent = z.logZone.closest('.message-content');
+                                if (!messageContent && z.textZone) messageContent = z.textZone.closest('.message-content');
+                                if (!messageContent && z.cardZone) messageContent = z.cardZone.closest('.message-content');
+                            }
+                            if (!messageContent) {
+                                var lastAi = document.querySelector('#chatContent .message-row.ai:last-of-type');
+                                if (lastAi) messageContent = lastAi.querySelector('.message-content');
+                            }
+                            if (!messageContent) return;
+                            var existing = messageContent.querySelector('.suggestion-chips');
+                            if (existing) existing.remove();
+                            var container = document.createElement('div');
+                            container.className = 'suggestion-chips';
+                            suggestions.forEach(function (text) {
+                                var btn = document.createElement('button');
+                                btn.type = 'button';
+                                btn.className = 'chip';
+                                btn.textContent = String(text);
+                                btn.addEventListener('click', function () {
+                                    var input = document.getElementById('userInput') || document.getElementById('chat-input');
+                                    if (input) {
+                                        input.value = text;
+                                        if (typeof checkInput === 'function') checkInput();
+                                        if (typeof sendMessage === 'function') sendMessage();
+                                    }
+                                });
+                                container.appendChild(btn);
+                            });
+                            messageContent.appendChild(container);
+                        }
+                        window.renderSuggestionChipsInCurrentMessage = renderSuggestionChipsInCurrentMessage;
+
                         // 🔥 UI/UX OVERHAUL: 更新内联执行记录
                         function updateProcessLog(content, state) {
                             // 映射技术状态到用户友好文本
@@ -4193,7 +5001,7 @@
                                             }
                                             resultContentHtml += `
                                                 <div class="mt-2">
-                                                    <img src="${imageUrl}" 
+                                                    <img src="${typeof getAbsoluteMediaUrl === 'function' ? getAbsoluteMediaUrl(imageUrl) : imageUrl}" 
                                                         class="img-fluid rounded shadow-sm" 
                                                         alt="${stepName} 结果图" 
                                                         style="max-width: 100%; height: auto; cursor: pointer;"
@@ -4220,7 +5028,7 @@
                                                 }
                                                 resultContentHtml += `
                                                     <div class="mt-2">
-                                                        <img src="${imageUrl}" 
+                                                        <img src="${typeof getAbsoluteMediaUrl === 'function' ? getAbsoluteMediaUrl(imageUrl) : imageUrl}" 
                                                             class="img-fluid rounded shadow-sm" 
                                                             alt="${stepName} 结果图 ${idx + 1}" 
                                                             style="max-width: 100%; height: auto; cursor: pointer;"
@@ -5349,9 +6157,12 @@
                             }
                         }
                         
-                        // 🔥 最终更新：确保消息内容已显示
+                        // 🔥 最终更新：剔除 <<>> 建议标签并渲染推荐追问芯片
                         if (messageBuffer && aiContentDiv) {
-                            updateChatBubble(messageBuffer);
+                            var pair = typeof extractAndStripSuggestionTags === 'function' ? extractAndStripSuggestionTags(messageBuffer) : { cleanText: messageBuffer, suggestions: [] };
+                            updateChatBubble(pair.cleanText || messageBuffer);
+                            if (Array.isArray(pair.suggestions) && pair.suggestions.length > 0 && typeof renderSuggestionChipsInCurrentMessage === 'function')
+                                renderSuggestionChipsInCurrentMessage(pair.suggestions);
                         }
                         
                         return;
@@ -6052,7 +6863,8 @@
                                 <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
                             </button>
                             <div class="popover-menu">
-                                <button type="button" class="popover-item danger">
+                                <button type="button" class="popover-item" data-action="rename">✏️ 重命名</button>
+                                <button type="button" class="popover-item danger" data-action="delete">
                                     <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
                                     删除
                                 </button>
@@ -6083,20 +6895,26 @@
                     moreBtn.onclick = function(ev) {
                         ev.preventDefault();
                         ev.stopPropagation();
-                        closeAllPopovers();
-                        popover.classList.toggle('show');
-                        setTimeout(function() {
-                            document.addEventListener('click', function _close() {
-                                document.removeEventListener('click', _close);
-                                popover.classList.remove('show');
-                            }, { once: true });
-                        }, 0);
+                        openPopoverAt(moreBtn, popover);
                     };
-                    popover.querySelector('.popover-item').onclick = function(ev) {
+                    var templateId = favorite.template_id != null ? favorite.template_id : favorite.id;
+                    var renameBtn = popover.querySelector('[data-action="rename"]');
+                    if (renameBtn) renameBtn.onclick = function(ev) {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        var oldName = (favorite.name || '未命名').slice(0, 80);
+                        var newName = prompt('请输入新名称:', oldName);
+                        if (newName === null || (newName = (newName || '').trim()) === '') return;
+                        if (templateId == null || templateId === '') return;
+                        fetch('/api/workflow_templates/' + templateId, { method: 'PUT', headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }), body: JSON.stringify({ name: newName }) })
+                            .then(function(r) { if (!r.ok) return r.json().then(function(d) { throw d; }); return r.json(); })
+                            .then(function() { closeAllPopovers(); if (window.favoriteWorkflowsFromServer && typeof fetchFavoriteWorkflows === 'function') fetchFavoriteWorkflows(); })
+                            .catch(function(e) { console.warn('[renameWorkflowTemplate]', e); alert(e.detail || '重命名失败'); });
+                    };
+                    popover.querySelector('[data-action="delete"]').onclick = function(ev) {
                         ev.preventDefault();
                         ev.stopPropagation();
                         if (!confirm('确定要删除此收藏吗？')) return;
-                        var templateId = favorite.template_id != null ? favorite.template_id : favorite.id;
                         if (templateId != null && templateId !== '') {
                             fetch('/api/workflow_templates/' + templateId, { method: 'DELETE', headers: getAuthHeaders() })
                                 .then(function(r) { if (!r.ok) throw new Error(r.statusText); })
@@ -6118,6 +6936,7 @@
                                 listContainer.appendChild(hint);
                             }
                         }
+                        closeAllPopovers();
                     };
                 }
             }
@@ -6190,7 +7009,7 @@
                             <h6>3. ${plotTitle}</h6>
                             <div class="card border-0 shadow-sm">
                                 <div class="card-body text-center">
-                                    <img src="${normalizedPath}" style="max-width:95%; border-radius:8px; cursor:zoom-in;" onclick="openLightbox(this.src)" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                                    <img src="${typeof getAbsoluteMediaUrl === 'function' ? getAbsoluteMediaUrl(normalizedPath) : normalizedPath}" style="max-width:95%; border-radius:8px; cursor:zoom-in;" onclick="openLightbox(this.src)" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
                                     <p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${normalizedPath}</p>
                                     ${keyStep.summary ? `<p class="mt-2 text-secondary">${keyStep.summary}</p>` : ''}
                                 </div>
@@ -6275,7 +7094,7 @@
                                 if (!normalizedPath.startsWith('/results/')) {
                                     normalizedPath = '/results/' + normalizedPath;
                                 }
-                                contentHtml += `<div class="mt-2 mb-3"><img src="${normalizedPath}" class="img-fluid rounded border" style="max-width:100%; cursor:zoom-in;" onclick="openLightbox(this.src)" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"><p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${normalizedPath}</p></div>`;
+                                contentHtml += `<div class="mt-2 mb-3"><img src="${typeof getAbsoluteMediaUrl === 'function' ? getAbsoluteMediaUrl(normalizedPath) : normalizedPath}" class="img-fluid rounded border" style="max-width:100%; cursor:zoom-in;" onclick="openLightbox(this.src)" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"><p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${normalizedPath}</p></div>`;
                             } else {
                                 contentHtml += `<div class="mt-2 mb-3">${renderUniversalFileCard(imagePath, '数据文件')}</div>`;
                             }
