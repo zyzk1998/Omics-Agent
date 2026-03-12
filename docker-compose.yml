@@ -1,3 +1,5 @@
+# 数据持久化：uploads/results 使用宿主机 ./data 目录挂载，容器重建不丢。
+# 宿主机 ./data/uploads、./data/results 等若不存在，Docker 会自动创建；entrypoint 会 chown 给容器内 appuser，保证可写。
 services:
   # =========================================
   # 0. 用户与资产中台 - MySQL（Phase 1 数据库基建）
@@ -49,6 +51,7 @@ services:
     restart: always
     ports:
       - "8028:8028"  # 直接暴露 API 服务器端口
+    # 绝对持久化：uploads/results 挂载到宿主机 ./data，容器重建不丢
     environment:
       - TZ=Asia/Shanghai
       - REDIS_URL=redis://redis:6379/0
@@ -80,7 +83,7 @@ services:
     volumes:
       - .:/app
       - ./data/uploads:/app/uploads
-      - ./results:/app/results
+      - ./data/results:/app/results
       - ./data:/app/data
       - /etc/localtime:/etc/localtime:ro
     depends_on:
@@ -107,8 +110,8 @@ services:
     volumes:
       - ./services/nginx/conf.d:/etc/nginx/conf.d:ro
       - ./services/nginx/html:/usr/share/nginx/html:ro
-      - ./data/uploads:/app/uploads:ro  # 上传文件目录（只读）
-      - ./results:/app/results:ro        # 分析结果目录（只读）
+      - ./data/uploads:/app/uploads:ro
+      - ./data/results:/app/results:ro
     depends_on:
       - api-server
     networks:
@@ -143,7 +146,7 @@ services:
     volumes:
       - .:/app
       - ./data/uploads:/app/uploads
-      - ./results:/app/results
+      - ./data/results:/app/results
       - ./data:/app/data
       - /etc/localtime:/etc/localtime:ro
     # 🔧 修复：在容器启动时修复挂载目录的权限

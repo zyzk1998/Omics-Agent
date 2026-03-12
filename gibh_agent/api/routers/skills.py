@@ -2,21 +2,23 @@
 UGC 技能上传与管理员审核 API
 
 路由规范：APIRouter(prefix="/api")，路径不再带 /api，避免嵌套重复。
-- GET  /api/skills: 公开分页查询（正交过滤 main_cat, sub_cat），仅返回 approved
-- POST /api/skills: 用户上传技能，status 强制 pending
-- GET  /api/admin/skills: 管理员拉取待审核列表（严格 role 校验）
-- PUT  /api/admin/skills/{skill_id}/status: 管理员审批
+- GET    /api/skills: 公开分页查询（正交过滤 main_cat, sub_cat），仅返回 approved；saved_only=True 时返回当前用户收藏
+- POST   /api/skills: 用户上传技能，status 强制 pending
+- POST   /api/skills/{skill_id}/bookmark: 收藏技能（防重复）
+- DELETE /api/skills/{skill_id}/bookmark: 取消收藏
+- GET    /api/admin/skills: 管理员拉取待审核列表（严格 role 校验）
+- PUT    /api/admin/skills/{skill_id}/status: 管理员审批
 """
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from gibh_agent.core.deps import get_current_user, get_current_admin_user
+from gibh_agent.core.deps import get_current_user, get_current_admin_user, get_current_owner_id
 from gibh_agent.db.connection import get_db_session
-from gibh_agent.db.models import User, Skill as SkillModel
+from gibh_agent.db.models import User, Skill as SkillModel, UserSavedSkill
 
 logger = logging.getLogger(__name__)
 
@@ -47,21 +49,64 @@ class SkillStatusUpdate(BaseModel):
 
 @router.get("/skills")
 def list_skills_public(
+    request: Request,
     main_cat: Optional[str] = Query(None, description="大类筛选"),
     sub_cat: Optional[str] = Query(None, description="小类筛选"),
+    saved_only: bool = Query(False, description="仅返回当前用户收藏的技能"),
     page: int = Query(1, ge=1, description="页码"),
     size: int = Query(12, ge=1, le=50, description="每页条数"),
     db: Session = Depends(get_db_session),
 ):
-    """公开分页查询：仅 status=approved，正交过滤 main_category + sub_category。"""
-    q = db.query(SkillModel).filter(SkillModel.status == "approved")
-    if main_cat and (main_cat := main_cat.strip()):
-        q = q.filter(SkillModel.main_category == main_cat)
-    if sub_cat and (sub_cat := sub_cat.strip()):
-        q = q.filter(SkillModel.sub_category == sub_cat)
+    """公开分页查询：仅 status=approved。saved_only=True 时需鉴权并只返回当前用户收藏。若当前无技能则自动补种 7 大核心组学后重查。"""
+    owner_id: Optional[str] = None
+    try:
+        owner_id = get_current_owner_id(request)
+    except HTTPException:
+        pass
+    if saved_only and not owner_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="查看「我的」收藏需要登录或提供身份",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    def _query():
+        q = db.query(SkillModel).filter(SkillModel.status == "approved")
+        if saved_only and owner_id:
+            q = q.join(
+                UserSavedSkill,
+                (UserSavedSkill.skill_id == SkillModel.id) & (UserSavedSkill.owner_id == owner_id),
+            )
+        if main_cat and (mc := main_cat.strip()):
+            q = q.filter(SkillModel.main_category == mc)
+        if sub_cat and (sc := sub_cat.strip()):
+            q = q.filter(SkillModel.sub_category == sc)
+        return q
+
+    q = _query()
     total = q.count()
+    if total == 0 and not saved_only:
+        try:
+            from gibh_agent.db.seed_skills import run_seed_all_system_skills
+            db.query(SkillModel).filter(SkillModel.author_id == "system").delete()
+            run_seed_all_system_skills(db)
+            db.commit()
+            logger.info("[Skills] 已按需补种核心组学 + 生物医药技能")
+        except Exception as e:
+            db.rollback()
+            logger.warning("[Skills] 按需补种失败: %s", e)
+        q = _query()
+        total = q.count()
     offset = (page - 1) * size
     rows = q.order_by(SkillModel.created_at.desc()).offset(offset).limit(size).all()
+    saved_ids: set = set()
+    if owner_id:
+        saved_rows = (
+            db.query(UserSavedSkill.skill_id)
+            .filter(UserSavedSkill.owner_id == owner_id)
+            .all()
+        )
+        saved_ids = {r[0] for r in saved_rows}
     items = [
         {
             "id": r.id,
@@ -72,6 +117,7 @@ def list_skills_public(
             "prompt_template": r.prompt_template,
             "author_id": r.author_id,
             "created_at": r.created_at.isoformat() if r.created_at else None,
+            "saved": r.id in saved_ids,
         }
         for r in rows
     ]
@@ -107,6 +153,52 @@ def create_skill(
         db.rollback()
         logger.exception("创建技能失败: %s", e)
         raise HTTPException(status_code=500, detail="提交失败")
+
+
+@router.post("/skills/{skill_id}/bookmark")
+def bookmark_skill(
+    skill_id: int,
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+):
+    """收藏技能：防重复插入。"""
+    skill = db.query(SkillModel).filter(SkillModel.id == skill_id, SkillModel.status == "approved").first()
+    if not skill:
+        raise HTTPException(status_code=404, detail="技能不存在或未通过审核")
+    existing = (
+        db.query(UserSavedSkill)
+        .filter(UserSavedSkill.owner_id == owner_id, UserSavedSkill.skill_id == skill_id)
+        .first()
+    )
+    if existing:
+        return {"status": "success", "skill_id": skill_id, "message": "已在收藏中", "saved": True}
+    try:
+        db.add(UserSavedSkill(owner_id=owner_id, skill_id=skill_id))
+        db.commit()
+        logger.info("用户收藏技能: owner=%s skill_id=%s", owner_id, skill_id)
+        return {"status": "success", "skill_id": skill_id, "message": "已添加到我的工具", "saved": True}
+    except Exception as e:
+        db.rollback()
+        logger.exception("收藏技能失败: %s", e)
+        raise HTTPException(status_code=500, detail="收藏失败")
+
+
+@router.delete("/skills/{skill_id}/bookmark")
+def unbookmark_skill(
+    skill_id: int,
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+):
+    """取消收藏。"""
+    deleted = (
+        db.query(UserSavedSkill)
+        .filter(UserSavedSkill.owner_id == owner_id, UserSavedSkill.skill_id == skill_id)
+        .delete()
+    )
+    db.commit()
+    if deleted:
+        logger.info("用户取消收藏技能: owner=%s skill_id=%s", owner_id, skill_id)
+    return {"status": "success", "skill_id": skill_id, "message": "已取消收藏", "saved": False}
 
 
 @router.get("/admin/skills", response_model=List[dict])

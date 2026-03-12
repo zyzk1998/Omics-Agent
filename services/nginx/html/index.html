@@ -221,6 +221,8 @@
             .sidebar-session-item, .sidebar-asset-item { position: relative; display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 8px; cursor: pointer; margin: 2px 0; font-size: 13px; overflow: visible; }
             .sidebar-session-item .item-text, .sidebar-asset-item .item-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .sidebar-session-item:hover, .sidebar-asset-item:hover { background: #f3f4f6; }
+            .sidebar-session-item.active-session { background: #f3f4f6; }
+            #btnNewSession.active-session { background: #f3f4f6; border-radius: 8px; }
             .item-more-btn { opacity: 0; background: transparent; border: none; color: #9ca3af; cursor: pointer; padding: 4px; border-radius: 4px; transition: all 0.2s; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
             .sidebar-session-item:hover .item-more-btn, .sidebar-asset-item:hover .item-more-btn, .sidebar-favorite-item:hover .item-more-btn { opacity: 1; }
             .item-more-btn:hover { background: #e5e7eb; color: #1f2329; }
@@ -518,6 +520,13 @@
                 flex: 1;
                 min-height: 0;
             }
+            .skill-tags-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-top: auto;
+                gap: 8px;
+            }
             .skill-tags { display: flex; gap: 6px; flex-wrap: wrap; }
             .skill-card .tag {
                 font-size: 11px;
@@ -527,48 +536,51 @@
                 border-radius: 4px;
                 border: none;
             }
+            .skill-use-btn-inline {
+                background: #f3f4f6;
+                color: #374151;
+                border: none;
+                padding: 4px 14px;
+                border-radius: 16px;
+                font-size: 12px;
+                font-weight: 500;
+                cursor: pointer;
+                opacity: 0;
+                transform: translateX(10px);
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                flex-shrink: 0;
+            }
+            .skill-card:hover .skill-use-btn-inline {
+                opacity: 1;
+                transform: translateX(0);
+            }
+            .skill-use-btn-inline:hover {
+                background: #e5e7eb;
+                color: #111827;
+            }
             .skill-footer {
                 display: flex;
                 align-items: center;
                 justify-content: flex-end;
                 padding-top: 8px;
                 border-top: 1px solid #f1f5f9;
-                transition: opacity 0.25s ease;
             }
-            .skill-card:hover .skill-footer { opacity: 0.65; }
-            .footer-actions { display: flex; gap: 4px; }
-            .icon-btn {
-                width: 32px;
-                height: 32px;
+            .footer-actions { display: flex; gap: 12px; color: #9ca3af; }
+            .footer-actions .icon-btn {
+                width: 28px;
+                height: 28px;
+                padding: 4px;
                 border: none;
-                background: transparent;
-                border-radius: 6px;
+                background: none;
                 cursor: pointer;
-                font-size: 14px;
+                color: inherit;
+                border-radius: 6px;
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
-                transition: background 0.2s, color 0.2s;
+                transition: color 0.2s;
             }
-            .icon-btn:hover { background: #e5e7eb; color: #3b82f6; }
-            .skill-use-btn {
-                position: absolute;
-                bottom: 16px;
-                right: 16px;
-                opacity: 0;
-                transform: translateY(10px);
-                transition: all 0.3s ease;
-                background: #3b82f6;
-                color: white;
-                border: none;
-                padding: 6px 16px;
-                border-radius: 20px;
-                font-size: 13px;
-                cursor: pointer;
-                z-index: 2;
-            }
-            .skill-use-btn:hover { background: #2563eb; color: white; }
-            .skill-card:hover .skill-use-btn { opacity: 1; transform: translateY(0); }
+            .footer-actions .icon-btn:hover { color: #3b82f6; }
             .skills-square-pager {
                 position: absolute;
                 bottom: 0;
@@ -1805,12 +1817,9 @@
                     <div class="skills-square-nav-row" id="skillsNavMain">
                         <button type="button" class="skills-nav-tab active" data-main="">全部</button>
                         <button type="button" class="skills-nav-tab" data-main="多模态组学">多模态组学</button>
-                        <button type="button" class="skills-nav-tab" data-main="生命科学">生命科学</button>
-                        <button type="button" class="skills-nav-tab" data-main="医药科学">医药科学</button>
+                        <button type="button" class="skills-nav-tab" data-main="生物医药">生物医药</button>
                         <button type="button" class="skills-nav-tab" data-main="化学">化学</button>
-                    </div>
-                    <div class="skills-square-nav-row" id="skillsNavSub">
-                        <!-- 动态渲染：多模态组学 -> 7 组学；其他/全部 -> 公共场景 -->
+                        <button type="button" class="skills-nav-tab" data-main="我的">我的</button>
                     </div>
                 </div>
                 <div class="skills-square-scroll">
@@ -2165,6 +2174,10 @@
 
             const chatContent = document.getElementById('chatContent');
             const chatScrollArea = document.getElementById('chatBox');
+            function scrollToBottom() {
+                var scrollContainer = document.querySelector('.chat-scroll-area') || document.getElementById('chatBox');
+                if (scrollContainer) scrollContainer.scrollTop = scrollContainer.scrollHeight;
+            }
             const userInput = document.getElementById('userInput');
             const sendBtn = document.getElementById('sendBtn');
             const stopBtn = document.getElementById('stopBtn');
@@ -2186,52 +2199,39 @@
                 proteomics: "【角色设定】你是一位资深的蛋白质组学与质谱分析专家。\n\n【组学类型】蛋白质组学 (Proteomics)\n\n【分析内容和步骤】\n1. [原始谱图质控与搜库]\n2. [定量与归一化]\n3. [差异蛋白筛选与富集分析]\n4. [蛋白质互作网络与通路解读]\n\n【输出要求】请输出火山图、热图与互作网络，并解读关键蛋白与通路。"
             };
 
-            // ================= Skills Square (正交过滤 + 真分页 API) =================
-            var SKILLS_MAIN_CATS = ['', '多模态组学', '生命科学', '医药科学', '化学'];
-            var SKILLS_SUB_OMICS = ['', '转录组学', '空间组学', '代谢组学', '医学影像组学', '基因组学', '表观遗传组学', '蛋白质组学'];
-            var SKILLS_SUB_COMMON = ['', '临床应用', '信息检索', '合规管理', '数据分析', '数据可视化', '数据处理', '文本处理', '预测与建模'];
+            // ================= Skills Square (扁平化：仅大类 Tab + 真分页 API) =================
             var skillsCurrentMain = '';
-            var skillsCurrentSub = '';
             var skillsCurrentPage = 1;
             var skillsTotal = 0;
             var skillsPageSize = 12;
 
-            function renderSkillsSubTabs() {
-                var row = document.getElementById('skillsNavSub');
-                if (!row) return;
-                var tabs = (skillsCurrentMain === '多模态组学') ? SKILLS_SUB_OMICS : SKILLS_SUB_COMMON;
-                row.innerHTML = tabs.map(function(v) {
-                    var label = v || '全部';
-                    var active = (v === skillsCurrentSub) ? ' active' : '';
-                    return '<button type="button" class="skills-nav-tab' + active + '" data-sub="' + (v ? escapeHtmlForCard(v) : '') + '">' + escapeHtmlForCard(label) + '</button>';
-                }).join('');
-                row.querySelectorAll('.skills-nav-tab').forEach(function(btn) {
-                    btn.onclick = function() {
-                        skillsCurrentSub = (btn.getAttribute('data-sub') || '').trim();
-                        document.querySelectorAll('#skillsNavSub .skills-nav-tab').forEach(function(b) { b.classList.remove('active'); });
-                        btn.classList.add('active');
-                        fetchSkills(skillsCurrentMain, skillsCurrentSub, 1);
-                    };
-                });
-            }
-
-            function fetchSkills(mainCat, subCat, page) {
-                skillsCurrentMain = mainCat || '';
-                skillsCurrentSub = subCat || '';
+            function fetchSkills(mainCat, page) {
+                skillsCurrentMain = (mainCat != null && mainCat !== undefined) ? (mainCat || '') : skillsCurrentMain;
                 skillsCurrentPage = page || 1;
                 var grid = document.getElementById('skillsGrid');
                 var emptyEl = document.getElementById('skillsEmptyState');
                 var pagerEl = document.getElementById('skillsPager');
                 if (grid) grid.innerHTML = '<div class="skills-square-empty">加载中...</div>';
                 if (emptyEl) emptyEl.style.display = 'none';
-                var params = new URLSearchParams();
-                if (skillsCurrentMain) params.set('main_cat', skillsCurrentMain);
-                if (skillsCurrentSub) params.set('sub_cat', skillsCurrentSub);
-                params.set('page', String(skillsCurrentPage));
-                params.set('size', String(skillsPageSize));
-                fetch('/api/skills?' + params.toString(), { method: 'GET', headers: getAuthHeaders() })
-                    .then(function(r) { return r.json(); })
+                var isMyTab = (skillsCurrentMain === '我的');
+                var url = '/api/skills?page=' + encodeURIComponent(String(skillsCurrentPage)) + '&size=' + encodeURIComponent(String(skillsPageSize));
+                if (isMyTab) url += '&saved_only=true';
+                else url += '&main_cat=' + encodeURIComponent(skillsCurrentMain || '');
+                fetch(url, { method: 'GET', headers: getAuthHeaders() })
+                    .then(function(r) {
+                        if (!r.ok) {
+                            if (emptyEl) {
+                                emptyEl.textContent = (r.status === 401 && isMyTab) ? '请先登录或提供身份以查看「我的」收藏' : '加载失败，请稍后重试';
+                                emptyEl.style.display = 'block';
+                            }
+                            if (grid) grid.innerHTML = '';
+                            if (pagerEl) pagerEl.style.display = 'none';
+                            return { items: [], total: 0 };
+                        }
+                        return r.json();
+                    })
                     .then(function(data) {
+                        console.log('🔍 [Skills API Response] 请求大类:', skillsCurrentMain, '返回数据:', data);
                         var items = (data && data.items) || [];
                         skillsTotal = (data && data.total) != null ? data.total : 0;
                         if (!grid) return;
@@ -2244,36 +2244,55 @@
                             if (emptyEl) emptyEl.style.display = 'none';
                             var skillCardIcons = { '转录组学': '🧬', '空间组学': '🗺️', '代谢组学': '🧪', '医学影像组学': '🩻', '基因组学': '🧬', '表观遗传组学': '📊', '蛋白质组学': '🔗' };
                             grid.innerHTML = items.map(function(s) {
-                                var name = (s.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-                                var desc = (s.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-                                var mainCat = (s.main_category || '').replace(/</g, '&lt;');
-                                var subCat = (s.sub_category || '').replace(/</g, '&lt;');
-                                var icon = skillCardIcons[s.sub_category] || '🧬';
-                                var catBadges = '';
-                                if (mainCat) catBadges += '<span class="cat-badge">' + mainCat + '</span>';
-                                if (subCat) catBadges += '<span class="cat-badge">' + subCat + '</span>';
-                                var tagsHtml = '<span class="tag">API</span><span class="tag">数据分析</span>';
-                                return '<div class="skill-card" data-skill-id="' + s.id + '">' +
-                                    '<div class="skill-card-header">' +
-                                    '<div class="skill-icon">' + icon + '</div>' +
-                                    '<div class="skill-title-group">' +
-                                    '<h3 class="skill-title">' + name + '</h3>' +
-                                    '<div class="skill-categories">' + catBadges + '</div></div></div>' +
-                                    '<div class="skill-desc">' + desc + '</div>' +
-                                    '<div class="skill-tags">' + tagsHtml + '</div>' +
-                                    '<div class="skill-footer">' +
-                                    '<div class="footer-actions">' +
-                                    '<button type="button" class="icon-btn" title="添加到我的工具">➕</button>' +
-                                    '<button type="button" class="icon-btn" title="分享">🔗</button>' +
-                                    '<button type="button" class="icon-btn" title="复制">📋</button></div></div>' +
-                                    '<button type="button" class="skill-use-btn" data-skill-id="' + s.id + '">🪄 使用此技能</button></div>';
+                                try {
+                                    var name = (s.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                                    var desc = (s.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                                    var mainCat = (s.main_category || '').replace(/</g, '&lt;');
+                                    var subCat = (s.sub_category || '').replace(/</g, '&lt;');
+                                    var icon = skillCardIcons[s.sub_category] || '🧬';
+                                    var catBadges = '';
+                                    if (mainCat) catBadges += '<span class="cat-badge">' + mainCat + '</span>';
+                                    if (subCat) catBadges += '<span class="cat-badge">' + subCat + '</span>';
+                                    var tagSub = (subCat || '数据分析').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                                    var tagsHtml = '<span class="tag">动态工作流</span><span class="tag">' + tagSub + '</span>';
+                                    var isSaved = !!(s.saved === true);
+                                    var addBtnTitle = isSaved ? '已收藏' : '添加到我的工具';
+                                    var addBtnSvg = isSaved
+                                        ? '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+                                        : '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+                                    var footerActionsHtml = '<div class="footer-actions">' +
+                                        '<button type="button" class="icon-btn btn-skill-bookmark" title="' + addBtnTitle + '" data-skill-id="' + s.id + '" data-saved="' + (isSaved ? '1' : '0') + '">' + addBtnSvg + '</button>' +
+                                        '<button type="button" class="icon-btn" title="分享"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg></button>' +
+                                        '<button type="button" class="icon-btn" title="复制"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div>';
+                                    return '<div class="skill-card" data-skill-id="' + s.id + '">' +
+                                        '<div class="skill-card-header">' +
+                                        '<div class="skill-icon">' + icon + '</div>' +
+                                        '<div class="skill-title-group">' +
+                                        '<h3 class="skill-title">' + name + '</h3>' +
+                                        '<div class="skill-categories">' + catBadges + '</div></div></div>' +
+                                        '<div class="skill-desc">' + desc + '</div>' +
+                                        '<div class="skill-tags-row">' +
+                                        '<div class="skill-tags">' + tagsHtml + '</div>' +
+                                        '<button type="button" class="skill-use-btn-inline" data-skill-id="' + s.id + '">使用</button></div>' +
+                                        '<div class="skill-footer">' + footerActionsHtml + '</div></div>';
+                                } catch (err) {
+                                    console.error('❌ 渲染单张技能卡片失败:', err, s);
+                                    return '';
+                                }
                             }).join('');
-                            grid.querySelectorAll('.skill-use-btn').forEach(function(btn) {
+                            grid.querySelectorAll('.skill-use-btn-inline').forEach(function(btn) {
                                 btn.onclick = function(e) {
                                     e.stopPropagation();
                                     var id = btn.getAttribute('data-skill-id');
                                     var item = items.find(function(s) { return String(s.id) === String(id); });
                                     if (item) useSkillFromApi(item);
+                                };
+                            });
+                            grid.querySelectorAll('.btn-skill-bookmark').forEach(function(btn) {
+                                btn.onclick = function(e) {
+                                    e.stopPropagation();
+                                    var skillId = btn.getAttribute('data-skill-id');
+                                    if (skillId && typeof toggleSkillBookmark === 'function') toggleSkillBookmark(skillId, btn);
                                 };
                             });
                         }
@@ -2298,13 +2317,13 @@
                                 '<button type="button" class="pager-btn" data-action="next"' + (nextDisabled ? ' disabled' : '') + '>&gt;</button>' +
                                 '<span style="margin-left:12px;color:#64748b;">共 ' + skillsTotal + ' 条</span>';
                             pagerEl.querySelectorAll('.pager-btn[data-action="prev"]').forEach(function(b) {
-                                b.onclick = function() { if (!prevDisabled) fetchSkills(skillsCurrentMain, skillsCurrentSub, skillsCurrentPage - 1); };
+                                b.onclick = function() { if (!prevDisabled) fetchSkills(skillsCurrentMain, skillsCurrentPage - 1); };
                             });
                             pagerEl.querySelectorAll('.pager-btn[data-action="next"]').forEach(function(b) {
-                                b.onclick = function() { if (!nextDisabled) fetchSkills(skillsCurrentMain, skillsCurrentSub, skillsCurrentPage + 1); };
+                                b.onclick = function() { if (!nextDisabled) fetchSkills(skillsCurrentMain, skillsCurrentPage + 1); };
                             });
                             pagerEl.querySelectorAll('.pager-num[data-page]').forEach(function(b) {
-                                b.onclick = function() { fetchSkills(skillsCurrentMain, skillsCurrentSub, parseInt(b.getAttribute('data-page'), 10)); };
+                                b.onclick = function() { fetchSkills(skillsCurrentMain, parseInt(b.getAttribute('data-page'), 10)); };
                             });
                         }
                     })
@@ -2313,6 +2332,43 @@
                         if (emptyEl) { emptyEl.textContent = '加载失败，请稍后重试'; emptyEl.style.display = 'block'; }
                         if (pagerEl) pagerEl.style.display = 'none';
                     });
+            }
+
+            function showToast(msg) {
+                var existing = document.getElementById('skills-toast');
+                if (existing) existing.remove();
+                var el = document.createElement('div');
+                el.id = 'skills-toast';
+                el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e293b;color:#f1f5f9;padding:10px 20px;border-radius:8px;font-size:14px;z-index:10002;box-shadow:0 4px 12px rgba(0,0,0,0.3);transition:opacity 0.3s;';
+                el.textContent = msg;
+                document.body.appendChild(el);
+                setTimeout(function() { el.style.opacity = '0'; setTimeout(function() { el.remove(); }, 300); }, 2200);
+            }
+
+            function toggleSkillBookmark(skillId, btnElement) {
+                if (!btnElement || !skillId) return;
+                var isSaved = btnElement.getAttribute('data-saved') === '1';
+                var url = '/api/skills/' + encodeURIComponent(String(skillId)) + '/bookmark';
+                var method = isSaved ? 'DELETE' : 'POST';
+                var opts = { method: method, headers: getAuthHeaders() };
+                fetch(url, opts)
+                    .then(function(r) {
+                        if (r.status === 401) { showToast('请先登录或提供身份'); return null; }
+                        return r.json();
+                    })
+                    .then(function(data) {
+                        if (!data) return;
+                        var newSaved = !!(data.saved === true);
+                        btnElement.setAttribute('data-saved', newSaved ? '1' : '0');
+                        btnElement.setAttribute('title', newSaved ? '已收藏' : '添加到我的工具');
+                        btnElement.innerHTML = newSaved
+                            ? '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+                            : '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+                        if (newSaved) showToast('已添加到我的工具');
+                        else showToast('已取消收藏');
+                        if (skillsCurrentMain === '我的' && !newSaved && typeof fetchSkills === 'function') fetchSkills('我的', skillsCurrentPage);
+                    })
+                    .catch(function() { showToast('操作失败，请重试'); });
             }
 
             function useSkillFromApi(skill) {
@@ -2478,6 +2534,9 @@
                 if (chatContent) {
                     while (chatContent.children.length > 0) chatContent.removeChild(chatContent.lastChild);
                 }
+                // 🔒 防回退：仅在此处与 loadSessionAndRestore 清空 zone/cache，保证实时流阶段防重机制不被破坏
+                window.currentMessageZones = null;
+                if (typeof window.workflowCache !== 'undefined') window.workflowCache = {};
                 if (wrapper) {
                     wrapper.classList.remove('hidden');
                     var heroBranding = document.getElementById('hero-branding');
@@ -2494,6 +2553,26 @@
                 if (workspaceContent) workspaceContent.innerHTML = '';
                 chatHistory = [];
                 currentSessionId = null;  // Phase 5: 新建会话时清空
+                setActiveSessionInSidebar(null);
+            }
+            function setActiveSessionInSidebar(sessionId) {
+                var btnNew = document.getElementById('btnNewSession');
+                document.querySelectorAll('.sidebar-session-item').forEach(function(el) { el.classList.remove('active-session'); });
+                if (document.getElementById('full-history-list')) {
+                    document.querySelectorAll('#full-history-list .sidebar-session-item').forEach(function(el) { el.classList.remove('active-session'); });
+                }
+                if (sessionId == null || sessionId === '') {
+                    if (btnNew) btnNew.classList.add('active-session');
+                } else {
+                    if (btnNew) btnNew.classList.remove('active-session');
+                    var sel = document.querySelector('.sidebar-session-item[data-session-id="' + sessionId + '"]');
+                    if (sel) sel.classList.add('active-session');
+                    var fullList = document.getElementById('full-history-list');
+                    if (fullList) {
+                        var fullSel = fullList.querySelector('.sidebar-session-item[data-session-id="' + sessionId + '"]');
+                        if (fullSel) fullSel.classList.add('active-session');
+                    }
+                }
             }
             function useChipPrompt(el) {
                 var key = el && el.getAttribute && el.getAttribute('data-prompt-inject');
@@ -2523,9 +2602,11 @@
             function noopAddProcessStep() {}
 
             window._renderWorkflowCardImpl = null;
-            window.renderWorkflowCard = function(workflowData) {
-                if (typeof window._renderWorkflowCardImpl === 'function') return window._renderWorkflowCardImpl(workflowData);
-                var z = getCardZone();
+            window.renderWorkflowCard = function(workflowData, targetZone, forceRender) {
+                if (targetZone === undefined) targetZone = null;
+                if (forceRender === undefined) forceRender = false;
+                if (typeof window._renderWorkflowCardImpl === 'function') return window._renderWorkflowCardImpl(workflowData, targetZone, forceRender);
+                var z = targetZone || getCardZone();
                 if (!z) { console.error('❌ [renderWorkflowCard] cardZone 不存在'); return null; }
                 console.warn('⚠️ [renderWorkflowCard] 尚未就绪，请先发送一条消息或刷新后重试');
                 return null;
@@ -2665,6 +2746,7 @@
                             item.onclick = function(ev) { if (ev.target.closest && !ev.target.closest('.item-more-btn') && !ev.target.closest('.popover-menu')) { ev.preventDefault(); ev.stopPropagation(); loadSessionAndRestore(s.id, s.title); } };
                             el.appendChild(item);
                         });
+                        if (typeof setActiveSessionInSidebar === 'function') setActiveSessionInSidebar(currentSessionId);
                         var btnAll = document.getElementById('btn-view-all-history');
                         if (btnAll) btnAll.remove();
                         var viewAllBtn = document.createElement('div');
@@ -2753,6 +2835,7 @@
                     item.onclick = function(ev) { if (ev.target.closest && !ev.target.closest('.item-more-btn') && !ev.target.closest('.popover-menu')) { ev.preventDefault(); ev.stopPropagation(); loadSessionAndRestore(s.id, s.title); } };
                     container.appendChild(item);
                 });
+                if (typeof setActiveSessionInSidebar === 'function') setActiveSessionInSidebar(currentSessionId);
                 var searchInput = document.getElementById('history-search-input');
                 if (searchInput && (searchInput.value || '').trim()) {
                     var q = searchInput.value.trim().toLowerCase();
@@ -2918,11 +3001,15 @@
                 toggleLoadingState(false);
                 if (chatContent) { while (chatContent.firstChild) chatContent.removeChild(chatContent.firstChild); }
                 if (workspaceContent) workspaceContent.innerHTML = '';
+                // 🔒 防回退：仅在此处与 clearChatAndReset 清空 zone/cache；实时流中不清空，保留 workflow 防重复渲染
+                window.currentMessageZones = null;
+                if (typeof window.workflowCache !== 'undefined') window.workflowCache = {};
                 if (wrapper) wrapper.classList.add('hidden');
                 if (iw && bottomSlot && !bottomSlot.contains(iw)) { bottomSlot.appendChild(iw); iw.classList.remove('input-center'); iw.classList.add('input-bottom'); }
                 if (titleEl) titleEl.textContent = (title || sessionId).slice(0, 24);
                 if (wp) wp.classList.add('workspace-active');
                 chatHistory = [];
+                setActiveSessionInSidebar(sessionId);
 
                 fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/messages', { method: 'GET', headers: getAuthHeaders() })
                     .then(function(r) { return r.ok ? r.json() : Promise.reject(new Error(r.status)); })
@@ -2952,6 +3039,14 @@
                         if (wp && (document.querySelector('#active-workspace-content .report-section, #active-workspace-content .process-steps') != null) && typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
                     })
                     .catch(function(e) { console.warn('[loadSessionAndRestore]', e); });
+            }
+            // 🔥 全局消息清洗：仅用于前端展示，将系统注入指令替换为友好提示（不修改发给后端的 Payload）
+            function sanitizeSystemInjections(text) {
+                if (typeof text !== 'string') return text || '';
+                var s = text;
+                s = s.replace(/\[系统注入：用户请求复用工作流模板\s*：\s*\d+\s*\]/g, '🔄 **系统提示：** 已成功复用工作流模板。');
+                s = s.replace(/\[系统注入：用户选择了历史资产文件\s*：[\s\S]*?\]/g, '📁 **系统提示：** 已挂载历史数据资产。');
+                return s;
             }
             // 🔥 历史快照：清洗 <<<SUGGESTIONS>>> / <<>> 等标签，避免暴露在气泡中
             function stripSuggestionsFromMessage(text) {
@@ -3046,16 +3141,19 @@
                 chatContent.appendChild(row);
 
                 var prevZones = window.currentMessageZones;
+                // 🔒 静态快照与动态流解耦：本行专属 cardZone 为空，renderWorkflowCard 必渲染且会写回 workflowCache，不触发防重拦截
                 window.currentMessageZones = { logZone: logZone, textZone: textZone, cardZone: cardZone };
 
                 if (snap.text && textZone) {
-                    var text = typeof snap.text === 'string' ? stripSuggestionsFromMessage(snap.text) : '';
+                    var text = typeof snap.text === 'string' ? sanitizeSystemInjections(stripSuggestionsFromMessage(snap.text)) : '';
                     if (text) {
                         try { textZone.innerHTML = typeof safeMarkedParse === 'function' ? safeMarkedParse(text) : (typeof marked !== 'undefined' && marked.parse ? marked.parse(text) : text); } catch (e) { textZone.textContent = text; }
                     }
                 }
                 if (snap.workflow && typeof renderWorkflowCard === 'function') {
-                    try { renderWorkflowCard(snap.workflow); } catch (e) { console.warn('[Snapshot] renderWorkflowCard:', e); }
+                    try {
+                        renderWorkflowCard(snap.workflow, cardZone, true);
+                    } catch (e) { console.warn('[Snapshot] renderWorkflowCard:', e); }
                 }
                 if (snap.steps && Array.isArray(snap.steps) && snap.steps.length > 0) {
                     var normalized = snap.steps.map(function(s) { var c = {}; for (var k in s) c[k] = s[k]; c.status = (s.status || 'success'); return c; });
@@ -3195,19 +3293,15 @@
                 if (btnSkills) btnSkills.onclick = function() {
                     showSkillsView();
                     skillsCurrentMain = '';
-                    skillsCurrentSub = '';
-                    if (typeof renderSkillsSubTabs === 'function') renderSkillsSubTabs();
-                    if (typeof fetchSkills === 'function') fetchSkills('', '', 1);
+                    if (typeof fetchSkills === 'function') fetchSkills('', 1);
                 };
                 var navMain = document.getElementById('skillsNavMain');
                 if (navMain) navMain.querySelectorAll('.skills-nav-tab').forEach(function(btn) {
                     btn.onclick = function() {
                         skillsCurrentMain = (btn.getAttribute('data-main') || '').trim();
-                        skillsCurrentSub = '';
                         navMain.querySelectorAll('.skills-nav-tab').forEach(function(b) { b.classList.remove('active'); });
                         btn.classList.add('active');
-                        if (typeof renderSkillsSubTabs === 'function') renderSkillsSubTabs();
-                        if (typeof fetchSkills === 'function') fetchSkills(skillsCurrentMain, '', 1);
+                        if (typeof fetchSkills === 'function') fetchSkills(skillsCurrentMain, 1);
                     };
                 });
                 var histTitle = document.querySelector('.sidebar-history-title');
@@ -3219,7 +3313,7 @@
                 var grid = document.getElementById('skillsGrid');
                 if (grid) {
                     grid.addEventListener('click', function(e) {
-                        var btn = e.target && e.target.closest ? e.target.closest('.skill-use-btn') : null;
+                        var btn = e.target && e.target.closest ? e.target.closest('.skill-use-btn-inline') : null;
                         if (!btn) return;
                         var skillId = btn.getAttribute('data-skill-id');
                         if (skillId) useSkillById(skillId);
@@ -4306,6 +4400,12 @@
                                         // Store the returned form ID for later use
                                         data._workflow_form_id = returnedFormId;
                                     }
+                                    // 🔥 复用卡片专属：仅当来自收藏夹复用时，在卡片下方挂载「上传文件并执行」按钮（与普通规划卡片解耦）
+                                    if (data.from_favorite_reuse && returnedFormId) {
+                                        var cardZone = window.currentMessageZones && window.currentMessageZones.cardZone;
+                                        var cardEl = cardZone ? cardZone.querySelector('[data-form-id="' + returnedFormId + '"]') || cardZone.querySelector('#workflow-card-container') : null;
+                                        if (cardEl && typeof window.mountUploadExecuteButton === 'function') window.mountUploadExecuteButton(cardEl);
+                                    }
                                     // 仅规划不执行时也立刻刷新左侧数据资产（后端已按组学更新 modality）
                                     if (typeof fetchAssets === 'function') fetchAssets();
                                     break;
@@ -5157,99 +5257,68 @@
                         }
                         
                         // 🔥 实现挂到 _renderWorkflowCardImpl，供全局 window.renderWorkflowCard 委托调用（修复 Favorites ReferenceError）
-                        window._renderWorkflowCardImpl = function(workflowData) {
-                            // 🔥 DEBUG: 添加调试日志
-                            console.log("🔍 [renderWorkflowCard] Rendering Interactive Workflow Card:", workflowData);
-                            
-                            // 🔥 CRITICAL: 使用 cardZone（如果存在），否则回退到 aiContentDiv
-                            const cardZoneRef = window.currentMessageZones?.cardZone || aiContentDiv;
-                            
+                        window._renderWorkflowCardImpl = function(workflowData, targetZone, forceRender) {
+                            if (targetZone === undefined) targetZone = null;
+                            if (forceRender === undefined) forceRender = false;
+                            console.log("🔍 [renderWorkflowCard] Rendering:", forceRender ? "(forceRender 历史快照)" : "live", workflowData);
+                            const cardZoneRef = targetZone || window.currentMessageZones?.cardZone || aiContentDiv;
                             if (!cardZoneRef) {
                                 console.error("❌ [renderWorkflowCard] cardZone 不存在，无法渲染");
-                                return null;  // Return null to indicate failure
+                                return null;
                             }
-                            
-                            // 🔥 CRITICAL FIX: 防止重复渲染 - 但允许从预览模式升级到执行模式
-                            const existingCards = cardZoneRef.querySelectorAll('.alert-success, .params-form');
-                            let existingCard = null;
-                            for (let card of existingCards) {
-                                const heading = card.querySelector('h5, h6');
-                                if (heading && (heading.textContent.includes('工作流计划') || heading.textContent.includes('工作流'))) {
-                                    existingCard = card;
-                                    break;
-                                }
-                            }
-                            
-                            if (existingCard) {
-                                // 🔥 CRITICAL: Check if we should upgrade from Template to Execution
-                                const isExistingTemplate = existingCard.innerHTML.includes("预览模式") || 
-                                                        existingCard.innerHTML.includes("template_mode") ||
-                                                        existingCard.querySelector('.badge-secondary');
-                                const isNewExecution = !workflowData.template_mode;
-                                
-                                console.log(`🔍 [renderWorkflowCard] 现有卡片检测: isExistingTemplate=${isExistingTemplate}, isNewExecution=${isNewExecution}`);
-                                
-                                if (isExistingTemplate && isNewExecution) {
-                                    // 🔥 CRITICAL: Allow upgrade from Template to Execution
-                                    console.log("✅ [renderWorkflowCard] 允许从预览模式升级到执行模式，移除旧卡片");
-                                    existingCard.remove();
-                                } else {
-                                    // Skip duplicate (same mode) - but return existing ID
-                                    const existingForm = existingCard.querySelector('form');
-                                    const existingFormId = existingForm ? existingForm.id : null;
-                                    const existingDataFormId = existingCard.getAttribute('data-form-id');
-                                    const existingId = existingFormId || existingDataFormId;
-                                    
-                                    if (existingId) {
-                                        console.warn(`⚠️ [renderWorkflowCard] 工作流卡片已存在（相同模式），返回现有ID: ${existingId}`);
-                                        return existingId;  // Return existing ID
-                                    } else {
-                                        console.warn("⚠️ [renderWorkflowCard] 工作流卡片已存在但无法提取ID，跳过重复渲染");
-                                        return null;
-                                    }
-                                }
-                            }
-                            
-                            // 🔥 CRITICAL: 确保 workflowData 不为空
                             if (!workflowData) {
                                 console.error("❌ [renderWorkflowCard] workflowData 为空");
-                                const cardZoneRef = window.currentMessageZones?.cardZone || aiContentDiv;
-                                if (cardZoneRef) {
-                                    cardZoneRef.innerHTML += '<div class="alert alert-warning mt-3">⚠️ 工作流数据为空</div>';
-                                }
-                                return null;  // Return null to indicate failure
+                                if (cardZoneRef) cardZoneRef.innerHTML += '<div class="alert alert-warning mt-3">⚠️ 工作流数据为空</div>';
+                                return null;
                             }
-                            
-                            // 🔥 TASK 1: Idempotency Check - Prevent double rendering, but return existing ID
                             const workflowCardId = 'workflow-card-container';
-                            const existingWorkflowCard = cardZoneRef.querySelector(`#${workflowCardId}`);
-                            if (existingWorkflowCard) {
-                                // Check if it's the same mode (template vs execution)
-                                const existingIsTemplate = existingWorkflowCard.innerHTML.includes("预览模式") || 
-                                                        existingWorkflowCard.innerHTML.includes("template_mode");
-                                const newIsTemplate = workflowData.template_mode !== false;
-                                
-                                if (existingIsTemplate === newIsTemplate) {
-                                    // 🔥 TASK 1 FIX: Extract existing form ID and return it
-                                    const existingForm = existingWorkflowCard.querySelector('form');
-                                    const existingFormId = existingForm ? existingForm.id : null;
-                                    const existingDataFormId = existingWorkflowCard.getAttribute('data-form-id');
-                                    const existingId = existingFormId || existingDataFormId;
-                                    
-                                    if (existingId) {
-                                        console.log(`✅ [renderWorkflowCard] 重用现有卡片，返回现有ID: ${existingId}`);
-                                        return existingId;  // Return existing ID so execute button knows what to target
+                            // 如果是强制渲染模式（如历史快照恢复），直接跳过防重检查！
+                            if (!forceRender) {
+                                const existingCards = cardZoneRef.querySelectorAll('.alert-success, .params-form');
+                                let existingCard = null;
+                                for (let card of existingCards) {
+                                    const heading = card.querySelector('h5, h6');
+                                    if (heading && (heading.textContent.includes('工作流计划') || heading.textContent.includes('工作流'))) {
+                                        existingCard = card;
+                                        break;
+                                    }
+                                }
+                                if (existingCard) {
+                                    const isExistingTemplate = existingCard.innerHTML.includes("预览模式") || existingCard.innerHTML.includes("template_mode") || existingCard.querySelector('.badge-secondary');
+                                    const isNewExecution = !workflowData.template_mode;
+                                    if (isExistingTemplate && isNewExecution) {
+                                        console.log("✅ [renderWorkflowCard] 允许从预览模式升级到执行模式，移除旧卡片");
+                                        existingCard.remove();
                                     } else {
-                                        console.warn("⚠️ [renderWorkflowCard] 工作流卡片已存在但无法提取ID，跳过重复渲染");
+                                        const existingForm = existingCard.querySelector('form');
+                                        const existingFormId = existingForm ? existingForm.id : null;
+                                        const existingDataFormId = existingCard.getAttribute('data-form-id');
+                                        const existingId = existingFormId || existingDataFormId;
+                                        if (existingId) {
+                                            console.warn("⚠️ [renderWorkflowCard] 工作流卡片已存在，跳过渲染");
+                                            return existingId;
+                                        }
                                         return null;
                                     }
-                                } else {
-                                    // Different mode - remove old card to allow upgrade
-                                    console.log("✅ [renderWorkflowCard] 允许从预览模式升级到执行模式，移除旧卡片");
+                                }
+                                const existingWorkflowCard = cardZoneRef.querySelector(`#${workflowCardId}`);
+                                if (existingWorkflowCard) {
+                                    const existingIsTemplate = existingWorkflowCard.innerHTML.includes("预览模式") || existingWorkflowCard.innerHTML.includes("template_mode");
+                                    const newIsTemplate = workflowData.template_mode !== false;
+                                    if (existingIsTemplate === newIsTemplate) {
+                                        const existingForm = existingWorkflowCard.querySelector('form');
+                                        const existingFormId = existingForm ? existingForm.id : null;
+                                        const existingDataFormId = existingWorkflowCard.getAttribute('data-form-id');
+                                        const existingId = existingFormId || existingDataFormId;
+                                        if (existingId) {
+                                            console.log("✅ [renderWorkflowCard] 重用现有卡片，返回现有ID:", existingId);
+                                            return existingId;
+                                        }
+                                        return null;
+                                    }
                                     existingWorkflowCard.remove();
                                 }
                             }
-                            
                             // 🔥 TASK 3: Safety Check - Ignore empty steps from backend
                             const workflowSteps = workflowData.workflow_config?.workflow_data?.steps || 
                                                 workflowData.workflow_config?.steps ||
@@ -5301,7 +5370,7 @@
                             // 🔥 TASK 1: Use consistent ID for idempotency check
                             const formId = `wf-card-${Date.now()}`;
                             
-                            // 🔥 缓存工作流数据（用于收藏功能）
+                            // 🔒 防回退：仅在此处写入 cache，不在流式/会话内清空；历史恢复时此处会按新 formId 写回，与清空时机解耦
                             if (!window.workflowCache) {
                                 window.workflowCache = {};
                             }
@@ -6413,8 +6482,9 @@
                     fileCardsHtml += '</div>';
                 }
 
-                // 🔒 安全：确保 Markdown 渲染和思考过程不受影响
-                const bubbleContent = isHtml ? content : safeMarkedParse(content);
+                // 🔒 安全：确保 Markdown 渲染和思考过程不受影响；展示前清洗系统注入文案（不改变发给后端的 Payload）
+                const rawForDisplay = typeof content === 'string' ? sanitizeSystemInjections(content) : content;
+                const bubbleContent = isHtml ? content : safeMarkedParse(rawForDisplay);
                 // 文件卡片独立于 bubble；操作栏统一在 message-action-bar
                 row.innerHTML = `${role === 'ai' ? avatarHtml : ''}<div class="message-container">${fileCardsHtml}<div class="bubble">${bubbleContent}</div>${role === 'user' ? userActionsHtml : ''}${role === 'ai' ? footerHtml : ''}</div>`;
                 chatContent.appendChild(row);
@@ -6756,6 +6826,73 @@
                 }).catch(function(e) { console.error(e); alert('收藏失败：' + (e.message || '请稍后重试')); });
             }
             
+            // 🔥 复用卡片专属：在卡片下方挂载「上传文件并执行」按钮，独立于全局 uploadPendingFiles/sendMessage
+            window.mountUploadExecuteButton = function(cardElement) {
+                if (!cardElement || !cardElement.getAttribute('data-form-id')) return;
+                var formId = cardElement.getAttribute('data-form-id');
+                if (cardElement.nextElementSibling && cardElement.nextElementSibling.classList && cardElement.nextElementSibling.classList.contains('reuse-upload-execute-wrap')) return;
+                var wrap = document.createElement('div');
+                wrap.className = 'reuse-upload-execute-wrap mt-2 mb-2';
+                wrap.style.display = 'flex'; wrap.style.alignItems = 'center'; wrap.style.gap = '12px';
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn-upload-execute ghost-btn btn btn-sm';
+                btn.textContent = '\uD83D\uDCC1 上传文件并执行';
+                btn.style.cssText = 'color: #3b82f6; border: 1px solid #3b82f6; padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; background: transparent;';
+                var btnAsset = document.createElement('button');
+                btnAsset.type = 'button';
+                btnAsset.className = 'btn-select-asset-execute ghost-btn btn btn-sm';
+                btnAsset.textContent = '\uD83D\uDCC4 选择资产并执行';
+                btnAsset.style.cssText = 'color: #8b5cf6; border: 1px solid #8b5cf6; padding: 6px 12px; border-radius: 6px; margin-right: 12px; font-size: 13px; cursor: pointer; background: transparent;';
+                wrap.appendChild(btn);
+                wrap.appendChild(btnAsset);
+                cardElement.after(wrap);
+                btn.addEventListener('click', function() {
+                    var fileInput = document.createElement('input');
+                    fileInput.type = 'file';
+                    fileInput.multiple = false;
+                    fileInput.style.display = 'none';
+                    document.body.appendChild(fileInput);
+                    fileInput.addEventListener('change', function() {
+                        var files = fileInput.files;
+                        if (!files || files.length === 0) { document.body.removeChild(fileInput); return; }
+                        var originalText = btn.textContent;
+                        btn.disabled = true;
+                        btn.textContent = '\u23F3 正在上传...';
+                        var formData = new FormData();
+                        for (var i = 0; i < files.length; i++) formData.append('files', files[i]);
+                        fetch('/api/upload', { method: 'POST', headers: getAuthHeaders(), body: formData })
+                            .then(function(r) { return r.ok ? r.json() : r.text().then(function(t) { throw new Error(t || '上传失败'); }); })
+                            .then(function(data) {
+                                btn.textContent = '\uD83D\uDE80 正在启动执行...';
+                                var path = (data.file_paths && data.file_paths[0]) || data.file_path || data.group_dir || (data.files && data.files[0] && (data.files[0].file_path || data.files[0].file_id)) || '';
+                                if (!path) { throw new Error('服务器未返回文件路径'); }
+                                var card = cardElement;
+                                var existing = card.querySelector('input[name="param_0_file_path"]');
+                                if (existing) existing.remove();
+                                var hidden = document.createElement('input');
+                                hidden.type = 'hidden';
+                                hidden.name = 'param_0_file_path';
+                                hidden.value = path;
+                                card.appendChild(hidden);
+                                var execBtn = card.querySelector('#execute-workflow-' + formId);
+                                if (execBtn) execBtn.click();
+                                else { throw new Error('未找到执行按钮'); }
+                            })
+                            .catch(function(e) { alert('上传或执行失败: ' + (e.message || e)); })
+                            .finally(function() {
+                                btn.disabled = false;
+                                btn.textContent = originalText;
+                                document.body.removeChild(fileInput);
+                            });
+                    }, { once: true });
+                    fileInput.click();
+                });
+                btnAsset.addEventListener('click', function() {
+                    if (typeof window.openAssetPickerModal === 'function') window.openAssetPickerModal(formId, cardElement);
+                });
+            };
+            
             function removeFavoriteWorkflow(workflowId) {
                 const favorites = getFavoriteWorkflows();
                 const filtered = favorites.filter(f => f.id !== workflowId);
@@ -6821,8 +6958,14 @@
                 window.currentMessageZones.logZone = null;
                 window.currentMessageZones.textZone = aiRow.querySelector('.message-content');
                 try {
+                    var formId = null;
                     if (typeof window.renderWorkflowCard === 'function') {
-                        window.renderWorkflowCard(workflowData);
+                        formId = window.renderWorkflowCard(workflowData);
+                    }
+                    // 🔥 本地复用卡片：挂载「上传文件并执行」专属按钮（与普通规划卡片解耦）
+                    if (formId && cardZone && typeof window.mountUploadExecuteButton === 'function') {
+                        var cardEl = cardZone.querySelector('[data-form-id="' + formId + '"]') || cardZone.querySelector('#workflow-card-container');
+                        if (cardEl) window.mountUploadExecuteButton(cardEl);
                     }
                 } catch (e) {
                     console.error('❌ [useFavoriteWorkflow] 渲染失败:', e);
@@ -8004,11 +8147,68 @@
             };
 
             function selectTool(tool, query) { appendMessage('user', `我选择运行: <b>${tool.name}</b>`); sendMessage(tool, query); }
-            function scrollToBottom() { chatScrollArea.scrollTop = chatScrollArea.scrollHeight; }
+
+            // 🔥 复用卡片专属：资产选择弹窗（选择资产并执行）
+            window.openAssetPickerModal = function(formId, cardEl) {
+                window._assetPickerContext = { formId: formId, cardEl: cardEl };
+                var modal = document.getElementById('asset-picker-modal');
+                var listEl = document.getElementById('asset-picker-list');
+                if (!modal || !listEl) return;
+                listEl.innerHTML = '';
+                modal.style.display = 'flex';
+                modal.style.alignItems = 'center';
+                modal.style.justifyContent = 'center';
+                fetch('/api/assets', { method: 'GET', headers: getAuthHeaders() })
+                    .then(function(r) { return r.ok ? r.json() : r.text().then(function(t) { throw new Error(t || '获取资产失败'); }); })
+                    .then(function(list) {
+                        list = list || [];
+                        if (list.length === 0) { listEl.innerHTML = '<p class="text-muted" style="padding:12px;margin:0;">暂无数据资产</p>'; return; }
+                        var modalityLabels = { rna: '转录组学', spatial: '空间组学', metabolomics: '代谢组学', radiomics: '影像组学', uncategorized: '其他' };
+                        list.forEach(function(a) {
+                            var item = document.createElement('div');
+                            item.className = 'asset-picker-item';
+                            item.dataset.filePath = a.file_path || '';
+                            item.style.cssText = 'padding:10px 12px; border:1px solid #e5e7eb; border-radius:8px; cursor:pointer; background:#fff; transition: background .15s, border-color .15s;';
+                            var name = (a.file_name || a.file_path || '文件').slice(0, 50);
+                            var mod = (a.modality && modalityLabels[a.modality]) ? modalityLabels[a.modality] : (a.modality || '');
+                            item.innerHTML = '<strong style="display:block;">' + (name.replace(/</g, '&lt;')) + '</strong>' + (mod ? '<span style="font-size:12px;color:#6b7280;">' + mod + '</span>' : '');
+                            item.addEventListener('click', function() {
+                                var path = this.dataset.filePath;
+                                if (!path) return;
+                                var ctx = window._assetPickerContext;
+                                if (!ctx || !ctx.cardEl) { modal.style.display = 'none'; return; }
+                                modal.style.display = 'none';
+                                var card = ctx.cardEl;
+                                var fid = ctx.formId;
+                                var existing = card.querySelector('input[name="param_0_file_path"]');
+                                if (existing) existing.remove();
+                                var hidden = document.createElement('input');
+                                hidden.type = 'hidden';
+                                hidden.name = 'param_0_file_path';
+                                hidden.value = path;
+                                card.appendChild(hidden);
+                                var execBtn = card.querySelector('#execute-workflow-' + fid);
+                                if (execBtn) execBtn.click();
+                                window._assetPickerContext = null;
+                            });
+                            listEl.appendChild(item);
+                        });
+                    })
+                    .catch(function(e) { listEl.innerHTML = '<p style="padding:12px;margin:0;color:#dc2626;">加载失败: ' + (e.message || e) + '</p>'; });
+            };
         </script>
-    </body>
-    </html>
-lArea.scrollTop = chatScrollArea.scrollHeight; }
-        </script>
+        <div id="asset-picker-modal" class="modal-overlay" style="display: none; position: fixed; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 10001; align-items: center; justify-content: center;" onclick="if(event.target===this) this.style.display='none';">
+            <div class="modal-content asset-picker-modal-content" style="width: 500px; max-height: 60vh; display: flex; flex-direction: column; background: #fff; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.15); padding: 16px;" onclick="event.stopPropagation();">
+                <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 10px;">
+                    <h3 style="margin: 0;">选择数据资产</h3>
+                    <button type="button" onclick="document.getElementById('asset-picker-modal').style.display='none'" style="background:none; border:none; cursor:pointer; font-size:16px;">✕</button>
+                </div>
+                <div id="asset-picker-list" style="overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px;">
+                </div>
+            </div>
+        </div>
+        <style>
+            .asset-picker-item:hover { background: #f3f4f6 !important; border-color: #8b5cf6 !important; }
+        </style>
     </body>
     </html>

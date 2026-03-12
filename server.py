@@ -16,7 +16,8 @@ from typing import List, Optional, Set, Dict, Any
 from datetime import datetime
 from collections import deque
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends, Query
+from fastapi import status
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
@@ -130,9 +131,10 @@ from sqlalchemy import text
 # 注册 ORM 模型以便 create_all 建表
 try:
     from gibh_agent.db import models  # noqa: F401
-    from gibh_agent.db.models import Skill as SkillModel
+    from gibh_agent.db.models import Skill as SkillModel, UserSavedSkill
 except Exception:
     SkillModel = None
+    UserSavedSkill = None
 
 
 def _run_create_all():
@@ -141,155 +143,33 @@ def _run_create_all():
     Base.metadata.create_all(bind=engine)
 
 
-# 7 大核心组学技能：与前端 OMICS_PROMPT_TEMPLATES / 原 SKILLS_DATA 完全一致，优先入库
-CORE_OMICS_SKILLS = [
-    {
-        "name": "转录组学标准全流程",
-        "sub_category": "转录组学",
-        "description": "一键生成 scRNA-seq 质控、降维聚类、多分辨率鲁棒性对比、Marker 注释、差异与通路富集的标准工作流。",
-        "prompt_template": (
-            "【角色设定】你是一位顶尖的单细胞转录组数据分析专家。\n\n【组学类型】单细胞转录组 (scRNA-seq)\n\n"
-            "【分析内容和步骤】\n(注：以下步骤为默认推荐，您可根据需求自由修改、删减或增加)\n"
-            "1. [数据结构与内存预检]\n2. [质控与去双细胞]\n3. [降维聚类 (PCA/UMAP)]\n"
-            "4. [多分辨率聚类鲁棒性对比]\n5. [细胞类型自动注释与核心 Marker 气泡图、亚群比例分析]\n"
-            "6. [差异表达基因分析 (DEG)]\n7. [通路富集分析 (GO/KEGG)]\n\n"
-            "【输出要求】请提供细胞分群 UMAP 图、多分辨率对比图、Marker 基因热图及通路富集气泡图，并对关键细胞亚群进行详细解读。"
-        ),
-    },
-    {
-        "name": "空间域识别与聚类",
-        "sub_category": "空间组学",
-        "description": "聚焦空间域识别：坐标/影像校验、空间高变基因、降维聚类、多分辨率空间域物理映射对比。",
-        "prompt_template": (
-            "【角色设定】你是一位顶尖的空间转录组学生信专家。\n\n【组学类型】空间转录组 (Spatial Transcriptomics)\n\n"
-            "【分析内容和步骤】\n(注：以下步骤为默认推荐，您可根据需求自由修改、删减或增加)\n"
-            "1. [空间数据校验]（影像与坐标预检）\n2. [数据质控与过滤]\n3. [空间高变基因提取]\n"
-            "4. [降维与空间聚类]\n5. [多分辨率空间域物理映射对比]\n6. [空间域识别与通路富集]\n\n"
-            "【输出要求】请调用相关工具，输出包含空间分布图、UMAP图、多分辨率对比图的数据诊断报告，并给出专家解读。"
-        ),
-    },
-    {
-        "name": "差异标志物发现",
-        "sub_category": "代谢组学",
-        "description": "面向代谢物 biomarker：缺失值与归一化、PCA/PLS-DA、多维模型效能对比、VIP 与显著性筛选、通路拓扑解释。",
-        "prompt_template": (
-            "【角色设定】你是一位资深的非靶向代谢组学分析专家。\n\n【组学类型】非靶向代谢组学 (Untargeted Metabolomics)\n\n"
-            "【分析内容和步骤】\n(注：以下步骤为默认推荐，您可根据需求自由修改、删减或增加)\n"
-            "1. [数据与稀疏性校验]\n2. [缺失值插补与数据归一化]\n"
-            "3. [多元统计分析 (PCA/PLS-DA) 与多维模型效能对比]\n4. [差异代谢物筛选 (VIP>1, P<0.05)]\n"
-            "5. [代谢通路拓扑分析]\n\n【输出要求】请输出 PCA/PLS-DA/VIP 对比图、差异代谢物火山图，并重点解读关键生物标志物的潜在临床/病理意义。"
-        ),
-    },
-    {
-        "name": "多算法诊断模型构建",
-        "sub_category": "医学影像组学",
-        "description": "影像组学建模：ROI/数据校验、特征提取、LR/SVM/RF 多算法 ROC 对比、特征相关性聚类热图与 Rad-Score。",
-        "prompt_template": (
-            "【角色设定】你是一位资深的医学影像组学与机器学习专家。\n\n【组学类型】医学影像组学 (Radiomics)\n\n"
-            "【分析内容和步骤】\n(注：以下步骤为默认推荐，您可根据需求自由修改、删减或增加)\n"
-            "1. [数据与 ROI 校验]\n2. [图像预处理]\n3. [影像组学特征提取 (PyRadiomics)]\n"
-            "4. [多算法 (LR/SVM/RF) ROC 诊断效能对比]\n5. [特征相关性聚类热图与特征权重棒棒糖图]\n6. [Rad-Score 与风险概率]\n\n"
-            "【输出要求】请输出 ROC 对比图、特征权重图、聚类热图，并结合临床背景给出辅助诊断建议。"
-        ),
-    },
-    {
-        "name": "基因组变异检测",
-        "sub_category": "基因组学",
-        "description": "从原始测序数据到变异 calling、注释与致病性评估，输出质控与变异解读报告。",
-        "prompt_template": (
-            "【角色设定】你是一位资深的基因组学与生物信息学专家。\n\n【组学类型】基因组学 (Genomics)\n\n"
-            "【分析内容和步骤】\n1. [原始数据质控与比对]\n2. [变异检测 (SNV/InDel/CNV)]\n"
-            "3. [变异注释与过滤]\n4. [致病性评估与报告]\n\n"
-            "【输出要求】请输出质控报告、变异汇总表与关键突变解读。"
-        ),
-    },
-    {
-        "name": "表观遗传峰与 motif 分析",
-        "sub_category": "表观遗传组学",
-        "description": "峰 calling、差异分析、motif 富集与转录组/基因组整合解读。",
-        "prompt_template": (
-            "【角色设定】你是一位资深的表观遗传学分析专家。\n\n【组学类型】表观遗传组学 (Epigenomics)\n\n"
-            "【分析内容和步骤】\n1. [原始数据质控]\n2. [峰 calling 与注释]\n3. [差异分析与 motif 富集]\n"
-            "4. [与转录组/基因组整合解读]\n\n【输出要求】请输出峰图、差异区域与生物学解释。"
-        ),
-    },
-    {
-        "name": "蛋白质互作网络分析",
-        "sub_category": "蛋白质组学",
-        "description": "质谱定量、差异蛋白、富集分析与蛋白质互作网络构建与通路解读。",
-        "prompt_template": (
-            "【角色设定】你是一位资深的蛋白质组学与质谱分析专家。\n\n【组学类型】蛋白质组学 (Proteomics)\n\n"
-            "【分析内容和步骤】\n1. [原始谱图质控与搜库]\n2. [定量与归一化]\n"
-            "3. [差异蛋白筛选与富集分析]\n4. [蛋白质互作网络与通路解读]\n\n"
-            "【输出要求】请输出火山图、热图与互作网络，并解读关键蛋白与通路。"
-        ),
-    },
-]
-
-
-def _insert_skills_bootstrap_data(db: Session) -> None:
-    """向当前 Session 插入 7 大核心组学 + 43 条 Mock（不 commit，由调用方提交）。"""
-    for core in CORE_OMICS_SKILLS:
-        db.add(SkillModel(
-            name=core["name"],
-            description=core["description"],
-            main_category="多模态组学",
-            sub_category=core["sub_category"],
-            prompt_template=core["prompt_template"],
-            author_id="system",
-            status="approved",
-        ))
-    main_cats = ["多模态组学", "生命科学", "医药科学", "化学"]
-    sub_omics = ["转录组学", "空间组学", "代谢组学", "医学影像组学", "基因组学", "表观遗传组学", "蛋白质组学"]
-    sub_common = ["临床应用", "信息检索", "合规管理", "数据分析", "数据可视化", "数据处理", "文本处理", "预测与建模"]
-    names = [
-        "ADMETAI_predict", "单细胞轨迹推断", "空间转录组聚类", "代谢通路富集分析", "影像组学ROI分割",
-        "ChIP-seq峰注释", "变异注释与致病性", "scRNA-seq质控与聚类", "多组学整合关联", "药物靶点预测",
-        "生物标志物发现", "生存分析建模", "文献智能检索", "合规性检查引擎", "数据标准化流水线",
-        "交互式可视化看板", "NLP实体抽取", "分子对接打分", "通路拓扑分析", "差异表达与GSEA",
-        "代谢物鉴定与定量", "放射组学特征提取", "甲基化差异分析", "质谱搜库与定量", "基因组注释流程",
-        "单细胞拟时序", "多分辨率空间对比", "PLS-DA与VIP筛选", "LR/SVM/RF诊断模型", "ATAC-seq染色质开放性",
-        "蛋白质组差异与富集", "融合基因检测", "细胞类型注释", "空间高变基因", "代谢物通路映射",
-        "影像组学Rad-Score", "组蛋白修饰分析", "质谱DIA定量", "CNV calling", "细胞通讯推断",
-        "空间配体受体", "代谢物缺失值填补", "影像特征聚类热图", "甲基化与表达整合", "PPI网络模块",
-    ]
-    for i, name in enumerate(names[:43]):
-        main = main_cats[(i + 1) % len(main_cats)]
-        if main == "多模态组学":
-            sub = sub_omics[i % len(sub_omics)]
-        else:
-            sub = sub_common[i % len(sub_common)]
-        db.add(SkillModel(
-            name=name,
-            description="专业分析流程与智能建模。",
-            main_category=main,
-            sub_category=sub,
-            prompt_template="【角色】生命科学分析专家。请根据用户数据执行" + name + "相关流程。",
-            author_id="system",
-            status="approved",
-        ))
+# 7 大核心组学技能：CORE_OMICS_SKILLS 字典列表定义在 gibh_agent/db/seed_skills.py，修改 prompt_template 请编辑该文件。此处仅调用 run_seed_core_skills 注入。
+def _insert_core_skills_only(db: Session) -> None:
+    """向当前 Session 仅插入 7 大核心组学技能（不 commit，由调用方提交）。"""
+    from gibh_agent.db.seed_skills import run_seed_core_skills
+    run_seed_core_skills(db)
 
 
 def _bootstrap_skills_mock():
-    """若 Skill 表为空，先插入 7 大核心组学技能，再插入其余 Mock 至 50 条。不静默吞噬异常，完整打堆栈。"""
+    """每次启动强制刷新：清理 author_id=system 后注入 7 大核心组学 + 生物医药占位技能，合并插入且核心组学排在最前。
+    【红线】启动时禁止对 users/sessions/messages/assets/workflow_templates 做任何 delete/drop/truncate。"""
     if not is_available() or engine is None or SkillModel is None:
         logger.warning("[DB] 技能注入跳过: 数据库或 SkillModel 不可用")
         return
     from gibh_agent.db.connection import SessionLocal
+    from gibh_agent.db.seed_skills import run_seed_all_system_skills
     db = SessionLocal()
     try:
-        n = db.query(SkillModel).count()
-        logger.info("[DB] Skills 表当前条数: %d", n)
-        if n > 0:
-            logger.info("[DB] Skills 表已有数据，跳过冷启动注入")
-            return
-        logger.info("[DB] Skills 表为空，开始注入 7 大核心组学 + 43 条 Mock ...")
-        _insert_skills_bootstrap_data(db)
+        deleted = db.query(SkillModel).filter(SkillModel.author_id == "system").delete()
         db.commit()
-        logger.info("✅ [DB] 已注入 7 大核心组学技能 + 43 条 Mock，共 50 条（Skill 表冷启动）")
+        if deleted:
+            logger.info("[DB] 已清理 %d 条旧系统技能数据", deleted)
+        run_seed_all_system_skills(db)
+        db.commit()
+        logger.info("✅ [DB] 7 大核心组学 + 生物医药占位技能已注入并就绪！")
     except Exception as e:
         db.rollback()
-        logger.error("技能注入失败: %s", e, exc_info=True)
+        logger.error("❌ 技能注入失败: %s", e, exc_info=True)
     finally:
         db.close()
 
@@ -332,7 +212,7 @@ def _ensure_db_tables():
 def init_db_tables():
     """
     手动触发建表（startup 未执行或失败时使用）。幂等，仅创建缺失表；
-    若 skills 表为空，会同时触发技能冷启动注入（7 大核心 + 43 Mock）。
+    会同时触发系统技能强制刷新（仅清理 author_id=system 后注入 7 大核心组学技能）。
     部署后若出现 Table 'xxx' doesn't exist 或技能广场为空，访问: GET http://<host>:8028/api/db/init
     """
     if not is_available() or engine is None or Base is None:
@@ -355,23 +235,138 @@ def init_db_tables():
         )
 
 
+@app.get("/api/skills")
+def list_skills_public(
+    request: Request,
+    main_cat: Optional[str] = Query(None, description="大类筛选"),
+    sub_cat: Optional[str] = Query(None, description="小类筛选"),
+    saved_only: bool = Query(False, description="仅返回当前用户收藏的技能"),
+    page: int = Query(1, ge=1, description="页码"),
+    size: int = Query(12, ge=1, le=50, description="每页条数"),
+    db: Session = Depends(get_db_session),
+):
+    """技能广场公开分页查询：仅 status=approved；saved_only=True 时需鉴权并只返回收藏。无数据时自动补种 7 大核心组学。"""
+    if SkillModel is None:
+        return JSONResponse(status_code=503, content={"detail": "技能服务不可用", "items": [], "total": 0})
+    owner_id = None
+    try:
+        owner_id = get_current_owner_id(request)
+    except HTTPException:
+        pass
+    if saved_only and not owner_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="查看「我的」收藏需要登录或提供身份", headers={"WWW-Authenticate": "Bearer"})
+    mc = (main_cat or "").strip()
+    sc = (sub_cat or "").strip()
+    q = db.query(SkillModel).filter(SkillModel.status == "approved")
+    if saved_only and owner_id and UserSavedSkill is not None:
+        q = q.join(UserSavedSkill, (UserSavedSkill.skill_id == SkillModel.id) & (UserSavedSkill.owner_id == owner_id))
+    if mc:
+        q = q.filter(SkillModel.main_category == mc)
+    if sc:
+        q = q.filter(SkillModel.sub_category == sc)
+    total = q.count()
+    if total == 0 and not saved_only:
+        try:
+            from gibh_agent.db.seed_skills import run_seed_all_system_skills
+            db.query(SkillModel).filter(SkillModel.author_id == "system").delete()
+            run_seed_all_system_skills(db)
+            db.commit()
+            logger.info("[Skills] 已按需补种核心组学 + 生物医药技能")
+        except Exception as e:
+            db.rollback()
+            logger.warning("[Skills] 按需补种失败: %s", e)
+        q = db.query(SkillModel).filter(SkillModel.status == "approved")
+        if saved_only and owner_id and UserSavedSkill is not None:
+            q = q.join(UserSavedSkill, (UserSavedSkill.skill_id == SkillModel.id) & (UserSavedSkill.owner_id == owner_id))
+        if mc:
+            q = q.filter(SkillModel.main_category == mc)
+        if sc:
+            q = q.filter(SkillModel.sub_category == sc)
+        total = q.count()
+    offset = (page - 1) * size
+    rows = q.order_by(SkillModel.created_at.desc()).offset(offset).limit(size).all()
+    saved_ids = set()
+    if owner_id and UserSavedSkill is not None:
+        saved_rows = db.query(UserSavedSkill.skill_id).filter(UserSavedSkill.owner_id == owner_id).all()
+        saved_ids = {r[0] for r in saved_rows}
+    items = [
+        {
+            "id": r.id,
+            "name": r.name,
+            "description": r.description,
+            "main_category": r.main_category,
+            "sub_category": r.sub_category,
+            "prompt_template": r.prompt_template,
+            "author_id": r.author_id,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "saved": r.id in saved_ids,
+        }
+        for r in rows
+    ]
+    return {"items": items, "total": total}
+
+
+@app.post("/api/skills/{skill_id}/bookmark")
+def bookmark_skill(
+    skill_id: int,
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+):
+    """收藏技能：防重复。与 skills 路由重复注册以保证 router 未加载时仍可用。"""
+    if SkillModel is None or UserSavedSkill is None:
+        raise HTTPException(status_code=503, detail="技能服务不可用")
+    skill = db.query(SkillModel).filter(SkillModel.id == skill_id, SkillModel.status == "approved").first()
+    if not skill:
+        raise HTTPException(status_code=404, detail="技能不存在")
+    existing = (
+        db.query(UserSavedSkill)
+        .filter(UserSavedSkill.owner_id == owner_id, UserSavedSkill.skill_id == skill_id)
+        .first()
+    )
+    if not existing:
+        db.add(UserSavedSkill(owner_id=owner_id, skill_id=skill_id))
+        db.commit()
+    return {"status": "success", "message": "已添加到我的工具", "saved": True}
+
+
+@app.delete("/api/skills/{skill_id}/bookmark")
+def remove_skill_bookmark(
+    skill_id: int,
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+):
+    """取消收藏。与 skills 路由重复注册以保证 router 未加载时仍可用。"""
+    if UserSavedSkill is None:
+        raise HTTPException(status_code=503, detail="技能服务不可用")
+    bookmark = (
+        db.query(UserSavedSkill)
+        .filter(UserSavedSkill.owner_id == owner_id, UserSavedSkill.skill_id == skill_id)
+        .first()
+    )
+    if bookmark:
+        db.delete(bookmark)
+        db.commit()
+    return {"status": "success", "message": "已取消收藏", "saved": False}
+
+
 @app.post("/api/admin/bootstrap-skills")
 def admin_bootstrap_skills(
     db: Session = Depends(get_db_session),
     _admin=Depends(get_current_admin_user),
 ):
     """
-    管理员专用：清空 skills 表并重新注入 7 大核心组学 + 43 条 Mock（共 50 条）。
-    技能广场为空或需要恢复默认技能时，以管理员身份调用此接口即可。
+    管理员专用：仅清理 author_id=system 的旧系统技能后，重新注入 7 大核心组学技能，保留用户上传技能。
+    技能广场需要恢复默认技能时，以管理员身份调用此接口即可。
     """
     if not is_available() or SkillModel is None:
         raise HTTPException(status_code=503, detail="数据库不可用")
     try:
-        db.execute(text("TRUNCATE TABLE skills"))
-        _insert_skills_bootstrap_data(db)
+        from gibh_agent.db.seed_skills import run_seed_all_system_skills
+        deleted = db.query(SkillModel).filter(SkillModel.author_id == "system").delete()
+        run_seed_all_system_skills(db)
         db.commit()
-        logger.info("✅ [DB] 管理员已触发技能表清空并重新注入 50 条")
-        return JSONResponse(status_code=200, content={"detail": "已清空并重新注入 50 条技能（7 大核心 + 43 Mock）", "ok": True})
+        logger.info("✅ [DB] 管理员已触发：清理 %d 条旧系统技能并重新注入核心组学 + 生物医药", deleted)
+        return JSONResponse(status_code=200, content={"detail": "已清理旧系统技能并重新注入 7 大核心组学技能", "ok": True})
     except Exception as e:
         db.rollback()
         logger.exception("管理员注入技能失败: %s", e)
