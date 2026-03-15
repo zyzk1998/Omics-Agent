@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 
 from ..core.tool_registry import registry
+from ..core.file_inspector import resolve_omics_paths
+from ..core.utils import sanitize_plot_path
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +32,18 @@ def metabo_data_validation(
     """
     极速代谢组数据校验：读取丰度矩阵与样本分组表，计算 shape、缺失率、零值比例。
     不修改数据，不写回文件。meta_path 可选。data_path 可与 file_path 二选一（兼容 executor 注入）。
+    路径经全局 resolve_omics_paths 总线解析，优先从 tables 取第一个文件。
     """
     try:
         path_in = data_path or file_path
         if not path_in:
             return {"status": "error", "error": "请提供 data_path 或 file_path"}
+        if "," in str(path_in) or ";" in str(path_in):
+            resolved = resolve_omics_paths(str(path_in))
+            tables = resolved.get("tables") or []
+            if not tables:
+                raise ValueError("未找到有效的代谢组表格文件（请上传 .csv/.tsv/.xlsx/.txt）")
+            path_in = tables[0]
         dp = Path(path_in)
         if not dp.is_file():
             return {"status": "error", "error": f"数据文件不存在: {data_path}"}
@@ -73,7 +82,7 @@ def metabo_data_validation(
 
 @registry.register(
     name="metabo_model_comparison",
-    description="PCA + PLS-DA + VIP comparison: 1x3 plot (PCA 2D, PLS-DA 2D, VIP distribution). Input must be imputed and scaled.",
+    description="PCA + PLS-DA + VIP comparison: 1x3 plot (PCA 2D, PLS-DA 2D, VIP distribution). Input must be imputed and scaled. Optional label_col for group column.",
     category="Metabolomics",
     output_type="mixed",
 )
@@ -81,10 +90,18 @@ def metabo_model_comparison(
     data_path: str,
     meta_path: str,
     output_plot_path: str,
+    label_col: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     多维模型对比：对已插补+标准化的数据做 PCA、PLS-DA，并绘制 1x3 图（PCA 2D、PLS-DA 2D、VIP 分布）。
     若数据含 NaN 则直接报错，不调用 sklearn。
+
+    Args:
+        data_path (str): 丰度矩阵数据文件路径（已插补+标准化）。
+        meta_path (str): 样本元数据文件路径（可选，用于分组列）。
+        output_plot_path (str): 输出 1x3 对比图保存路径。
+        label_col (str, optional): 用于分组/分类的标签列名（如 'Group', 'Diagnosis', 'condition'）。
+            若未指定，系统将按启发式字典在数据表或元数据中自动寻找（label/target/class/y/group/status/diagnosis/type/condition/cohort，忽略大小写），且取值≥2 类。强烈建议大模型根据数据检查结果显式提供此参数。
     """
     try:
         import matplotlib.pyplot as plt
@@ -104,11 +121,45 @@ def metabo_model_comparison(
         n_samples, n_features = X.shape
         if n_features < 2:
             raise ValueError("至少需要 2 个特征列才能进行 PCA/PLS-DA 对比。")
+        candidate_cols = [
+            "label", "target", "class", "y",
+            "group", "status", "diagnosis", "type", "condition", "cohort",
+        ]
+        candidate_cols_lower = {c.lower() for c in candidate_cols}
         group_col = None
-        for c in df.columns:
-            if c not in numeric_cols and df[c].nunique() >= 2 and df[c].nunique() <= 20:
-                group_col = c
-                break
+        if label_col and str(label_col).strip():
+            want = str(label_col).strip()
+            found = None
+            for c in df.columns:
+                if str(c).strip().lower() == want.lower():
+                    found = c
+                    break
+            if found is None:
+                raise ValueError(
+                    f"指定的标签列 '{label_col}' 不在数据表列中。可用列: {list(df.columns)[:30]}"
+                )
+            if df[found].nunique() < 2 or df[found].nunique() > 20:
+                raise ValueError(
+                    f"指定的标签列 '{found}' 唯一值数量为 {df[found].nunique()}，需要至少 2 类且不超过 20 类。"
+                )
+            group_col = found
+        if group_col is None:
+            candidates = [
+                c for c in df.columns
+                if c not in numeric_cols and str(c).strip().lower() in candidate_cols_lower
+            ]
+            candidates = [c for c in candidates if df[c].nunique() >= 2 and df[c].nunique() <= 20]
+            if len(candidates) == 1:
+                group_col = candidates[0]
+            elif len(candidates) > 1:
+                raise ValueError(
+                    f"存在多个可能的分组列 {candidates}，请通过参数 label_col 指定其一。"
+                )
+        if group_col is None:
+            for c in df.columns:
+                if c not in numeric_cols and df[c].nunique() >= 2 and df[c].nunique() <= 20:
+                    group_col = c
+                    break
         y_labels = None
         if group_col:
             y_labels = df[group_col].astype(str)
@@ -183,13 +234,14 @@ def metabo_model_comparison(
         axes[2].set_title("VIP Scores")
         axes[2].legend()
         plt.tight_layout()
-        os.makedirs(os.path.dirname(output_plot_path) or ".", exist_ok=True)
-        fig.savefig(output_plot_path, bbox_inches="tight", dpi=150)
+        out_plot = sanitize_plot_path(output_plot_path)
+        os.makedirs(str(out_plot.parent) or ".", exist_ok=True)
+        fig.savefig(str(out_plot), bbox_inches="tight", dpi=150)
         plt.close()
         return {
             "status": "success",
             "message": "多维模型对比图已保存",
-            "plot_path": output_plot_path,
+            "plot_path": str(out_plot.resolve()),
             "data_path": data_path,
             "output_file": data_path,
             "file_path": data_path,

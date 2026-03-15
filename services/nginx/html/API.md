@@ -1,11 +1,9 @@
-# GIBH Agent API 文档
+# Omics Agent API 文档
 
-**版本**: v2.1  
+**版本**: v2.0  
 **基础 URL**: `http://localhost:8028` (开发环境)  
 **协议**: HTTP/1.1  
 **数据格式**: JSON (除文件上传外)
-
-**近期更新**: 账户与资产中台（鉴权、会话/消息、数据资产、工作流收藏）、技能广场（分页/收藏/管理员）、双通道大模型路由（model_name 入参）。
 
 ---
 
@@ -14,12 +12,11 @@
 1. [通用说明](#通用说明)
 2. [核心 API 端点](#核心-api-端点)
 3. [详细接口文档](#详细接口文档)
-4. [鉴权与会话/资产/技能接口](#鉴权与会话资产技能接口)
-5. [SSE 流式响应格式](#sse-流式响应格式)
-6. [数据结构定义](#数据结构定义)
-7. [错误处理](#错误处理)
-8. [使用示例](#使用示例)
-9. [前端集成指南](#前端集成指南)
+4. [SSE 流式响应格式](#sse-流式响应格式)
+5. [数据结构定义](#数据结构定义)
+6. [错误处理](#错误处理)
+7. [使用示例](#使用示例)
+8. [前端集成指南](#前端集成指南)
 
 ---
 
@@ -36,10 +33,6 @@ Content-Type: application/json
 ```
 Content-Type: multipart/form-data
 ```
-
-**鉴权**（需登录或身份时）：
-- 登录后：`Authorization: Bearer <access_token>`（来自 `POST /api/auth/login` 返回的 `access_token`）
-- 游客：`X-Guest-UUID: <uuid>`（前端生成并持久化，用于会话/资产/工作流收藏隔离）
 
 ### 响应格式
 
@@ -81,9 +74,8 @@ Content-Type: multipart/form-data
 |------|------|------|----------|
 | `GET` | `/` | 返回前端 HTML 页面 | HTML |
 | `GET` | `/api/health` | API 健康检查 | JSON |
-| `GET` | `/api/db/init` | 数据库建表/初始化（部署后可选调用） | JSON |
-| `POST` | `/api/upload` | 文件上传（多文件；按 owner_id 隔离并写 Asset） | JSON |
-| `POST` | `/api/chat` | 聊天（SSE 流式；支持 model_name 双通道模型路由） | SSE / JSON |
+| `POST` | `/api/upload` | 文件上传（支持多文件） | JSON |
+| `POST` | `/api/chat` | 聊天接口（支持流式响应） | SSE / JSON |
 | `POST` | `/api/execute` | 执行工作流 | JSON |
 | `GET` | `/api/logs/stream` | 实时日志流（SSE） | SSE |
 | `GET` | `/api/logs` | 获取历史日志 | JSON |
@@ -91,37 +83,11 @@ Content-Type: multipart/form-data
 | `GET` | `/api/tools/list` | 列出所有工具 | JSON |
 | `GET` | `/api/tools/{tool_name}` | 获取工具 Schema | JSON |
 | `POST` | `/api/workflows/plan` | 规划工作流 | JSON |
-| `POST` | `/api/workflows/save` | 保存工作流（书签） | JSON |
+| `POST` | `/api/workflows/save` | 保存工作流 | JSON |
 | `GET` | `/api/workflows/list` | 列出用户工作流 | JSON |
 | `DELETE` | `/api/workflows/{workflow_id}` | 删除工作流 | JSON |
 | `GET` | `/api/jobs/history` | 获取任务历史 | JSON |
-| `GET` | `/api/workflow/status/{run_id}` | 查询工作流状态（可选 Celery） | JSON |
-| **鉴权** | | | |
-| `POST` | `/api/auth/register` | 用户注册 | JSON |
-| `POST` | `/api/auth/login` | 登录（表单 username/password，返回 access_token） | JSON |
-| `GET` | `/api/auth/me` | 当前用户信息（需 Bearer） | JSON |
-| `POST` | `/api/auth/merge_guest_data` | 游客数据合并到当前用户（需 Bearer） | JSON |
-| **会话与消息** | | | |
-| `GET` | `/api/sessions` | 当前用户历史会话列表 | JSON |
-| `GET` | `/api/sessions/{session_id}/messages` | 指定会话消息列表 | JSON |
-| `DELETE` | `/api/messages/{message_id}` | 删除单条消息 | JSON |
-| `DELETE` | `/api/sessions/{session_id}` | 删除会话及下属消息 | JSON |
-| `PUT` | `/api/sessions/{session_id}` | 重命名会话（title） | JSON |
-| **数据资产** | | | |
-| `GET` | `/api/assets` | 当前用户数据资产列表 | JSON |
-| `POST` | `/api/assets/reclassify` | 重新分类资产（模态等） | JSON |
-| `DELETE` | `/api/assets/{asset_id}` | 删除资产记录 | JSON |
-| `PUT` | `/api/assets/{asset_id}` | 重命名资产（file_name） | JSON |
-| **工作流收藏** | | | |
-| `GET` | `/api/workflow_templates` | 当前用户工作流收藏列表 | JSON |
-| `POST` | `/api/workflow_templates` | 新建工作流收藏（name + config_json） | JSON |
-| `DELETE` | `/api/workflow_templates/{template_id}` | 删除工作流收藏 | JSON |
-| `PUT` | `/api/workflow_templates/{template_id}` | 重命名工作流收藏 | JSON |
-| **技能广场** | | | |
-| `GET` | `/api/skills` | 技能分页列表（main_cat/sub_cat/saved_only/page/size） | JSON |
-| `POST` | `/api/skills/{skill_id}/bookmark` | 收藏技能 | JSON |
-| `DELETE` | `/api/skills/{skill_id}/bookmark` | 取消收藏 | JSON |
-| `POST` | `/api/admin/bootstrap-skills` | 管理员：重新注入系统技能 | JSON |
+| `GET` | `/api/workflow/status/{run_id}` | 查询工作流状态 | JSON |
 
 ---
 
@@ -292,17 +258,28 @@ if (result.status === 'success') {
 ```typescript
 interface ChatRequest {
   message: string;                    // 用户消息（可为空，如果有文件）
-  history?: Array<{ role: "user"|"assistant"; content: string }>;
-  uploaded_files?: Array<{             // 已上传文件（支持 name/path 或 file_name/file_path）
-    name?: string;  file_name?: string;
-    path?: string;  file_path?: string;
+  history?: Array<{                   // 对话历史（可选）
+    role: "user" | "assistant";
+    content: string;
   }>;
-  workflow_data?: { workflow_name: string; steps: WorkflowStep[]; file_paths: string[]; };
-  test_dataset_id?: string;
-  stream?: boolean;                   // 默认 false；true 时返回 SSE
-  session_id?: string;                // 新建会话时不传，由后端生成并落库
-  user_id?: string;                   // 可选，默认由鉴权得到 owner_id
-  model_name?: string;                // 双通道模型路由：如 "qwen3.5-plus"、"deepseek-ai/DeepSeek-R1"、"Pro/zai-org/GLM-5"
+  uploaded_files?: Array<{             // 已上传的文件列表（可选）
+    name: string;                      // 文件名
+    path: string;                     // 文件路径（相对路径或绝对路径）
+  }>;
+  workflow_data?: {                   // 工作流执行数据（可选）
+    workflow_name: string;
+    steps: Array<{
+      step_id: string;
+      tool_id: string;
+      name: string;
+      params: Record<string, any>;
+    }>;
+    file_paths: string[];             // 文件路径数组（必需）
+  };
+  test_dataset_id?: string;           // 测试数据集 ID（可选）
+  stream?: boolean;                    // 是否使用流式响应，默认 false
+  session_id?: string;                 // 会话ID（可选）
+  user_id?: string;                    // 用户ID（可选，默认 "guest"）
 }
 ```
 
@@ -312,12 +289,14 @@ interface ChatRequest {
 {
   "message": "分析这个文件",
   "uploaded_files": [
-    { "file_name": "example.h5ad", "file_path": "/app/uploads/owner1/batch_id/example.h5ad" }
+    {
+      "name": "example.csv",
+      "path": "guest/20250128_120000/example.csv"
+    }
   ],
   "stream": true,
-  "session_id": "uuid-from-backend-or-new",
-  "user_id": "owner_id",
-  "model_name": "deepseek-ai/DeepSeek-R1"
+  "user_id": "guest",
+  "session_id": "20250128_120000"
 }
 ```
 
@@ -982,315 +961,6 @@ interface WorkflowSaveRequest {
 
 ---
 
-## 鉴权与会话/资产/技能接口
-
-### 11. 数据库初始化
-
-#### `GET /api/db/init`
-
-**说明**: 建表与初始化（部署后若出现表不存在或技能为空可调用）
-
-**请求参数**: 无
-
-**成功响应** (200 OK):
-
-```json
-{
-  "message": "数据库初始化成功",
-  "tables_created": true
-}
-```
-
----
-
-### 12. 鉴权接口
-
-#### `POST /api/auth/register`
-
-**说明**: 用户注册
-
-**请求格式**: `application/json`
-
-**请求体**:
-
-```json
-{
-  "username": "myuser",
-  "password": "mypassword"
-}
-```
-
-**成功响应** (200 OK):
-
-```json
-{
-  "username": "myuser",
-  "message": "注册成功",
-  "role": "user"
-}
-```
-
-**错误响应** (400): `{"detail": "用户名已存在"}` 或 `"用户名和密码不能为空"`
-
----
-
-#### `POST /api/auth/login`
-
-**说明**: 登录，使用表单 `application/x-www-form-urlencoded`，返回 JWT
-
-**请求体**: `username`, `password`（表单字段）
-
-**成功响应** (200 OK):
-
-```json
-{
-  "access_token": "eyJ...",
-  "token_type": "bearer",
-  "username": "myuser",
-  "role": "user"
-}
-```
-
-**错误响应** (401): `{"detail": "用户名或密码错误"}`
-
----
-
-#### `GET /api/auth/me`
-
-**说明**: 当前用户信息（需 Header: `Authorization: Bearer <access_token>`）
-
-**成功响应** (200 OK):
-
-```json
-{
-  "username": "myuser",
-  "role": "user"
-}
-```
-
----
-
-#### `POST /api/auth/merge_guest_data`
-
-**说明**: 登录后将游客身份下的会话/资产/工作流收藏合并到当前用户
-
-**请求体**:
-
-```json
-{
-  "guest_uuid": "uuid-from-x-guest-uuid"
-}
-```
-
-**成功响应** (200 OK): 合并结果描述
-
----
-
-### 13. 会话与消息
-
-#### `GET /api/sessions`
-
-**说明**: 当前用户（owner_id）历史会话，按创建时间倒序；需鉴权或 X-Guest-UUID
-
-**响应示例**:
-
-```json
-[
-  {
-    "id": "session-uuid",
-    "owner_id": "user1",
-    "title": "新会话",
-    "created_at": "2025-03-13T12:00:00"
-  }
-]
-```
-
----
-
-#### `GET /api/sessions/{session_id}/messages`
-
-**说明**: 指定会话的消息列表；校验会话归属
-
-**响应示例**:
-
-```json
-[
-  {
-    "id": 1,
-    "session_id": "session-uuid",
-    "role": "user",
-    "content": { "text": "..." },
-    "created_at": "2025-03-13T12:00:00"
-  }
-]
-```
-
-**错误响应** (403/404): 无权或会话不存在
-
----
-
-#### `DELETE /api/messages/{message_id}`
-
-**说明**: 删除单条消息；校验消息所属会话归属
-
-**成功响应** (200 OK): `{"status": "success"}` 或类似
-
----
-
-#### `DELETE /api/sessions/{session_id}` / `PUT /api/sessions/{session_id}`
-
-**说明**: 删除会话（及下属消息）；重命名会话（请求体 `{"title": "新标题"}`）
-
----
-
-### 14. 数据资产
-
-#### `GET /api/assets`
-
-**说明**: 当前用户数据资产列表；需鉴权或 X-Guest-UUID
-
-**响应示例**:
-
-```json
-[
-  {
-    "id": 1,
-    "owner_id": "user1",
-    "file_name": "data.h5ad",
-    "file_path": "user1/batch/data.h5ad",
-    "modality": "RNA",
-    "created_at": "2025-03-13T12:00:00"
-  }
-]
-```
-
----
-
-#### `POST /api/assets/reclassify`
-
-**说明**: 重新分类资产（模态等）
-
-#### `DELETE /api/assets/{asset_id}` / `PUT /api/assets/{asset_id}`
-
-**说明**: 删除资产；重命名（请求体 `{"file_name": "新文件名"}`）
-
----
-
-### 15. 工作流收藏
-
-#### `GET /api/workflow_templates`
-
-**说明**: 当前用户工作流收藏列表
-
-**响应示例**:
-
-```json
-[
-  {
-    "id": 1,
-    "owner_id": "user1",
-    "name": "我的流程",
-    "config_json": { "workflow_name": "...", "steps": [...] },
-    "created_at": "2025-03-13T12:00:00"
-  }
-]
-```
-
----
-
-#### `POST /api/workflow_templates`
-
-**请求体**:
-
-```json
-{
-  "name": "收藏名称",
-  "config_json": { "workflow_name": "...", "steps": [...] }
-}
-```
-
-**成功响应** (200 OK): `{"template_id": 1, "status": "success"}`
-
----
-
-#### `DELETE /api/workflow_templates/{template_id}` / `PUT /api/workflow_templates/{template_id}`
-
-**说明**: 删除收藏；重命名（请求体 `{"name": "新名称"}`）
-
----
-
-### 16. 技能广场
-
-#### `GET /api/skills`
-
-**说明**: 技能分页列表；仅 `status=approved`；`saved_only=true` 时需鉴权且只返回当前用户收藏
-
-**请求参数** (Query):
-- `main_cat` (string, 可选): 大类筛选
-- `sub_cat` (string, 可选): 小类筛选
-- `saved_only` (bool, 可选): 仅收藏，默认 false
-- `page` (int, 可选): 页码，默认 1
-- `size` (int, 可选): 每页条数，默认 12
-
-**响应示例**:
-
-```json
-{
-  "items": [
-    {
-      "id": 1,
-      "name": "技能名称",
-      "description": "...",
-      "main_category": "多模态组学",
-      "sub_category": "转录组学",
-      "prompt_template": "...",
-      "author_id": "system",
-      "created_at": "2025-03-13T12:00:00",
-      "saved": false
-    }
-  ],
-  "total": 42
-}
-```
-
-**错误响应** (401): `saved_only=true` 且未登录时 `{"detail": "查看「我的」收藏需要登录或提供身份"}`
-
----
-
-#### `POST /api/skills/{skill_id}/bookmark`
-
-**说明**: 收藏技能；防重复；需鉴权
-
-**成功响应** (200 OK):
-
-```json
-{
-  "status": "success",
-  "message": "已添加到我的工具",
-  "saved": true
-}
-```
-
----
-
-#### `DELETE /api/skills/{skill_id}/bookmark`
-
-**说明**: 取消收藏；需鉴权
-
-**成功响应** (200 OK): `{"status": "success", "message": "已取消收藏", "saved": false}`
-
----
-
-#### `POST /api/admin/bootstrap-skills`
-
-**说明**: 管理员专用；重新注入系统技能（清理 author_id=system 后补种）
-
-**请求头**: `Authorization: Bearer <access_token>`，且用户 `role=admin`
-
-**成功响应** (200 OK): 补种结果描述
-
----
-
 ## SSE 流式响应格式
 
 当 `stream: true` 时，`/api/chat` 接口返回 Server-Sent Events (SSE) 格式的流式响应。
@@ -1306,7 +976,6 @@ interface WorkflowSaveRequest {
 | `diagnosis` | 诊断报告 | `{ "report_data": {...} }` |
 | `result` | 最终结果 | `{ "report_data": {...} }` 或 `{ "workflow_config": {...} }` |
 | `done` | 完成信号 | `{ "status": "success" }` |
-| `state_snapshot` | 会话状态快照（入库用） | `{ "text", "workflow", "steps", "report" }` |
 | `error` | 错误信息 | `{ "error": "错误描述", "message": "用户友好的错误消息" }` |
 
 **⚠️ 重要提示**: `message` 事件中的 `content` 字段只包含**增量 token**，不是累积文本。客户端必须使用 `buffer += data.content` 来累积内容。
@@ -1737,12 +1406,12 @@ while (true) {
 - **结果文件路径**: 相对于 `RESULTS_DIR`，格式: `run_{timestamp}/{filename}`
 - **访问结果文件**: 通过 `/results/{path}` 静态文件服务访问
 
-### C. 多用户与鉴权
+### C. 多用户支持
 
-- **身份解析**: 优先 `Authorization: Bearer <access_token>`（登录用户），否则 `X-Guest-UUID`（游客）；解析结果为 `owner_id`，用于会话/消息/资产/工作流收藏/技能收藏隔离。
-- **目录隔离**: 上传目录按 `owner_id` 隔离: `{UPLOAD_DIR}/{owner_id}/{batch_id}/`；Asset 表记录 `owner_id`。
-- **会话/消息**: Session、Message 表含 `owner_id` / `session_id`，新建会话时由后端生成 `session_id` 并落库。
-- **工作流收藏**: WorkflowTemplate 表按 `owner_id` 隔离；技能收藏 UserSavedSkill 按 `owner_id` + `skill_id` 防重复。
+系统支持多用户隔离：
+- 每个用户有独立的文件目录: `{UPLOAD_DIR}/{user_id}/`
+- 每个会话有独立的子目录: `{UPLOAD_DIR}/{user_id}/{session_id}/`
+- 工作流和任务历史按用户隔离
 
 ### D. 10x Genomics 数据特殊处理
 
@@ -1752,6 +1421,6 @@ while (true) {
 
 ---
 
-**文档版本**: v2.1  
-**最后更新**: 2025-03-13  
-**维护者**: GIBH Agent Team
+**文档版本**: v2.0  
+**最后更新**: 2025-01-28  
+**维护者**: Omics Agent Team

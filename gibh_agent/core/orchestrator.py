@@ -185,10 +185,44 @@ class AgentOrchestrator:
             SSE 格式的事件字符串: "data: {json}\n\n"
         """
         files = files or []
+        # 🔥 全链路绝对路径：入口处统一将相对路径转为 UPLOAD_DIR 下绝对路径，避免底层工具 [Errno 2]
+        _base = self.upload_dir
+        _normalized = []
+        for _f in files:
+            if isinstance(_f, dict):
+                _path = _f.get("path") or _f.get("file_path")
+                if _path and isinstance(_path, str):
+                    _p = Path(_path)
+                    if not _p.is_absolute():
+                        _path = str((_base / _p).resolve())
+                    else:
+                        _path = str(_p.resolve())
+                    _normalized.append({**_f, "path": _path, "name": _f.get("name") or _f.get("file_name") or Path(_path).name})
+                else:
+                    _normalized.append(_f)
+            elif isinstance(_f, str):
+                _p = Path(_f)
+                if not _p.is_absolute():
+                    _path = str((_base / _p).resolve())
+                else:
+                    _path = str(_p.resolve())
+                _normalized.append({"name": Path(_path).name, "path": _path})
+            else:
+                _normalized.append(_f)
+        files = _normalized
         history = history or []
+        # 🔥 头尾记忆：保留首轮锚点 + 最近 6 条，大 JSON 仅做占位清洗
+        history = self._truncate_and_sanitize_history(history, max_tail_messages=6)
+        # 🔥 有状态应用切片：内存状态快照，供流式过程中聚合，最终入库 content.state_snapshot
+        state_snapshot = {
+            "text": "",
+            "workflow": None,
+            "steps": [],
+            "report": None,
+        }
         owner_id = kwargs.get("owner_id") or kwargs.get("user_id")
         db = kwargs.get("db")
-        model_name = (kwargs.get("model_name") or "").strip() or "deepseek-ai/DeepSeek-R1"
+        model_name = (kwargs.get("model_name") or "").strip() or "qwen3.5-plus"
         _t_start = time.time()
         logger.info("[Profiler] stream_process 入口 - 开始处理请求 (model_name=%s)", model_name)
 
@@ -206,17 +240,28 @@ class AgentOrchestrator:
                 ).first()
                 if template and template.config_json:
                     logger.info("✅ [Orchestrator] 复用工作流模板: id=%s name=%s", template_id, template.name)
-                    yield self._format_sse("status", {"content": "正在加载工作流模板...", "state": "loading"})
+                    yield self._emit_sse(state_snapshot,"status", {"content": "正在加载工作流模板...", "state": "loading"})
                     await asyncio.sleep(0.02)
                     # config_json 即前端 renderWorkflowCard 所需结构（event: workflow 一致）
-                    payload = template.config_json if isinstance(template.config_json, dict) else {}
-                    yield self._format_sse("workflow", payload)
+                    payload = dict(template.config_json) if isinstance(template.config_json, dict) else {}
+                    # 标识为「收藏复用」卡片，前端据此挂载「上传文件并执行」专属按钮，与普通规划卡片解耦
+                    payload["from_favorite_reuse"] = True
+                    payload["template_id"] = template_id
+                    # 复用时强制为执行模式，确保卡片显示「执行工作流」按钮，便于直传执行
+                    payload["template_mode"] = False
+                    # 🔥 强制状态聚合：在 yield 前写入快照，保证入库 content.state_snapshot.workflow 非空，历史恢复可渲染卡片
+                    state_snapshot["workflow"] = payload
+                    msg_text = f"已加载工作流「{template.name}」，请检查参数后点击执行。"
+                    state_snapshot["text"] = msg_text
+                    yield self._emit_sse(state_snapshot,"workflow", payload)
                     await asyncio.sleep(0.01)
-                    yield self._format_sse("message", {"content": f"已加载工作流「{template.name}」，请检查参数后点击执行。"})
+                    yield self._emit_sse(state_snapshot,"message", {"content": msg_text})
                     await asyncio.sleep(0.01)
-                    yield self._format_sse("status", {"content": "模板已就绪", "state": "completed"})
+                    yield self._emit_sse(state_snapshot,"status", {"content": "模板已就绪", "state": "completed"})
                     await asyncio.sleep(0.01)
-                    yield self._format_sse("done", {"status": "success"})
+                    yield self._emit_sse(state_snapshot,"done", {"status": "success"})
+                    state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                    yield self._format_sse("state_snapshot", state_snapshot)
                     return
                 else:
                     logger.warning("⚠️ [Orchestrator] 复用模板不存在或 config_json 为空: template_id=%s", template_id)
@@ -225,12 +270,14 @@ class AgentOrchestrator:
             except Exception as e:
                 logger.warning("⚠️ [Orchestrator] 工作流模板加载失败: %s", e)
             # 🔥 强制阻断：匹配到复用指令后无论成功与否都 return，绝不继续走 _classify_global_intent
+            state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+            yield self._format_sse("state_snapshot", state_snapshot)
             return
 
         # 🔥 PHASE 1: Layer 0 - Global Intent Routing (Chat vs Task)
         # Check if this is general chat or a bioinformatics task BEFORE any file inspection or planning
         try:
-            yield self._format_sse("status", {
+            yield self._emit_sse(state_snapshot,"status", {
                 "content": "正在理解您的意图...",
                 "state": "analyzing"
             })
@@ -244,7 +291,7 @@ class AgentOrchestrator:
             if intent_type == "chat":
                 # 🔥 CHAT MODE: Stream LLM response directly, skip all file/planning logic
                 logger.info("💬 [Orchestrator] 进入聊天模式，跳过文件检查和规划")
-                yield self._format_sse("status", {
+                yield self._emit_sse(state_snapshot,"status", {
                     "content": "正在思考...",
                     "state": "thinking"
                 })
@@ -259,9 +306,14 @@ class AgentOrchestrator:
                         "<<<SUGGESTIONS>>>[\"问题1\", \"问题2\"]<<<END_SUGGESTIONS>>>\n"
                         "若对话在结束（如告别、再见）则不要输出上述块。"
                     )
+                    # 🔥 显式注入当前工作台文件状态，防止大模型失忆
+                    user_content = query
+                    files_hint = self._build_current_files_hint(files)
+                    if files_hint:
+                        user_content = files_hint + "\n\n" + user_content
                     messages = [
                         {"role": "system", "content": chat_system},
-                        {"role": "user", "content": query}
+                        {"role": "user", "content": user_content}
                     ]
                     
                     # Add history context if available
@@ -285,23 +337,27 @@ class AgentOrchestrator:
                         if _llm_first_byte is None:
                             _llm_first_byte = time.time()
                             logger.info("[Profiler] 收到 LLM 首字节 - 耗时: %.2fs", _llm_first_byte - _t_llm_start)
-                        yield self._format_sse(event_type, data)
+                        yield self._emit_sse(state_snapshot,event_type, data)
                         await asyncio.sleep(0.01)
                     logger.info("[Profiler] LLM 思考与生成总耗时: %.2fs", time.time() - _t_llm_start)
 
-                    yield self._format_sse("status", {
+                    yield self._emit_sse(state_snapshot,"status", {
                         "content": "回答完成",
                         "state": "completed"
                     })
                     await asyncio.sleep(0.01)
-                    yield self._format_sse("done", {"status": "success"})
+                    yield self._emit_sse(state_snapshot,"done", {"status": "success"})
+                    state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                    yield self._format_sse("state_snapshot", state_snapshot)
                     return
                 else:
                     # Fallback if LLM not available
-                    yield self._format_sse("message", {
+                    yield self._emit_sse(state_snapshot,"message", {
                         "content": "抱歉，LLM服务暂时不可用。"
                     })
-                    yield self._format_sse("done", {"status": "success"})
+                    yield self._emit_sse(state_snapshot,"done", {"status": "success"})
+                    state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                    yield self._format_sse("state_snapshot", state_snapshot)
                     return
             
             # 🔥 TASK MODE: Continue with existing logic (file check -> plan -> execute)
@@ -332,16 +388,18 @@ class AgentOrchestrator:
                 
                 if not steps or len(steps) == 0:
                     logger.error("❌ [Orchestrator] workflow_data 中没有步骤")
-                    yield self._format_sse("error", {
+                    yield self._emit_sse(state_snapshot,"error", {
                         "error": "工作流配置无效",
                         "message": "工作流数据中没有找到步骤"
                     })
+                    state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                    yield self._format_sse("state_snapshot", state_snapshot)
                     return
                 
                 logger.info(f"✅ [Orchestrator] 准备执行 {len(steps)} 个步骤")
                 
                 # 1. Initialize Execution Engine
-                yield self._format_sse("status", {
+                yield self._emit_sse(state_snapshot,"status", {
                     "content": "正在初始化执行引擎...",
                     "state": "running"
                 })
@@ -353,14 +411,63 @@ class AgentOrchestrator:
                 upload_dir_str = str(upload_dir) if isinstance(upload_dir, Path) else upload_dir
                 executor = WorkflowExecutor(upload_dir=upload_dir_str)
                 
-                # 2. Extract file paths
-                file_paths = workflow_data.get("file_paths", [])
+                # 2. Extract file paths（去重 + 强制绝对路径，防止传入 Executor/工具 为相对路径）
+                file_paths = workflow_data.get("file_paths", []) or []
                 if not file_paths and files:
-                    # Extract from files parameter
                     file_paths = [f.get("path") or f.get("file_path") or f.get("name") for f in files if f]
-                    file_paths = [p for p in file_paths if p]
+                file_paths = list(dict.fromkeys([p for p in file_paths if p]))
+                _upload_base = Path(getattr(self, 'upload_dir', os.getenv("UPLOAD_DIR", "/app/uploads")))
+                _abs_paths = []
+                for _p in file_paths:
+                    _path = Path(_p) if isinstance(_p, str) else Path(str(_p))
+                    if not _path.is_absolute():
+                        _path = (_upload_base / _path).resolve()
+                    _abs_paths.append(str(_path))
+                file_paths = _abs_paths
+                logger.info(f"📁 [Orchestrator] 文件路径(绝对): {file_paths}")
                 
-                logger.info(f"📁 [Orchestrator] 文件路径: {file_paths}")
+                # 🔥 直接执行时也按 workflow 类型更新未分类资产的 modality，使左侧栏数据资产实时归到对应组学
+                db = kwargs.get("db")
+                owner_id = kwargs.get("owner_id")
+                if db and owner_id and file_paths:
+                    try:
+                        workflow_name = (workflow_config.get("workflow_name") or "").strip().lower()
+                        _domain = "metabolomics"
+                        if "rna" in workflow_name or "转录" in workflow_name:
+                            _domain = "rna"
+                        elif "spatial" in workflow_name or "空间" in workflow_name:
+                            _domain = "spatial"
+                        elif "radiomics" in workflow_name or "影像" in workflow_name:
+                            _domain = "radiomics"
+                        elif "genomics" in workflow_name or "基因组" in workflow_name:
+                            _domain = "genomics"
+                        elif "epigenomics" in workflow_name or "表观" in workflow_name:
+                            _domain = "epigenomics"
+                        elif "proteomics" in workflow_name or "蛋白" in workflow_name:
+                            _domain = "proteomics"
+                        modality_map = {
+                            "rna": "rna", "metabolomics": "metabolomics", "spatial": "spatial", "radiomics": "radiomics",
+                            "genomics": "genomics", "epigenomics": "epigenomics", "proteomics": "proteomics",
+                        }
+                        workflow_type = modality_map.get(_domain)
+                        if workflow_type:
+                            file_names = list({os.path.basename(str(p)) for p in file_paths if p})
+                            if file_names:
+                                from gibh_agent.db.models import Asset
+                                updated = db.query(Asset).filter(
+                                    Asset.owner_id == owner_id,
+                                    Asset.modality.is_(None),
+                                    Asset.file_name.in_(file_names)
+                                ).update({"modality": workflow_type}, synchronize_session=False)
+                                db.commit()
+                                if updated:
+                                    logger.info(f"✅ [Orchestrator] 直接执行：已更新 {updated} 条未分类资产 modality -> {workflow_type} (file_names={file_names})")
+                    except Exception as e:
+                        logger.warning("⚠️ [Orchestrator] 直接执行路径更新资产 modality 失败: %s", e)
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
                 
                 # 🔥 TASK 1: Execute Steps with specific step names in logs
                 steps = workflow_config.get("steps", [])
@@ -404,7 +511,7 @@ class AgentOrchestrator:
                             logger.debug(f"⚠️ [Orchestrator] 无法从工具注册表获取工具名称: {e}，使用默认名称")
                             tool_display_name = step_name
                     
-                    yield self._format_sse("status", {
+                    yield self._emit_sse(state_snapshot,"status", {
                         "content": f"正在执行步骤: {tool_display_name}...",
                         "state": "running"
                     })
@@ -419,10 +526,12 @@ class AgentOrchestrator:
                     )
                 except SecurityException as e:
                     logger.warning("❌ [Orchestrator] 执行阶段数据完整性校验未通过: %s", e)
-                    yield self._format_sse("error", {
+                    yield self._emit_sse(state_snapshot,"error", {
                         "error": "数据完整性校验未通过",
                         "message": str(e) or "数据完整性校验未通过，无法执行分析。"
                     })
+                    state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                    yield self._format_sse("state_snapshot", state_snapshot)
                     return
                 
                 logger.info(f"✅ [Orchestrator] 工作流执行完成，结果: {type(results)}")
@@ -452,7 +561,7 @@ class AgentOrchestrator:
                     
                     if is_cellranger:
                         # Cell Ranger 步骤：发送友好的等待提示
-                        yield self._format_sse("status", {
+                        yield self._emit_sse(state_snapshot,"status", {
                             "content": "⏳ Cell Ranger 正在后台运行，这可能需要较长时间（通常 30 分钟到数小时），请耐心等待...",
                             "state": "async_job_started",
                             "show_waiting_bubble": True,
@@ -460,7 +569,7 @@ class AgentOrchestrator:
                         })
                         await asyncio.sleep(0.01)
                     else:
-                        yield self._format_sse("status", {
+                        yield self._emit_sse(state_snapshot,"status", {
                             "content": f"异步作业已启动: {step_id}",
                             "state": "async_job_started"
                         })
@@ -479,14 +588,16 @@ class AgentOrchestrator:
                         "steps_details": steps_details
                     }
                     
-                    yield self._format_sse("result", async_response)
-                    yield self._format_sse("status", {
+                    yield self._emit_sse(state_snapshot,"result", async_response)
+                    yield self._emit_sse(state_snapshot,"status", {
                         "content": "等待异步作业完成..." if not is_cellranger else "⏳ Cell Ranger 正在后台运行，请耐心等待...",
                         "state": "waiting",
                         "show_waiting_bubble": is_cellranger
                     })
                     await asyncio.sleep(0.01)
-                    yield self._format_sse("done", {"status": "async_job_started"})
+                    yield self._emit_sse(state_snapshot,"done", {"status": "async_job_started"})
+                    state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                    yield self._format_sse("state_snapshot", state_snapshot)
                     return  # STOP HERE - Do not continue to next steps
                 
                 # 4. Generate Summary (if agent available and no async job)
@@ -528,7 +639,7 @@ class AgentOrchestrator:
                 
                 if target_agent and hasattr(target_agent, '_generate_analysis_summary'):
                     start_time = time.time()
-                    yield self._format_sse("status", {
+                    yield self._emit_sse(state_snapshot,"status", {
                         "content": "正在生成专家解读报告...",
                         "state": "running"
                     })
@@ -596,7 +707,7 @@ class AgentOrchestrator:
                             if hasattr(target_agent, 'context') and "last_llm_error" in target_agent.context:
                                 llm_error_info = target_agent.context.pop("last_llm_error")  # 取出后清除
                                 logger.warning(f"⚠️ [Orchestrator] 检测到LLM调用错误，发送详细错误信息到前端")
-                                yield self._format_sse("error", {
+                                yield self._emit_sse(state_snapshot,"error", {
                                     "error": llm_error_info.get("error_message", "LLM调用失败"),
                                     "message": f"LLM调用失败: {llm_error_info.get('error_message', '未知错误')}",
                                     "error_type": llm_error_info.get("error_type", "Unknown"),
@@ -685,7 +796,7 @@ class AgentOrchestrator:
                 # 🔥 TASK 3: Yield Execution Results FIRST (step_result events)
                 # This allows frontend to render the Accordion with step results
                 if steps_details and len(steps_details) > 0:
-                    yield self._format_sse("status", {
+                    yield self._emit_sse(state_snapshot,"status", {
                         "content": "正在渲染执行结果...",
                         "state": "rendering"
                     })
@@ -698,13 +809,13 @@ class AgentOrchestrator:
                             "workflow_name": workflow_config.get("workflow_name", "工作流")
                         }
                     }
-                    yield self._format_sse("step_result", step_result_response)
+                    yield self._emit_sse(state_snapshot,"step_result", step_result_response)
                     await asyncio.sleep(0.01)
                 
                 # 🔥 TASK 3: THEN Yield Diagnosis Report LAST (diagnosis event)
                 # This ensures the Expert Report appears after the execution results
                 if summary:
-                    yield self._format_sse("status", {
+                    yield self._emit_sse(state_snapshot,"status", {
                         "content": "正在生成专家解读报告...",
                         "state": "generating_report"
                     })
@@ -725,7 +836,7 @@ class AgentOrchestrator:
                     if evaluation:
                         diagnosis_response["report_data"]["evaluation"] = evaluation
                     
-                    yield self._format_sse("diagnosis", diagnosis_response)
+                    yield self._emit_sse(state_snapshot,"diagnosis", diagnosis_response)
                     await asyncio.sleep(0.01)
                 
                 # 🔥 TASK 3: Also yield combined result event for backward compatibility
@@ -741,21 +852,27 @@ class AgentOrchestrator:
                 if evaluation:
                     final_response["report_data"]["evaluation"] = evaluation
                 
-                yield self._format_sse("result", final_response)
-                yield self._format_sse("status", {
+                yield self._emit_sse(state_snapshot,"result", final_response)
+                yield self._emit_sse(state_snapshot,"status", {
                     "content": "执行完成",
                     "state": "completed"
                 })
                 await asyncio.sleep(0.01)
-                yield self._format_sse("done", {"status": "success"})
+                yield self._emit_sse(state_snapshot,"done", {"status": "success"})
+                state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                yield self._format_sse("state_snapshot", state_snapshot)
                 return  # STOP HERE - Do not continue to planning
                 
             except Exception as e:
                 logger.error(f"❌ [Orchestrator] 直接执行失败: {e}", exc_info=True)
-                yield self._format_sse("error", {
+                err_msg = f"工作流执行失败: {str(e)}"
+                state_snapshot["text"] = (state_snapshot.get("text") or "") + err_msg
+                yield self._emit_sse(state_snapshot,"error", {
                     "error": str(e),
-                    "message": f"工作流执行失败: {str(e)}"
+                    "message": err_msg
                 })
+                state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                yield self._format_sse("state_snapshot", state_snapshot)
                 return
         
         # 🔥 CRITICAL DEBUG: 记录接收到的原始文件数据
@@ -790,7 +907,7 @@ class AgentOrchestrator:
             self.conversation_state[session_id] = {}
             # 直接调用执行逻辑（这里需要根据实际执行接口调整）
             # 暂时跳过 FileInspector 和 Diagnosis，直接进入执行
-            yield self._format_sse("status", {
+            yield self._emit_sse(state_snapshot,"status", {
                 "content": "正在执行工作流...",
                 "state": "running"
             })
@@ -800,7 +917,7 @@ class AgentOrchestrator:
         
         try:
             # Step 1: 立即输出开始状态
-            yield self._format_sse("status", {
+            yield self._emit_sse(state_snapshot,"status", {
                 "content": "正在接收请求...",
                 "state": "start"
             })
@@ -816,7 +933,7 @@ class AgentOrchestrator:
             else:
                 refined_query = query
                 if self.query_rewriter:
-                    yield self._format_sse("status", {
+                    yield self._emit_sse(state_snapshot,"status", {
                         "content": "正在优化查询语句...",
                         "state": "running"
                     })
@@ -952,7 +1069,7 @@ class AgentOrchestrator:
             else:
                 # 🔥 CRITICAL REFACTOR: Step 3 - ALWAYS Analyze Intent First (Dynamic Scoping)
                 # Step 3.1: Analyze Intent (ALWAYS FIRST) - Determine modality and target_steps
-                yield self._format_sse("status", {
+                yield self._emit_sse(state_snapshot,"status", {
                     "content": "正在分析您的需求...",
                     "state": "running"
                 })
@@ -1066,7 +1183,7 @@ class AgentOrchestrator:
                 else:
                     logger.warning("⚠️ [Orchestrator] files 为空或 None")
                 
-                yield self._format_sse("status", {
+                yield self._emit_sse(state_snapshot,"status", {
                     "content": "正在检测文件输入...",
                     "state": "running"
                 })
@@ -1079,7 +1196,7 @@ class AgentOrchestrator:
                     logger.info("⚠️ [Orchestrator] 分支 A: Plan-First 模式（无文件）")
                     logger.info("⚠️ [Orchestrator] 进入预览模式，不会生成诊断报告")
                     # RNA 与 Spatial/Radiomics 一致：无文件时仅展示工作流预览卡片（蓝按钮「上传以激活」），不再询问本地测试数据
-                    yield self._format_sse("status", {
+                    yield self._emit_sse(state_snapshot,"status", {
                         "content": "未检测到文件，进入方案预览模式...",
                         "state": "running"
                     })
@@ -1087,7 +1204,7 @@ class AgentOrchestrator:
                     
                     try:
                         # Step A1: Generate Template Workflow - FULL workflow, pre-select by intent
-                        yield self._format_sse("status", {
+                        yield self._emit_sse(state_snapshot,"status", {
                             "content": "正在根据您的需求定制流程...",
                             "state": "running"
                         })
@@ -1132,7 +1249,7 @@ class AgentOrchestrator:
                             # 🔥 TASK 1: Empty Guard - Do NOT yield empty plans
                             if not steps or len(steps) == 0:
                                 logger.error(f"❌ [Orchestrator] Plan-First模式: 模板工作流步骤为空，不发送workflow事件")
-                                yield self._format_sse("error", {
+                                yield self._emit_sse(state_snapshot,"error", {
                                     "error": "模板生成失败",
                                     "message": "无法生成有效的工作流模板，请检查输入或联系技术支持"
                                 })
@@ -1147,9 +1264,10 @@ class AgentOrchestrator:
                                 "workflow_config": wf_config,
                                 "workflow_data": wf_config,
                                 "template_mode": True,  # 🔥 CRITICAL: 明确标记为模板模式
-                                "recommended_steps": recommended_steps  # 🔥 意图驱动预选: 空=全选
+                                "recommended_steps": recommended_steps,  # 🔥 意图驱动预选: 空=全选
+                                "file_paths": [],  # 模板模式无文件，保持结构一致
                             }
-                            yield self._format_sse("workflow", workflow_event_data)
+                            yield self._emit_sse(state_snapshot,"workflow", workflow_event_data)
                             await asyncio.sleep(0.01)
                         
                         # 🔥 CRITICAL: Generate message with modality and step count
@@ -1160,29 +1278,29 @@ class AgentOrchestrator:
                             "RNA": "转录组",
                         }
                         modality_display = _modality_map.get(domain_name, domain_name or "分析")
-                        yield self._format_sse("message", {
+                        yield self._emit_sse(state_snapshot,"message", {
                             "content": f"已为您规划 **{modality_display}** 分析流程（包含 {steps_count} 个步骤）。请上传数据以激活。"
                         })
                         await asyncio.sleep(0.01)
                         
                         # 输出结果事件
-                        yield self._format_sse("result", {
+                        yield self._emit_sse(state_snapshot,"result", {
                             "workflow_config": workflow_data,
                             "template_mode": True
                         })
                         
                         # 🔥 CRITICAL: STOP HERE - 不继续执行
-                        yield self._format_sse("status", {
+                        yield self._emit_sse(state_snapshot,"status", {
                             "content": "方案模版已生成，等待上传...",
                             "state": "completed"
                         })
                         await asyncio.sleep(0.01)
                         
-                        yield self._format_sse("done", {"status": "success"})
+                        yield self._emit_sse(state_snapshot,"done", {"status": "success"})
                         return  # 立即返回，不继续执行
                     except Exception as e:
                         logger.error(f"❌ [Orchestrator] Plan-First 模式失败: {e}", exc_info=True)
-                        yield self._format_sse("error", {
+                        yield self._emit_sse(state_snapshot,"error", {
                             "error": str(e),
                             "message": f"模板生成失败: {str(e)}"
                         })
@@ -1210,13 +1328,14 @@ class AgentOrchestrator:
             
                 if not file_path:
                     logger.error("❌ [Orchestrator] Path A: 无法提取文件路径")
-                    yield self._format_sse("error", {
-                        "error": "文件路径无效",
-                        "message": "无法从文件对象中提取路径"
-                    })
+                    msg = "无法从文件对象中提取路径"
+                    state_snapshot["text"] = (state_snapshot.get("text") or "") + msg
+                    yield self._emit_sse(state_snapshot,"error", {"error": "文件路径无效", "message": msg})
+                    state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                    yield self._format_sse("state_snapshot", state_snapshot)
                     return
             
-                yield self._format_sse("status", {
+                yield self._emit_sse(state_snapshot,"status", {
                     "content": f"检测到文件，正在进行数据体检...",
                     "state": "running"
                 })
@@ -1321,7 +1440,7 @@ class AgentOrchestrator:
                                     if sig_path.exists():
                                         if not verify_file_signature(path_for_verify, public_key_b64):
                                             logger.warning("❌ [Orchestrator] 数据完整性校验未通过: %s", file_path)
-                                            yield self._format_sse("error", {
+                                            yield self._emit_sse(state_snapshot,"error", {
                                                 "error": "数据完整性校验未通过",
                                                 "message": "数据完整性校验未通过，请重新上传数据。"
                                             })
@@ -1437,7 +1556,7 @@ class AgentOrchestrator:
                             sug = agent_instance.context.get("diagnosis_suggestions")
                             if sug:
                                 payload["suggestions"] = sug
-                        yield self._format_sse("diagnosis", payload)
+                        yield self._emit_sse(state_snapshot,"diagnosis", payload)
                         await asyncio.sleep(0.01)
                     elif file_metadata:
                         # 文件检查未通过（类型无法识别或读取失败），避免进入规划阶段导致“工作流规划失败”
@@ -1445,21 +1564,21 @@ class AgentOrchestrator:
                         if isinstance(err_msg, str) and len(err_msg) > 200:
                             err_msg = err_msg[:200] + "..."
                         logger.warning("❌ [Orchestrator] Path A: 文件检查未通过: %s", file_metadata.get("file_type", "unknown"))
-                        yield self._format_sse("error", {
+                        yield self._emit_sse(state_snapshot,"error", {
                             "error": "文件类型不支持或无法读取",
                             "message": f"{err_msg}\n\n支持格式：单细胞 RNA 请上传 .h5ad 或解压后的 10x 目录（含 matrix.mtx、barcodes.tsv、features.tsv）；代谢组学请上传 CSV；影像组学请上传 .nii / .nii.gz / .dcm。"
                         })
                         return
                 except Exception as e:
                     logger.error(f"❌ [Orchestrator] Path A: 文件检查失败: {e}", exc_info=True)
-                    yield self._format_sse("error", {
+                    yield self._emit_sse(state_snapshot,"error", {
                         "error": str(e),
                         "message": f"文件检查失败: {str(e)}"
                     })
                     return
             
                 # A2. Plan (With Metadata) - CRITICAL: Explicitly tell planner this is NOT a template
-                yield self._format_sse("status", {
+                yield self._emit_sse(state_snapshot,"status", {
                     "content": "正在根据您的需求定制流程...",
                     "state": "running"
                 })
@@ -1491,9 +1610,15 @@ class AgentOrchestrator:
                     recommended_steps = workflow.resolve_dependencies(intent_target_steps)
                     logger.info(f"✅ [Orchestrator] Path A 意图预选: intent={intent_target_steps} -> recommended={recommended_steps}")
             
+                # 🔥 显式注入当前工作台文件状态，防止执行阶段大模型失忆
+                plan_query = refined_query
+                if files:
+                    files_hint = self._build_current_files_hint(files)
+                    if files_hint:
+                        plan_query = files_hint + "\n\n" + plan_query
                 _t_plan_start = time.time()
                 result = await planner.generate_plan(
-                    user_query=refined_query,
+                    user_query=plan_query,
                     file_metadata=file_metadata,  # 🔥 CRITICAL: file_metadata exists
                     category_filter=None,
                     domain_name=domain_name,
@@ -1508,7 +1633,7 @@ class AgentOrchestrator:
                 if hasattr(self.agent, 'context') and "last_llm_error" in self.agent.context:
                     llm_error_info = self.agent.context.pop("last_llm_error")  # 取出后清除
                     logger.warning(f"⚠️ [Orchestrator] 检测到LLM调用错误（数据诊断阶段），发送详细错误信息到前端")
-                    yield self._format_sse("error", {
+                    yield self._emit_sse(state_snapshot,"error", {
                         "error": llm_error_info.get("error_message", "LLM调用失败"),
                         "message": f"数据诊断LLM调用失败: {llm_error_info.get('error_message', '未知错误')}",
                         "error_type": llm_error_info.get("error_type", "Unknown"),
@@ -1614,7 +1739,7 @@ class AgentOrchestrator:
                             "❌ [Orchestrator] Path A: 工作流规划失败，步骤为空。%s",
                             debug_detail,
                         )
-                        yield self._format_sse("error", {
+                        yield self._emit_sse(state_snapshot,"error", {
                             "error": "工作流规划失败",
                             "message": "无法生成有效的工作流步骤，请检查输入数据或联系技术支持",
                             "details": plan_fail_cause or debug_detail,
@@ -1633,13 +1758,18 @@ class AgentOrchestrator:
                     # 🔥 TASK 1: Yield workflow event ONLY ONCE, at the very end of planning block
                     # 🔥 TASK 2 & 3 FIX: 添加参数推荐和诊断报告到工作流配置
                     # 🔥 意图驱动预选: recommended_steps 放顶层 + workflow_config 内（双写确保前端能读到）
+                    # 🔥 MULTI-FILE: 下发前端时 file_paths 必须为本次请求的全部路径，去重后禁止只取 files[0]
+                    all_file_paths = [f.get("path") or f.get("file_path") or f.get("name") for f in files if f]
+                    all_file_paths = list(dict.fromkeys([p for p in all_file_paths if p]))
                     if isinstance(workflow_data, dict):
                         workflow_data = dict(workflow_data)
                         workflow_data["recommended_steps"] = recommended_steps
+                        workflow_data["file_paths"] = all_file_paths
                     workflow_event_data = {
                         "workflow_config": workflow_data,
                         "template_mode": False,  # 🔥 CRITICAL: Always False in Path A
-                        "recommended_steps": recommended_steps  # 🔥 意图驱动预选: 空=全选
+                        "recommended_steps": recommended_steps,  # 🔥 意图驱动预选: 空=全选
+                        "file_paths": all_file_paths,
                     }
                 
                     # 添加参数推荐（如果存在）
@@ -1656,26 +1786,35 @@ class AgentOrchestrator:
                             workflow_event_data["diagnosis_report"] = diagnosis_report
                             logger.info(f"✅ [Orchestrator] 添加诊断报告到工作流事件")
                 
-                    # 🔥 Task 4: 规划完成后按 workflow_type 更新未分类资产的 modality（仅当前用户）
+                    # 🔥 Task 4: 规划完成后按 workflow_type 更新未分类资产的 modality（宽泛匹配：按文件名，兼容 10x 三件套等）
+                    # 优先用当前请求的 files 构建 file_names，确保本轮参与规划的所有文件（含 10x barcodes/features/matrix）都被归到对应组学
                     if db and owner_id and domain_name:
                         try:
-                            file_paths = (workflow_data or {}).get("file_paths") or []
-                            if not file_paths and files:
+                            file_paths = []
+                            if files:
                                 file_paths = [f.get("path") or f.get("file_path") or f.get("name") for f in files if f]
-                            file_paths = [p for p in file_paths if p]
+                            if not file_paths and (workflow_data or {}).get("file_paths"):
+                                file_paths = (workflow_data or {}).get("file_paths") or []
+                            file_paths = list(dict.fromkeys([p for p in file_paths if p]))
+                            file_names = list({os.path.basename(str(p)) for p in file_paths if p})
                             _dm = (domain_name or "").strip().lower()
-                            modality_map = {"rna": "rna", "metabolomics": "metabolomics", "spatial": "spatial", "radiomics": "radiomics", "genomics": "genomics", "epigenomics": "epigenomics", "proteomics": "proteomics"}
+                            # 与前端 FIXED_MODALITY_LABELS 对齐：转录组含 RNA/transcriptomics/single_cell，统一写 rna
+                            modality_map = {
+                                "rna": "rna", "transcriptomics": "rna", "single_cell": "rna",
+                                "metabolomics": "metabolomics", "spatial": "spatial", "radiomics": "radiomics",
+                                "genomics": "genomics", "epigenomics": "epigenomics", "proteomics": "proteomics",
+                            }
                             workflow_type = modality_map.get(_dm) or (_dm if _dm in modality_map.values() else None)
-                            if workflow_type and file_paths:
+                            if workflow_type and file_names:
                                 from gibh_agent.db.models import Asset
                                 updated = db.query(Asset).filter(
                                     Asset.owner_id == owner_id,
-                                    Asset.file_path.in_(file_paths),
-                                    Asset.modality.is_(None)
+                                    Asset.modality.is_(None),
+                                    Asset.file_name.in_(file_names)
                                 ).update({"modality": workflow_type}, synchronize_session=False)
                                 db.commit()
                                 if updated:
-                                    logger.info(f"✅ [Orchestrator] 已更新 {updated} 条未分类资产 modality -> {workflow_type}")
+                                    logger.info(f"✅ [Orchestrator] 已更新 {updated} 条未分类资产 modality -> {workflow_type} (file_names={file_names})")
                         except Exception as e:
                             logger.warning("⚠️ [Orchestrator] 更新资产 modality 失败: %s", e)
                             try:
@@ -1684,20 +1823,20 @@ class AgentOrchestrator:
                                 pass
 
                     logger.info(f"✅ [Orchestrator] Path A: 发送workflow事件，包含 {len(steps)} 个步骤, recommended_steps={recommended_steps}")
-                    yield self._format_sse("workflow", workflow_event_data)
+                    yield self._emit_sse(state_snapshot,"workflow", workflow_event_data)
                     await asyncio.sleep(0.01)
             
                     # Yield result event with workflow config (包含推荐和诊断)
-                    yield self._format_sse("result", workflow_event_data)
+                    yield self._emit_sse(state_snapshot,"result", workflow_event_data)
                     await asyncio.sleep(0.01)
                 
-                    yield self._format_sse("status", {
+                    yield self._emit_sse(state_snapshot,"status", {
                         "content": "工作流规划完成，请确认执行。",
                         "state": "completed"
                     })
                     await asyncio.sleep(0.01)
                 
-                    yield self._format_sse("done", {"status": "success"})
+                    yield self._emit_sse(state_snapshot,"done", {"status": "success"})
                     return  # 🔥 CRITICAL: STOP HERE - Do NOT auto-execute
                 
                     # 🔥 REMOVED: Auto-execution logic
@@ -1712,7 +1851,7 @@ class AgentOrchestrator:
                         should_auto_execute = True
                         # ... (same execution logic as above) ...
                         # For now, just log and return error
-                        yield self._format_sse("error", {
+                        yield self._emit_sse(state_snapshot,"error", {
                             "error": "工作流规划结果格式错误",
                             "message": f"规划结果不是字典类型: {type(result)}"
                         })
@@ -1720,14 +1859,17 @@ class AgentOrchestrator:
             
         except Exception as e:
             logger.error(f"❌ 流式处理失败: {e}", exc_info=True)
-            yield self._format_sse("status", {
+            yield self._emit_sse(state_snapshot,"status", {
                 "content": f"处理失败: {str(e)}",
                 "state": "error"
             })
-            yield self._format_sse("error", {
+            yield self._emit_sse(state_snapshot,"error", {
                 "error": str(e),
                 "message": f"处理失败: {str(e)}"
             })
+        finally:
+            state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+            yield self._emit_sse(state_snapshot,"state_snapshot", state_snapshot)
     
     def _generate_fallback_summary(
         self, 
@@ -1882,4 +2024,173 @@ class AgentOrchestrator:
         """
         json_data = json.dumps(data, ensure_ascii=False)
         return f"event: {event_type}\ndata: {json_data}\n\n"
+
+    @staticmethod
+    def _sanitize_snapshot_text(text: str) -> str:
+        """清洗 state_snapshot 文本：剔除 <<>>...<<>> 与 <think>...</think> 标签（含跨行）。"""
+        if not text or not isinstance(text, str):
+            return ""
+        t = text
+        t = re.sub(r"<think>[\s\S]*?<\/think>", "", t, flags=re.IGNORECASE)
+        t = re.sub(r"<<>>\[[\s\S]*?\]<<>>", "", t)
+        t = re.sub(r"<<>>[\s\S]*?<<>>", "", t)
+        return t.strip()
+
+    def _sanitize_large_json(self, history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        仅清洗每条消息的 content / message 中的大块 JSON，替换为占位符。
+        不修改 role 及其他字段，保证结构完整。
+        """
+        if not history:
+            return []
+        placeholder = "[系统提示：此处生成了工作流卡片]"
+        out = []
+        for item in history:
+            if not isinstance(item, dict):
+                out.append(item)
+                continue
+            content = item.get("content") or item.get("message") or ""
+            if not isinstance(content, str) or len(content) < 500:
+                out.append(item)
+                continue
+            if ("workflow_data" in content or '"steps"' in content or "'steps'" in content) and (
+                content.strip().startswith("{") or "workflow_name" in content
+            ):
+                new_item = dict(item)
+                if "content" in new_item:
+                    new_item["content"] = placeholder
+                if "message" in new_item:
+                    new_item["message"] = placeholder
+                out.append(new_item)
+            else:
+                out.append(item)
+        return out
+
+    def _truncate_and_sanitize_history(
+        self, history: List[Dict[str, Any]], max_tail_messages: int = 6
+    ) -> List[Dict[str, Any]]:
+        """
+        头尾记忆法：保留锚点（首条用户+首条 AI）与近期 N 条，避免丢失任务锚点。
+        - Head: 永远保留 history[0]、history[1]（首轮对话）
+        - Tail: 保留最近 max_tail_messages 条
+        - 按索引合并去重后做大 JSON 清洗
+        """
+        if not history:
+            return []
+        n = len(history)
+        if n <= 2 + max_tail_messages:
+            return self._sanitize_large_json(history)
+        head_indices = set(range(min(2, n)))
+        tail_start = max(0, n - max_tail_messages)
+        tail_indices = set(range(tail_start, n))
+        indices = sorted(head_indices | tail_indices)
+        truncated = [history[i] for i in indices]
+        return self._sanitize_large_json(truncated)
+
+    def _build_current_files_hint(self, files: List[Dict[str, Any]]) -> str:
+        """组装当前工作台已挂载文件的状态文案，供注入到 LLM 上下文。无文件时返回空字符串。"""
+        if not files:
+            return ""
+        names = []
+        for f in files:
+            if not isinstance(f, dict):
+                continue
+            name = f.get("name") or f.get("path") or f.get("file_path")
+            if name and isinstance(name, str):
+                names.append(Path(name).name if name else name)
+            elif name:
+                names.append(str(name))
+        if not names:
+            return ""
+        return "[系统状态：当前工作台中已挂载文件：" + ", ".join(names) + "]"
+
+    def _emit_sse(
+        self,
+        state_snapshot: Dict[str, Any],
+        event_type: str,
+        data: Dict[str, Any],
+    ) -> str:
+        """
+        聚合状态并返回 SSE 字符串。仅做内存赋值，不阻塞。
+        执行阶段全量事件捕获（供历史恢复与工作台渲染）：
+        - message, thought -> text
+        - workflow, plan -> workflow
+        - step -> steps 按 step.id/step_id 查找并覆盖更新，否则追加（防重复）
+        - step_result -> steps 覆盖为 steps_details，并合并 report_data 入 report
+        - diagnosis -> 合并 report_data（诊断报告）入 report
+        - result, done -> 若带 diagnosis 或 report_data 则整体写入 report
+        - report_data -> 合并入 report.report_data
+        """
+        if event_type in ("message", "thought"):
+            state_snapshot["text"] = (state_snapshot.get("text") or "") + (data.get("content") or "")
+        elif event_type in ("workflow", "plan") and data:
+            state_snapshot["workflow"] = data
+        elif event_type == "step" and data:
+            step_obj = data.get("step", data)
+            step_id = step_obj.get("id") or step_obj.get("step_id")
+            steps = state_snapshot.get("steps") or []
+            if step_id is not None:
+                for i, s in enumerate(steps):
+                    if (s.get("id") or s.get("step_id")) == step_id:
+                        steps[i] = {**(s if isinstance(s, dict) else {}), **(step_obj if isinstance(step_obj, dict) else {})}
+                        break
+                else:
+                    steps.append(step_obj if isinstance(step_obj, dict) else {"id": step_id, **step_obj})
+            else:
+                steps.append(step_obj if isinstance(step_obj, dict) else {"step": step_obj})
+            state_snapshot["steps"] = steps
+        elif event_type == "step_result" and data:
+            rd = data.get("report_data") or {}
+            if rd.get("steps_details"):
+                # 全量替换为 steps_details，并确保每步的 data（图表/表格）无损写入快照
+                steps_list = []
+                for s in rd["steps_details"]:
+                    step_copy = dict(s) if isinstance(s, dict) else {"step": s}
+                    if isinstance(s, dict) and "data" in s:
+                        step_copy["data"] = s["data"]
+                    steps_list.append(step_copy)
+                state_snapshot["steps"] = steps_list
+            # 单步更新：若 payload 带 step_id + data，合并到对应 step
+            step_id = data.get("step_id") or data.get("id")
+            if step_id and state_snapshot.get("steps"):
+                for s in state_snapshot["steps"]:
+                    if not isinstance(s, dict):
+                        continue
+                    if (s.get("id") or s.get("step_id")) == step_id:
+                        s.update(data)
+                        if "data" in data:
+                            s["data"] = data["data"]
+                        break
+            if rd:
+                report = state_snapshot.get("report") or {}
+                report.setdefault("report_data", {}).update(rd)
+                state_snapshot["report"] = report
+        elif event_type == "diagnosis" and data:
+            if "report" not in state_snapshot or state_snapshot["report"] is None:
+                state_snapshot["report"] = {}
+            report = state_snapshot["report"]
+            report_data = report.get("report_data") or {}
+            report_data.update(data.get("report_data") or {})
+            report["report_data"] = report_data
+            diagnosis_val = data.get("diagnosis") or report_data.get("diagnosis") or data
+            report["diagnosis"] = diagnosis_val
+            for k, v in data.items():
+                if k not in ("report_data", "diagnosis"):
+                    report[k] = v
+            state_snapshot["report"] = report
+        elif event_type in ("result", "done") and data:
+            if data.get("diagnosis") is not None or data.get("report_data") is not None:
+                report = state_snapshot.get("report") or {}
+                report_data = report.get("report_data") or {}
+                report_data.update(data.get("report_data") or {})
+                report["report_data"] = report_data
+                for k, v in data.items():
+                    if k != "report_data":
+                        report[k] = v
+                state_snapshot["report"] = report
+        elif event_type == "report_data" and data:
+            report = state_snapshot.get("report") or {}
+            report.setdefault("report_data", {}).update(data)
+            state_snapshot["report"] = report
+        return self._format_sse(event_type, data)
 

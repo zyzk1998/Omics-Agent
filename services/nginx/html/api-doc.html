@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API 文档 - GIBH Agent</title>
+    <!-- 标准 Favicon -->
+    <link rel="icon" type="image/png" href="/static/favicon.png?v=4">
+    <!-- 苹果设备 Touch Icon (提升在 iOS 上的书签显示效果) -->
+    <link rel="apple-touch-icon" href="/static/favicon.png?v=4">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+            padding: 24px 32px;
+            max-width: 960px;
+            margin: 0 auto;
+        }
+        .header {
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 2px solid #667eea;
+        }
+        .header h1 { font-size: 24px; color: #111; }
+        .header p { color: #666; font-size: 14px; margin-top: 8px; }
+        #content {
+            background: #fff;
+            padding: 28px 32px;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+        }
+        #content.loading { color: #999; }
+        #content.error { color: #c00; }
+        /* Markdown 渲染样式 */
+        #content h1 { font-size: 22px; margin: 24px 0 12px; color: #111; border-bottom: 1px solid #eee; padding-bottom: 8px; }
+        #content h2 { font-size: 18px; margin: 20px 0 10px; color: #333; }
+        #content h3 { font-size: 16px; margin: 16px 0 8px; color: #444; }
+        #content h4 { font-size: 14px; margin: 12px 0 6px; color: #555; }
+        #content p { margin-bottom: 12px; }
+        #content ul, #content ol { margin: 12px 0 12px 24px; }
+        #content li { margin-bottom: 6px; }
+        #content code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+        #content pre { background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 8px; overflow-x: auto; margin: 12px 0; font-size: 13px; line-height: 1.5; }
+        #content pre code { background: none; padding: 0; color: inherit; }
+        #content table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+        #content th, #content td { border: 1px solid #dee2e6; padding: 10px 12px; text-align: left; }
+        #content th { background: #f8f9fa; font-weight: 600; }
+        #content tr:nth-child(even) { background: #f9fafb; }
+        #content blockquote { border-left: 4px solid #667eea; padding-left: 16px; margin: 12px 0; color: #555; }
+        #content hr { border: none; border-top: 1px solid #eee; margin: 24px 0; }
+        #content strong { font-weight: 600; color: #111; }
+        #content a { color: #667eea; text-decoration: none; }
+        #content a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>API 文档</h1>
+    </div>
+    <div id="content" class="loading">正在加载 API 文档…</div>
+    <script>
+        (function () {
+            var content = document.getElementById('content');
+            fetch('./API.md')
+                .then(function (r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.text();
+                })
+                .then(function (md) {
+                    if (typeof marked !== 'undefined') {
+                        marked.setOptions({ gfm: true, breaks: true });
+                        content.innerHTML = marked.parse(md || '');
+                        content.classList.remove('loading');
+                    } else {
+                        content.textContent = 'Markdown 库未加载，显示原文：\n\n' + md;
+                        content.classList.remove('loading');
+                    }
+                })
+                .catch(function (err) {
+                    content.textContent = '加载失败: ' + (err.message || String(err)) + '。请确保在相同域名下访问（如 /api-doc.html）。';
+                    content.classList.remove('loading');
+                    content.classList.add('error');
+                });
+        })();
+    </script>
+</body>
+</html>

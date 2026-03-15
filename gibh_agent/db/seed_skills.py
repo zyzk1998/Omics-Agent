@@ -1,7 +1,12 @@
 """
 7 大核心组学技能种子数据：供 server 启动注入与 API 按需补种使用。
 保证 status=approved、author_id=system、main_category=多模态组学。
+防重：热修复（仅系统技能去重 + 强制 name UNIQUE 索引）+ MySQL 原子 INSERT ON DUPLICATE KEY UPDATE，
+不依赖 create_all 改表，不依赖 Python 层 try/except 竞态。
 """
+from datetime import datetime
+
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from gibh_agent.db.models import Skill as SkillModel
@@ -321,9 +326,35 @@ def run_seed_core_skills(db: Session) -> int:
     return len(CORE_OMICS_SKILLS)
 
 
+def get_all_system_skills_list() -> list:
+    """返回合并后的系统技能列表（CORE 最前，其次 BIOMEDICINE、ADDITIONAL_BIOMED、CHEMISTRY），供幂等 Upsert 使用。"""
+    return (
+        CORE_OMICS_SKILLS
+        + BIOMEDICINE_SKILLS
+        + ADDITIONAL_BIOMED_SKILLS
+        + CHEMISTRY_SKILLS
+    )
+
+
+def get_slim_system_skills_list() -> list:
+    """仅返回 name 与 description，供意图分类/技能匹配时喂给大模型，严禁将 prompt_template 传入。"""
+    all_skills = get_all_system_skills_list()
+    return [{"name": s.get("name", ""), "description": s.get("description", "")} for s in all_skills]
+
+
+def get_prompt_template_by_skill_name(skill_name: str) -> str:
+    """按技能名称从系统技能列表中提取 prompt_template，供确定技能后作为执行阶段 System Prompt。未找到则返回空字符串。"""
+    all_skills = get_all_system_skills_list()
+    for s in all_skills:
+        if (s.get("name") or "").strip() == (skill_name or "").strip():
+            return (s.get("prompt_template") or "").strip()
+    return ""
+
+
 def run_seed_all_system_skills(db: Session) -> int:
-    """合并四部分后统一插入：CORE 最前，其次 BIOMEDICINE、ADDITIONAL_BIOMED、CHEMISTRY；所有技能 status=approved、author_id=system。"""
-    all_skills = CORE_OMICS_SKILLS + BIOMEDICINE_SKILLS + ADDITIONAL_BIOMED_SKILLS + CHEMISTRY_SKILLS
+    """合并四部分后统一插入：CORE 最前，其次 BIOMEDICINE、ADDITIONAL_BIOMED、CHEMISTRY；所有技能 status=approved、author_id=system。
+    【已弃用】请使用 run_upsert_system_skills 以保证幂等性，避免技能翻倍。"""
+    all_skills = get_all_system_skills_list()
     for skill in all_skills:
         db.add(SkillModel(
             name=skill["name"],
@@ -334,4 +365,81 @@ def run_seed_all_system_skills(db: Session) -> int:
             author_id="system",
             status="approved",
         ))
+    return len(all_skills)
+
+
+def _hotfix_dedupe_system_skills(db: Session) -> int:
+    """热修复：仅对 author_id=system 按 name 去重，保留 id 最小的那条，删除其余。不碰用户上传技能。返回删除条数。"""
+    try:
+        # 删除「同 name 且 author_id=system 且 id 非最小」的重复行
+        sql = """
+        DELETE s1 FROM skills s1
+        INNER JOIN skills s2 ON s1.name = s2.name
+            AND s1.author_id = 'system' AND s2.author_id = 'system'
+            AND s1.id > s2.id
+        """
+        r = db.execute(text(sql))
+        db.commit()
+        return r.rowcount if hasattr(r, "rowcount") else 0
+    except Exception:
+        db.rollback()
+        return 0
+
+
+def _hotfix_ensure_unique_name_index(db: Session) -> bool:
+    """热修复：若 name 上尚无唯一索引，则 ALTER TABLE 添加强制锁。create_all 不会改旧表，故需手写补丁。"""
+    try:
+        db.execute(text("ALTER TABLE skills ADD UNIQUE INDEX idx_skill_name (name)"))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        # 1061 Duplicate key name / 1062 等表示索引已存在或约束已有，视为成功
+        err = str(e).lower() if e else ""
+        if "duplicate key" in err or "1061" in err or "already exists" in err or "multiple" in err:
+            return True
+        raise
+
+
+def run_upsert_system_skills(db: Session) -> int:
+    """幂等注入：先热修复（系统技能去重 + 强制 name UNIQUE），再按条 MySQL 原子 INSERT ON DUPLICATE KEY UPDATE，
+    仅当已存在行 author_id='system' 时才覆盖，不覆盖用户上传技能。"""
+    _hotfix_dedupe_system_skills(db)
+    _hotfix_ensure_unique_name_index(db)
+
+    all_skills = get_all_system_skills_list()
+    now = datetime.utcnow()
+
+    # MySQL 原子 Upsert：存在则仅当 author_id=system 时用新值覆盖，避免误改用户数据
+    sql = """
+    INSERT INTO skills (name, description, main_category, sub_category, prompt_template, author_id, status, created_at)
+    VALUES (:name, :description, :main_category, :sub_category, :prompt_template, 'system', 'approved', :created_at)
+    ON DUPLICATE KEY UPDATE
+        main_category   = IF(author_id = 'system', VALUES(main_category),   main_category),
+        sub_category    = IF(author_id = 'system', VALUES(sub_category),    sub_category),
+        description     = IF(author_id = 'system', VALUES(description),     description),
+        prompt_template = IF(author_id = 'system', VALUES(prompt_template), prompt_template),
+        status          = IF(author_id = 'system', VALUES(status),          status),
+        author_id       = IF(author_id = 'system', VALUES(author_id),        author_id)
+    """
+    stmt = text(sql)
+    for skill_data in all_skills:
+        name = (skill_data.get("name") or "").strip()
+        if not name:
+            continue
+        params = {
+            "name": name,
+            "description": skill_data.get("description") or "",
+            "main_category": skill_data.get("main_category") or "多模态组学",
+            "sub_category": skill_data.get("sub_category") or "",
+            "prompt_template": skill_data.get("prompt_template") or "",
+            "created_at": now,
+        }
+        try:
+            db.execute(stmt, params)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
     return len(all_skills)

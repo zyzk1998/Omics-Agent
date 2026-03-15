@@ -20,12 +20,19 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends, 
 from fastapi import status
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
+from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent))
+
+# 加载 .env（INITIAL_ADMINS 等），若未安装 python-dotenv 则跳过
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 from gibh_agent import create_agent
 from gibh_agent.core.file_inspector import FileInspector
@@ -151,22 +158,17 @@ def _insert_core_skills_only(db: Session) -> None:
 
 
 def _bootstrap_skills_mock():
-    """每次启动强制刷新：清理 author_id=system 后注入 7 大核心组学 + 生物医药占位技能，合并插入且核心组学排在最前。
+    """幂等注入：由 seed_skills.run_upsert_system_skills 内部先暴力清洗 author_id=system，再逐条 Upsert（含 IntegrityError 防并发）。
     【红线】启动时禁止对 users/sessions/messages/assets/workflow_templates 做任何 delete/drop/truncate。"""
     if not is_available() or engine is None or SkillModel is None:
         logger.warning("[DB] 技能注入跳过: 数据库或 SkillModel 不可用")
         return
     from gibh_agent.db.connection import SessionLocal
-    from gibh_agent.db.seed_skills import run_seed_all_system_skills
+    from gibh_agent.db.seed_skills import run_upsert_system_skills
     db = SessionLocal()
     try:
-        deleted = db.query(SkillModel).filter(SkillModel.author_id == "system").delete()
-        db.commit()
-        if deleted:
-            logger.info("[DB] 已清理 %d 条旧系统技能数据", deleted)
-        run_seed_all_system_skills(db)
-        db.commit()
-        logger.info("✅ [DB] 7 大核心组学 + 生物医药占位技能已注入并就绪！")
+        run_upsert_system_skills(db)
+        logger.info("✅ [DB] 7 大核心组学 + 生物医药 + 化学技能已幂等注入并就绪！")
     except Exception as e:
         db.rollback()
         logger.error("❌ 技能注入失败: %s", e, exc_info=True)
@@ -267,11 +269,9 @@ def list_skills_public(
     total = q.count()
     if total == 0 and not saved_only:
         try:
-            from gibh_agent.db.seed_skills import run_seed_all_system_skills
-            db.query(SkillModel).filter(SkillModel.author_id == "system").delete()
-            run_seed_all_system_skills(db)
-            db.commit()
-            logger.info("[Skills] 已按需补种核心组学 + 生物医药技能")
+            from gibh_agent.db.seed_skills import run_upsert_system_skills
+            run_upsert_system_skills(db)
+            logger.info("[Skills] 已按需幂等补种核心组学 + 生物医药 + 化学技能")
         except Exception as e:
             db.rollback()
             logger.warning("[Skills] 按需补种失败: %s", e)
@@ -361,11 +361,11 @@ def admin_bootstrap_skills(
     if not is_available() or SkillModel is None:
         raise HTTPException(status_code=503, detail="数据库不可用")
     try:
-        from gibh_agent.db.seed_skills import run_seed_all_system_skills
-        deleted = db.query(SkillModel).filter(SkillModel.author_id == "system").delete()
-        run_seed_all_system_skills(db)
+        from gibh_agent.db.seed_skills import run_upsert_system_skills
+        deleted = db.query(SkillModel).filter(SkillModel.author_id == "system").delete(synchronize_session=False)
         db.commit()
-        logger.info("✅ [DB] 管理员已触发：清理 %d 条旧系统技能并重新注入核心组学 + 生物医药", deleted)
+        run_upsert_system_skills(db)
+        logger.info("✅ [DB] 管理员已触发：清理 %d 条旧系统技能并幂等注入核心组学 + 生物医药 + 化学", deleted)
         return JSONResponse(status_code=200, content={"detail": "已清理旧系统技能并重新注入 7 大核心组学技能", "ok": True})
     except Exception as e:
         db.rollback()
@@ -541,6 +541,47 @@ app.mount("/uploads", StaticFiles(directory=_uploads_dir), name="uploads")
 _static_dir = Path(__file__).parent / "services" / "nginx" / "html" / "static"
 if _static_dir.is_dir():
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
+# 帮助文档与 API 文档（与 index.html 同级，供用户菜单点击访问）
+_html_dir = Path(__file__).parent / "services" / "nginx" / "html"
+
+
+@app.get("/whotowork.html")
+async def serve_whotowork():
+    """帮助文档：如何工作 / 使用说明"""
+    path = _html_dir / "whotowork.html"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Not Found")
+    return FileResponse(path, media_type="text/html; charset=utf-8")
+
+
+@app.get("/API.md")
+async def serve_api_md():
+    """API 文档（原始 Markdown）"""
+    path = _html_dir / "API.md"
+    if not path.exists():
+        path = Path(__file__).parent / "API.md"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Not Found")
+    return FileResponse(path, media_type="text/markdown; charset=utf-8")
+
+
+@app.get("/api-doc.html")
+async def serve_api_doc_html():
+    """API 文档渲染页：优先返回静态文件，不存在则返回内联 HTML 查看器（fetch /API.md + marked 渲染）"""
+    path = _html_dir / "api-doc.html"
+    if path.exists():
+        return FileResponse(path, media_type="text/html; charset=utf-8")
+    # 回退：内联最小可用查看器，确保路由不 404
+    inline_html = """<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>API 文档</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script></head><body style="font-family:sans-serif;max-width:960px;margin:0 auto;padding:24px;">
+<div id="c">正在加载 /API.md…</div>
+<script>
+fetch('/API.md').then(function(r){if(!r.ok)throw new Error(r.status);return r.text();})
+.then(function(md){var c=document.getElementById('c');if(typeof marked!=='undefined'){marked.setOptions({gfm:true});c.innerHTML=marked.parse(md);}else c.textContent=md;})
+.catch(function(e){document.getElementById('c').textContent='加载失败: '+e.message;});
+</script></body></html>"""
+    return HTMLResponse(inline_html)
 
 # 初始化智能体
 agent = None

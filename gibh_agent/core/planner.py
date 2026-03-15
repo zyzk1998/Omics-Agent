@@ -233,17 +233,18 @@ Generate ONLY the JSON object, no additional text."""
         Returns:
             用户提示词文本
         """
-        # 格式化工具信息
+        # 🔥 意图识别 Prompt 瘦身：只传 name + description + 参数名列表，禁止传完整 args_schema/prompt_template
         tools_text = []
         for i, tool in enumerate(retrieved_tools, 1):
-            tool_info = f"""
-Tool {i}: {tool['name']}
-  Description: {tool['description']}
-  Category: {tool['category']}
-  Output Type: {tool['output_type']}
-  Parameters Schema:
-{json.dumps(tool['args_schema'], indent=2, ensure_ascii=False)}
-"""
+            name = tool.get("name") or ""
+            desc = tool.get("description") or ""
+            schema = tool.get("args_schema") or {}
+            params_hint = ""
+            if isinstance(schema, dict) and "properties" in schema:
+                params_hint = "  Params: " + ", ".join(schema["properties"].keys()) + "\n"
+            elif isinstance(schema, dict):
+                params_hint = "  Params: " + ", ".join(k for k in schema.keys() if not k.startswith("$")) + "\n"
+            tool_info = f"\nTool {i}: {name}\n  Description: {desc}\n{params_hint}"
             tools_text.append(tool_info)
         
         # 格式化文件信息

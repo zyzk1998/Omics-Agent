@@ -11,6 +11,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from ...core.tool_registry import registry
+from ...core.utils import sanitize_plot_path
+from .quality_control import _resolve_adata_path
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,7 @@ def run_normalize(
     """
     try:
         import scanpy as sc
-        
+        adata_path = _resolve_adata_path(adata_path)
         # 🔥 CRITICAL FIX: 支持目录输入（向后兼容）和文件输入
         # 如果输入是目录，尝试读取其中的 filtered.h5ad 文件
         if os.path.isdir(adata_path):
@@ -129,7 +131,7 @@ def run_hvg(
     """
     try:
         import scanpy as sc
-        
+        adata_path = _resolve_adata_path(adata_path)
         # 加载数据
         adata = sc.read_h5ad(adata_path)
         
@@ -201,7 +203,7 @@ def run_scale(
     """
     try:
         import scanpy as sc
-        
+        adata_path = _resolve_adata_path(adata_path)
         # 加载数据
         adata = sc.read_h5ad(adata_path)
         
@@ -260,7 +262,7 @@ def run_pca(
     """
     try:
         import scanpy as sc
-        
+        adata_path = _resolve_adata_path(adata_path)
         # 加载数据
         adata = sc.read_h5ad(adata_path)
         
@@ -340,6 +342,7 @@ def run_neighbors(
     try:
         import scanpy as sc
         
+        adata_path = _resolve_adata_path(adata_path)
         # 加载数据
         adata = sc.read_h5ad(adata_path)
         
@@ -400,7 +403,7 @@ def run_clustering(
     """
     try:
         import scanpy as sc
-        
+        adata_path = _resolve_adata_path(adata_path)
         # 加载数据
         adata = sc.read_h5ad(adata_path)
         
@@ -468,6 +471,7 @@ def run_clustering_comparison(
         resolutions = [0.3, 0.5, 0.8]
     try:
         import scanpy as sc
+        adata_path = _resolve_adata_path(adata_path)
         adata = sc.read_h5ad(adata_path)
         if "X_umap" not in adata.obsm.keys():
             if "neighbors" not in adata.uns:
@@ -479,10 +483,9 @@ def run_clustering_comparison(
         for i, res in enumerate(resolutions):
             sc.pl.umap(adata, color=f"leiden_{res}", ax=axes[i], show=False, title=f"Resolution {res}")
         plt.tight_layout()
-        out_dir = os.path.dirname(output_plot_path)
-        if out_dir:
-            os.makedirs(out_dir, exist_ok=True)
-        fig.savefig(output_plot_path, bbox_inches="tight", dpi=150)
+        out_plot = sanitize_plot_path(output_plot_path)
+        out_plot.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(str(out_plot), bbox_inches="tight", dpi=150)
         plt.close()
         # 持久化：下游 rna_find_markers 等可直接复用 X_umap/neighbors，避免 10 万+ 细胞重复计算
         out_h5ad = adata_path
@@ -494,7 +497,7 @@ def run_clustering_comparison(
         return {
             "status": "success",
             "message": "多分辨率聚类对比图已保存",
-            "plot_path": output_plot_path,
+            "plot_path": str(out_plot.resolve()),
             "resolutions": resolutions,
             "output_h5ad": out_h5ad,
         }
@@ -527,7 +530,7 @@ def run_umap(
     """
     try:
         import scanpy as sc
-        
+        adata_path = _resolve_adata_path(adata_path)
         # 加载数据
         adata = sc.read_h5ad(adata_path)
         
@@ -615,7 +618,7 @@ def run_tsne(
     """
     try:
         import scanpy as sc
-        
+        adata_path = _resolve_adata_path(adata_path)
         # 加载数据
         adata = sc.read_h5ad(adata_path)
         
@@ -714,7 +717,7 @@ def run_find_markers(
     try:
         import scanpy as sc
         import pandas as pd
-        
+        adata_path = _resolve_adata_path(adata_path)
         # 加载数据
         adata = sc.read_h5ad(adata_path)
         

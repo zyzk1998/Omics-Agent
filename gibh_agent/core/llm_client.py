@@ -45,11 +45,12 @@ class LLMClient:
         model: str = "gpt-3.5-turbo",
         temperature: float = 0.7,
         max_tokens: int = 2048,
-        timeout: Optional[float] = None  # None = 无限期等待，不强制超时中断
+        timeout: Optional[float] = None,  # None = 无限期等待，不强制超时中断
+        provider: Optional[str] = None,  # 用于日志：如 "DashScope" / "SiliconFlow"
     ):
         """
         初始化 LLM 客户端
-        
+
         Args:
             base_url: API 基础 URL（本地或云端）
             api_key: API 密钥（本地模型可为 "EMPTY"）
@@ -57,6 +58,7 @@ class LLMClient:
             temperature: 温度参数
             max_tokens: 最大 token 数
             timeout: 超时时间（秒）
+            provider: 通道标识，仅用于请求前日志（如 DashScope / SiliconFlow）
         """
         self.base_url = base_url
         self.api_key = api_key
@@ -64,9 +66,8 @@ class LLMClient:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
-        
-        # 取消强制超时，允许无限期等待（用户宁愿等待也不希望被中断）
-        # 不再使用 httpx.Timeout，直接传 timeout（None 表示不设超时）
+        self._provider = provider or "Unknown"
+
         self._sync_client = OpenAI(
             base_url=base_url,
             api_key=api_key,
@@ -107,7 +108,7 @@ class LLMClient:
             "stream": stream
         }
         params.update(kwargs)
-        logger.info("🚀 [Model Router] 正在将请求路由至大模型: %s", params["model"])
+        logger.info("🚀 [Model Router] 通道: %s | 模型: %s", getattr(self, "_provider", "Unknown"), params["model"])
         completion = self._sync_client.chat.completions.create(**params)
         
         # 🔥 Task 2: 强制记录原始 JSON 响应
@@ -175,7 +176,7 @@ class LLMClient:
             "stream": stream
         }
         params.update(kwargs)
-        logger.info("🚀 [Model Router] 正在将请求路由至大模型: %s", params["model"])
+        logger.info("🚀 [Model Router] 通道: %s | 模型: %s", getattr(self, "_provider", "Unknown"), params["model"])
         completion = await self._async_client.chat.completions.create(**params)
         
         # 🔥 Task 2: 强制记录原始 JSON 响应
@@ -241,7 +242,7 @@ class LLMClient:
             "stream": True
         }
         params.update(kwargs)
-        logger.info("🚀 [Model Router] 正在将请求路由至大模型: %s", params["model"])
+        logger.info("🚀 [Model Router] 通道: %s | 模型: %s", getattr(self, "_provider", "Unknown"), params["model"])
         # 🔥 Task 2: 收集流式响应并记录完整 JSON
         collected_content = []
         collected_chunks = []
@@ -349,9 +350,56 @@ class LLMClient:
                 yield chunk.choices[0].delta.content
 
 
+def _resolve_provider_for_model(model_name: str) -> tuple:
+    """
+    根据 model_name 解析使用的通道；qwen 系列走 DashScope，其余走 SiliconFlow。
+    每次请求独立解析，保证并发下不串线（无全局可变状态）。
+    Returns:
+        (base_url, api_key, provider_label)
+    """
+    name = (model_name or "").strip().lower()
+    if "qwen" in name:
+        api_key = os.getenv("DASHSCOPE_API_KEY")
+        if not api_key or not str(api_key).strip():
+            raise ValueError(
+                "使用 Qwen 模型需配置 DASHSCOPE_API_KEY 环境变量。"
+                "请在 .env 中添加: DASHSCOPE_API_KEY=your_dashscope_api_key"
+            )
+        base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        logger.info("🚀 [Model Router] 目标URL: %s | 模型: %s", base_url, model_name)
+        return (base_url, api_key.strip(), "DashScope")
+    api_key = os.getenv("SILICONFLOW_API_KEY")
+    if not api_key or not str(api_key).strip():
+        raise ValueError(
+            "使用当前模型需配置 SILICONFLOW_API_KEY 环境变量。"
+            "请在 .env 中添加: SILICONFLOW_API_KEY=your_siliconflow_api_key"
+        )
+    base_url = "https://api.siliconflow.cn/v1"
+    logger.info("🚀 [Model Router] 目标URL: %s | 模型: %s", base_url, model_name)
+    return (base_url, api_key.strip(), "SiliconFlow")
+
+
 class LLMClientFactory:
     """LLM 客户端工厂，根据配置创建客户端"""
-    
+
+    @staticmethod
+    def create_for_model(model_name: str, **kwargs) -> LLMClient:
+        """
+        双通道智能路由：根据 model_name 选择 DashScope 或 SiliconFlow，
+        在方法内局部实例化客户端，并发请求下不会串线。
+        """
+        base_url, api_key, provider = _resolve_provider_for_model(model_name)
+        logger.info("🚀 [Model Router] 通道: %s | 模型: %s", provider, model_name)
+        return LLMClient(
+            base_url=base_url,
+            api_key=api_key,
+            model=model_name,
+            temperature=kwargs.get("temperature", 0.7),
+            max_tokens=kwargs.get("max_tokens", 4096),
+            timeout=kwargs.get("timeout"),
+            provider=provider,
+        )
+
     @staticmethod
     def create_default() -> LLMClient:
         """

@@ -87,11 +87,9 @@ def list_skills_public(
     total = q.count()
     if total == 0 and not saved_only:
         try:
-            from gibh_agent.db.seed_skills import run_seed_all_system_skills
-            db.query(SkillModel).filter(SkillModel.author_id == "system").delete()
-            run_seed_all_system_skills(db)
-            db.commit()
-            logger.info("[Skills] 已按需补种核心组学 + 生物医药技能")
+            from gibh_agent.db.seed_skills import run_upsert_system_skills
+            run_upsert_system_skills(db)
+            logger.info("[Skills] 已按需幂等补种核心组学 + 生物医药 + 化学技能")
         except Exception as e:
             db.rollback()
             logger.warning("[Skills] 按需补种失败: %s", e)

@@ -1,7 +1,12 @@
 """
 通用工具函数
-包含 JSON 序列化辅助函数
+包含 JSON 序列化辅助函数、绘图路径矫正等。
 """
+from datetime import date, datetime
+from decimal import Decimal
+from pathlib import Path
+from typing import Union
+
 import numpy as np
 import pandas as pd
 import math
@@ -70,7 +75,37 @@ def sanitize_for_json(obj):
             logger.warning(f"⚠️ 检测到 Python float NaN/Infinity 值，转换为 None: {obj}")
             return None
         return obj
-    
+
+    # 处理 datetime/date（API 返回 JSON 时需为字符串）
+    elif isinstance(obj, (datetime, date)):
+        return obj.isoformat() if hasattr(obj, "isoformat") else str(obj)
+
+    # 处理 bytes（转为 UTF-8 字符串，避免 JSON 报错）
+    elif isinstance(obj, bytes):
+        try:
+            return obj.decode("utf-8")
+        except Exception:
+            return f"<bytes len={len(obj)}>"
+
+    # 处理 Decimal（MySQL/JSON 有时返回）
+    elif isinstance(obj, Decimal):
+        return float(obj)
+
     # 其他类型直接返回（str, int, bool, None 等）
     return obj
+
+
+# 绘图工具允许的扩展名（matplotlib savefig 支持）；禁止 .csv 等导致 Format not supported
+_PLOT_EXTENSIONS = (".png", ".pdf", ".svg", ".jpg", ".jpeg")
+
+
+def sanitize_plot_path(path: Union[str, Path]) -> Path:
+    """
+    强制矫正绘图输出路径后缀，避免外部传入 .csv 等导致 matplotlib 报错。
+    仅当后缀在允许列表内时保留；否则改为 .png。不影响合法 .pdf/.svg 等高精度输出。
+    """
+    p = Path(path) if isinstance(path, str) else path
+    if not p.suffix or p.suffix.lower() not in _PLOT_EXTENSIONS:
+        return (p.parent / (p.stem + ".png")) if p.stem else (p.parent / "plot.png")
+    return p
 

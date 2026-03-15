@@ -23,6 +23,207 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================
+# Universal File Resolution Bus (全局文件解析总线)
+# ============================================
+
+def resolve_omics_paths(raw_path_string: str) -> Dict[str, List[str]]:
+    """
+    全局通用文件解析总线：将逗号拼接的路径字符串拆分为列表并智能分类。
+    供代谢组、转录组、影像组等底层工具统一调用；未知后缀放入 unknown，不报错。
+
+    Returns:
+        {
+            "tables": [...],   # .csv, .tsv, .xlsx, .txt
+            "h5ad": [...],    # .h5ad, .h5
+            "10x_mtx": [...], # 若同时检测到 matrix.mtx + barcodes/features/genes，则为公共父目录路径（单元素列表）
+            "images": [...],  # 影像原图（.nii/.dcm 等且文件名不含 mask/roi/seg）
+            "masks": [...],   # 掩膜（文件名含 mask/roi/seg）
+            "unknown": [...]  # 未识别后缀，安全保留不丢弃
+        }
+    """
+    if not raw_path_string or not isinstance(raw_path_string, str):
+        return {
+            "tables": [], "h5ad": [], "10x_mtx": [], "images": [], "masks": [], "unknown": [],
+        }
+    raw = raw_path_string.replace(";", ",").strip()
+    parts = [x.strip() for x in raw.split(",") if x.strip()]
+    paths: List[str] = []
+    for p in parts:
+        try:
+            path_obj = Path(p)
+            paths.append(str(path_obj.resolve()) if path_obj.exists() else p)
+        except Exception:
+            paths.append(p)
+    paths = [p for p in paths if p]
+
+    mask_keywords = ("mask", "roi", "seg", "segmentation", "label")
+    table_suffixes = (".csv", ".tsv", ".xlsx", ".txt")
+    image_extensions = (".nii", ".nii.gz", ".dcm", ".tiff", ".tif", ".png", ".jpg", ".jpeg", ".bmp", ".webp")
+    out: Dict[str, List[str]] = {
+        "tables": [],
+        "h5ad": [],
+        "10x_mtx": [],
+        "images": [],
+        "masks": [],
+        "unknown": [],
+    }
+
+    # 10x 相关路径收集：用于后续计算公共父目录
+    tenx_paths: List[str] = []
+
+    for p in paths:
+        path_obj = Path(p)
+        name_lower = path_obj.name.lower()
+        suffix_lower = path_obj.suffix.lower()
+        if path_obj.suffix.lower() == ".gz" and len(path_obj.suffixes) >= 2:
+            suffix_lower = "".join(path_obj.suffixes[-2:]).lower()
+
+        # 表格
+        if suffix_lower in table_suffixes or name_lower.endswith(".tsv.gz"):
+            out["tables"].append(p)
+            continue
+        # h5ad
+        if suffix_lower in (".h5ad", ".h5"):
+            out["h5ad"].append(p)
+            continue
+        # 10x：仅记录路径，稍后统一算公共父目录，不先放入 unknown
+        if "matrix.mtx" in name_lower or name_lower == "matrix.mtx.gz":
+            tenx_paths.append(p)
+            continue
+        if "barcodes" in name_lower and (name_lower.endswith(".tsv") or name_lower.endswith(".tsv.gz")):
+            tenx_paths.append(p)
+            continue
+        if ("features" in name_lower or "genes" in name_lower) and (name_lower.endswith(".tsv") or name_lower.endswith(".tsv.gz")):
+            tenx_paths.append(p)
+            continue
+
+        # 影像：image / mask
+        if (
+            suffix_lower in image_extensions
+            or ".nii" in name_lower
+            or name_lower.endswith(".nii.gz")
+            or suffix_lower == ".dcm"
+        ):
+            if any(kw in name_lower for kw in mask_keywords) and not any(
+                k in name_lower for k in ("image", "img", "mri", "ct", "t1", "t2", "flair")
+            ):
+                out["masks"].append(p)
+            else:
+                out["images"].append(p)
+            continue
+
+        out["unknown"].append(p)
+
+    # 10x_mtx：若同时存在 matrix.mtx 与 barcodes/features/genes，提取公共父目录（os.path.dirname + commonpath）
+    if tenx_paths:
+        dirs = [os.path.dirname(p) for p in tenx_paths]
+        has_matrix = any("matrix.mtx" in Path(p).name.lower() for p in tenx_paths)
+        has_barcodes_or_features = any(
+            "barcodes" in Path(p).name.lower() or "features" in Path(p).name.lower() or "genes" in Path(p).name.lower()
+            for p in tenx_paths
+        )
+        if has_matrix and has_barcodes_or_features:
+            try:
+                common = os.path.commonpath(dirs) if len(dirs) > 1 else dirs[0]
+                out["10x_mtx"] = [common]
+            except (ValueError, OSError):
+                out["10x_mtx"] = [dirs[0]] if dirs else []
+        else:
+            out["unknown"].extend(tenx_paths)
+
+    return out
+
+
+def parse_multiple_files(file_paths_string: str) -> Dict[str, List[str]]:
+    """
+    将前端逗号/分号拼接的路径字符串拆分为列表，并按后缀/文件名特征归类为结构化字典。
+    供影像组学、单细胞 10x、空间组学等统一使用；无法识别的后缀归入 unknown，不丢弃。
+
+    Returns:
+        {
+            "images": [...],   # 原图（nii/dcm/tiff 等，且文件名非 mask）
+            "masks": [...],    # 掩膜（文件名含 mask/roi/seg 等）
+            "matrix": [...],   # 矩阵/主数据（h5ad, mtx, 或 10x 目录路径）
+            "barcodes": [...], # 10x barcodes.tsv
+            "features": [...], # 10x features.tsv / genes.tsv
+            "tables": [...],   # CSV 等表格
+            "unknown": [...]  # 未识别后缀一律保留，防止误删用户数据
+        }
+    """
+    if not file_paths_string or not isinstance(file_paths_string, str):
+        return {
+            "images": [], "masks": [], "matrix": [], "barcodes": [], "features": [],
+            "tables": [], "unknown": [],
+        }
+    raw = file_paths_string.replace(";", ",").strip()
+    parts = [x.strip() for x in raw.split(",") if x.strip()]
+    paths: List[str] = []
+    for p in parts:
+        try:
+            path_obj = Path(p)
+            paths.append(str(path_obj.resolve()) if path_obj.exists() else p)
+        except Exception:
+            paths.append(p)
+    paths = [p for p in paths if p]
+
+    mask_keywords = ("mask", "roi", "seg", "segmentation", "label")
+    image_extensions = (".nii", ".nii.gz", ".dcm", ".tiff", ".tif", ".png", ".jpg", ".jpeg", ".bmp", ".webp")
+    out: Dict[str, List[str]] = {
+        "images": [],
+        "masks": [],
+        "matrix": [],
+        "barcodes": [],
+        "features": [],
+        "tables": [],
+        "unknown": [],
+    }
+
+    for p in paths:
+        path_obj = Path(p)
+        name_lower = path_obj.name.lower()
+        suffix_lower = path_obj.suffix.lower()
+        if path_obj.suffix.lower() == ".gz" and len(path_obj.suffixes) >= 2:
+            suffix_lower = "".join(path_obj.suffixes[-2:]).lower()
+
+        # 10x
+        if "barcodes" in name_lower and (name_lower.endswith(".tsv") or name_lower.endswith(".tsv.gz")):
+            out["barcodes"].append(p)
+            continue
+        if ("features" in name_lower or "genes" in name_lower) and (name_lower.endswith(".tsv") or name_lower.endswith(".tsv.gz")):
+            out["features"].append(p)
+            continue
+        if "matrix.mtx" in name_lower or name_lower == "matrix.mtx.gz":
+            out["matrix"].append(p)
+            continue
+
+        # 单文件数据
+        if suffix_lower in (".h5ad", ".h5"):
+            out["matrix"].append(p)
+            continue
+        if suffix_lower == ".csv":
+            out["tables"].append(p)
+            continue
+
+        # 影像：按扩展名 + 文件名区分 image / mask（.nii.gz 的 Path.suffix 为 .gz，用 name 判断）
+        if (
+            suffix_lower in image_extensions
+            or ".nii" in name_lower
+            or name_lower.endswith(".nii.gz")
+            or suffix_lower == ".dcm"
+        ):
+            if any(kw in name_lower for kw in mask_keywords) and "image" not in name_lower and "img" not in name_lower and "mri" not in name_lower and "ct" not in name_lower:
+                out["masks"].append(p)
+            else:
+                out["images"].append(p)
+            continue
+
+        # 未识别：保留到 unknown
+        out["unknown"].append(p)
+
+    return out
+
+
+# ============================================
 # Part 1: Registry & Base Class
 # ============================================
 

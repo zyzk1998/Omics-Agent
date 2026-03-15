@@ -6,8 +6,24 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 from ...core.tool_registry import registry
+from ...core.file_inspector import resolve_omics_paths
+from ...core.utils import sanitize_plot_path
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_spatial_path(raw_path: str) -> str:
+    """经全局总线解析：优先 h5ad，其次 10x_mtx 目录。"""
+    if not raw_path or ("," not in raw_path and ";" not in raw_path):
+        return raw_path
+    resolved = resolve_omics_paths(raw_path)
+    h5ad_list = resolved.get("h5ad") or []
+    tenx = resolved.get("10x_mtx") or []
+    if h5ad_list:
+        return h5ad_list[0]
+    if tenx:
+        return tenx[0]
+    raise ValueError("未找到有效的空间数据：请上传 .h5ad 或 10x Visium 目录")
 
 
 # ---------------------------------------------------------------------------
@@ -24,19 +40,25 @@ def spatial_data_validation(adata_path: Optional[str] = None, h5ad_path: Optiona
     """
     极速空间数据校验：读取 h5ad，检查 obsm['spatial'] 与 uns['spatial']（如有）。
     不修改数据，不写回文件。接受 adata_path 或 h5ad_path（与 executor 一致）。
+    路径经 resolve_omics_paths 总线解析：优先 h5ad，其次 10x_mtx 目录。
     """
     path_in = adata_path or h5ad_path or (kwargs.get("h5ad_path") if kwargs else None)
     if not path_in:
         return {"status": "error", "error": "请提供 adata_path 或 h5ad_path"}
+    path_in = _resolve_spatial_path(str(path_in))
     try:
         import anndata as ad
     except ImportError:
         return {"status": "error", "error": "anndata is required"}
     p = Path(path_in)
-    if not p.is_file():
-        return {"status": "error", "error": f"h5ad file not found: {path_in}"}
     try:
-        adata = ad.read_h5ad(p)
+        if p.is_dir():
+            from ...core.rna_utils import read_10x_data
+            adata = read_10x_data(str(p), var_names="gene_symbols", cache=False)
+        elif p.is_file():
+            adata = ad.read_h5ad(p)
+        else:
+            return {"status": "error", "error": f"路径不存在或不可读: {path_in}"}
         n_spots = adata.n_obs
         n_genes = adata.n_vars
         has_spatial_coord = "spatial" in adata.obsm
@@ -364,10 +386,8 @@ def spatial_clustering_comparison(
             key = f"spatial_leiden_{res}"
             keys.append(key)
             sc.tl.leiden(adata, resolution=res, key_added=key)
-        out = Path(output_plot_path)
+        out = sanitize_plot_path(output_plot_path)
         out.parent.mkdir(parents=True, exist_ok=True)
-        if out.suffix.lower() != ".png":
-            out = out.parent / (out.stem + ".png")
         fig, axes = plt.subplots(1, 3, figsize=(18, 6))
         has_image = bool(adata.uns.get("spatial"))
         for i, (res, key) in enumerate(zip(resolutions, keys)):

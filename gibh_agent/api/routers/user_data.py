@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from gibh_agent.core.deps import get_current_owner_id
+from gibh_agent.core.utils import sanitize_for_json
 from gibh_agent.db.connection import get_db_session
 from gibh_agent.db.models import (
     Session as SessionModel,
@@ -84,27 +85,45 @@ def list_messages(
     db: Session = Depends(get_db_session),
 ) -> List[dict]:
     """返回指定会话的消息列表；仅当会话属于当前 owner_id 时允许访问。"""
-    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="会话不存在")
-    if session.owner_id != owner_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该会话")
-    rows = (
-        db.query(MessageModel)
-        .filter(MessageModel.session_id == session_id)
-        .order_by(MessageModel.created_at.asc())
-        .all()
-    )
-    return [
-        {
-            "id": r.id,
-            "session_id": r.session_id,
-            "role": r.role,
-            "content": r.content,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in rows
-    ]
+    try:
+        session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+        if not session:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        if session.owner_id != owner_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该会话")
+        rows = (
+            db.query(MessageModel)
+            .filter(MessageModel.session_id == session_id)
+            .order_by(MessageModel.created_at.asc())
+            .all()
+        )
+        out = []
+        for r in rows:
+            raw = {
+                "id": r.id,
+                "session_id": r.session_id,
+                "role": r.role,
+                "content": r.content,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            try:
+                out.append(sanitize_for_json(raw))
+            except Exception as row_err:
+                logger.warning("单条消息序列化失败 message_id=%s: %s", getattr(r, "id", None), row_err)
+                # 降级：仅返回可序列化的基本字段，content 置为占位
+                out.append(sanitize_for_json({
+                    "id": int(r.id) if r.id is not None else 0,
+                    "session_id": str(r.session_id or ""),
+                    "role": str(r.role or "agent"),
+                    "content": {"text": "[该条消息内容无法解析]", "state_snapshot": None},
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }))
+        return out
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("获取会话消息失败 session_id=%s: %s", session_id, e)
+        raise HTTPException(status_code=500, detail="获取消息失败")
 
 
 @router.delete("/api/messages/{message_id}")

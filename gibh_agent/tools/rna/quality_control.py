@@ -12,8 +12,23 @@ import matplotlib.pyplot as plt
 
 from ...core.tool_registry import registry
 from ...core.rna_utils import read_10x_data, load_10x_from_tarball
+from ...core.file_inspector import resolve_omics_paths
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_adata_path(raw_path: str) -> str:
+    """经全局总线解析：优先 10x_mtx 目录，其次 h5ad；否则抛异常。"""
+    if not raw_path or ("," not in raw_path and ";" not in raw_path):
+        return raw_path
+    resolved = resolve_omics_paths(raw_path)
+    tenx = resolved.get("10x_mtx") or []
+    h5ad_list = resolved.get("h5ad") or []
+    if tenx:
+        return tenx[0]
+    if h5ad_list:
+        return h5ad_list[0]
+    raise ValueError("未找到有效的单细胞数据：请上传 10x 目录（含 matrix.mtx + barcodes/features）或 .h5ad 文件")
 
 
 @registry.register(
@@ -26,10 +41,15 @@ def run_data_validation(adata_path: str) -> Dict[str, Any]:
     """
     极速数据校验：仅使用 scanpy.read_h5ad 快速读取 shape，检查 obs/var 存在性。
     用于 DAG 前置绿色节点展示，不修改数据、不写回文件。
+    路径经 resolve_omics_paths 总线解析：优先 10x_mtx 目录，其次 h5ad。
     """
     try:
         import scanpy as sc
-        adata = sc.read_h5ad(adata_path)
+        adata_path = _resolve_adata_path(adata_path)
+        if os.path.isdir(adata_path):
+            adata = read_10x_data(adata_path, var_names='gene_symbols', cache=False)
+        else:
+            adata = sc.read_h5ad(adata_path)
         n_cells = adata.n_obs
         n_genes = adata.n_vars
         if not (hasattr(adata, "obs") and adata.obs is not None and hasattr(adata, "var") and adata.var is not None):
@@ -82,6 +102,7 @@ def run_qc_filter(
     try:
         import scanpy as sc
         
+        adata_path = _resolve_adata_path(adata_path)
         # 加载数据（支持 .tar.gz/.tgz 10x 压缩包、10x 目录、.h5ad、其他 scanpy 可读格式）
         output_base_for_input = None  # 从压缩包加载时，用于写 output_h5ad 的目录
         if (adata_path.endswith(".tar.gz") or adata_path.endswith(".tgz") or
@@ -211,7 +232,7 @@ def run_doublet_detection(
     """
     try:
         import scanpy as sc
-        
+        adata_path = _resolve_adata_path(adata_path)
         # 加载数据
         adata = sc.read_h5ad(adata_path)
         

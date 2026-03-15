@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Omics Agent - How to Work 全流程数据流向图</title>
+    <title>GIBH Agent - How to Work 全流程数据流向图 (V2 最新架构)</title>
+    <!-- 标准 Favicon -->
+    <link rel="icon" type="image/png" href="/static/favicon.png?v=4">
+    <!-- 苹果设备 Touch Icon (提升在 iOS 上的书签显示效果) -->
+    <link rel="apple-touch-icon" href="/static/favicon.png?v=4">
     <style>
         * {
             margin: 0;
@@ -1186,46 +1190,46 @@
                 user: {
                     component: "用户 (User)",
                     coreFunction: "用户交互接口",
-                    dataIO: "Input: 自然语言查询 + 文件上传 → Output: HTTP POST 请求",
-                    technologyDescription: "实现基于 React/Vanilla JS 的前端界面，使用 FormData API 处理文件上传，通过 fetch API 发送 HTTP POST 请求到后端。前端负责用户输入验证、文件预览和错误提示。",
-                    keyLogic: "用户在 Web UI 中输入查询文本或上传文件，前端收集用户输入并发送到后端 API。",
-                    designRationale: "分离用户界面层与业务逻辑层，实现前后端解耦。前端负责交互和展示，后端负责计算和决策。这种架构支持前后端独立开发和部署，提高系统可维护性。",
-                    upstreamDownstream: "Upstream: N/A (用户入口) | Downstream: Orchestrator (接收用户请求)",
+                    dataIO: "Input: 自然语言查询 + 文件上传 → Output: HTTP POST /api/chat、/api/upload 等",
+                    technologyDescription: "基于 Vanilla JS 的单页前端（index.html），使用 FormData 处理文件上传（POST /api/upload），通过 fetch + ReadableStream 消费 SSE 流（POST /api/chat）。提供技能广场、历史会话、数据资产、工作流收藏、用户菜单与系统设置等模块；鉴权依赖 /api/auth（登录/注册/游客合并），会话与消息持久化依赖 /api/sessions、/api/sessions/{id}/messages。",
+                    keyLogic: "用户在聊天区输入查询并上传文件，前端将 message、uploaded_files、stream、session_id、user_id 发送至 /api/chat；支持多模型切换（Qwen3.5-Plus、DeepSeek-R1、GLM-5 等），模型选择通过请求体或前端 #modelSelect 传入。",
+                    designRationale: "前后端解耦：前端负责交互与 SSE 解析（status/workflow/step_result/diagnosis/message/done），后端负责编排、规划与执行。RESTful + SSE 保证实时体验与可维护性。",
+                    upstreamDownstream: "Upstream: N/A (用户入口) | Downstream: FastAPI 网关 (接收 /api/chat、/api/upload 等)",
                     llmLogic: "N/A - User Interface Layer（不直接调用 LLM API）",
-                    academicBasis: "N/A - User Interface Layer (标准 Web 架构模式，基于 RESTful API 设计原则)"
+                    academicBasis: "N/A - User Interface Layer (标准 Web 架构，RESTful + SSE)"
                 },
                 orchestrator: {
                     component: "总控编排 (Orchestrator)",
                     coreFunction: "core.orchestrator.AgentOrchestrator.stream_process()",
-                    dataIO: "Input: UserQuery + ConversationHistory + UploadedFiles → Output: SSE Events (status, workflow, step_result, diagnosis, result)",
-                    technologyDescription: "实现基于 SOP（Standard Operating Procedure）的协调机制。使用 Celery 进行异步任务调度，Redis 作为消息代理（message broker）处理高并发请求。通过 FastAPI 的 StreamingResponse 实现 SSE 流式输出，使用 Python async/await 异步生成器逐条 yield SSE 事件。使用 LLM API 进行意图分类，基于规则和 LLM 输出进行路由决策。",
-                    keyLogic: "管理对话历史，进行意图分类（Chat vs Task），协调多智能体协作。使用 LLM 进行全局意图判断，根据结果路由到规划流程或直接聊天。维护会话状态和上下文。",
-                    designRationale: "为什么需要 Orchestrator？实现单一入口点，统一管理多智能体协作。分离意图分类与具体执行，允许在规划前进行 Human-in-the-loop 验证。支持流式输出，提升用户体验。防止多个智能体直接通信导致的混乱，确保数据流的一致性。",
-                    upstreamDownstream: "Upstream: User (接收用户请求) | Downstream: Planner (任务模式) / LLM (聊天模式) / Executor (执行模式)",
-                    llmLogic: "<strong>触发点:</strong> <code>_classify_global_intent()</code> → <code>llm_client.achat(messages, temperature=0.1, max_tokens=50)</code><br><br><strong>Prompt 策略:</strong> Zero-shot Classification。System Prompt: \"你是一个意图分类助手。只返回JSON格式的意图类型。\" User Prompt: 包含用户查询和分类规则（聊天 vs 任务）。<br><br><strong>上下文窗口:</strong> UserQuery（原始文本）+ 关键词规则（task_keywords: [\"分析\", \"处理\", \"运行\", \"执行\"]）。如果关键词匹配则直接返回，否则调用 LLM。<br><br><strong>输出解析:</strong> 1) 移除 Markdown 代码块（```json），2) JSON.parse() 提取 <code>{\"type\": \"chat\" | \"task\"}</code>，3) 如果解析失败，检查响应文本中是否包含 \"task\" 关键词作为后备方案。",
-                    academicBasis: "[1] H. Hong et al., \"MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework,\" ICLR, 2024. (SOPs)<br>[2] P. Soare et al., \"Scalable Distributed Task Queues,\" IEEE Trans. Cloud Comput., 2023. (Celery/Async Architecture)"
+                    dataIO: "Input: query, files, history, model_name, owner_id → Output: SSE (status, workflow, step_result, diagnosis, message, done, state_snapshot)",
+                    technologyDescription: "FastAPI 请求直接调用 AgentOrchestrator.stream_process()，无 Celery 主路径；SSE 由 Python async generator 逐条 yield，经 StreamingResponse 推送到前端。支持工作流模板复用：若 query 匹配「系统注入：用户请求复用工作流模板：{id}」，则直接从 DB 读取 WorkflowTemplate.config_json 下发 workflow 事件，跳过 LLM 规划。鉴权与会话：owner_id 由 get_current_owner_id（JWT 或 guest_uuid）解析，session_id/message 持久化到 MySQL（Session/Message 表）。",
+                    keyLogic: "意图分类（Chat vs Task）→ 任务模式则调用 WorkflowPlanner + 领域 Agent + 执行；聊天模式则直接 LLM 流式回复。集成 QueryRewriter、Clarifier、Reflector（Agentic）做查询重写与澄清。",
+                    designRationale: "单一入口、流式体验、规划与执行解耦；可选 Celery+Redis 仅用于 /api/workflow/status/{run_id} 等异步任务状态查询。",
+                    upstreamDownstream: "Upstream: FastAPI /api/chat (接收 query/files/history) | Downstream: Planner / LLM / Agent (按意图路由)",
+                    llmLogic: "<strong>触发点:</strong> <code>_classify_global_intent()</code> → <code>llm_client.achat(messages, temperature=0.1, max_tokens=50)</code><br><br><strong>策略:</strong> Zero-shot 意图分类，返回 JSON type: chat|task；关键词规则优先，未匹配再调 LLM。<br><br><strong>输出解析:</strong> 解析 JSON {\"type\": \"chat\"|\"task\"}，失败时按 \"task\" 关键词兜底。",
+                    academicBasis: "[1] H. Hong et al., \"MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework,\" ICLR, 2024. (SOPs)"
                 },
                 planner: {
                     component: "首席科学家 (Lead Scientist / Planner)",
-                    coreFunction: "core.planner.SOPPlanner.plan_workflow()",
-                    dataIO: "Input: UserQuery + FileMetadata + ToolSchemas → Output: JSON_Workflow: {workflow_name, steps: [{step_id, tool_id, name, params}]}",
-                    technologyDescription: "使用 Chain-of-Thought (CoT) Prompting 分解生物问题。由 deepseek-R1（MoE 架构）提供推理能力。将工具 Schema 注入到 LLM 提示词中，使用 JSON Schema 验证 LLM 输出，确保工作流格式正确。实现参数推荐算法，基于数据统计信息（如样本数、特征数）推荐最佳参数。使用 Few-shot Learning 提供示例工作流。",
-                    keyLogic: "使用 Chain-of-Thought (CoT) 推理拆解科学问题。将用户需求分解为可执行的步骤序列。每个步骤包含工具ID和参数配置。支持参数推荐和动态调整。",
-                    designRationale: "为什么分离 Planner 和 Executor？允许在昂贵执行前进行 Human-in-the-loop 验证，防止错误执行浪费计算资源。支持工作流的预览、修改和优化。实现规划与执行的解耦，提高系统灵活性。通过 Schema 验证防止 LLM 产生无效工作流，减少执行错误。",
-                    upstreamDownstream: "Upstream: Orchestrator (接收任务意图) + Retriever (获取工具 Schema) | Downstream: Executor (发送工作流配置) / Frontend (预览模式)",
-                    llmLogic: "<strong>触发点:</strong> <code>generate_plan()</code> → <code>_classify_intent()</code> → <code>llm_client.achat(messages, temperature=0.1)</code><br><br><strong>Prompt 策略:</strong> Chain-of-Thought (CoT) + Few-shot Learning。System Prompt 注入：1) 领域分类规则（Metabolomics vs RNA），2) 可用步骤列表（从 WorkflowRegistry 获取），3) 模式分类规则（PLANNING vs EXECUTION）。User Prompt 包含：UserQuery + FileMetadata（是否有文件）+ 目标步骤列表。<br><br><strong>上下文窗口:</strong> UserQuery + FileMetadata（has_file: bool）+ ToolSchemas（从 Retriever 获取的 top-k 工具 JSON Schema）+ WorkflowRegistry 的 DAG 依赖关系（作为 System Prompt 的一部分）。<br><br><strong>输出解析:</strong> 1) JSON.parse() 提取 <code>{\"domain_name\": \"Metabolomics\" | \"RNA\", \"mode\": \"EXECUTION\" | \"PLANNING\", \"target_steps\": [...]}</code>，2) 使用 Pydantic 模型验证格式，3) 如果 target_steps 为空数组，则使用完整工作流（从 WorkflowRegistry 获取所有步骤）。",
+                    coreFunction: "core.planner.WorkflowPlanner.plan_workflow()",
+                    dataIO: "Input: UserQuery + FileMetadata + ToolSchemas (RAG) → Output: JSON Workflow {workflow_name, steps: [{step_id, tool_id, name, params, selected}]}",
+                    technologyDescription: "WorkflowPlanner（core.planner）结合 Chain-of-Thought 与 RAG：先通过 Tool Retriever（ChromaDB）语义检索 top-k 工具 Schema，注入 LLM 提示词；支持 skip_steps/target_steps 动态勾选步骤。多模型支持：Qwen3.5-Plus、DeepSeek-R1、GLM-5 等由前端/请求传入 model_name，统一经 LLMClient 调用。JSON Schema / Pydantic 校验 LLM 输出；参数推荐基于 FileMetadata（如样本数、特征数）。",
+                    keyLogic: "CoT 拆解科学问题 → 领域/模式分类 → 生成步骤序列（含 selected）；错误时接收 Executor 反馈，LLM 分析后输出修正方案并重试。",
+                    designRationale: "规划与执行解耦，支持 Human-in-the-loop 预览与修改；Schema 校验降低无效工作流；RAG 保证工具与意图对齐。",
+                    upstreamDownstream: "Upstream: Orchestrator + Retriever (ToolSchemas) | Downstream: Agent/Executor、前端 (workflow 事件)",
+                    llmLogic: "<strong>触发:</strong> plan_workflow → llm_client.achat(messages, temperature=0.1)。<br><br><strong>策略:</strong> CoT + Few-shot；System 注入领域规则、WorkflowRegistry 步骤列表、模式（PLANNING/EXECUTION）；User 含 query、FileMetadata、target_steps。<br><br><strong>输出:</strong> domain_name、mode、target_steps；Pydantic 校验；空 target_steps 时走完整工作流。",
                     academicBasis: "[3] DeepSeek-AI, \"deepseek-R1 Technical Report,\" arXiv, 2024.<br>[4] J. Wei et al., \"Chain-of-Thought Prompting Elicits Reasoning in LLMs,\" NeurIPS, 2022."
                 },
                 retriever: {
                     component: "图书馆员 (Librarian / Tool Retriever)",
                     coreFunction: "core.tool_retriever.ToolRetriever.query_tools()",
-                    dataIO: "Input: UserQuery (自然语言描述) → Output: List[ToolSchema] - 工具 JSON Schema 列表",
-                    technologyDescription: "实现 RAG（Retrieval-Augmented Generation）系统。使用 ChromaDB 存储工具 Schema 的 embedding，执行余弦相似度搜索（cosine similarity search）匹配用户意图与 50+ 生物工具。使用 OpenAI Embeddings 或 Ollama Embeddings 将用户查询和工具描述转换为向量。返回 top-k 最相似的工具，工具 Schema 使用 JSON Schema 格式，包含参数定义、类型、描述和示例。",
-                    keyLogic: "使用 ChromaDB 向量数据库进行语义检索。将用户查询转换为 embedding，在工具库中查找相似度最高的工具。返回工具的完整 Schema（参数定义、描述、示例）。",
-                    designRationale: "为什么使用语义检索而非关键词匹配？支持自然语言查询，用户无需了解具体工具名称。通过 embedding 相似度匹配，提高工具推荐的准确性。支持工具描述的模糊匹配，即使工具名称不完全匹配也能找到相关工具。",
-                    upstreamDownstream: "Upstream: Planner (接收工具查询请求) | Downstream: Planner (返回工具 Schema)",
-                    llmLogic: "<strong>触发点:</strong> <code>query_tools()</code> → <code>embedding_model.embed_query(query_text)</code><br><br><strong>API 类型:</strong> Embeddings API（非 Chat API）。使用 OpenAI Embeddings 或 Ollama Embeddings 模型（如 <code>nomic-embed-text</code>）。<br><br><strong>输入:</strong> UserQuery（自然语言文本，例如 \"分析单细胞RNA数据\"）。<br><br><strong>输出:</strong> Vector Float List（例如 768 维或 1536 维的浮点数数组）。<br><br><strong>处理流程:</strong> 1) 将查询文本转换为 embedding 向量，2) 在 ChromaDB 中计算与所有工具描述的余弦相似度（cosine similarity），3) 返回 top-k（默认 k=10）最相似的工具 Schema。注意：此模块不使用 Chat API，而是使用 Embeddings API 进行语义相似度计算。",
-                    academicBasis: "[5] Y. Qin et al., \"ToolLLM: Facilitating LLMs to Master 16000+ Real-world APIs,\" ICLR, 2024.<br>[6] J. Johnson et al., \"Billion-scale similarity search,\" IEEE Trans. Big Data, 2021. (Vector Search Theory)"
+                    dataIO: "Input: UserQuery (自然语言) → Output: List[ToolSchema]（JSON Schema，含参数、描述、示例）",
+                    technologyDescription: "RAG：ChromaDB 存工具 Schema 的 embedding，Ollama/OpenAI Embeddings（如 nomic-embed-text）做语义检索。工具注册来自 gibh_agent.tools load_all_tools() 自动发现并同步到 ChromaDB。GET /api/tools/search、/api/tools/list、/api/tools/{tool_name} 对外暴露检索与 Schema 查询。",
+                    keyLogic: "embed_query(query_text) → 向量相似度检索 → 返回 top-k 工具 Schema，供 Planner 注入 LLM 提示词。",
+                    designRationale: "语义检索替代关键词匹配，自然语言即可匹配生物/组学工具；工具库与代码 @register 一致，便于扩展。",
+                    upstreamDownstream: "Upstream: Planner | Downstream: Planner (ToolSchemas)",
+                    llmLogic: "仅用 Embeddings API（非 Chat）；embed_query → 向量 → ChromaDB 余弦相似度 → top-k ToolDef。",
+                    academicBasis: "[5] Y. Qin et al., \"ToolLLM: Facilitating LLMs to Master 16000+ Real-world APIs,\" ICLR, 2024."
                 },
                 agent: {
                     component: "领域专家 (Domain Agents)",
@@ -1240,36 +1244,36 @@
                 },
                 executor: {
                     component: "执行引擎 (Executor)",
-                    coreFunction: "core.executor.WorkflowExecutor.execute_step()",
-                    dataIO: "Input: StepConfig: {step_id, tool_id, params} → Output: StepResult: {status, logs, data, images}",
-                    technologyDescription: "实现沙箱化执行环境。通过 Python 反射机制（Reflection，使用 getattr, importlib）动态加载工具函数。使用 Pydantic 模型验证步骤参数，确保类型和格式正确。集成 Scanpy 和 DESeq2 进行组学数据处理。工具执行可能涉及：1) 同步 Python 函数调用，2) Subprocess 调用外部程序（如 Cell Ranger），3) Celery 异步任务队列处理耗时操作。处理步骤间数据流：前一步的输出文件路径作为下一步的输入参数。",
-                    keyLogic: "从 ToolRegistry 动态查找工具函数。使用 Pydantic 验证参数。调用工具函数（可能涉及 Subprocess 或 Celery 异步任务）。处理步骤间的数据流（前一步输出作为下一步输入）。收集执行结果和错误信息。",
-                    designRationale: "为什么分离 Executor 和 Planner？允许在规划后、执行前进行验证，防止无效参数导致执行失败。支持错误恢复和重试机制（Executor → Planner 反馈循环）。实现执行逻辑的通用化，无需为每个工具编写特定代码。通过参数验证减少运行时错误。",
-                    upstreamDownstream: "Upstream: Agent (接收工作流配置) | Downstream: Tools (调用工具函数) / Planner (错误反馈循环) / Output (返回执行结果)",
-                    llmLogic: "<strong>触发点:</strong> Executor 本身不直接调用 LLM API。但在错误恢复场景中，错误信息会反馈给 Planner，Planner 使用 LLM 生成修正后的工作流。<br><br><strong>间接 LLM 使用:</strong> 当执行失败时，Executor 返回 ErrorResult，Orchestrator 触发重规划流程，Planner 使用 LLM 分析错误原因并生成修正后的工作流（参见 Planner 的 llmLogic）。<br><br><strong>代码生成场景（未来扩展）:</strong> 如果工具需要动态代码生成，Executor 可能调用 LLM 生成 Python 代码块。输入：Step description + Dataframe .head()（数据预览），输出：Python Code block（使用正则表达式提取 ```python 代码块）。",
-                    academicBasis: "[7] F. A. Wolf et al., \"SCANPY: large-scale single-cell gene expression data analysis,\" Genome Biology, 2018.<br>[8] H. Li et al., \"SheetCopilot: Bringing Software Productivity to the Next Level,\" NeurIPS, 2023."
+                    coreFunction: "WorkflowExecutor.execute_step() / 工具通过 @registry.register 注册，load_all_tools 发现",
+                    dataIO: "Input: StepConfig {step_id, tool_id, params} → Output: StepResult {status, logs, data, images}",
+                    technologyDescription: "从 ToolRegistry 动态查找工具（getattr/importlib）；Pydantic 校验参数。步骤间数据链式传递（如 h5ad_path）。支持 Scanpy、Squidpy、PyRadiomics 等多模态工具。耗时任务可选走 Celery Worker（/api/workflow/status/{run_id} 查询状态），默认同步执行。",
+                    keyLogic: "按步骤执行 → 参数验证 → 调用工具函数 → 收集 step_result；失败时错误上下文反馈 Planner，LLM 修正后重试。",
+                    designRationale: "规划与执行解耦；错误自愈闭环；工具与执行框架解耦，便于扩展。",
+                    upstreamDownstream: "Upstream: Agent (工作流配置) | Downstream: Tools / Planner (错误反馈) / Output (SSE step_result)",
+                    llmLogic: "Executor 不直接调 LLM；错误时 ErrorResult → Planner → LLM 修正工作流 → 再执行。",
+                    academicBasis: "[7] F. A. Wolf et al., \"SCANPY: large-scale single-cell gene expression data analysis,\" Genome Biology, 2018."
                 },
                 llm: {
                     component: "大语言模型服务 (LLM Service)",
-                    coreFunction: "llm_client.achat() / llm_client.astream()",
-                    dataIO: "Input: List[Message] + temperature, max_tokens → Output: JSON / Stream",
-                    technologyDescription: "deepseek-R1 (MoE 架构) 提供推理能力。Orchestrator 用于意图分类；Planner 用于工作流规划与错误修正；Agent 用于诊断报告生成。通过统一 LLM Client 封装 API 调用。",
-                    keyLogic: "意图分类 (Zero-shot)、工作流规划 (CoT + Few-shot)、错误分析、诊断报告生成。",
-                    designRationale: "LLM 是系统的推理引擎，但作为外部服务不参与数据流主路径，故以虚线连接表示「调用关系」。",
-                    upstreamDownstream: "Upstream: Orchestrator (意图分类) | Planner (规划/修正) | Agent (诊断) | Downstream: 各模块接收 LLM 响应",
-                    llmLogic: "本模块即为 LLM 服务本身。被 Orchestrator、Planner、Agent 调用。",
-                    academicBasis: "deepseek-R1 Technical Report, arXiv 2024."
+                    coreFunction: "llm_client.achat() / llm_client.astream()，统一 LLMClient 封装",
+                    dataIO: "Input: messages, temperature, max_tokens, model_name → Output: JSON / Stream",
+                    technologyDescription: "多模型路由：Qwen3.5-Plus（阿里云）、DeepSeek-R1、GLM-5 Pro 等，由请求 model_name 或前端 #modelSelect 决定。Orchestrator 意图分类、Planner 工作流规划与错误修正、Agent 领域诊断报告，均通过同一 LLMClient 调用。",
+                    keyLogic: "意图分类 (Zero-shot)、规划 (CoT + Few-shot)、错误分析、诊断报告。",
+                    designRationale: "推理引擎统一封装，模型可插拔；虚线表示「调用关系」不占主数据流。",
+                    upstreamDownstream: "Upstream: Orchestrator / Planner / Agent | Downstream: 各模块消费 LLM 响应",
+                    llmLogic: "LLM 服务本体；被 Orchestrator、Planner、Agent 调用。",
+                    academicBasis: "DeepSeek-R1 / Qwen / GLM 技术报告；Chain-of-Thought 与 RAG 文献。"
                 },
                 output: {
                     component: "分析结果 (Analysis Results)",
-                    coreFunction: "SSE Streaming + Frontend Rendering",
-                    dataIO: "Input: AnalysisResults + AI Report → Output: Rendered UI: Workflow Cards + Step Results + AI Diagnosis",
-                    technologyDescription: "使用 Server-Sent Events (SSE) 实现实时渲染。后端使用 FastAPI StreamingResponse，通过 async generator 逐条发送 JSON 格式的事件。通过 NGINX 反向代理（reverse proxy）在生产环境中提供负载均衡（load balancing）。前端使用 EventSource API 或 fetch API 的 ReadableStream 解析 SSE 流。前端实现状态机解析不同事件类型（status, workflow, step_result, diagnosis），实时更新 DOM。使用 Marked.js 或 marked 库渲染 Markdown 格式的 AI 报告。",
-                    keyLogic: "通过 Server-Sent Events (SSE) 实时推送分析进度。前端解析 SSE 事件流，实时渲染工作流卡片、步骤结果、图表和 AI 诊断报告。支持流式文本输出和增量更新。",
-                    designRationale: "为什么使用 SSE 而非轮询？实时推送，降低延迟。单向通信，简化实现。支持流式输出，提升用户体验。相比 WebSocket，SSE 更简单，无需双向通信。使用 NGINX 反向代理提供生产级负载均衡和高可用性。",
-                    upstreamDownstream: "Upstream: Executor (接收执行结果) + Agent (接收分析报告) | Downstream: User (最终展示)",
-                    llmLogic: "N/A - Output Layer（不直接调用 LLM API，仅渲染 LLM 生成的诊断报告）",
-                    academicBasis: "[9] W. Tarneberg et al., \"Dynamic Application-Aware Load Balancing for NGINX,\" IEEE Access, 2021."
+                    coreFunction: "SSE 流式推送 + 前端解析与渲染",
+                    dataIO: "Input: SSE 事件流 → Output: 工作流卡片、步骤结果、图表、Markdown 诊断、state_snapshot",
+                    technologyDescription: "FastAPI StreamingResponse + async generator 逐条 yield SSE。事件类型：status（进度）、workflow（工作流配置/模板复用）、step_result（步骤结果）、diagnosis（领域报告）、message（流式文本）、done、state_snapshot（会话状态快照入库）。前端 fetch + ReadableStream 解析，按 type 分支更新 DOM；Markdown 用 marked 等渲染。生产可配 NGINX 反向代理。",
+                    keyLogic: "后端 yield _emit_sse(type, payload)；前端解析 data: {...}，根据 type 渲染卡片/步骤/报告。",
+                    designRationale: "SSE 单向实时、实现简单；流式体验；state_snapshot 保证历史会话可恢复工作流卡片与报告。",
+                    upstreamDownstream: "Upstream: Orchestrator/Executor/Agent (SSE 源) | Downstream: User (浏览器)",
+                    llmLogic: "N/A - 仅渲染 LLM 产出的诊断与消息。",
+                    academicBasis: "[9] SSE 标准；NGINX 负载均衡实践。"
                 }
             };
             
@@ -1277,16 +1281,17 @@
             const dataFlowSpecs = {
                 'user-orch': {
                     source: 'User', target: 'Orchestrator', sourceZh: '用户', targetZh: '编排器',
-                    anatomy: '<strong>上下文：</strong>用户在前端输入自然语言并上传文件。<strong>意义：</strong>这是整个流程的入口，将非结构化输入转为可处理的请求。<strong>关键变量：</strong>message（用户意图）、uploaded_files（文件引用）、stream（开启流式输出）。',
-                    human_desc: 'The user sends their message and uploaded files to the Orchestrator via the chat API.',
-                    function_sig: 'POST /api/chat(request: ChatRequest) -> StreamingResponse',
-                    payload_preview: '{"message":"Analyze this","uploaded_files":[{"name":"example.h5ad","path":"..."}],"stream":true  // 开启流式输出}',
+                    anatomy: '<strong>上下文：</strong>用户在前端输入自然语言并上传文件（或先 POST /api/upload 再传 file_path）。<strong>意义：</strong>流程入口，将非结构化输入转为可处理请求。<strong>关键变量：</strong>message、uploaded_files（file_name/file_path）、stream、session_id、user_id、model_name。',
+                    human_desc: 'The user sends message and uploaded file refs to the backend via POST /api/chat.',
+                    function_sig: 'POST /api/chat (ChatRequest) -> StreamingResponse (SSE)',
+                    payload_preview: '{"message":"分析这个数据","uploaded_files":[{"file_name":"x.h5ad","file_path":"/app/uploads/..."}],"stream":true,"session_id":"uuid","user_id":"owner_id","model_name":"deepseek-ai/DeepSeek-R1"}',
                     param_mapping: {
-                        'message': 'Natural language query from the user (e.g., "Analyze this data")',
-                        'uploaded_files': 'List of file references with name and server path after upload',
-                        'stream': 'When true, enables SSE streaming for real-time updates',
-                        'user_id': 'Identifies the user session for multi-tenant isolation',
-                        'session_id': 'Correlates requests within a single conversation'
+                        'message': '用户自然语言查询',
+                        'uploaded_files': '上传文件列表，项含 file_name / file_path（或 name/path）',
+                        'stream': 'true 时启用 SSE 流式输出',
+                        'user_id': '当前用户/游客标识（JWT 或 guest_uuid）',
+                        'session_id': '会话 ID，新建会话时由后端生成并落库',
+                        'model_name': '可选，指定 LLM 模型（如 Qwen3.5-Plus、DeepSeek-R1）'
                     }
                 },
                 'orch-planner': {
@@ -1893,10 +1898,10 @@
                         <div class="detail-item-value">
                             <p style="margin-bottom: 12px;"><strong>核心架构：</strong>采用微服务拆分模式，通过 docker-compose 编排。</p>
                             <ul style="margin: 0; padding-left: 20px; line-height: 1.9;">
-                                <li><strong>容器 A (Gateway)：</strong>Nginx。负责静态资源托管与反向代理，统一 CORS 策略，保障生产环境安全。</li>
-                                <li><strong>容器 B (Brain)：</strong>FastAPI Server (Orchestrator + Planner)。锁定 Python 运行环境，隔离业务逻辑与计算资源。</li>
-                                <li><strong>容器 C (Muscle)：</strong>Celery Worker (Executor + Tools)。这是解耦的核心。生信分析依赖复杂的系统库（gcc, gfortran），将其封装在独立容器中，实现了「计算环境隔离」。支持水平扩展（Horizontal Scaling），高并发时可启动多个 Worker 容器。</li>
-                                <li><strong>容器 D (Memory)：</strong>Redis + ChromaDB。负责消息队列与向量存储，数据持久化。</li>
+                                <li><strong>网关 (Gateway)：</strong>Nginx。静态资源与反向代理，CORS、负载均衡。</li>
+                                <li><strong>应用 (Brain)：</strong>FastAPI 单进程：Orchestrator + WorkflowPlanner + 领域 Agent + Executor + 工具调用。stream_process() 主路径为同步/异步生成器，SSE 直接由本进程 yield，无需消息队列。</li>
+                                <li><strong>可选 Worker：</strong>需要异步任务状态查询时，可部署 Celery Worker + Redis；/api/workflow/status/{run_id} 等依赖 Celery 时启用。默认部署可不含 Celery。</li>
+                                <li><strong>存储：</strong>MySQL（会话/消息/资产/技能/工作流模板）；ChromaDB（工具向量）；文件系统（上传与结果）。</li>
                             </ul>
                         </div>
                     </div>
@@ -1904,7 +1909,7 @@
                         <div class="detail-item-label">工具原子化设计 (Atomic Tool Design)</div>
                         <div class="detail-item-value">
                             <p style="margin-bottom: 10px;"><strong>定义：</strong>每个生信工具（如 <code>run_pca</code>, <code>plot_volcano</code>）都被封装为无状态的原子函数。</p>
-                            <p style="margin-bottom: 10px;"><strong>实现：</strong>使用 Python 装饰器 <code>@register_tool</code> 注册到全局注册表。</p>
+                            <p style="margin-bottom: 10px;"><strong>实现：</strong>使用 <code>@registry.register</code> 等装饰器注册到 ToolRegistry，<code>load_all_tools()</code> 启动时发现并同步到 ChromaDB。</p>
                             <p style="margin-bottom: 8px;"><strong>解耦优势：</strong></p>
                             <ul style="margin: 0; padding-left: 20px; line-height: 1.9;">
                                 <li><strong>LLM 友好：</strong>大模型可以像搭积木一样，根据需求动态检索并组装原子工具，而非调用死板的脚本。</li>
@@ -2472,7 +2477,7 @@
                                 element: '.control-bar .scenario-btn:last-of-type',
                                 popover: {
                                     title: '基础设施与安全',
-                                    description: '点击可查看内生安全体系：Celery Worker 异步 BLAKE3 哈希 + Ed25519 签名、.sig 旁路校验、Fail-Open 设计。'
+                                    description: '点击可查看安全与多租户：Pydantic 校验、owner_id 隔离、可选 BLAKE3/Ed25519/.sig 内生安全。'
                                 },
                                 onHighlightStarted: () => {
                                     showInfraReport();
@@ -2504,8 +2509,8 @@
         
         <!-- 详细流程说明 - V2 架构白盒技术文档 -->
         <div class="section">
-            <h2>📋 全流程数据流向详解 (V2 Architecture)</h2>
-            <p style="color: #666; margin-bottom: 24px;">本文档与上方交互式场景模式（Planning / Execution / Error Loop / Direct Chat）一一对应，采用白盒视角描述系统内部机制。</p>
+            <h2>📋 全流程数据流向详解 (V2 最新架构)</h2>
+            <p style="color: #666; margin-bottom: 24px;">本文档与上方交互式场景模式（规划流程 / 执行流程 / 错误循环 / 直接聊天 / 部署架构）一一对应，描述当前系统架构、接口与数据流。前端为 Vanilla JS（index.html），后端为 FastAPI + AgentOrchestrator.stream_process()，SSE 流式输出；鉴权、会话、资产、技能、工作流收藏均落 MySQL，工具 RAG 用 ChromaDB。</p>
             
             <h3>一、核心机制解析 (Core Mechanisms)</h3>
             
@@ -2573,16 +2578,17 @@
                 </ul>
             </div>
             
-            <h3>三、技术栈映射 (Tech Stack Mapping)</h3>
+            <h3>三、技术栈与核心 API 映射 (Tech Stack & API)</h3>
             
             <div class="flow-step">
                 <ul>
-                    <li><strong>Modalities</strong>：RNA、代谢组学、<strong>空间组学 (Visium)</strong>、<strong>影像组学 (NIfTI)</strong> 等多模态领域 Agent</li>
-                    <li><strong>Reasoning</strong>：DeepSeek-R1 (MoE) — 意图分类、Dynamic Planning、错误分析、领域专属诊断报告</li>
-                    <li><strong>Memory</strong>：ChromaDB — 工具语义检索、RAG</li>
-                    <li><strong>Scheduling</strong>：Celery + Redis — 异步任务调度</li>
-                    <li><strong>Streaming</strong>：SSE — status / workflow / step_result / diagnosis；前端 Universal File Card 渲染非图片结果</li>
-                    <li><strong>Safety</strong>：Pydantic + Docker 沙箱；<strong>内生安全</strong>：Celery 异步 BLAKE3 + Ed25519 签名、.sig 旁路校验、Fail-Open 设计</li>
+                    <li><strong>Modalities</strong>：RNA、代谢组学、空间组学 (Visium)、影像组学 (NIfTI) 等多模态领域 Agent；FileInspector / ModalitySniffer 做文件治理与模态检测</li>
+                    <li><strong>Reasoning</strong>：多模型（Qwen3.5-Plus、DeepSeek-R1、GLM-5 等）— 意图分类、WorkflowPlanner 动态规划、错误分析、领域诊断报告</li>
+                    <li><strong>Memory</strong>：ChromaDB — 工具 RAG；MySQL — 会话/消息/资产/技能/工作流收藏（Session、Message、Asset、Skill、UserSavedSkill、WorkflowTemplate）</li>
+                    <li><strong>Scheduling</strong>：FastAPI 同步/异步，AgentOrchestrator.stream_process() 主路径；<strong>可选</strong> Celery + Redis 用于 /api/workflow/status/{run_id} 等异步任务状态查询</li>
+                    <li><strong>Streaming</strong>：SSE 事件 — status / workflow / step_result / diagnosis / message / done / state_snapshot；前端 ReadableStream 解析并渲染</li>
+                    <li><strong>核心 API</strong>：GET /、/api/health；POST /api/upload、/api/chat（SSE）、/api/execute；GET /api/sessions、/api/sessions/{id}/messages、/api/assets、/api/skills、/api/workflow_templates；POST/DELETE /api/skills/{id}/bookmark；POST /api/auth/login、register、merge_guest_data；GET /api/tools/search、/api/tools/list、/api/tools/{name}；POST /api/workflows/plan、/api/workflows/save；GET /api/workflows/list；DELETE /api/workflows/{id}；GET /api/workflow/status/{run_id}</li>
+                    <li><strong>Safety</strong>：Pydantic 校验；可选内生安全（BLAKE3/Ed25519/.sig）；多用户 owner_id/session_id 隔离</li>
                 </ul>
             </div>
         </div>
@@ -2617,8 +2623,8 @@
             </div>
             
             <div class="flow-step">
-                <h3>6. 多用户隔离与内生安全</h3>
-                <p>多用户独立目录（<code>{user_id}/{session_id}/</code>）。内生安全：Celery Worker 异步 BLAKE3 哈希 + Ed25519 签名，.sig 旁路文件做完整性校验，Fail-Open 设计保证业务可用。</p>
+                <h3>6. 多用户隔离与鉴权</h3>
+                <p>owner_id 由 JWT（/api/auth/login）或 X-Guest-UUID 解析；会话/消息/资产/技能收藏/工作流模板均按 owner_id 隔离。MySQL 持久化 Session、Message、Asset、Skill、UserSavedSkill、WorkflowTemplate。可选内生安全（BLAKE3/Ed25519/.sig）。</p>
             </div>
         </div>
         
@@ -2668,18 +2674,17 @@ graph TB
                 <div class="flow-text-summary">
                     <h4>📋 步骤详解</h4>
                     <ol>
-                        <li><strong>前端 → API 服务器</strong>：HTTP POST 请求（文件上传含压缩包/医学影像、聊天请求）</li>
-                        <li><strong>文件治理</strong>：StructureNormalizer 解压 → ModalitySniffer 检测模态 → FileInspector 提取元数据</li>
-                        <li><strong>API 服务器 → 编排器</strong>：创建 <code>AgentOrchestrator</code>，调用 <code>stream_process()</code></li>
-                        <li><strong>编排器 → 智能体/规划器</strong>：意图分类、按模态路由到领域智能体（RNA/代谢/空间/影像组学等）、调用规划器（Dynamic Planning）</li>
-                        <li><strong>规划器 ↔ 工具检索器/LLM</strong>：语义检索工具、LLM 生成工作流（含 skip_steps/selected）</li>
-                        <li><strong>领域智能体 → 执行器</strong>：创建 <code>WorkflowExecutor</code>，执行工作流</li>
-                        <li><strong>执行器 → 工具</strong>：动态查找工具、验证参数、步骤间数据链式传递、调用工具函数</li>
-                        <li><strong>工具 → 执行器</strong>：返回 step_result（数据、图表路径）；前端非图片用 Universal File Card 渲染</li>
-                        <li><strong>执行器 ⇢ 规划器</strong>：错误时反馈 Traceback，触发重规划</li>
-                        <li><strong>领域智能体 → 编排器</strong>：领域专属摘要（<code>_generate_analysis_summary</code>）生成报告</li>
-                        <li><strong>编排器 → 前端</strong>：SSE 流式输出（status, workflow, step_result, diagnosis, result, done）</li>
-                        <li><strong>前端渲染</strong>：解析 SSE 事件，渲染工作流卡片、步骤结果、AI 报告</li>
+                        <li><strong>前端 → API</strong>：POST /api/upload 上传文件；POST /api/chat 发送 message、uploaded_files、stream、session_id、user_id、model_name</li>
+                        <li><strong>文件治理</strong>：StructureNormalizer 解压 → ModalitySniffer 检测模态 → FileInspector 提取 FileMetadata</li>
+                        <li><strong>API → 编排器</strong>：FastAPI 调用 <code>AgentOrchestrator.stream_process(query, files, history, model_name=..., owner_id=...)</code>，无 Celery 主路径</li>
+                        <li><strong>编排器</strong>：意图分类（Chat/Task）、工作流模板复用正则拦截；Task 则调 WorkflowPlanner + 领域 Agent</li>
+                        <li><strong>规划器 ↔ 检索器/LLM</strong>：Tool Retriever.query_tools() 语义检索 → 工具 Schema 注入 LLM → CoT 生成工作流（含 selected/skip_steps）</li>
+                        <li><strong>领域智能体 → 执行器</strong>：WorkflowExecutor 按步骤执行，ToolRegistry 动态查找工具</li>
+                        <li><strong>执行器 → 工具</strong>：Pydantic 校验参数、步骤间 h5ad_path 等链式传递、调用 @register 工具</li>
+                        <li><strong>执行器 → 输出</strong>：step_result 经 SSE 推送；前端按 type 渲染卡片/步骤/图表</li>
+                        <li><strong>错误自愈</strong>：Executor 错误反馈 Planner → LLM 修正 → 再执行</li>
+                        <li><strong>编排器 → 前端</strong>：SSE 事件 status / workflow / step_result / diagnosis / message / done / state_snapshot；state_snapshot 可入库供历史恢复</li>
+                        <li><strong>前端</strong>：fetch + ReadableStream 解析 SSE，渲染工作流卡片、步骤结果、Markdown 报告</li>
                     </ol>
                 </div>
             </div>

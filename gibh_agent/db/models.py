@@ -74,16 +74,27 @@ class WorkflowTemplate(Base):
 
 
 class Skill(Base):
-    """UGC 技能表：用户上传技能，待管理员审核后展示。"""
+    """UGC 技能表：用户上传技能，待管理员审核后展示。系统技能 name 唯一约束防并发重复。"""
 
     __tablename__ = "skills"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(256), nullable=False)
+    name = Column(String(255), unique=True, index=True, nullable=False)
     description = Column(Text, nullable=True)
     main_category = Column(String(128), nullable=True)
     sub_category = Column(String(128), nullable=True)
     prompt_template = Column(Text, nullable=True)
     author_id = Column(String(255), nullable=False, index=True)  # username
     status = Column(String(32), nullable=False, default="pending")  # pending | approved | rejected
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class UserSavedSkill(Base):
+    """用户收藏技能关联表：轻量级，owner_id 为 String 支持游客与继承。"""
+
+    __tablename__ = "user_saved_skills"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_id = Column(String(255), nullable=False, index=True)
+    skill_id = Column(Integer, nullable=False, index=True)  # 逻辑关联 skills.id，不设 FK 保持与项目风格一致
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
