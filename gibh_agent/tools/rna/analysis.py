@@ -407,12 +407,13 @@ def run_clustering(
         # 加载数据
         adata = sc.read_h5ad(adata_path)
         
-        # 聚类
+        # 聚类（resolution 可能被 LLM 传成 str，强制转为 float）
+        res_f = float(resolution)
         if algorithm == "leiden":
-            sc.tl.leiden(adata, resolution=resolution)
+            sc.tl.leiden(adata, resolution=res_f)
             cluster_key = "leiden"
         elif algorithm == "louvain":
-            sc.tl.louvain(adata, resolution=resolution)
+            sc.tl.louvain(adata, resolution=res_f)
             cluster_key = "louvain"
         else:
             return {
@@ -467,8 +468,20 @@ def run_clustering_comparison(
     多分辨率聚类对比：在已降维的 adata 上以 0.3/0.5/0.8 跑 Leiden，绘制 1x3 UMAP 对比图。
     仅添加 leiden_0.3/0.5/0.8，不覆盖默认 leiden。若在内存中计算了 UMAP/neighbors，会写回 h5ad 供下游复用，避免重复计算（隐患 4 修复）。
     """
-    if resolutions is None:
-        resolutions = [0.3, 0.5, 0.8]
+    # 确保 resolutions 是 float 列表（大模型可能传入 "0.3,0.5,0.8" 字符串）
+    if isinstance(resolutions, str):
+        res_list = [float(r.strip()) for r in resolutions.split(",") if r.strip()]
+    elif isinstance(resolutions, (int, float)):
+        res_list = [float(resolutions)]
+    elif isinstance(resolutions, list):
+        res_list = [float(r) for r in resolutions]
+    elif resolutions is None:
+        res_list = [0.3, 0.5, 0.8]
+    else:
+        res_list = [0.3, 0.5, 0.8]
+    if not res_list:
+        res_list = [0.3, 0.5, 0.8]
+    resolutions = res_list
     try:
         import scanpy as sc
         adata_path = _resolve_adata_path(adata_path)

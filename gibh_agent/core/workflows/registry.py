@@ -46,6 +46,7 @@ class WorkflowRegistry:
         from .rna import RNAWorkflow
         from .spatial_workflow import SpatialWorkflow
         from .radiomics_workflow import RadiomicsWorkflow
+        from .sted_ec_workflow import STEDECWorkflow
         
         # 注册代谢组学工作流
         metabolomics = MetabolomicsWorkflow()
@@ -62,6 +63,10 @@ class WorkflowRegistry:
         # 注册影像组学工作流
         radiomics = RadiomicsWorkflow()
         self.register(radiomics)
+        
+        # 注册 STED-EC 特色科研流程工作流
+        sted_ec = STEDECWorkflow()
+        self.register(sted_ec)
         
         logger.info(f"✅ [WorkflowRegistry] 已注册 {len(self._workflows)} 个工作流: {list(self._workflows.keys())}")
     

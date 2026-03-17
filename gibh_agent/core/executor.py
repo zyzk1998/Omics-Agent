@@ -374,8 +374,8 @@ class WorkflowExecutor:
             else:
                 logger.warning(f"⚠️ [Executor] 原始参数中缺少 group_column")
         
-        # 处理数据流：替换占位符（传递工具类别信息）
-        processed_params = self._process_data_flow(params, step_context, tool_category=tool_category)
+        # 处理数据流：替换占位符（传递工具类别与当前步骤，供 STED-EC 等注入上一步输出）
+        processed_params = self._process_data_flow(params, step_context, tool_category=tool_category, current_tool_id=tool_id)
         
         # 🔥 CRITICAL DEBUG: 记录处理后的参数
         if tool_id in ["metabolomics_plsda", "differential_analysis", "metabolomics_pathway_enrichment"]:
@@ -452,13 +452,15 @@ class WorkflowExecutor:
         
         # 🔥 CRITICAL REGRESSION FIX: Normalize all path-like parameters before tool execution
         # 🔥 TASK 2: Only resolve paths that are NOT already absolute and existing
-        path_params = ["file_path", "adata_path", "h5ad_path", "image_path", "mask_path", "output_path", "output_file", "fastq_path", "reference_path", "output_h5ad", "features_csv_path", "rad_score_csv_path"]
+        path_params = ["file_path", "adata_path", "h5ad_path", "trajectory_data_path", "image_path", "mask_path", "output_path", "output_file", "fastq_path", "reference_path", "output_h5ad", "features_csv_path", "rad_score_csv_path"]
         for param_name in path_params:
             if param_name in processed_params:
                 original_path = processed_params[param_name]
                 if original_path and isinstance(original_path, str):
-                    # Skip placeholder values
-                    if original_path not in ["<待上传数据>", "<PENDING_UPLOAD>", ""]:
+                    # Skip placeholder values and unresolved step refs (e.g. <sted_ec_moscot_trajectory>)
+                    if original_path not in ["<待上传数据>", "<PENDING_UPLOAD>", ""] and not (
+                        original_path.strip().startswith("<") and original_path.strip().endswith(">")
+                    ):
                         # 🔥 CRITICAL: If already absolute and exists, do NOT modify it
                         if Path(original_path).is_absolute() and Path(original_path).exists():
                             logger.debug(f"✅ [Executor] 路径参数 {param_name} 已是绝对路径且存在，不修改: {original_path}")
@@ -721,7 +723,7 @@ class WorkflowExecutor:
         except Exception as e:
             error_msg = str(e)
             tb_str = traceback.format_exc()
-            logger.error(f"❌ 步骤 {step_id} 执行失败: {error_msg}\n{tb_str}")
+            logger.error("🔥 [步骤执行崩溃] %s:\n%s", step_name, tb_str)
             
             # 🔥 全局报错一致性：ValueError 等业务异常常含中文说明，优先保留为 user_message
             from .error_formatter import ErrorFormatter
@@ -750,16 +752,18 @@ class WorkflowExecutor:
         self,
         params: Dict[str, Any],
         step_context: Optional[Dict[str, Any]] = None,
-        tool_category: Optional[str] = None
+        tool_category: Optional[str] = None,
+        current_tool_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         处理数据流：替换占位符（如 <step1_output>）和自动注入文件路径
-        
+
         Args:
             params: 原始参数
             step_context: 步骤上下文（包含 current_file_path）
             tool_category: 工具类别（用于确定文件路径参数名）
-        
+            current_tool_id: 当前步骤的 tool_id（用于 STED-EC 等从预处理步骤注入 time_key/cell_type_key）
+
         Returns:
             处理后的参数
         """
@@ -964,13 +968,13 @@ class WorkflowExecutor:
                             logger.info(f"🔄 数据流: {key} = <{placeholder}> -> {output_path}")
                         else:
                             # 路径参数不能赋值为 dict，保留占位符或原值，避免 TypeError
-                            if key in ("h5ad_path", "adata_path", "file_path", "output_path", "image_path", "mask_path"):
+                            if key in ("h5ad_path", "adata_path", "file_path", "trajectory_data_path", "output_path", "image_path", "mask_path"):
                                 logger.warning(f"⚠️ 占位符 <{placeholder}> 未解析出路径，保留原值")
                                 processed[key] = value
                             else:
                                 processed[key] = step_result
                     else:
-                        if key in ("h5ad_path", "adata_path", "file_path", "output_path", "image_path", "mask_path"):
+                        if key in ("h5ad_path", "adata_path", "file_path", "trajectory_data_path", "output_path", "image_path", "mask_path"):
                             processed[key] = value
                         else:
                             processed[key] = step_result
@@ -1006,7 +1010,18 @@ class WorkflowExecutor:
             for k, v in list(processed.items()):
                 if isinstance(v, str) and "<output_dir>" in v:
                     processed[k] = v.replace("<output_dir>", out_dir)
-        
+
+        # STED-EC：从数据校验步骤向时间序列标准化与 moscot 步骤注入 time_key / cell_type_key
+        if current_tool_id in ("sted_ec_time_series_formatting", "sted_ec_moscot_trajectory"):
+            pre = self.step_results.get("sted_ec_data_validation")
+            if isinstance(pre, dict) and pre.get("status") == "success":
+                if pre.get("time_key"):
+                    processed["time_key"] = pre["time_key"]
+                    logger.info(f"🔄 数据流: 从 sted_ec_data_validation 注入 time_key = {pre['time_key']}")
+                if pre.get("cell_type_key") is not None:
+                    processed["cell_type_key"] = pre["cell_type_key"]
+                    logger.info(f"🔄 数据流: 从 sted_ec_data_validation 注入 cell_type_key = {pre['cell_type_key']}")
+
         return processed
     
     def _is_image_file(self, file_path: str) -> bool:
@@ -1228,6 +1243,11 @@ class WorkflowExecutor:
             step_name = step.get("name", step.get("step_name", step_id))
             tool_id = step.get("tool_id", step_id)
             params = step.get("params", {})
+            
+            # 🔥 前端勾选状态：用户取消勾选的步骤不执行，仅持久化到快照
+            if step.get("enabled") is False or step.get("selected") is False:
+                logger.info(f"⏭️ [Executor] 跳过步骤 {step_name} ({tool_id})：用户未勾选")
+                continue
             
             # 🔥 CRITICAL FIX: 完全移除 visualize_pca 步骤（不在流程中显示）
             if tool_id == "visualize_pca" or step_id == "visualize_pca":

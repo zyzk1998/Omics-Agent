@@ -219,12 +219,16 @@ class AgentOrchestrator:
             "workflow": None,
             "steps": [],
             "report": None,
+            "_start_time": time.time(),  # 用于 done 事件下发 duration，与前端计时器统一
         }
         owner_id = kwargs.get("owner_id") or kwargs.get("user_id")
         db = kwargs.get("db")
         model_name = (kwargs.get("model_name") or "").strip() or "qwen3.5-plus"
+        target_domain = kwargs.get("target_domain")
+        if target_domain and isinstance(target_domain, str) and not target_domain.strip():
+            target_domain = None  # 防回退：空字符串视为未传，走传统意图识别
         _t_start = time.time()
-        logger.info("[Profiler] stream_process 入口 - 开始处理请求 (model_name=%s)", model_name)
+        logger.info("[Profiler] stream_process 入口 - 开始处理请求 (model_name=%s, target_domain=%s)", model_name, target_domain)
 
         # 🔥 工作流收藏复用：正则拦截「用户请求复用工作流模板」，跳过 LLM 规划，直接下发 DB 中的 config_json 作为 workflow 事件
         _query_str = (query or "").strip()
@@ -275,18 +279,21 @@ class AgentOrchestrator:
             return
 
         # 🔥 PHASE 1: Layer 0 - Global Intent Routing (Chat vs Task)
-        # Check if this is general chat or a bioinformatics task BEFORE any file inspection or planning
+        # 快车道：若带 target_domain 则跳过意图分类，强制任务模式
         try:
-            yield self._emit_sse(state_snapshot,"status", {
-                "content": "正在理解您的意图...",
-                "state": "analyzing"
-            })
-            await asyncio.sleep(0.01)
-
-            _t_intent_start = time.time()
-            intent_type = await self._classify_global_intent(query, files)
-            logger.info("[Profiler] 全局意图分类完成 - 耗时: %.2fs", time.time() - _t_intent_start)
-            logger.info(f"🔍 [Orchestrator] 全局意图分类: {intent_type}")
+            if target_domain:
+                intent_type = "task"
+                logger.info(f"🔍 [Orchestrator] 快车道硬路由: target_domain={target_domain}，跳过全局意图分类")
+            else:
+                yield self._emit_sse(state_snapshot,"status", {
+                    "content": "正在理解您的意图...",
+                    "state": "analyzing"
+                })
+                await asyncio.sleep(0.01)
+                _t_intent_start = time.time()
+                intent_type = await self._classify_global_intent(query, files)
+                logger.info("[Profiler] 全局意图分类完成 - 耗时: %.2fs", time.time() - _t_intent_start)
+                logger.info(f"🔍 [Orchestrator] 全局意图分类: {intent_type}")
             
             if intent_type == "chat":
                 # 🔥 CHAT MODE: Stream LLM response directly, skip all file/planning logic
@@ -397,6 +404,8 @@ class AgentOrchestrator:
                     return
                 
                 logger.info(f"✅ [Orchestrator] 准备执行 {len(steps)} 个步骤")
+                # 🔥 持久化用户勾选状态：将当前执行的 workflow（含 step.enabled/selected）写入快照，历史恢复时复选框正确
+                state_snapshot["workflow"] = {"workflow_data": workflow_config, "workflow_config": {"workflow_data": workflow_config}}
                 
                 # 1. Initialize Execution Engine
                 yield self._emit_sse(state_snapshot,"status", {
@@ -445,8 +454,11 @@ class AgentOrchestrator:
                             _domain = "epigenomics"
                         elif "proteomics" in workflow_name or "蛋白" in workflow_name:
                             _domain = "proteomics"
+                        elif "sted" in workflow_name or "轨迹" in workflow_name:
+                            _domain = "sted_ec_trajectory"
                         modality_map = {
                             "rna": "rna", "metabolomics": "metabolomics", "spatial": "spatial", "radiomics": "radiomics",
+                            "sted_ec_trajectory": "sted_ec",
                             "genomics": "genomics", "epigenomics": "epigenomics", "proteomics": "proteomics",
                         }
                         workflow_type = modality_map.get(_domain)
@@ -1075,83 +1087,89 @@ class AgentOrchestrator:
                 })
                 await asyncio.sleep(0.01)
                 
-                # Initialize planner for intent analysis
+                # 🔥 快车道硬路由：仅跳过意图识别（IntentAnalyzer），绝不跳过「有无文件」分支与 Path A 体检
+                # 血统保证：下方同一套 if not has_files (Branch A 预览) / else (Path A 正式) 与 file_inspector.inspect_file 必走
                 from .planner import SOPPlanner
                 from .tool_retriever import ToolRetriever
-                
                 llm_client = self._get_llm_client()
                 if not llm_client:
                     raise ValueError("LLM 客户端不可用")
-                
                 tool_retriever = ToolRetriever()
                 planner = SOPPlanner(tool_retriever, llm_client)
-                
-                
-                # 🔥 CRITICAL FIX: Pass file_metadata to intent classification for file-type-based routing
-                # If files exist, inspect first file to get metadata for intent classification
-                file_metadata_for_intent = None
-                if files and len(files) > 0:
-                    first_file = files[0]
-                    logger.info(f"🔍 [Orchestrator] 准备检查文件用于意图分类: {first_file}, type={type(first_file)}")
-                    if isinstance(first_file, dict):
-                        file_path = first_file.get("path") or first_file.get("file_path") or first_file.get("name")
-                    elif isinstance(first_file, str):
-                        file_path = first_file
+                steps_to_skip_fast = None  # 快车道时由 _analyze_user_intent 填充，非快车道不传
+                if target_domain:
+                    _td = (target_domain or "").strip().lower()
+                    _map = {"rna": "RNA", "metabolomics": "Metabolomics", "radiomics": "Radiomics", "spatial": "Spatial", "sted_ec_trajectory": "STED_EC"}
+                    domain_name = _map.get(_td)
+                    if not domain_name or not self.workflow_registry.is_supported(domain_name):
+                        logger.warning("⚠️ [Orchestrator] target_domain=%s 无法映射或不受支持，回退 Metabolomics", target_domain)
+                        domain_name = "Metabolomics"
+                    workflow = self.workflow_registry.get_workflow(domain_name)
+                    if not workflow:
+                        raise ValueError(f"无法获取工作流: {domain_name}")
+                    # 🔥 快车道修复：跳过领域识别，但必须保留步骤分析，根据用户 prompt（如「只做PCA」）动态规划
+                    intent_analysis = await planner._analyze_user_intent(refined_query, workflow)
+                    if isinstance(intent_analysis, dict):
+                        target_steps = intent_analysis.get("target_steps") or []
+                        steps_to_skip_fast = intent_analysis.get("skip_steps") or []
                     else:
-                        file_path = str(first_file)
-                        
-                    logger.info(f"🔍 [Orchestrator] 提取的文件路径: {file_path}")
-                        
-                    if file_path:
-                        # Ensure absolute path
-                        path_obj = Path(file_path)
-                        if not path_obj.is_absolute():
-                            path_obj = Path(self.upload_dir) / path_obj
-                        file_path = str(path_obj.resolve())
-                            
-                        logger.info(f"🔍 [Orchestrator] 解析后的绝对路径: {file_path}")
-                            
-                        try:
-                            _t_inspect_start = time.time()
-                            file_metadata_for_intent = self.file_inspector.inspect_file(file_path)
-                            logger.info("[Profiler] 数据预检完成 - 耗时: %.2fs", time.time() - _t_inspect_start)
-                            logger.info(f"✅ [Orchestrator] 文件检查成功，文件类型: {file_metadata_for_intent.get('file_type', 'unknown')}")
-                            logger.info(f"✅ [Orchestrator] 文件元数据键: {list(file_metadata_for_intent.keys())[:10]}")
-                        except Exception as e:
-                            logger.error(f"❌ [Orchestrator] 文件检查失败，无法用于意图分类: {e}", exc_info=True)
+                        target_steps = intent_analysis if isinstance(intent_analysis, list) else []
+                        steps_to_skip_fast = []
+                    if not target_steps:
+                        target_steps = list(workflow.steps_dag.keys())
+                        logger.info("✅ [Orchestrator] 快车道: 用户未指定步骤，使用全量 (%d 步)", len(target_steps))
                     else:
-                        logger.warning(f"⚠️ [Orchestrator] 无法从文件对象中提取路径")
+                        logger.info("✅ [Orchestrator] 快车道: domain=%s, 步骤分析结果 target_steps=%s, skip_steps=%s", domain_name, target_steps, steps_to_skip_fast)
                 else:
-                    logger.info(f"ℹ️ [Orchestrator] 没有文件，跳过文件检查")
-                
-                # Analyze intent: classify domain and determine target_steps
-                intent_result = await planner._classify_intent(refined_query, file_metadata_for_intent)
-                domain_name = intent_result.get("domain_name")
-                
-                # Validate domain
-                if not domain_name or not self.workflow_registry.is_supported(domain_name):
-                    logger.warning(f"⚠️ [Orchestrator] 无法识别域名: {domain_name}")
-                    domain_name = "Metabolomics"  # 默认值
-                
-                # Get workflow instance for intent analysis
-                workflow = self.workflow_registry.get_workflow(domain_name)
-                if not workflow:
-                    raise ValueError(f"无法获取工作流: {domain_name}")
-                
-                # Analyze user intent to determine target_steps (returns dict with target_steps + skip_steps)
-                intent_analysis = await planner._analyze_user_intent(refined_query, workflow)
-                if isinstance(intent_analysis, dict):
-                    target_steps = intent_analysis.get("target_steps") or []
-                else:
-                    target_steps = intent_analysis if isinstance(intent_analysis, list) else []
-                
-                # 🔥 CRITICAL FIX: Use intent_result.target_steps when _analyze_user_intent returns empty
-                # (Ensures consistency between Preview and Execution - _classify_intent may have captured partial intent)
-                if not target_steps and intent_result.get("target_steps"):
-                    intent_steps = [s for s in intent_result["target_steps"] if s in workflow.steps_dag]
-                    if intent_steps:
-                        target_steps = intent_steps
-                        logger.info(f"✅ [Orchestrator] 使用 intent_result.target_steps 作为回退: {target_steps}")
+                    # 🔥 CRITICAL FIX: Pass file_metadata to intent classification for file-type-based routing
+                    file_metadata_for_intent = None
+                    if files and len(files) > 0:
+                        first_file = files[0]
+                        logger.info(f"🔍 [Orchestrator] 准备检查文件用于意图分类: {first_file}, type={type(first_file)}")
+                        if isinstance(first_file, dict):
+                            file_path = first_file.get("path") or first_file.get("file_path") or first_file.get("name")
+                        elif isinstance(first_file, str):
+                            file_path = first_file
+                        else:
+                            file_path = str(first_file)
+                        logger.info(f"🔍 [Orchestrator] 提取的文件路径: {file_path}")
+                        if file_path:
+                            path_obj = Path(file_path)
+                            if not path_obj.is_absolute():
+                                path_obj = Path(self.upload_dir) / path_obj
+                            file_path = str(path_obj.resolve())
+                            logger.info(f"🔍 [Orchestrator] 解析后的绝对路径: {file_path}")
+                            try:
+                                _t_inspect_start = time.time()
+                                file_metadata_for_intent = self.file_inspector.inspect_file(file_path)
+                                logger.info("[Profiler] 数据预检完成 - 耗时: %.2fs", time.time() - _t_inspect_start)
+                                logger.info(f"✅ [Orchestrator] 文件检查成功，文件类型: {file_metadata_for_intent.get('file_type', 'unknown')}")
+                            except Exception as e:
+                                logger.error(f"❌ [Orchestrator] 文件检查失败，无法用于意图分类: {e}", exc_info=True)
+                        else:
+                            logger.warning(f"⚠️ [Orchestrator] 无法从文件对象中提取路径")
+                    else:
+                        logger.info(f"ℹ️ [Orchestrator] 没有文件，跳过文件检查")
+                    
+                    # Analyze intent: classify domain and determine target_steps
+                    intent_result = await planner._classify_intent(refined_query, file_metadata_for_intent)
+                    domain_name = intent_result.get("domain_name")
+                    if not domain_name or not self.workflow_registry.is_supported(domain_name):
+                        logger.warning(f"⚠️ [Orchestrator] 无法识别域名: {domain_name}")
+                        domain_name = "Metabolomics"
+                    workflow = self.workflow_registry.get_workflow(domain_name)
+                    if not workflow:
+                        raise ValueError(f"无法获取工作流: {domain_name}")
+                    intent_analysis = await planner._analyze_user_intent(refined_query, workflow)
+                    if isinstance(intent_analysis, dict):
+                        target_steps = intent_analysis.get("target_steps") or []
+                    else:
+                        target_steps = intent_analysis if isinstance(intent_analysis, list) else []
+                    if not target_steps and intent_result.get("target_steps"):
+                        intent_steps = [s for s in intent_result["target_steps"] if s in workflow.steps_dag]
+                        if intent_steps:
+                            target_steps = intent_steps
+                            logger.info(f"✅ [Orchestrator] 使用 intent_result.target_steps 作为回退: {target_steps}")
                 
                 # Ensure target_steps is not empty (fallback to full workflow)
                 if not target_steps:
@@ -1170,7 +1188,9 @@ class AgentOrchestrator:
                 
                 logger.info(f"✅ [Orchestrator] 意图分析完成: domain={domain_name}, target_steps={target_steps}")
                 
-                # 🔥 SYSTEM REFACTOR: Step 3.2: Check Files (The Branching Point)
+                # 🔥 文件分支路由（快车道与传统路共用，绝不跳过）
+                # 无文件 -> Branch A 预览（generate_plan file_metadata=None, is_template=True）；有文件 -> Path A 先 inspect_file 再正式规划
+                # SYSTEM REFACTOR: Step 3.2: Check Files (The Branching Point)
                 # Priority: Files check determines execution mode
                 # Note: has_files already checked above for resume action
                 
@@ -1210,16 +1230,14 @@ class AgentOrchestrator:
                         })
                         await asyncio.sleep(0.01)
                         
-                        # 🔥 INTENT-DRIVEN PRE-SELECTION: Get workflow for full plan + recommended_steps
+                        # 🔥 INTENT-DRIVEN: 传意图分析得到的 target_steps 给 Planner，支持「只做PCA」等动态规划
                         workflow = self.workflow_registry.get_workflow(domain_name)
                         intent_target_steps = target_steps or []
                         all_steps = list(workflow.steps_dag.keys()) if workflow else []
-                        # Planner always gets FULL workflow; UI pre-selects based on intent
-                        planner_target_steps = all_steps
-                        recommended_steps = []
-                        if intent_target_steps and set(intent_target_steps) != set(all_steps):
-                            recommended_steps = workflow.resolve_dependencies(intent_target_steps)
-                            logger.info(f"✅ [Orchestrator] 意图预选: intent={intent_target_steps} -> recommended={recommended_steps}")
+                        planner_target_steps = intent_target_steps if intent_target_steps else all_steps
+                        recommended_steps = workflow.resolve_dependencies(planner_target_steps) if planner_target_steps else []
+                        if intent_target_steps:
+                            logger.info(f"✅ [Orchestrator] 意图步骤: {intent_target_steps} -> planner_target_steps={planner_target_steps}, recommended={recommended_steps}")
                         
                         # Path B: PREVIEW MODE - Generate FULL workflow, UI will pre-select recommended_steps
                         _t_plan_start = time.time()
@@ -1228,8 +1246,10 @@ class AgentOrchestrator:
                         file_metadata=None,  # 明确传递 None
                         category_filter=None,
                         domain_name=domain_name,  # 使用已分析的域名
-                        target_steps=planner_target_steps,  # 🔥 FULL workflow (pre-select in UI)
-                        is_template=True  # 🔥 CRITICAL: Explicitly IS a template
+                        target_steps=planner_target_steps,  # 快车道时为步骤分析结果，否则全量
+                        is_template=True,  # 🔥 CRITICAL: Explicitly IS a template
+                        target_domain=target_domain,  # 快车道：供 Planner 做工具物理阉割/domain_prompt
+                        steps_to_skip=steps_to_skip_fast  # 快车道时传入 _analyze_user_intent 的 skip_steps
                         )
                         logger.info("[Profiler] 规划(模板)完成 - 耗时: %.2fs", time.time() - _t_plan_start)
                         logger.info(f"✅ [Orchestrator] 模板生成完成: {len(all_steps)} 个步骤, 预选 {len(recommended_steps) or '全部'}")
@@ -1276,6 +1296,7 @@ class AgentOrchestrator:
                             "Radiomics": "影像组 (Radiomics)",
                             "Spatial": "空间组学",
                             "RNA": "转录组",
+                            "STED_EC": "特色科研流程 (STED-EC)",
                         }
                         modality_display = _modality_map.get(domain_name, domain_name or "分析")
                         yield self._emit_sse(state_snapshot,"message", {
@@ -1311,11 +1332,12 @@ class AgentOrchestrator:
         
                 # ============================================================
                 # PATH A: CLASSIC EXECUTION - Runs when has_files (resume or else)
+                # 快车道与老路均必须经此路径：先体检再正式规划，绝不跳过 file_inspector.inspect_file
                 # ============================================================
                 if run_execution_branch:
                     logger.info("🚀 [Orchestrator] Path A: 文件检测到。强制执行模式（经典执行路径）")
             
-                # A1. File Inspection - Extract file path and inspect
+                # A1. File Inspection - 有文件时必做体检，提取 file_metadata 供正式规划使用
                 first_file = files[0]
                 if isinstance(first_file, dict):
                     file_path = first_file.get("path") or first_file.get("file_path") or first_file.get("name")
@@ -1418,7 +1440,7 @@ class AgentOrchestrator:
                         except (ValueError, OSError) as e:
                             logger.debug("Common path / normalizer skip: %s", e)
                 
-                # Step 2: Inspect (directory when multi-file, else single file)
+                # Step 2: Inspect（有文件时必做，快车道与老路均不可跳过）
                 file_metadata = None
                 try:
                     file_metadata = self.file_inspector.inspect_file(path_for_inspect)
@@ -1600,15 +1622,14 @@ class AgentOrchestrator:
                 if file_metadata:
                     logger.info(f"  - file_metadata.file_path: {file_metadata.get('file_path', 'N/A')}")
             
-                # 🔥 INTENT-DRIVEN PRE-SELECTION: Full workflow + recommended_steps for UI
+                # 🔥 INTENT-DRIVEN: 传意图分析得到的 target_steps 给 Planner，支持「只做PCA」等动态规划
                 workflow = self.workflow_registry.get_workflow(domain_name)
                 intent_target_steps = target_steps or []
                 all_steps = list(workflow.steps_dag.keys()) if workflow else []
-                planner_target_steps = all_steps
-                recommended_steps = []
-                if intent_target_steps and set(intent_target_steps) != set(all_steps):
-                    recommended_steps = workflow.resolve_dependencies(intent_target_steps)
-                    logger.info(f"✅ [Orchestrator] Path A 意图预选: intent={intent_target_steps} -> recommended={recommended_steps}")
+                planner_target_steps = intent_target_steps if intent_target_steps else all_steps
+                recommended_steps = workflow.resolve_dependencies(planner_target_steps) if planner_target_steps else []
+                if intent_target_steps:
+                    logger.info(f"✅ [Orchestrator] Path A 意图步骤: {intent_target_steps} -> planner_target_steps={planner_target_steps}")
             
                 # 🔥 显式注入当前工作台文件状态，防止执行阶段大模型失忆
                 plan_query = refined_query
@@ -1622,8 +1643,10 @@ class AgentOrchestrator:
                     file_metadata=file_metadata,  # 🔥 CRITICAL: file_metadata exists
                     category_filter=None,
                     domain_name=domain_name,
-                    target_steps=planner_target_steps,  # 🔥 FULL workflow (pre-select in UI)
-                    is_template=False  # 🔥 CRITICAL: Explicitly NOT a template
+                    target_steps=planner_target_steps,  # 快车道时为步骤分析结果，否则全量
+                    is_template=False,  # 🔥 CRITICAL: Explicitly NOT a template
+                    target_domain=target_domain,  # 快车道：供 Planner 做工具物理阉割/domain_prompt
+                    steps_to_skip=steps_to_skip_fast  # 快车道时传入 _analyze_user_intent 的 skip_steps
                 )
                 logger.info("[Profiler] 规划(执行)完成 - 耗时: %.2fs", time.time() - _t_plan_start)
                 logger.info(f"✅ [Orchestrator] Path A: 工作流规划完成")
@@ -1802,6 +1825,7 @@ class AgentOrchestrator:
                             modality_map = {
                                 "rna": "rna", "transcriptomics": "rna", "single_cell": "rna",
                                 "metabolomics": "metabolomics", "spatial": "spatial", "radiomics": "radiomics",
+                                "sted_ec_trajectory": "sted_ec",
                                 "genomics": "genomics", "epigenomics": "epigenomics", "proteomics": "proteomics",
                             }
                             workflow_type = modality_map.get(_dm) or (_dm if _dm in modality_map.values() else None)
@@ -2192,5 +2216,10 @@ class AgentOrchestrator:
             report = state_snapshot.get("report") or {}
             report.setdefault("report_data", {}).update(data)
             state_snapshot["report"] = report
+        # 🔥 统一计时器：done 事件携带后端总耗时，前端与执行记录面板一致
+        if event_type == "done":
+            t0 = state_snapshot.get("_start_time")
+            duration = round((time.time() - t0), 1) if t0 else 0
+            data = {**(data or {}), "duration": duration, "total_duration": duration}
         return self._format_sse(event_type, data)
 

@@ -2132,6 +2132,7 @@
                         <button type="button" class="skills-nav-tab" data-main="多模态组学">多模态组学</button>
                         <button type="button" class="skills-nav-tab" data-main="生物医药">生物医药</button>
                         <button type="button" class="skills-nav-tab" data-main="化学">化学</button>
+                        <button type="button" class="skills-nav-tab" data-main="特色科研流程">特色科研流程</button>
                         <button type="button" class="skills-nav-tab" data-main="我的">我的</button>
                     </div>
                 </div>
@@ -2546,14 +2547,18 @@
             
             // 安全的 marked 包装函数
             function safeMarkedParse(text) {
+                if (text === null || text === undefined) return '';
+                var s = String(text);
+                // 剔除大模型生成的黄色警示图标
+                s = s.replace(/⚠️/g, '');
                 // #region agent log
                 // 已禁用调试请求: fetch('http://localhost:7242/ingest/...',...).catch(()=>{});
                 // #endregion
                 if (typeof marked !== 'undefined' && marked.parse) {
-                    return marked.parse(text);
+                    return marked.parse(s);
                 }
                 // 降级：简单的 HTML 转义和换行处理
-                return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+                return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
             }
 
             const chatContent = document.getElementById('chatContent');
@@ -2589,6 +2594,19 @@
             var skillsTotal = 0;
             var skillsPageSize = 12;
 
+            /** 特色科研流程：顶尖实验室沉淀技能（前端注入，与后端列表合并展示；点击后走 getTargetDomainFromSkill 硬路由） */
+            window.__FEATURED_RESEARCH_SKILLS = [
+                {
+                    id: 'sted_ec_trajectory',
+                    name: '单细胞时空轨迹推断 (STED-EC)',
+                    main_category: '特色科研流程',
+                    sub_category: '轨迹推断',
+                    description: '基于最优传输理论 (Optimal Transport) 的单细胞时空轨迹推断工具。通过整合单细胞转录组与时间序列信息，精准重构细胞发育、分化或疾病演进的动态轨迹，揭示细胞命运决定的关键调控机制。',
+                    tags: ['单细胞', '轨迹推断', '最优传输', '时序分析'],
+                    prompt_template: '请执行单细胞时空轨迹推断：基于最优传输理论，对时间序列单细胞数据做轨迹推断，重构发育/分化或疾病演进动态轨迹。'
+                }
+            ];
+
             /* 技能收藏状态 100% 来自后端 GET /api/skills 的 saved 字段与 UserSavedSkill 表，不使用 localStorage。*/
             function fetchSkills(mainCat, page) {
                 skillsCurrentMain = (mainCat != null && mainCat !== undefined) ? (mainCat || '') : skillsCurrentMain;
@@ -2619,6 +2637,16 @@
                         console.log('🔍 [Skills API Response] 请求大类:', skillsCurrentMain, '返回数据:', data);
                         var items = (data && data.items) || [];
                         skillsTotal = (data && data.total) != null ? data.total : 0;
+                        var featured = window.__FEATURED_RESEARCH_SKILLS || [];
+                        if (featured.length) {
+                            if (skillsCurrentMain === '特色科研流程') {
+                                items = featured.concat(items.filter(function(s) { return (s.main_category || '') !== '特色科研流程'; }));
+                                skillsTotal = Math.max(skillsTotal, items.length);
+                            } else if (skillsCurrentMain === '' && skillsCurrentPage === 1) {
+                                items = featured.concat(items);
+                                skillsTotal += featured.length;
+                            }
+                        }
                         if (!grid) return;
                         if (items.length === 0) {
                             grid.innerHTML = '';
@@ -2627,7 +2655,7 @@
                         } else {
                             window._lastSkillsItems = items;
                             if (emptyEl) emptyEl.style.display = 'none';
-                            var skillCardIcons = { '转录组学': '🧬', '空间组学': '🗺️', '代谢组学': '🧪', '医学影像组学': '🩻', '基因组学': '🧬', '表观遗传组学': '📊', '蛋白质组学': '🔗' };
+                            var skillCardIcons = { '转录组学': '🧬', '空间组学': '🗺️', '代谢组学': '🧪', '医学影像组学': '🩻', '基因组学': '🧬', '表观遗传组学': '📊', '蛋白质组学': '🔗', '轨迹推断': '📈' };
                             grid.innerHTML = items.map(function(s) {
                                 try {
                                     var name = (s.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2766,8 +2794,25 @@
                     .catch(function() { showToast('操作失败，请重试'); });
             }
 
+            /** 从技能名称或分类映射出确定性意图的 target_domain，供后端硬路由使用 */
+            function getTargetDomainFromSkill(skill) {
+                if (!skill) return null;
+                var name = (skill.name || '');
+                var nameLower = name.toLowerCase();
+                var main = (skill.main_category || '').toLowerCase();
+                var sub = (skill.sub_category || '').toLowerCase();
+                var combined = nameLower + ' ' + main + ' ' + sub;
+                if (nameLower.indexOf('sted-ec') !== -1 || name.indexOf('轨迹推断') !== -1) return 'sted_ec_trajectory';
+                if (/转录组|单细胞|rna|scrna|scrna-seq|rna-seq/i.test(combined)) return 'rna';
+                if (/代谢组|metabolom/i.test(combined)) return 'metabolomics';
+                if (/影像组|radiomics|nii|dicom|医学影像/i.test(combined)) return 'radiomics';
+                if (/空间组|spatial|visium|空间转录/i.test(combined)) return 'spatial';
+                return null;
+            }
+
             function useSkillFromApi(skill) {
                 showChatView();
+                window._pendingSkillTargetDomain = getTargetDomainFromSkill(skill);
                 var inp = document.getElementById('userInput');
                 if (inp && skill && (skill.prompt_template || skill.name)) {
                     inp.value = skill.prompt_template || ('请执行与「' + skill.name + '」相关的分析流程。');
@@ -2792,6 +2837,16 @@
                 if (skillsPane) skillsPane.style.display = 'flex';
                 if (wsPane) wsPane.style.display = 'none';
                 if (rzR) rzR.style.display = 'none';
+                // 进入技能广场时强制同步 UI 与数据状态，避免切换页面后分类高亮与展示数据不一致
+                var navMain = document.getElementById('skillsNavMain');
+                if (navMain) {
+                    navMain.querySelectorAll('.skills-nav-tab').forEach(function(btn) { btn.classList.remove('active'); });
+                    var allBtn = navMain.querySelector('.skills-nav-tab[data-main=""]');
+                    if (allBtn) allBtn.classList.add('active');
+                }
+                skillsCurrentMain = '';
+                skillsCurrentPage = 1;
+                if (typeof fetchSkills === 'function') fetchSkills('', 1);
             }
             function showChatView() {
                 hideAllMainPanes();
@@ -3647,8 +3702,20 @@
                 if (displayName.length > 24) displayName = displayName.slice(0, 24) + '...';
                 tag.innerHTML = '📄 ' + displayName + ' <span class="remove-tag" title="移除">✕</span>';
                 var removeSpan = tag.querySelector('.remove-tag');
-                if (removeSpan) removeSpan.onclick = function(e) { e.stopPropagation(); tag.remove(); checkInput(); };
+                if (removeSpan) removeSpan.onclick = function(e) {
+                    e.stopPropagation();
+                    tag.remove();
+                    var idx = uploadedFiles.findIndex(function(f) { return (f.path || f.file_path) === filePath; });
+                    if (idx >= 0) { uploadedFiles.splice(idx, 1); if (typeof renderFilePreviewArea === 'function') renderFilePreviewArea(); }
+                    checkInput();
+                };
                 row.appendChild(tag);
+                // 🔥 数据资产选择：追加到 uploadedFiles，不覆盖（多文件场景不吞文件）
+                var already = uploadedFiles.some(function(f) { return (f.path || f.file_path) === filePath; });
+                if (!already) {
+                    uploadedFiles.push({ path: filePath, file_path: filePath, name: fileName || filePath, file_name: fileName || filePath });
+                    if (typeof renderFilePreviewArea === 'function') renderFilePreviewArea();
+                }
                 checkInput();
             }
             // Task2: 真·时光机：仅恢复历史，绝不触发 sendMessage
@@ -3681,7 +3748,24 @@
                 setActiveSessionInSidebar(sessionId);
 
                 fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/messages', { method: 'GET', headers: getAuthHeaders() })
-                    .then(function(r) { return r.ok ? r.json() : Promise.reject(new Error(r.status)); })
+                    .then(function(r) {
+                        if (!r.ok) {
+                            return r.text().then(function(text) {
+                                try {
+                                    var errData = JSON.parse(text);
+                                    if (errData.traceback) {
+                                        console.error("🔥 [后端 500 崩溃堆栈]:\n" + errData.traceback);
+                                    } else {
+                                        console.error("❌ [后端报错]:", errData);
+                                    }
+                                } catch (e) {
+                                    console.error("❌ [后端报错 - 非 JSON]:", text);
+                                }
+                                throw new Error("HTTP " + r.status);
+                            });
+                        }
+                        return r.json();
+                    })
                     .then(function(messages) {
                         if (!Array.isArray(messages)) return;
                         window.currentSessionMessageIds = messages.map(function(m) { return m.id; });
@@ -3695,13 +3779,18 @@
                                 var text = (content && content.text) || (typeof content === 'string' ? content : '');
                                 appendMessage('user', text || '', null, null, false, null, msg.id);
                             } else if (msg.role === 'agent' && content) {
-                                if (content.state_snapshot) {
-                                    createRestoreAIMessageRowWithSnapshot(content.state_snapshot, msg.id);
-                                } else if (content.events) {
-                                    createRestoreAIMessageRowWithSnapshot({ text: '【系统提示：该条为旧版历史记录，仅支持文本显示】', workflow: null, steps: [], report: null }, msg.id);
-                                } else {
-                                    var fallbackText = (content.text != null ? content.text : (content.message || ''));
-                                    createRestoreAIMessageRowWithSnapshot({ text: typeof fallbackText === 'string' ? fallbackText : '', workflow: null, steps: [], report: null }, msg.id);
+                                try {
+                                    if (content.state_snapshot) {
+                                        createRestoreAIMessageRowWithSnapshot(content.state_snapshot, msg.id);
+                                    } else if (content.events) {
+                                        createRestoreAIMessageRowWithSnapshot({ text: '【系统提示：该条为旧版历史记录，仅支持文本显示】', workflow: null, steps: [], report: null }, msg.id);
+                                    } else {
+                                        var fallbackText = (content.text != null ? content.text : (content.message || ''));
+                                        createRestoreAIMessageRowWithSnapshot({ text: typeof fallbackText === 'string' ? fallbackText : '', workflow: null, steps: [], report: null }, msg.id);
+                                    }
+                                } catch (e) {
+                                    console.error('单条消息渲染崩溃:', e, msg);
+                                    appendMessage('ai', '⚠️ [系统提示] 该条历史记录的卡片数据已损坏，无法完整渲染。');
                                 }
                             }
                         }
@@ -3800,8 +3889,18 @@
                 function normImgPath(p) {
                     if (!p || typeof p !== 'string') return '';
                     if (/^https?:\/\//i.test(p)) return p;
-                    var s = p.replace(/^\/+/, '').replace(/^results\//, '');
-                    return s ? '/results/' + s : p;
+                    var src = String(p).trim();
+                    // 将后端物理绝对路径 /app/uploads 映射为前端静态路由 /results，避免请求 /results/app/uploads/... 导致 404
+                    if (src.indexOf('/app/uploads') !== -1) {
+                        src = src.replace('/app/uploads', '/results');
+                    } else if (src.indexOf('app/uploads') === 0) {
+                        src = '/results/' + src.replace(/^app\/uploads\/?/, '');
+                    } else if (src.indexOf('/results') !== 0 && src.indexOf('http') !== 0) {
+                        src = (src.indexOf('/') === 0 ? src : '/results/' + src.replace(/^results\/?/, ''));
+                    }
+                    // 避免双重拼接 /results/results/
+                    src = src.replace(/\/results\/results\//g, '/results/');
+                    return src || p;
                 }
                 function textToHtml(text, useMarkdown) {
                     if (text == null) return '';
@@ -3829,11 +3928,12 @@
                     sumEl.innerHTML = '<h6 class="text-muted mb-2">专家总结</h6><div class="report-content-box" style="font-size:14px;line-height:1.8;color:#333;background:#f0f7ff;padding:16px;border-radius:8px;border-left:4px solid #4d6bfe">' + textToHtml(summary) + '</div>';
                     body.appendChild(sumEl);
                 }
-                var stepsDetails = (rd && rd.steps_details) ? rd.steps_details : [];
+                var stepsDetails = ((rd && rd.steps_details) ? rd.steps_details : []).filter(Boolean);
                 if (stepsDetails.length > 0) {
                     var execWrap = document.createElement('div');
                     execWrap.className = 'report-execution-content mt-4';
-                    execWrap.innerHTML = '<h6 class="text-muted mb-3">执行结果详情</h6><div class="checklist-container snapshot-steps"></div>';
+                    var accordionId = 'snapshot-accordion-' + Date.now();
+                    execWrap.innerHTML = '<h6 class="text-muted mb-3">执行结果详情</h6><div class="accordion checklist-container snapshot-steps" id="' + accordionId + '"></div>';
                     var list = execWrap.querySelector('.snapshot-steps');
                     stepsDetails.forEach(function(step, idx) {
                         var name = step.step_name || step.name || step.step_id || step.tool_id || ('步骤 ' + (idx + 1));
@@ -3841,13 +3941,12 @@
                         var images = (step.step_result && step.step_result.data && step.step_result.data.images) || (step.data && step.data.images) || [];
                         if (plot && !images.length) images = [plot];
                         var tables = (step.step_result && step.step_result.data && step.step_result.data.tables) || (step.data && step.data.tables) || [];
-                        var section = document.createElement('div');
-                        section.className = 'snapshot-step-section mb-4';
-                        var html = '<div class="d-flex align-items-center mb-2"><span class="checklist-icon icon-success">✓</span><span class="fw-medium">' + esc(name) + '</span></div>';
+                        var stepId = 'collapse-step-' + accordionId + '-' + idx;
+                        var contentHtml = '';
                         if (images && images.length > 0) {
-                            images.forEach(function(src) {
+                            images.filter(Boolean).forEach(function(src) {
                                 var url = normImgPath(src);
-                                if (url) html += '<div class="mt-2 mb-2"><img src="' + esc(url) + '" class="report-image img-fluid rounded border" style="max-width:100%;cursor:zoom-in;" onerror="this.style.display=\'none\'"></div>';
+                                if (url) contentHtml += '<div class="mt-2 mb-2"><img src="' + esc(url) + '" class="report-image img-fluid rounded border" style="max-width:100%;cursor:zoom-in;" onerror="this.style.display=\'none\'"></div>';
                             });
                         }
                         if (tables && Array.isArray(tables) && tables.length > 0) {
@@ -3855,15 +3954,21 @@
                             if (rows && typeof rows === 'object' && !Array.isArray(rows)) rows = [rows];
                             if (Array.isArray(rows) && rows.length > 0) {
                                 var headers = typeof rows[0] === 'object' && rows[0] !== null ? Object.keys(rows[0]) : [];
-                                html += '<div class="table-responsive mt-2"><table class="table table-sm table-bordered"><thead class="table-light"><tr>' + headers.map(function(h) { return '<th class="small">' + esc(h) + '</th>'; }).join('') + '</tr></thead><tbody>';
-                                rows.slice(0, 10).forEach(function(row) {
-                                    html += '<tr>' + headers.map(function(h) { return '<td class="small">' + esc(row[h] != null ? row[h] : '') + '</td>'; }).join('') + '</tr>';
+                                contentHtml += '<div class="table-responsive mt-2"><table class="table table-sm table-bordered"><thead class="table-light"><tr>' + headers.map(function(h) { return '<th class="small">' + esc(h) + '</th>'; }).join('') + '</tr></thead><tbody>';
+                                (Array.isArray(rows) ? rows : []).filter(Boolean).slice(0, 10).forEach(function(row) {
+                                    contentHtml += '<tr>' + headers.map(function(h) { return '<td class="small">' + esc(row[h] != null ? row[h] : '') + '</td>'; }).join('') + '</tr>';
                                 });
-                                html += '</tbody></table></div>';
+                                contentHtml += '</tbody></table></div>';
                             }
                         }
-                        section.innerHTML = html;
-                        list.appendChild(section);
+                        var itemHtml = '<div class="accordion-item snapshot-step-section">' +
+                            '<h2 class="accordion-header">' +
+                            '<button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#' + stepId + '" aria-expanded="true">' +
+                            '<span class="checklist-icon icon-success me-2">✓</span>' + esc(name) +
+                            '</button></h2>' +
+                            '<div id="' + stepId + '" class="accordion-collapse collapse show">' +
+                            '<div class="accordion-body">' + (contentHtml || '') + '</div></div></div>';
+                        list.insertAdjacentHTML('beforeend', itemHtml);
                     });
                     body.appendChild(execWrap);
                 }
@@ -3887,11 +3992,12 @@
                 }
                 targetContainer.appendChild(root);
             }
-            // 🔥 内部：仅渲染工作流卡片到 targetZone，返回 formId（供 renderStaticHistorySnapshot 调用）
-            function _renderStaticWorkflowCard(workflowData, targetZone) {
+            // 🔥 内部：仅渲染工作流卡片到 targetZone，返回 formId（供 renderStaticHistorySnapshot 调用）；messageId 用于 data-message-id 与自动保存
+            function _renderStaticWorkflowCard(workflowData, targetZone, messageId) {
                 if (!targetZone || !workflowData) return null;
                 const formId = 'hist-wf-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
                 const workflowCardId = 'card-' + formId;
+                const messageIdAttr = (messageId != null && messageId !== '') ? ' data-message-id="' + String(messageId) + '"' : '';
                 function esc(s) {
                     if (s == null) return '';
                     const t = String(s);
@@ -3904,32 +4010,44 @@
                 const workflowName = (workflowData.workflow_config && workflowData.workflow_config.workflow_data && workflowData.workflow_config.workflow_data.workflow_name)
                     || (workflowData.workflow_data && workflowData.workflow_data.workflow_name)
                     || workflowData.workflow_name || '工作流计划';
-                let cardHtml = '<div class="alert alert-success mt-3 params-form" id="' + workflowCardId + '" data-form-id="' + formId + '" style="border-left: 4px solid #28a745;">';
+                let cardHtml = '<form id="' + formId + '" class="alert alert-success mt-3 params-form" data-form-id="' + formId + '"' + messageIdAttr + ' style="border-left: 4px solid #28a745;">';
                 cardHtml += '<h5><i class="bi bi-diagram-3"></i> 📋 ' + esc(workflowName) + ' <span class="badge bg-secondary ms-2">[历史]</span></h5>';
                 if (workflowSteps.length > 0) {
                     cardHtml += '<p class="text-muted">请确认或修改每一步的参数：</p><div class="accordion" id="acc-' + formId + '">';
+                    var renderIdx = 0;
                     for (var idx = 0; idx < workflowSteps.length; idx++) {
                         var step = workflowSteps[idx];
-                        var stepId = 'step-' + idx + '-' + formId;
-                        var stepName = step.name || step.step_name || step.id || step.tool_id || ('步骤 ' + (idx + 1));
+                        // 1. 严格隐藏未勾选步骤：快照明确未启用则直接从 DOM 中抹除
+                        if (step.enabled === false || step.selected === false) continue;
+                        // 2. 能走到这里的都是当初勾选过的，默认 checked；移除 disabled，历史卡片可再次微调与复用
+                        var isChecked = true;
+                        var checkedAttr = ' checked';
+                        var stepId = 'step-' + renderIdx + '-' + formId;
+                        var stepName = step.name || step.step_name || step.id || step.tool_id || ('步骤 ' + (renderIdx + 1));
                         var toolId = step.tool_id || step.tool || '';
                         var stepParams = step.params || {};
                         cardHtml += '<div class="accordion-item"><h2 class="accordion-header d-flex align-items-center">';
-                        cardHtml += '<div class="form-check ms-3 me-2"><input class="form-check-input step-checkbox" type="checkbox" checked data-index="' + idx + '" data-step-id="' + esc(step.step_id || toolId) + '"></div>';
-                        cardHtml += '<button class="accordion-button ' + (idx > 0 ? 'collapsed' : '') + '" type="button" data-bs-toggle="collapse" data-bs-target="#' + stepId + '">' + esc(stepName) + '</button></h2>';
-                        cardHtml += '<div id="' + stepId + '" class="accordion-collapse collapse ' + (idx === 0 ? 'show' : '') + '" data-bs-parent="#acc-' + formId + '"><div class="accordion-body">';
-                        cardHtml += '<input type="hidden" name="tool_id_' + idx + '" value="' + esc(toolId) + '">';
-                        cardHtml += '<input type="hidden" name="step_name_' + idx + '" value="' + esc(stepName) + '">';
-                        cardHtml += '<input type="hidden" name="step_id_' + idx + '" value="' + esc(step.step_id || toolId) + '">';
+                        cardHtml += '<div class="form-check ms-3 me-2"><input class="form-check-input step-checkbox" type="checkbox"' + checkedAttr + ' data-index="' + renderIdx + '" data-step-id="' + esc(step.step_id || toolId) + '"></div>';
+                        cardHtml += '<button class="accordion-button ' + (renderIdx > 0 ? 'collapsed' : '') + '" type="button" data-bs-toggle="collapse" data-bs-target="#' + stepId + '">' + esc(stepName) + '</button></h2>';
+                        cardHtml += '<div id="' + stepId + '" class="accordion-collapse collapse ' + (renderIdx === 0 ? 'show' : '') + '" data-bs-parent="#acc-' + formId + '"><div class="accordion-body">';
+                        cardHtml += '<input type="hidden" name="tool_id_' + renderIdx + '" value="' + esc(toolId) + '">';
+                        cardHtml += '<input type="hidden" name="step_name_' + renderIdx + '" value="' + esc(stepName) + '">';
+                        cardHtml += '<input type="hidden" name="step_id_' + renderIdx + '" value="' + esc(step.step_id || toolId) + '">';
                         if (stepParams && typeof stepParams === 'object' && !Array.isArray(stepParams)) {
                             var fpList = (workflowData.file_paths && Array.isArray(workflowData.file_paths)) ? workflowData.file_paths : [];
                             Object.keys(stepParams).forEach(function(paramName) {
                                 var paramValue = stepParams[paramName];
-                                var inputName = 'param_' + idx + '_' + paramName;
+                                var inputName = 'param_' + renderIdx + '_' + paramName;
                                 var displayName = paramName.replace(/_/g, ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); });
                                 var isPathParam = /path|file|csv|dir/i.test(paramName);
                                 if (isPathParam) {
-                                    var displayValue = (fpList.length > 0) ? fpList.join(', ') : (paramValue && paramValue !== '<待上传数据>' && paramValue !== '<PENDING_UPLOAD>' ? String(paramValue) : '');
+                                    // 默认尊重 Planner 结果，绝不无脑用 fpList.join(', ') 覆盖 image_path/mask_path
+                                    var displayValue = (paramValue && paramValue !== '<待上传数据>' && paramValue !== '<PENDING_UPLOAD>') ? String(paramValue) : '';
+                                    if (!displayValue && fpList && fpList.length === 1) {
+                                        displayValue = fpList[0];
+                                    } else if (!displayValue && fpList && fpList.length > 1) {
+                                        displayValue = '';
+                                    }
                                     if (displayValue) {
                                         cardHtml += '<div class="mb-2"><label class="form-label small"><strong>' + esc(displayName) + '</strong> (只读)</label>';
                                         cardHtml += '<input type="text" class="form-control form-control-sm" value="' + esc(displayValue) + '" readonly style="background-color: #e9ecef;"></div>';
@@ -3948,27 +4066,71 @@
                             });
                         }
                         cardHtml += '</div></div></div>';
+                        renderIdx++;
                     }
                     cardHtml += '</div>';
                     cardHtml += '<div class="mt-3 d-flex justify-content-between align-items-center flex-wrap gap-2">';
-                    cardHtml += '<button class="btn btn-success btn-sm" id="execute-workflow-' + formId + '" onclick="executeWorkflowFromForm(this)"><i class="bi bi-play-circle"></i> 🚀 执行工作流</button>';
+                    cardHtml += '<button type="button" class="btn btn-success btn-sm" id="execute-workflow-' + formId + '" onclick="executeWorkflowFromForm(this)"><i class="bi bi-play-circle"></i> 🚀 执行工作流</button>';
                     cardHtml += '</div>';
                 } else {
                     cardHtml += '<div class="mt-2"><p class="text-warning"><i class="bi bi-exclamation-triangle"></i> 步骤列表为空</p></div>';
                 }
-                cardHtml += '</div>';
+                cardHtml += '</form>';
                 targetZone.innerHTML = cardHtml;
+                // 🔥 历史卡片复用收藏夹能力：挂载「添加本地文件」「添加数据资产」及 file chips 区，与收藏夹一致
+                var cardEl = targetZone.querySelector('[data-form-id="' + formId + '"]');
+                if (cardEl && typeof window.mountUploadExecuteButton === 'function') window.mountUploadExecuteButton(cardEl);
+                // 🔥 文件事前探照：静默检查历史路径是否存在，缺失则标红并锁定执行
+                var pathsToCheck = [];
+                if (workflowData.file_paths && Array.isArray(workflowData.file_paths)) pathsToCheck = workflowData.file_paths.slice();
+                workflowSteps.forEach(function(step) {
+                    var pr = step.params || {};
+                    Object.keys(pr).forEach(function(k) {
+                        if (/path|file|csv|dir/i.test(k)) {
+                            var v = pr[k];
+                            if (v && typeof v === 'string' && v !== '<待上传数据>' && v !== '<PENDING_UPLOAD>') pathsToCheck.push(v);
+                        }
+                    });
+                });
+                pathsToCheck = pathsToCheck.filter(Boolean);
+                pathsToCheck = pathsToCheck.filter(function(p, i, a) { return a.indexOf(p) === i; });
+                if (pathsToCheck.length > 0 && typeof getAuthHeaders === 'function') {
+                    fetch('/api/utils/check_files', {
+                        method: 'POST',
+                        headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ paths: pathsToCheck })
+                    }).then(function(r) { return r.json(); }).then(function(res) {
+                        var missing = res.missing_files || [];
+                        if (missing.length === 0) return;
+                        var missingSet = {};
+                        missing.forEach(function(m) { missingSet[m] = true; });
+                        cardEl.querySelectorAll('input.form-control.form-control-sm[readonly]').forEach(function(inp) {
+                            if (missingSet[inp.value.trim()]) { inp.classList.add('border-danger'); inp.classList.add('text-danger'); }
+                        });
+                        var btnRow = cardEl.querySelector('.mt-3.d-flex');
+                        if (btnRow) {
+                            var warn = document.createElement('div');
+                            warn.id = 'file-check-warning-' + formId;
+                            warn.className = 'text-danger small mt-1';
+                            warn.style.width = '100%';
+                            warn.innerHTML = '<i class="bi bi-exclamation-triangle-fill"></i>  历史文件已失效或被清理，请使用下方「添加本地文件/数据资产」按钮重新提供数据。';
+                            btnRow.parentNode.insertBefore(warn, btnRow);
+                        }
+                        var execBtn = cardEl.querySelector('#execute-workflow-' + formId);
+                        if (execBtn) execBtn.disabled = true;
+                    }).catch(function(e) { console.warn('[Pre-flight check]', e); });
+                }
                 return formId;
             }
             // 🔥 时光机全量注水：工作流卡片 + 执行记录(中栏简略 + 右栏详情) + 分析报告（diagnosis/summary）
-            function renderStaticHistorySnapshot(snap, targetZone, logZone) {
+            function renderStaticHistorySnapshot(snap, targetZone, logZone, messageId) {
                 var formId = null;
                 if (!snap || (!snap.workflow && (!snap.steps || snap.steps.length === 0) && !snap.report)) return formId;
                 if (snap.workflow && targetZone) {
-                    try { formId = _renderStaticWorkflowCard(snap.workflow, targetZone); } catch (e) { console.warn('[Snapshot] _renderStaticWorkflowCard:', e); }
+                    try { formId = _renderStaticWorkflowCard(snap.workflow, targetZone, messageId); } catch (e) { console.warn('[Snapshot] _renderStaticWorkflowCard:', e); }
                 }
                 if (snap.steps && Array.isArray(snap.steps) && snap.steps.length > 0 && logZone) {
-                    var normalized = snap.steps.map(function(s) {
+                    var normalized = snap.steps.filter(Boolean).map(function(s) {
                         var c = {}; for (var k in s) c[k] = s[k];
                         var st = (s.status || '').toLowerCase();
                         c.status = (st === 'running' || st === 'pending') ? 'pending' : (s.status || 'success');
@@ -4044,7 +4206,7 @@
                         renderSuggestionChipsInCurrentMessage(pair.suggestions, messageContent);
                 }
                 if (snap.workflow || (snap.steps && snap.steps.length > 0) || snap.report) {
-                    var histFormId = typeof renderStaticHistorySnapshot === 'function' ? renderStaticHistorySnapshot(snap, cardZone, logZone) : null;
+                    var histFormId = typeof renderStaticHistorySnapshot === 'function' ? renderStaticHistorySnapshot(snap, cardZone, logZone, messageId) : null;
                     if (histFormId && snap.workflow) {
                         window.workflowCache = window.workflowCache || {};
                         window.workflowCache[histFormId] = { workflowData: snap.workflow, originalQuery: '' };
@@ -4171,11 +4333,7 @@
 
                 // 视图路由：技能广场 / 聊天
                 var btnSkills = document.getElementById('btn-skills-square');
-                if (btnSkills) btnSkills.onclick = function() {
-                    showSkillsView();
-                    skillsCurrentMain = '';
-                    if (typeof fetchSkills === 'function') fetchSkills('', 1);
-                };
+                if (btnSkills) btnSkills.onclick = function() { showSkillsView(); };
                 var btnFavorites = document.getElementById('btn-sidebar-favorites');
                 var favBlock = btnFavorites && btnFavorites.closest('.sidebar-favorites-block');
                 if (btnFavorites && favBlock) btnFavorites.onclick = function() { favBlock.classList.toggle('collapsed'); };
@@ -4576,6 +4734,7 @@
             window.addEventListener('dragenter', (e) => { if(!isProcessing) { e.preventDefault(); dropOverlay.style.display = 'flex'; } });
             window.addEventListener('dragleave', (e) => { e.preventDefault(); if (e.clientX === 0 && e.clientY === 0) dropOverlay.style.display = 'none'; });
             window.addEventListener('dragover', (e) => e.preventDefault());
+            // 🔥 多文件修复：必须传入完整 FileList，禁止只传 files[0]（拖拽多文件时全部入队）
             window.addEventListener('drop', (e) => { e.preventDefault(); dropOverlay.style.display = 'none'; if (!isProcessing && e.dataTransfer.files.length > 0) handleFileSelect(e.dataTransfer.files); });
             window.addEventListener('paste', (e) => { if (!isProcessing && e.clipboardData.files.length > 0) { e.preventDefault(); handleFileSelect(e.clipboardData.files); } });
 
@@ -4774,6 +4933,7 @@
                     renderFilePreviewArea();
                     if (typeof fetchAssets === 'function') fetchAssets();
                     console.log('✅ 文件上传成功，返回文件路径:', uploadedFilePaths);
+                    // 🔥 多文件修复：调用方必须用 push/concat 追加到 uploadedFiles，禁止 uploadedFiles = 覆盖
                     return uploadedFilePaths;
                     
                 } catch (e) {
@@ -4830,7 +4990,7 @@
                     try {
                         newlyUploadedFiles = await uploadPendingFiles();
                             console.log('✅ [sendMessage] 文件上传完成，新上传文件数:', newlyUploadedFiles.length);
-                        // 将新上传的文件添加到 uploadedFiles 数组
+                        // 🔥 多文件修复：必须追加，禁止覆盖（uploadedFiles = ... 会吞掉已有文件）
                         uploadedFiles.push(...newlyUploadedFiles);
                             console.log('📋 [sendMessage] 当前 uploadedFiles 总数:', uploadedFiles.length);
                         // 🔥 输入框上方展示已上传文件卡片（打样一致）
@@ -5011,6 +5171,8 @@
                 console.log('🚀 [sendMessage] filesToSend:', filesToSend);
                 console.log('🚀 [sendMessage] filesToSend 数量:', filesToSend.length);
                 
+                var currentSkillDomain = (typeof window._pendingSkillTargetDomain !== 'undefined' && window._pendingSkillTargetDomain != null) ? window._pendingSkillTargetDomain : null;
+                if (currentSkillDomain) window._pendingSkillTargetDomain = null;
                 const payload = { 
                     message: finalMessage, 
                     history: chatHistory, 
@@ -5021,7 +5183,8 @@
                     use_history_files: useHistoryFiles,
                     model_name: (typeof getSelectedModel === 'function' ? getSelectedModel() : 'deepseek-ai/DeepSeek-R1'),
                     stream: true,  // 🔥 启用 SSE 流式传输
-                    session_id: currentSessionId || undefined  // Phase 5: 持久化会话
+                    session_id: currentSessionId || undefined,  // Phase 5: 持久化会话
+                    target_domain: currentSkillDomain  // 确定性意图硬路由：仅技能广场点击时非 null，闲聊为 null
                 };
                 
                 // 🔥 CRITICAL: 详细日志，确保文件被正确传递
@@ -5387,8 +5550,19 @@
                                     break;
                                     
                                 case 'step_result':
-                                    // 🔥 TASK 3: Render execution steps FIRST (Accordion)
+                                    // 🔥 步骤级异常透传：失败步骤的 traceback 在控制台高亮打印
                                     if (data.report_data && data.report_data.steps_details) {
+                                        data.report_data.steps_details.forEach(function(step) {
+                                            var status = (step.status || '').toLowerCase();
+                                            if (status === 'error' || status === 'failed' || step.error) {
+                                                var tb = step.traceback || (step.step_result && step.step_result.traceback);
+                                                if (tb) {
+                                                    console.error("🔥 [后端步骤崩溃堆栈 - " + (step.step_name || step.name || step.step_id || '') + "]:\n" + tb);
+                                                } else {
+                                                    console.error("❌ [步骤执行失败]:", step.error || step.message);
+                                                }
+                                            }
+                                        });
                                         renderExecutionSteps(data.report_data.steps_details);
                                     }
                                     break;
@@ -5416,6 +5590,21 @@
                                     
                                 case 'result':
                                     // 数据驱动：steps_details → #report-execution；diagnosis → #report-summary；diagnosis_report → #report-diagnosis
+                                    // 🔥 步骤级异常透传：失败步骤的 traceback 在控制台高亮打印
+                                    var resultSteps = (data.report_data && data.report_data.steps_details) ? data.report_data.steps_details : (data.steps_details || []);
+                                    if (resultSteps.length > 0) {
+                                        resultSteps.forEach(function(step) {
+                                            var status = (step.status || '').toLowerCase();
+                                            if (status === 'error' || status === 'failed' || step.error) {
+                                                var tb = step.traceback || (step.step_result && step.step_result.traceback);
+                                                if (tb) {
+                                                    console.error("🔥 [后端步骤崩溃堆栈 - " + (step.step_name || step.name || step.step_id || '') + "]:\n" + tb);
+                                                } else {
+                                                    console.error("❌ [步骤执行失败]:", step.error || step.message);
+                                                }
+                                            }
+                                        });
+                                    }
                                     if (data.report_data) {
                                         if (data.report_data.steps_details && data.report_data.steps_details.length > 0) {
                                             renderExecutionSteps(data.report_data.steps_details);
@@ -5443,12 +5632,14 @@
                                     break;
 
                                 case 'message_saved':
-                                    // 新生成的 AI 消息已入库，将 message_id 绑定到当前正在渲染的 AI 气泡（最后一个无 id 的 .message-row.ai）
+                                    // 新生成的 AI 消息已入库，将 message_id 绑定到当前正在渲染的 AI 气泡（最后一个无 id 的 .message-row.ai）及卡片
                                     if (data && data.message_id != null) {
                                         var aiRows = document.querySelectorAll('#chatContent .message-row.ai');
                                         for (var r = aiRows.length - 1; r >= 0; r--) {
                                             if (!aiRows[r].dataset.messageId) {
                                                 aiRows[r].dataset.messageId = String(data.message_id);
+                                                var cardInRow = aiRows[r].querySelector('[data-form-id]');
+                                                if (cardInRow) cardInRow.setAttribute('data-message-id', String(data.message_id));
                                                 break;
                                             }
                                         }
@@ -6060,15 +6251,8 @@
                                 } else if (stepStatus === 'running') stepSublabel = '执行中...';
                                 else stepSublabel = '排队中';
 
-                                // 🔥 TASK 1: Default expand PCA and Volcano Plot steps (independent expansion)
-                                const hasResults = stepStatus === 'success' || stepStatus === 'warning';
-                                const stepNameLower = stepName.toLowerCase();
-                                // Default expand: PCA, Volcano Plot, or first step with results
-                                const shouldExpand = hasResults && (
-                                    stepNameLower.includes('pca') || 
-                                    stepNameLower.includes('volcano') ||
-                                    (index === 0 && hasResults)
-                                );
+                                // 🔥 所有组学报告手风琴默认展开：不依赖 omics 类型，全部 show、按钮无 collapsed、无 data-bs-parent
+                                const shouldExpand = true;
                                 
                                 // 🔥 PHASE 1: Enhanced result data extraction
                                 const stepResult = step.step_result || {};
@@ -6229,9 +6413,9 @@
                                                 <div class="accordion" id="${stepId}-acc">
                                                     <div class="accordion-item" style="border:none;">
                                                         <h2 class="accordion-header">
-                                                            <button class="accordion-button collapsed py-2" type="button" data-bs-toggle="collapse" data-bs-target="#${stepId}" aria-expanded="${shouldExpand}" style="font-size:13px;">查看详情</button>
+                                                            <button class="accordion-button py-2" type="button" data-bs-toggle="collapse" data-bs-target="#${stepId}" aria-expanded="true" style="font-size:13px;">查看详情</button>
                                                         </h2>
-                                                        <div id="${stepId}" class="accordion-collapse collapse ${shouldExpand ? 'show' : ''}">
+                                                        <div id="${stepId}" class="accordion-collapse collapse show">
                                                             <div class="accordion-body">
                                                                 ${step.summary ? `<div class="small text-muted mb-2">${escapeHtml(step.summary)}</div>` : ''}
                                                                 ${stepError && (stepStatus === 'error' || stepStatus === 'skipped') ? `
@@ -6523,7 +6707,10 @@
                                             const isPathParam = /path|file|csv|dir/i.test(paramName);
                                             if (isPathParam) {
                                                 const uniquePaths = [...new Set((filePaths || []).filter(Boolean))];
-                                                const displayValue = uniquePaths.length > 0 ? uniquePaths.join(', ') : (paramValue && paramValue !== '<待上传数据>' && paramValue !== '<PENDING_UPLOAD>' ? String(paramValue) : '');
+                                                // 默认尊重 Planner 结果，绝不无脑用 join 覆盖 image_path/mask_path/features_csv_path
+                                                let displayValue = (paramValue && paramValue !== '<待上传数据>' && paramValue !== '<PENDING_UPLOAD>') ? String(paramValue) : '';
+                                                if (!displayValue && uniquePaths.length === 1) displayValue = uniquePaths[0];
+                                                else if (!displayValue && uniquePaths.length > 1) displayValue = '';
                                                 if (displayValue) {
                                                     formHtml += `<div class="mb-2">
                                                         <label class="form-label small"><strong>${displayName}</strong> (只读)</label>
@@ -6638,6 +6825,70 @@
                             return formId;  // Return the newly generated formId
                         };
                         
+                        // 🔥 从表单收集工作流状态（步骤勾选与参数），供执行与自动保存复用
+                        window.getWorkflowDataFromForm = function(formId) {
+                            var formElement = document.querySelector('[data-form-id="' + formId + '"]');
+                            if (!formElement) return null;
+                            var workflowName = formElement.querySelector('h5') ? (formElement.querySelector('h5').textContent || '').replace(/^\s*📋\s*/, '').replace(/\s*\[历史\]\s*$|\s*\[模版预览 Mode\]\s*$/g, '').trim() : '工作流';
+                            var checkboxes = formElement.querySelectorAll('.step-checkbox');
+                            var updatedSteps = [];
+                            checkboxes.forEach(function(checkbox, index) {
+                                var stepId = checkbox.dataset.stepId || '';
+                                var toolId = (formElement.querySelector('input[name="tool_id_' + index + '"]') || {}).value || '';
+                                var stepName = (formElement.querySelector('input[name="step_name_' + index + '"]') || {}).value || '';
+                                var params = {};
+                                var paramInputs = formElement.querySelectorAll('input[name^="param_' + index + '_"], select[name^="param_' + index + '_"]');
+                                paramInputs.forEach(function(input) {
+                                    var paramName = input.name.replace('param_' + index + '_', '');
+                                    var paramValue = input.type === 'checkbox' ? input.checked : (input.type === 'number' ? (parseFloat(input.value) || 0) : input.value);
+                                    params[paramName] = paramValue;
+                                });
+                                var enabled = !!checkbox.checked;
+                                updatedSteps.push({ step_id: stepId, tool_id: toolId, name: stepName, params: params, enabled: enabled, selected: enabled });
+                            });
+                            return { workflow_data: { workflow_name: workflowName, steps: updatedSteps } };
+                        };
+
+                        // 🔥 防抖定时器：工作流卡片自动保存
+                        var _workflowAutoSaveTimer = null;
+                        var _workflowAutoSaveArgs = null;
+                        window.scheduleWorkflowAutoSave = function(formId, messageId) {
+                            if (!messageId) return;
+                            if (_workflowAutoSaveTimer) clearTimeout(_workflowAutoSaveTimer);
+                            _workflowAutoSaveArgs = [formId, messageId];
+                            _workflowAutoSaveTimer = setTimeout(function() {
+                                _workflowAutoSaveTimer = null;
+                                if (_workflowAutoSaveArgs && typeof window.autoSaveWorkflowState === 'function')
+                                    window.autoSaveWorkflowState(_workflowAutoSaveArgs[0], _workflowAutoSaveArgs[1]);
+                            }, 1000);
+                        };
+                        window.autoSaveWorkflowState = function(formId, messageId) {
+                            if (!messageId) return;
+                            var data = typeof window.getWorkflowDataFromForm === 'function' ? window.getWorkflowDataFromForm(formId) : null;
+                            if (!data || !data.workflow_data) return;
+                            fetch('/api/messages/' + encodeURIComponent(messageId) + '/workflow', {
+                                method: 'PATCH',
+                                headers: Object.assign({}, (typeof getAuthHeaders === 'function' ? getAuthHeaders() : {}), { 'Content-Type': 'application/json' }),
+                                body: JSON.stringify(data)
+                            }).then(function(r) {
+                                if (!r.ok) return r.text().then(function(t) { throw new Error(t || 'PATCH failed'); });
+                            }).catch(function(e) { console.warn('[Workflow Auto-Save]', e.message || e); });
+                        };
+
+                        // 🔥 事件委托：卡片内勾选或参数变更时防抖静默同步
+                        function _workflowAutoSaveOnChange(e) {
+                            var card = e.target && e.target.closest && e.target.closest('[data-form-id]');
+                            if (!card) return;
+                            var isRelevant = (e.target.classList && e.target.classList.contains('step-checkbox')) || (e.target.closest && e.target.closest('.form-control'));
+                            if (!isRelevant) return;
+                            var messageId = card.getAttribute('data-message-id') || (card.closest('.message-row') && card.closest('.message-row').dataset && card.closest('.message-row').dataset.messageId);
+                            if (!messageId) return;
+                            var formId = card.getAttribute('data-form-id');
+                            if (formId && typeof window.scheduleWorkflowAutoSave === 'function') window.scheduleWorkflowAutoSave(formId, messageId);
+                        }
+                        document.addEventListener('change', _workflowAutoSaveOnChange);
+                        document.addEventListener('input', _workflowAutoSaveOnChange);
+
                         // 🔥 实现挂到 _executeWorkflowFromFormImpl，供全局 window.executeWorkflowFromForm 委托调用
                         window._executeWorkflowFromFormImpl = function(buttonElement) {
                             // 🔥 TASK 1: Find form container using DOM traversal (works 100% of the time)
@@ -6657,16 +6908,46 @@
                                         formElement.id;
                             console.log("🚀 [executeWorkflowFromForm] 从表单执行工作流，formId:", formId);
                             
-                            // 🔥 Task 4: Collect form data and construct updatedSteps
+                            // 🔥 Task 4: Collect form data and construct updatedSteps（全量步骤 + enabled/selected 供快照持久化）
                             const updatedSteps = [];
                             const checkboxes = formElement.querySelectorAll('.step-checkbox');
-                            const filePaths = [];
+                            let filePaths = [];
+                            // 🔥 预填 filePaths，供占位符替换使用（避免 <user_input> 等直接发给后端）
+                            var cardPathsInput = formElement.querySelector('#hidden-file-paths-' + formId);
+                            if (cardPathsInput && cardPathsInput.value) {
+                                try {
+                                    var parsed = JSON.parse(cardPathsInput.value.replace(/&quot;/g, '"'));
+                                    if (Array.isArray(parsed) && parsed.length > 0) filePaths.push.apply(filePaths, parsed.filter(Boolean));
+                                } catch (e) {}
+                            }
+                            if (filePaths.length === 0 && typeof uploadedFiles !== 'undefined' && uploadedFiles.length > 0) {
+                                filePaths.push(...uploadedFiles.map(f => f.path || f.file_path || f.name).filter(p => p));
+                            }
+                            if (filePaths.length === 0) {
+                                var assetTags = document.querySelectorAll('#inputWrapper .asset-tag');
+                                for (var a = 0; a < assetTags.length; a++) {
+                                    var fp = assetTags[a].getAttribute('data-filepath');
+                                    if (fp && fp !== '<待上传数据>' && fp !== '<PENDING_UPLOAD>') filePaths.push(fp);
+                                }
+                            }
+                            if (filePaths.length === 0 && window.workflowCache && window.workflowCache[formId]) {
+                                var cachedData = window.workflowCache[formId].workflowData;
+                                var cachedFilePaths = cachedData?.file_paths || cachedData?.workflow_data?.file_paths || [];
+                                if (cachedFilePaths.length > 0) filePaths.push(...cachedFilePaths.filter(p => p && p !== '<PENDING_UPLOAD>' && p !== '<待上传数据>'));
+                            }
+                            if (filePaths.length === 0) {
+                                var messageRow = formElement.closest('.message-row');
+                                if (messageRow) {
+                                    var fileChips = messageRow.querySelectorAll('.file-chip');
+                                    fileChips.forEach(function(chip) {
+                                        var fileName = chip.textContent.trim();
+                                        var matchedFile = (typeof uploadedFiles !== 'undefined' && uploadedFiles.find) ? uploadedFiles.find(f => f.name === fileName || f.file_name === fileName) : null;
+                                        if (matchedFile && matchedFile.path) filePaths.push(matchedFile.path);
+                                    });
+                                }
+                            }
                             
                             checkboxes.forEach((checkbox, index) => {
-                                if (!checkbox.checked) {
-                                    return; // Skip unchecked steps
-                                }
-                                
                                 const stepId = checkbox.dataset.stepId;
                                 const toolId = formElement.querySelector(`input[name="tool_id_${index}"]`)?.value || '';
                                 const stepName = formElement.querySelector(`input[name="step_name_${index}"]`)?.value || '';
@@ -6676,8 +6957,8 @@
                                 const paramInputs = formElement.querySelectorAll(`input[name^="param_${index}_"], select[name^="param_${index}_"]`);
                                 
                                 paramInputs.forEach(input => {
-                                    const paramName = input.name.replace(`param_${index}_`, '');
-                                    let paramValue;
+                                    var paramName = input.name.replace('param_' + index + '_', '');
+                                    var paramValue;
                                     
                                     if (input.type === 'checkbox') {
                                         paramValue = input.checked;
@@ -6687,27 +6968,57 @@
                                         paramValue = input.value;
                                     }
                                     
+                                    // 1. 清洗历史遗留的逗号脏数据
+                                    if (typeof paramValue === 'string' && paramValue.indexOf(',') !== -1 && (paramName.indexOf('path') !== -1 || paramName.indexOf('dir') !== -1)) {
+                                        paramValue = paramValue.split(',')[0].trim();
+                                    }
+                                    
+                                    // 2. 终极占位符替换：只要是占位符，且有新文件，立刻注入真实路径！
+                                    if (typeof paramValue === 'string' && (paramValue === '<user_input>' || paramValue === '<待上传数据>' || paramValue === '<PENDING_UPLOAD>' || paramValue === '')) {
+                                        if (filePaths && filePaths.length > 0) {
+                                            paramValue = filePaths[0];
+                                        }
+                                    }
+                                    
+                                    // 3. 针对 h5ad_path 等特定参数的强制覆盖（防回退）
+                                    if (filePaths && filePaths.length > 0 && (paramName === 'file_path' || paramName === 'adata_path' || paramName === 'data_path' || paramName === 'h5ad_path')) {
+                                        if (!paramValue || (typeof paramValue === 'string' && paramValue.startsWith('<'))) {
+                                            paramValue = filePaths[0];
+                                        }
+                                    }
+                                    
                                     params[paramName] = paramValue;
                                     
-                                    // Extract file paths
-                                    if ((paramName === 'file_path' || paramName === 'adata_path') && paramValue) {
-                                        if (paramValue !== '<待上传数据>' && paramValue !== '<PENDING_UPLOAD>') {
+                                    // Extract file paths（从勾选步骤收集，含 h5ad_path/data_path）
+                                    if (checkbox.checked && (paramName === 'file_path' || paramName === 'adata_path' || paramName === 'h5ad_path' || paramName === 'data_path') && paramValue) {
+                                        if (paramValue !== '<待上传数据>' && paramValue !== '<PENDING_UPLOAD>' && (typeof paramValue !== 'string' || !paramValue.startsWith('<'))) {
                                             filePaths.push(paramValue);
                                         }
                                     }
                                 });
                                 
+                                const enabled = !!checkbox.checked;
                                 updatedSteps.push({
                                     step_id: stepId,
                                     tool_id: toolId,
                                     name: stepName,
-                                    params: params
+                                    params: params,
+                                    enabled: enabled,
+                                    selected: enabled
                                 });
                             });
                             
                             console.log("📋 [executeWorkflowFromForm] 更新的步骤:", updatedSteps);
                             console.log("📁 [executeWorkflowFromForm] 文件路径:", filePaths);
                             
+                            // 🔥 收藏卡片：优先从卡片隐藏输入读取通过「添加本地文件/添加数据资产」追加的路径
+                            var cardPathsInput = formElement.querySelector('#hidden-file-paths-' + formId);
+                            if (cardPathsInput && cardPathsInput.value) {
+                                try {
+                                    var parsed = JSON.parse(cardPathsInput.value.replace(/&quot;/g, '"'));
+                                    if (Array.isArray(parsed) && parsed.length > 0) filePaths.push.apply(filePaths, parsed.filter(Boolean));
+                                } catch (e) {}
+                            }
                             // 🔥 TASK 2 FIX: Validate and collect file paths from multiple sources
                             // 1. 从表单参数中提取（已处理）
                             // 2. 从全局 uploadedFiles 中提取
@@ -6742,6 +7053,18 @@
                                     });
                                 }
                             }
+                            // 🔥 拆开逗号/分号拼接的路径（历史快照或旧数据可能为 "path1; path2" 单字符串），保证后端收到数组
+                            var flattenedPaths = [];
+                            filePaths.forEach(function(p) {
+                                var s = String(p != null ? p : '').trim();
+                                if (!s) return;
+                                if (s.indexOf(';') >= 0 || s.indexOf(',') >= 0) {
+                                    s.split(/[;,]/).forEach(function(part) { var t = part.trim(); if (t) flattenedPaths.push(t); });
+                                } else {
+                                    flattenedPaths.push(s);
+                                }
+                            });
+                            filePaths = flattenedPaths.length ? flattenedPaths : filePaths;
                             // 🔥 空弹夹拦截：无上传、无资产选择则禁止执行
                             var hasUploaded = uploadedFiles.length > 0;
                             var hasAssetTag = document.querySelectorAll('#inputWrapper .asset-tag').length > 0;
@@ -6817,10 +7140,12 @@
                             submitWorkflow(`wf-exec-${workflowId}`, steps.length, JSON.stringify(filePaths));
                         };
                         
-                        // 🔥 REQUIREMENT 1: 处理完成事件 - 彻底移除 Thinking spinner
+                        // 🔥 REQUIREMENT 1: 处理完成事件 - 彻底移除 Thinking spinner；统一计时器：优先用后端下发的 duration
                         function handleDoneEvent(data) {
                             clearInterval(timerInterval);
-                            const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+                            const duration = (data && (data.duration != null || data.total_duration != null))
+                                ? (Number(data.duration ?? data.total_duration)).toFixed(1)
+                                : ((Date.now() - startTime) / 1000).toFixed(1);
                             
                             // 🔥 TASK 1: CRITICAL - 彻底移除所有 Thinking spinner 和容器
                             // 1. Remove .thinking-container immediately
@@ -6885,8 +7210,13 @@
                                 }
                             });
                             
-                            // 🔥 REQUIREMENT 1: Update status log only, no separate bubble
+                            // 🔥 REQUIREMENT 1: Update status log only, no separate bubble；与卡片底部计时器一致
                             addProcessStep(`完成 (${duration}s)`, 'done');
+                            // 🔥 统一计时器：将当前消息 footer 的 .generation-timer 更新为与执行记录面板一致的后端/本地耗时
+                            var timerEl = (window.currentMessageZones && window.currentMessageZones.textZone && window.currentMessageZones.textZone.closest('.message-row'))
+                                ? window.currentMessageZones.textZone.closest('.message-row').querySelector('.generation-timer')
+                                : document.querySelector('#chatContent .message-row.ai:last-of-type .generation-timer');
+                            if (timerEl) timerEl.innerHTML = '<i class="bi bi-stopwatch"></i> ' + duration + 's';
                             
                             // 🔥 强制扫尾：将所有还在转圈的图标变成打钩（防止流程结束后中栏仍显示 ↻）
                             document.querySelectorAll('.icon-running').forEach(function(icon) {
@@ -7857,31 +8187,103 @@
                 }).catch(function(e) { console.error(e); alert('收藏失败：' + (e.message || '请稍后重试')); });
             }
             
-            // 🔥 复用卡片专属：在卡片下方挂载「上传文件并执行」按钮，独立于全局 uploadPendingFiles/sendMessage
+            // 🔥 收藏卡片：将选中的路径追加到卡片的 file_paths 并渲染为 File Chip，不触发执行（解耦选择与执行）
+            window.appendPathsToCard = function(formId, cardElement, paths) {
+                var card = cardElement;
+                var hid = card.querySelector('#hidden-file-paths-' + formId);
+                if (!hid) {
+                    hid = document.createElement('input');
+                    hid.type = 'hidden';
+                    hid.id = 'hidden-file-paths-' + formId;
+                    hid.value = '[]';
+                    card.appendChild(hid);
+                }
+                var arr = [];
+                try { arr = JSON.parse(hid.value.replace(/&quot;/g, '"')); } catch (e) {}
+                if (!Array.isArray(arr)) arr = [];
+                // 🔥 多文件修复：合并去重，绝不覆盖已有路径（避免 Visium 等配套多文件被吞）
+                if (paths && paths.length) {
+                    paths.forEach(function(p) { if (p && arr.indexOf(p) === -1) arr.push(p); });
+                    hid.value = JSON.stringify(arr).replace(/"/g, '&quot;');
+                }
+                var wrap = card.nextElementSibling;
+                if (wrap && wrap.classList && wrap.classList.contains('reuse-upload-execute-wrap')) {
+                    var chipsArea = wrap.querySelector('.card-file-chips-area');
+                    if (!chipsArea) {
+                        chipsArea = document.createElement('div');
+                        chipsArea.className = 'card-file-chips-area file-chips-area mt-2 mb-2';
+                        wrap.insertBefore(chipsArea, wrap.firstChild);
+                    }
+                    chipsArea.innerHTML = '';
+                    arr.forEach(function(path) {
+                        var chip = document.createElement('span');
+                        chip.className = 'file-chip';
+                        var name = (path.split('/').pop() || path).slice(0, 40);
+                        chip.innerHTML = '<i class="bi bi-file-earmark"></i> ' + (name.replace(/</g, '&lt;')) + ' <span class="remove-chip" style="cursor:pointer;color:#9ca3af;margin-left:4px;" title="移除">×</span>';
+                        chip.dataset.path = path;
+                        chip.querySelector('.remove-chip').addEventListener('click', function() {
+                            var list = [];
+                            try { list = JSON.parse(hid.value.replace(/&quot;/g, '"')); } catch (e) {}
+                            list = list.filter(function(x) { return x !== path; });
+                            hid.value = JSON.stringify(list).replace(/"/g, '&quot;');
+                            window.appendPathsToCard(formId, cardElement, []);
+                        });
+                        chipsArea.appendChild(chip);
+                    });
+                }
+                if (window.workflowCache && window.workflowCache[formId]) {
+                    window.workflowCache[formId].workflowData = window.workflowCache[formId].workflowData || {};
+                    window.workflowCache[formId].workflowData.file_paths = arr;
+                }
+                // 🔥 用户添加新文件后：移除事前探照的红色警告并解除执行按钮锁定
+                if (card) {
+                    card.querySelectorAll('input.form-control.form-control-sm[readonly]').forEach(function(inp) {
+                        inp.classList.remove('border-danger', 'text-danger');
+                    });
+                    var warnEl = card.querySelector('#file-check-warning-' + formId) || document.getElementById('file-check-warning-' + formId);
+                    if (warnEl && warnEl.parentNode) warnEl.parentNode.removeChild(warnEl);
+                    var execBtn = card.querySelector('#execute-workflow-' + formId) || document.getElementById('execute-workflow-' + formId);
+                    if (execBtn) execBtn.disabled = false;
+                }
+            };
+
+            // 🔥 复用卡片专属：在卡片下方挂载「添加本地文件」「添加数据资产」（仅添加不执行，需用户点击绿色「执行工作流」）
             window.mountUploadExecuteButton = function(cardElement) {
                 if (!cardElement || !cardElement.getAttribute('data-form-id')) return;
                 var formId = cardElement.getAttribute('data-form-id');
                 if (cardElement.nextElementSibling && cardElement.nextElementSibling.classList && cardElement.nextElementSibling.classList.contains('reuse-upload-execute-wrap')) return;
                 var wrap = document.createElement('div');
                 wrap.className = 'reuse-upload-execute-wrap mt-2 mb-2';
-                wrap.style.display = 'flex'; wrap.style.alignItems = 'center'; wrap.style.gap = '12px';
+                wrap.style.display = 'flex'; wrap.style.flexWrap = 'wrap'; wrap.style.alignItems = 'center'; wrap.style.gap = '12px';
+                var chipsArea = document.createElement('div');
+                chipsArea.className = 'card-file-chips-area file-chips-area';
+                chipsArea.style.width = '100%';
+                wrap.appendChild(chipsArea);
+                var btnRow = document.createElement('div');
+                btnRow.style.display = 'flex'; btnRow.style.alignItems = 'center'; btnRow.style.gap = '12px';
                 var btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = 'btn-upload-execute ghost-btn btn btn-sm';
-                btn.textContent = '\uD83D\uDCC1 上传文件并执行';
+                btn.textContent = '\uD83D\uDCC1 添加本地文件';
                 btn.style.cssText = 'color: #3b82f6; border: 1px solid #3b82f6; padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; background: transparent;';
                 var btnAsset = document.createElement('button');
                 btnAsset.type = 'button';
                 btnAsset.className = 'btn-select-asset-execute ghost-btn btn btn-sm';
-                btnAsset.textContent = '\uD83D\uDCC4 选择资产并执行';
-                btnAsset.style.cssText = 'color: #8b5cf6; border: 1px solid #8b5cf6; padding: 6px 12px; border-radius: 6px; margin-right: 12px; font-size: 13px; cursor: pointer; background: transparent;';
-                wrap.appendChild(btn);
-                wrap.appendChild(btnAsset);
+                btnAsset.textContent = '\uD83D\uDCC4 添加数据资产';
+                btnAsset.style.cssText = 'color: #8b5cf6; border: 1px solid #8b5cf6; padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; background: transparent;';
+                var hint = document.createElement('span');
+                hint.className = 'text-muted small';
+                hint.textContent = '添加完成后，请点击上方绿色「▶ 执行工作流」开始分析';
+                hint.style.fontSize = '12px';
+                btnRow.appendChild(btn);
+                btnRow.appendChild(btnAsset);
+                btnRow.appendChild(hint);
+                wrap.appendChild(btnRow);
                 cardElement.after(wrap);
                 btn.addEventListener('click', function() {
                     var fileInput = document.createElement('input');
                     fileInput.type = 'file';
-                    fileInput.multiple = false;
+                    fileInput.multiple = true;
                     fileInput.style.display = 'none';
                     document.body.appendChild(fileInput);
                     fileInput.addEventListener('change', function() {
@@ -7895,36 +8297,22 @@
                         fetch('/api/upload', { method: 'POST', headers: getAuthHeaders(), body: formData })
                             .then(function(r) { return r.ok ? r.json() : r.text().then(function(t) { throw new Error(t || '上传失败'); }); })
                             .then(function(data) {
-                                btn.textContent = '\uD83D\uDE80 正在启动执行...';
-                                var path = '';
+                                var paths = [];
                                 if (data.file_paths && Array.isArray(data.file_paths) && data.file_paths.length > 0) {
-                                    var uniquePaths = [...new Set(data.file_paths.filter(Boolean))];
-                                    path = uniquePaths.join(', ');
+                                    paths = [...new Set(data.file_paths.filter(Boolean))];
+                                } else if (data.files && Array.isArray(data.files) && data.files.length > 0) {
+                                    // 🔥 多文件修复：必须收集全部 files，不能只取 files[0]（避免 Visium 等配套文件被吞）
+                                    paths = data.files.map(function(f) { return f.file_path || f.file_id; }).filter(Boolean);
+                                    paths = [...new Set(paths)];
                                 } else if (data.file_path) {
-                                    path = data.file_path;
+                                    paths = [data.file_path];
                                 } else if (data.group_dir) {
-                                    path = data.group_dir;
-                                } else if (data.files && data.files[0] && (data.files[0].file_path || data.files[0].file_id)) {
-                                    path = data.files[0].file_path || data.files[0].file_id;
+                                    paths = [data.group_dir];
                                 }
-                                if (!path) { throw new Error('服务器未返回文件路径'); }
-                                var card = cardElement;
-                                var existing = card.querySelector('input[name="param_0_file_path"]');
-                                if (existing) existing.remove();
-                                var visibleInput = document.createElement('input');
-                                visibleInput.type = 'text';
-                                visibleInput.name = 'param_0_file_path';
-                                visibleInput.value = path;
-                                visibleInput.readOnly = true;
-                                visibleInput.setAttribute('readonly', 'readonly');
-                                visibleInput.className = 'form-control form-control-sm';
-                                visibleInput.style.cssText = 'background-color: #e9ecef;';
-                                card.appendChild(visibleInput);
-                                var execBtn = card.querySelector('#execute-workflow-' + formId);
-                                if (execBtn) execBtn.click();
-                                else { throw new Error('未找到执行按钮'); }
+                                if (paths.length === 0) throw new Error('服务器未返回文件路径');
+                                if (typeof window.appendPathsToCard === 'function') window.appendPathsToCard(formId, cardElement, paths);
                             })
-                            .catch(function(e) { alert('上传或执行失败: ' + (e.message || e)); })
+                            .catch(function(e) { alert('上传失败: ' + (e.message || e)); })
                             .finally(function() {
                                 btn.disabled = false;
                                 btn.textContent = originalText;
@@ -8348,12 +8736,12 @@
                         html += `
                         <div class="accordion-item">
                             <h2 class="accordion-header">
-                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#${stepId}">
+                                <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#${stepId}" aria-expanded="true">
                                     <span class="me-2">${statusIcon}</span> ${step.name}
                                     <span class="ms-auto text-muted small" style="font-weight:normal;">${step.summary || ''}</span>
                                 </button>
                             </h2>
-                            <div id="${stepId}" class="accordion-collapse collapse">
+                            <div id="${stepId}" class="accordion-collapse collapse show">
                                 <div class="accordion-body">
                                     ${contentHtml || '<div class="text-muted small">暂无详细内容</div>'}
                                 </div>
@@ -8741,35 +9129,37 @@
                     const uploadResult = await uploadRes.json();
                     console.log('🔥 [Template Upload] 上传结果:', uploadResult);
                     
-                    // 🔥 CRITICAL FIX: 健壮地提取服务器路径（处理字符串或数组）
-                    let serverPath = "";
+                    // 🔥 多文件修复：收集全部路径（Visium 等需 .h5 + spatial 配套，禁止只取第一个）
+                    const collectedPaths = [];
                     if (Array.isArray(uploadResult.file_paths) && uploadResult.file_paths.length > 0) {
-                        serverPath = uploadResult.file_paths[0];
+                        uploadResult.file_paths.forEach(function(p) { if (p) collectedPaths.push(p); });
                     } else if (uploadResult.file_path) {
-                        serverPath = uploadResult.file_path;
-                    } else if (typeof uploadResult.file_paths === 'string') {
-                        serverPath = uploadResult.file_paths;
+                        collectedPaths.push(uploadResult.file_path);
+                    } else if (typeof uploadResult.file_paths === 'string' && uploadResult.file_paths) {
+                        collectedPaths.push(uploadResult.file_paths);
+                    }
+                    if (uploadResult.files && Array.isArray(uploadResult.files)) {
+                        uploadResult.files.forEach(function(f) {
+                            var p = f.file_path || f.file_id;
+                            if (p && collectedPaths.indexOf(p) === -1) collectedPaths.push(p);
+                        });
                     }
                     
-                    if (!serverPath) {
+                    if (collectedPaths.length === 0) {
                         console.error('❌ [Template Upload] 上传响应中没有有效的文件路径:', uploadResult);
                         alert("上传失败: 服务器未返回文件路径。");
                         return;
                     }
                     
-                    // 🔥 CRITICAL FIX: 强制更新全局状态（清除旧状态，避免重复或过期状态）
-                    const fileName = serverPath.split('/').pop() || serverPath.split('\\').pop() || 'uploaded_data.csv';
-                            const fileInfo = {
-                                name: fileName,
-                        path: serverPath  // 🔥 CRITICAL: 使用服务器返回的完整路径
-                            };
+                    const fileInfos = collectedPaths.map(function(serverPath) {
+                        var fileName = serverPath.split('/').pop() || serverPath.split('\\').pop() || 'uploaded_data.csv';
+                        return { name: fileName, path: serverPath, file_path: serverPath };
+                    });
                     
-                    // 强制替换全局状态（而不是追加）
-                    uploadedFiles = [fileInfo];
-                    console.log('✅ [Template Upload] 强制更新全局 uploadedFiles:', uploadedFiles);
-                    console.log('✅ [Template Upload] 文件路径详情:', fileInfo);
+                    // 使用本次上传的完整列表更新全局状态（多文件场景不丢失）
+                    uploadedFiles = fileInfos;
+                    console.log('✅ [Template Upload] 更新全局 uploadedFiles 数量:', uploadedFiles.length, uploadedFiles);
                     
-                    // 🔥 CRITICAL FIX: 获取原始查询（从缓存或参数）
                     const queryToSend = originalQuery || window.pendingOriginalQuery || userInput.value.trim();
                     if (!queryToSend) {
                         console.error('❌ [Template Upload] 无法获取原始查询');
@@ -8780,10 +9170,8 @@
                     console.log('🔄 [Template Upload] 准备重新发送查询:', queryToSend);
                     userInput.value = queryToSend;
                     
-                    // 🔥 CRITICAL: 立即发送，显式传递文件列表
-                    // 不依赖默认的 sendMessage 行为读取 DOM 或全局状态
-                    console.log('🚀 [Template Upload] 调用 sendMessage，显式传递文件:', [fileInfo]);
-                    sendMessage(null, queryToSend, null, null, false, [fileInfo]);
+                    console.log('🚀 [Template Upload] 调用 sendMessage，显式传递文件数量:', fileInfos.length);
+                    sendMessage(null, queryToSend, null, null, false, fileInfos);
                     
                 } catch (e) {
                     console.error('❌ [Template Upload] 上传失败:', e);
@@ -9187,7 +9575,7 @@
 
             function selectTool(tool, query) { appendMessage('user', `我选择运行: <b>${tool.name}</b>`); sendMessage(tool, query); }
 
-            // 🔥 复用卡片专属：资产选择弹窗（选择资产并执行）
+            // 🔥 复用卡片专属：资产选择弹窗（仅添加为数据资产 Chip，不触发执行）
             window.openAssetPickerModal = function(formId, cardEl) {
                 window._assetPickerContext = { formId: formId, cardEl: cardEl };
                 var modal = document.getElementById('asset-picker-modal');
@@ -9217,17 +9605,7 @@
                                 var ctx = window._assetPickerContext;
                                 if (!ctx || !ctx.cardEl) { modal.style.display = 'none'; return; }
                                 modal.style.display = 'none';
-                                var card = ctx.cardEl;
-                                var fid = ctx.formId;
-                                var existing = card.querySelector('input[name="param_0_file_path"]');
-                                if (existing) existing.remove();
-                                var hidden = document.createElement('input');
-                                hidden.type = 'hidden';
-                                hidden.name = 'param_0_file_path';
-                                hidden.value = path;
-                                card.appendChild(hidden);
-                                var execBtn = card.querySelector('#execute-workflow-' + fid);
-                                if (execBtn) execBtn.click();
+                                if (typeof window.appendPathsToCard === 'function') window.appendPathsToCard(ctx.formId, ctx.cardEl, [path]);
                                 window._assetPickerContext = null;
                             });
                             listEl.appendChild(item);

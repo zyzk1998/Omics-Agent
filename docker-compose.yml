@@ -62,7 +62,7 @@ services:
       - SILICONFLOW_API_KEY=${SILICONFLOW_API_KEY}
       - SILICONFLOW_MODEL=${SILICONFLOW_MODEL:-deepseek-ai/DeepSeek-R1}
       # 🔒 安全：文件上传限制
-      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-104857600}
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-209715200}
       # 🔒 安全：CORS 配置
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
       # 修复 Numba 和 Matplotlib 权限问题
@@ -136,7 +136,7 @@ services:
       # 🔒 安全：从环境变量读取 API 密钥
       - SILICONFLOW_API_KEY=${SILICONFLOW_API_KEY}
       - SILICONFLOW_MODEL=${SILICONFLOW_MODEL:-deepseek-ai/DeepSeek-R1}
-      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-104857600}
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-209715200}
       # 修复 Numba 和 Matplotlib 权限问题
       - NUMBA_CACHE_DIR=/home/appuser/.cache/numba
       - MPLCONFIGDIR=/home/appuser/.config/matplotlib

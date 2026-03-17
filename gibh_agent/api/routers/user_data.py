@@ -3,7 +3,8 @@ Phase 4 - 侧栏数据读取：会话列表、消息历史、资产列表、工�
 
 - GET /api/sessions: 当前用户（owner_id）的历史会话，按 created_at 倒序
 - GET /api/sessions/{session_id}/messages: 指定会话的消息列表（校验归属）
-- GET /api/assets: 当前用户的数据资产列表
+- PATCH /api/messages/{message_id}/workflow: 更新消息的 state_snapshot.workflow（工作流卡片实时保存，校验归属）
+- DELETE /api/messages/{message_id}: 删除单条消息（校验归属）
 - DELETE /api/sessions/{session_id}: 删除会话及该会话下所有消息（校验 owner_id）
 - DELETE /api/assets/{asset_id}: 删除资产记录（校验 owner_id，可选删除物理文件）
 - GET /api/workflow_templates: 当前用户的工作流收藏列表
@@ -12,11 +13,14 @@ Phase 4 - 侧栏数据读取：会话列表、消息历史、资产列表、工�
 """
 import os
 import logging
+import traceback
+from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from gibh_agent.core.deps import get_current_owner_id
 from gibh_agent.core.utils import sanitize_for_json
@@ -48,6 +52,12 @@ class AssetRenameBody(BaseModel):
 class WorkflowTemplateRenameBody(BaseModel):
     """PUT /api/workflow_templates/{template_id} 请求体"""
     name: str
+
+
+class CheckFilesBody(BaseModel):
+    """POST /api/utils/check_files 请求体：文件事前探照"""
+    paths: List[str] = []
+
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +104,9 @@ def list_messages(
         rows = (
             db.query(MessageModel)
             .filter(MessageModel.session_id == session_id)
-            .order_by(MessageModel.created_at.asc())
             .all()
         )
+        rows.sort(key=lambda x: x.created_at)
         out = []
         for r in rows:
             raw = {
@@ -122,8 +132,65 @@ def list_messages(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("获取会话消息失败 session_id=%s: %s", session_id, e)
-        raise HTTPException(status_code=500, detail="获取消息失败")
+        tb_str = traceback.format_exc()
+        logger.error("🔥 [list_messages 崩溃]:\n%s", tb_str)
+        raise HTTPException(
+            status_code=500,
+            detail=f"获取消息失败: {str(e)}\n\n[Traceback]:\n{tb_str}",
+        )
+
+
+@router.post("/api/utils/check_files")
+def check_files(
+    body: CheckFilesBody = Body(...),
+    owner_id: str = Depends(get_current_owner_id),
+) -> dict:
+    """文件事前探照：检查给定路径的物理文件是否存在，返回不存在的路径列表。"""
+    missing_files: List[str] = []
+    for p in body.paths or []:
+        if not p or not isinstance(p, str):
+            continue
+        s = p.strip()
+        if not s:
+            continue
+        try:
+            path_obj = Path(s)
+            if not path_obj.is_absolute():
+                path_obj = path_obj.resolve()
+            if not path_obj.exists():
+                missing_files.append(p)
+        except Exception:
+            missing_files.append(p)
+    return {"missing_files": missing_files}
+
+
+@router.patch("/api/messages/{message_id}/workflow")
+def update_message_workflow(
+    message_id: int,
+    workflow_data: dict = Body(...),
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    """工作流卡片实时自动保存：更新指定消息的 state_snapshot.workflow，仅当该消息所属会话属于当前 owner_id 时允许。"""
+    msg = db.query(MessageModel).filter(MessageModel.id == message_id).first()
+    if not msg:
+        raise HTTPException(status_code=404, detail="消息不存在")
+    session = db.query(SessionModel).filter(SessionModel.id == msg.session_id).first()
+    if not session or session.owner_id != owner_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权修改该消息")
+    try:
+        content = msg.content if isinstance(msg.content, dict) else {}
+        if "state_snapshot" not in content or not isinstance(content["state_snapshot"], dict):
+            content["state_snapshot"] = {}
+        content["state_snapshot"]["workflow"] = workflow_data
+        msg.content = content
+        flag_modified(msg, "content")
+        db.commit()
+        return {"status": "success"}
+    except Exception as e:
+        db.rollback()
+        logger.exception("更新消息工作流失败 message_id=%s: %s", message_id, e)
+        raise HTTPException(status_code=500, detail="更新失败")
 
 
 @router.delete("/api/messages/{message_id}")

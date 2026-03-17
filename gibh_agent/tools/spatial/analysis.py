@@ -242,7 +242,8 @@ def spatial_clustering(
             sc.tl.pca(adata, n_comps=n_comps, svd_solver="arpack")
         rep = use_rep if use_rep in adata.obsm else "X"
         sc.pp.neighbors(adata, n_neighbors=n_neighbors, use_rep=rep)
-        sc.tl.leiden(adata, resolution=resolution, key_added=key_added)
+        resolution_f = float(resolution)  # 防止前端/LLM 传入 str 导致 TypeError
+        sc.tl.leiden(adata, resolution=resolution_f, key_added=key_added)
         n_clusters = int(adata.obs[key_added].astype(str).nunique())
         out = Path(output_path) if output_path else p
         out = out.parent / (out.stem + ".h5ad") if out.suffix.lower() != ".h5ad" else out
@@ -361,8 +362,20 @@ def spatial_clustering_comparison(
     path_in = adata_path or h5ad_path or (kwargs.get("h5ad_path") if kwargs else None)
     if not path_in:
         return {"status": "error", "error": "请提供 adata_path 或 h5ad_path"}
-    if resolutions is None:
-        resolutions = [0.3, 0.5, 0.8]
+    # 确保 resolutions 是 float 列表（大模型可能传入 "0.3,0.5,0.8" 字符串）
+    if isinstance(resolutions, str):
+        res_list = [float(r.strip()) for r in resolutions.split(",") if r.strip()]
+    elif isinstance(resolutions, (int, float)):
+        res_list = [float(resolutions)]
+    elif isinstance(resolutions, list):
+        res_list = [float(r) for r in resolutions]
+    elif resolutions is None:
+        res_list = [0.3, 0.5, 0.8]
+    else:
+        res_list = [0.3, 0.5, 0.8]
+    if not res_list:
+        res_list = [0.3, 0.5, 0.8]
+    resolutions = res_list
     try:
         import anndata as ad
         import scanpy as sc

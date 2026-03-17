@@ -125,6 +125,15 @@ class WorkflowPlanner:
             # Step 2: 构建 LLM Prompt
             logger.info("📝 Step 2: 构建 LLM Prompt...")
             system_prompt = self._build_system_prompt()
+            # 隐形护栏注入：不向前端暴露，用于约束跨领域串线与只勾选第一步等幻觉
+            hidden_guardrail = (
+                "\n\n[System Hidden Guardrails - MUST OBEY]\n"
+                "1. Domain Strictness: You must ONLY use tools that strictly match the user's requested omics domain "
+                "(e.g., do not use Radiomics tools for Transcriptomics tasks).\n"
+                "2. Full Workflow Selection: When generating the JSON workflow, you MUST set 'selected': true and "
+                "'enabled': true for ALL steps in the recommended pipeline. Do not leave any step unselected."
+            )
+            system_prompt += hidden_guardrail
             user_prompt = self._build_user_prompt(
                 user_query=user_query,
                 retrieved_tools=retrieved_tools,
@@ -542,7 +551,9 @@ class SOPPlanner:
         category_filter: Optional[str] = None,
         domain_name: Optional[str] = None,
         target_steps: Optional[List[str]] = None,
-        is_template: bool = False  # 🔥 ARCHITECTURAL RESET: Explicit template flag
+        is_template: bool = False,  # 🔥 ARCHITECTURAL RESET: Explicit template flag
+        target_domain: Optional[str] = None,  # 🔥 快车道硬路由：技能广场传入时已由 Orchestrator 做意图 bypass，此处仅做兼容；workflow 已按 domain_name 物理隔离
+        steps_to_skip: Optional[List[str]] = None,  # 🔥 快车道时由 Orchestrator 传入 _analyze_user_intent 的 skip_steps，否则由内部意图分析得到
     ) -> Dict[str, Any]:
         """
         生成基于 SOP 规则的工作流计划（架构重置版 - 严格分离执行和预览）
@@ -558,13 +569,14 @@ class SOPPlanner:
             domain_name: 可选的域名（如果提供，跳过意图分类）
             target_steps: 可选的目标步骤列表（如果提供，跳过意图分析）
             is_template: 是否为模板模式（True=预览，False=执行）
+            target_domain: 快车道时由 Orchestrator 传入，workflow 已按 domain 物理阉割，无跨界工具
         
         Returns:
             符合前端格式的工作流配置字典
         """
         try:
             _t_plan_start = time.time()
-            logger.info(f"🧠 [SOPPlanner] 开始生成计划: '{user_query}'")
+            logger.info(f"🧠 [SOPPlanner] 开始生成计划: '{user_query}' (target_domain={target_domain})")
             logger.info("[Profiler] 规划开始 - 耗时: 0.00s")
 
             # Step 1: Intent Classification (LLM) - 识别域名和模式（如果未提供）
@@ -579,6 +591,7 @@ class SOPPlanner:
                 _t_intent = time.time()
                 intent_result = await self._classify_intent(user_query, file_metadata)
                 logger.info("[Profiler] 意图分类(LLM)完成 - 耗时: %.2fs", time.time() - _t_intent)
+                logger.info("⏱️ [性能探针] generate_plan 阶段1(意图分类/域名确定) 耗时: %.2fs", time.time() - _t_plan_start)
                 domain_name = intent_result.get("domain_name")
                 execution_mode = intent_result.get("mode", "PLANNING")  # 🔥 NEW: Extract mode
                 
@@ -594,6 +607,7 @@ class SOPPlanner:
                 logger.info(f"✅ [SOPPlanner] 意图分类结果: domain={domain_name}, mode={execution_mode}")
             else:
                 logger.info(f"✅ [SOPPlanner] 使用提供的域名: {domain_name}")
+                logger.info("⏱️ [性能探针] generate_plan 阶段1(域名确定/快车道跳过意图) 耗时: %.2fs", time.time() - _t_plan_start)
                 # 🔥 CRITICAL: If domain_name provided but no mode, infer from file_metadata
                 if has_file_metadata:
                     # Default to EXECUTION if file exists and domain provided
@@ -617,21 +631,24 @@ class SOPPlanner:
                     "message": "工作流注册表错误"
                 }
             
-            # 🔥 ARCHITECTURAL FIX: 优先运行意图分析（Plan-First）
+            # 🔥 ARCHITECTURAL FIX: 优先运行意图分析（Plan-First）；快车道可由 Orchestrator 传入 steps_to_skip
             # Step 4: Analyze User Intent (LLM) - 从可用工具集中选择目标步骤（如果未提供）
-            steps_to_skip: List[str] = []
+            steps_to_skip_list: List[str] = list(steps_to_skip) if steps_to_skip is not None else []
+            _t_stage2_start = time.time()
             if target_steps is None:
                 logger.info("🔍 [SOPPlanner] Step 2: 分析用户意图（选择目标步骤）...")
                 _t_intent2 = time.time()
                 intent_result = await self._analyze_user_intent(user_query, workflow)
                 logger.info("[Profiler] 用户意图分析(LLM)完成 - 耗时: %.2fs", time.time() - _t_intent2)
+                logger.info("⏱️ [性能探针] generate_plan 阶段2(用户意图分析) 耗时: %.2fs", time.time() - _t_stage2_start)
                 if isinstance(intent_result, dict):
-                    steps_to_skip = intent_result.get("skip_steps") or []
+                    steps_to_skip_list = intent_result.get("skip_steps") or []
                     target_steps = intent_result.get("target_steps") or []
                 else:
                     target_steps = intent_result if isinstance(intent_result, list) else []
             else:
                 logger.info(f"✅ [SOPPlanner] 使用提供的目标步骤: {target_steps}")
+                logger.info("⏱️ [性能探针] generate_plan 阶段2(目标步骤/快车道跳过) 耗时: %.2fs", time.time() - _t_stage2_start)
             
             # 🔥 CRITICAL FIX: 确保 target_steps 不为空（Plan-First 必须返回完整标准流程）
             # 如果查询模糊（如"Analyze this", "Full analysis", "完整分析"），使用完整 SOP
@@ -679,16 +696,18 @@ class SOPPlanner:
             
             # Step 6: Generate Template - 生成工作流模板（支持占位符）
             logger.info("🔍 [SOPPlanner] Step 4: 生成工作流模板...")
+            _t_tmpl_start = time.time()
             workflow_config = workflow.generate_template(
                 target_steps=resolved_steps,
                 file_metadata=file_metadata
             )
+            logger.info("⏱️ [性能探针] generate_plan 阶段3(模板生成) 耗时: %.2fs", time.time() - _t_tmpl_start)
             
             # 🔥 Dynamic Planning: Uncheck steps the user asked to skip (selected: false)
-            if steps_to_skip:
+            if steps_to_skip_list:
                 wd = workflow_config.get("workflow_data") or {}
                 for step in (wd.get("steps") or []):
-                    if step.get("id") in steps_to_skip:
+                    if step.get("id") in steps_to_skip_list:
                         step["selected"] = False
                         logger.info(f"✅ [SOPPlanner] 已取消勾选步骤: {step.get('id')}")
             
@@ -714,7 +733,7 @@ class SOPPlanner:
             # 🔥 ARCHITECTURAL RESET: Step 7 - Strict Separation Based on is_template Flag
             logger.info("🔍 [SOPPlanner] Step 5: 处理元数据...")
             logger.info(f"🔍 [SOPPlanner] is_template={is_template}, file_metadata存在={file_metadata is not None}")
-            
+            _t_fill_start = time.time()
             # 🔥 CRITICAL: Remove ambiguity - Use is_template flag explicitly
             if is_template:
                 # TEMPLATE MODE: Use placeholders, set template_mode = True
@@ -744,6 +763,7 @@ class SOPPlanner:
                                     if file_metadata.get("file_path"):
                                         params[param_name] = file_metadata.get("file_path")
                                         logger.warning(f"⚠️ [SOPPlanner] 已修复：将 {param_name} 设置为 {file_metadata.get('file_path')}")
+            logger.info("⏱️ [性能探针] generate_plan 阶段4(元数据填充/占位符) 耗时: %.2fs", time.time() - _t_fill_start)
             
             # 🔥 ARCHITECTURAL RESET: Final Validation - Enforce is_template flag
             final_steps_count = len(workflow_config.get('workflow_data', {}).get('steps', []))
@@ -794,6 +814,7 @@ class SOPPlanner:
                     "workflow_data": workflow_config.get("workflow_data", {})
                 }
             
+            logger.info("⏱️ [性能探针] generate_plan 总耗时: %.2fs", time.time() - _t_plan_start)
             # 🔥 CRITICAL FIX: 构建返回结果，清理冗余字段
             result = {
                 "type": "workflow_config",
@@ -858,6 +879,7 @@ class SOPPlanner:
             dict: {"target_steps": ["step1", ...], "skip_steps": ["step_x"]}
             或 list: 兼容旧版，表示 target_steps，skip_steps 视为 []。
         """
+        _t_analyze_start = time.time()
         # 获取可用步骤列表
         available_steps = list(workflow.steps_dag.keys())
         domain_knowledge = self._get_domain_knowledge(workflow)
@@ -912,13 +934,14 @@ From the user query, output a JSON object with "target_steps" and "skip_steps". 
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ]
-        
+        logger.info("⏱️ [性能探针] 用户意图分析-组装 Prompt 耗时: %.2fs", time.time() - _t_analyze_start)
+        _t_llm_start = time.time()
         response = await self.llm_client.achat(
             messages=messages,
             temperature=0.1,
             max_tokens=512
         )
-        
+        logger.info("⏱️ [性能探针] 用户意图分析-LLM 规划生成耗时: %.2fs", time.time() - _t_llm_start)
         # 🔥 FIX: 提取 ChatCompletion 对象的内容
         if hasattr(response, 'choices') and response.choices:
             response_text = response.choices[0].message.content or ""
@@ -926,6 +949,7 @@ From the user query, output a JSON object with "target_steps" and "skip_steps". 
             response_text = str(response)
         
         # 解析响应：支持 {"target_steps": [...], "skip_steps": [...]} 或旧版纯数组
+        _t_parse_start = time.time()
         try:
             raw = json.loads(response_text.strip())
             if isinstance(raw, dict):
@@ -946,6 +970,7 @@ From the user query, output a JSON object with "target_steps" and "skip_steps". 
                 logger.warning(f"⚠️ LLM 返回了无效的步骤ID: {invalid}，已过滤")
             
             logger.info(f"✅ [SOPPlanner] 意图分析完成: target_steps={valid_steps}, skip_steps={valid_skip}")
+            logger.info("⏱️ [性能探针] 用户意图分析-JSON 解析与后处理耗时: %.2fs", time.time() - _t_parse_start)
             return {"target_steps": valid_steps, "skip_steps": valid_skip}
         except json.JSONDecodeError as e:
             logger.error(f"❌ 意图分析 JSON 解析失败: {e}")
@@ -1147,6 +1172,7 @@ From the user query, output a JSON object with "target_steps" and "skip_steps". 
                 "target_steps": ["step1", "step2", ...]  # 如果为空，表示完整工作流
             }
         """
+        _t_classify_start = time.time()
         # 🔥 CONTEXT-AWARE INTENT CLASSIFICATION: Determine execution mode based on query + file context
         has_file = file_metadata is not None
         
@@ -1252,13 +1278,16 @@ Classify the intent and return JSON only. Remember:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ]
-        
+        _t_probe_a_end = time.time()
+        logger.info("⏱️ [性能探针] 意图分类-组装 Prompt 耗时: %.2fs", _t_probe_a_end - _t_classify_start)
+        _t_llm_start = time.time()
         response = await self.llm_client.achat(
             messages=messages,
             temperature=0.1,
             max_tokens=512
         )
-        
+        llm_duration = time.time() - _t_llm_start
+        logger.info("⏱️ [性能探针] 意图分类-LLM 规划生成耗时: %.2fs", llm_duration)
         # 🔥 FIX: 提取 ChatCompletion 对象的内容
         if hasattr(response, 'choices') and response.choices:
             response_text = response.choices[0].message.content or ""
@@ -1266,6 +1295,7 @@ Classify the intent and return JSON only. Remember:
             response_text = str(response)
         
         # 解析响应
+        _t_parse_start = time.time()
         try:
             intent_result = json.loads(response_text.strip())
             domain_name = intent_result.get("domain_name", "Metabolomics")
@@ -1378,7 +1408,7 @@ Classify the intent and return JSON only. Remember:
                 mode = "PLANNING"
             
             logger.info(f"✅ [SOPPlanner] 意图分类结果: domain={domain_name}, mode={mode}, target_steps={len(target_steps)}")
-            
+            logger.info("⏱️ [性能探针] 意图分类-JSON 解析与后处理耗时: %.2fs", time.time() - _t_parse_start)
             return {
                 "domain_name": domain_name,
                 "mode": mode,  # 🔥 NEW: Include mode in result

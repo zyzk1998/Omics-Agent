@@ -30,8 +30,16 @@ def _scatter_spatial_no_image(adata: Any, color_by: str, out: Path, dpi: int = 2
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(6, 5))
-    xy = adata.obsm["spatial"]
-    valid = ~np.any(np.isnan(xy), axis=1)
+    # 🔥 强制将空间坐标转换为浮点数，避免字符串坐标触发
+    # "must be real number, not str"（matplotlib 对 x/y/c 的类型检查）
+    xy_raw = adata.obsm["spatial"]
+    try:
+        xy = np.asarray(xy_raw, dtype=float)
+    except Exception:
+        logger.exception("Spatial scatter: failed to cast obsm['spatial'] to float; raw dtype=%s", getattr(getattr(xy_raw, 'dtype', None), 'name', type(xy_raw)))
+        raise
+    # 过滤 NaN / 非有限值的行，保证传入 matplotlib 的坐标全为实数
+    valid = np.isfinite(xy).all(axis=1)
     xy = xy[valid]
     if color_by in adata.obs.columns:
         raw = adata.obs[color_by].values[valid]

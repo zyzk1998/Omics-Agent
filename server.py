@@ -55,6 +55,22 @@ logger = logging.getLogger(__name__)
 # 创建 FastAPI 应用
 app = FastAPI(title="GIBH-AGENT-V2 Test Server")
 
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """全链路异常透传：将 Python Traceback 打包进 500 响应体，供前端控制台高亮打印。"""
+    tb_str = traceback.format_exc()
+    logger.error("🔥 [全局异常捕获] 500 Internal Server Error:\n%s", tb_str)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal Server Error",
+            "error_message": str(exc),
+            "traceback": tb_str,
+        },
+    )
+
+
 # 🔥 Step 2: Tool-RAG 架构 - Vector Database Integration
 # 初始化工具检索器（在启动时同步工具）
 tool_retriever = None
@@ -134,6 +150,7 @@ from gibh_agent.core.deps import get_current_owner_id, get_current_admin_user
 from gibh_agent.db.connection import get_db_session, engine, is_available, Base
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.exc import DataError, OperationalError
 
 # 注册 ORM 模型以便 create_all 建表
 try:
@@ -456,7 +473,7 @@ except Exception as e:
     raise
 
 # 安全配置
-MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 100 * 1024 * 1024))  # 默认 100MB
+MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 200 * 1024 * 1024))  # 默认 200MB
 # .h5 = 10x Visium / scRNA Feature Barcode Matrix (industry standard); .h5ad = AnnData
 ALLOWED_EXTENSIONS = {'.h5', '.h5ad', '.mtx', '.tsv', '.csv', '.txt', '.gz', '.tar', '.zip'}
 ALLOWED_MIME_TYPES = {
@@ -694,6 +711,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None  # 🔥 BUG FIX: 添加 session_id 字段
     user_id: Optional[str] = "guest"  # 🔥 BUG FIX: 添加 user_id 字段，默认为 guest
     model_name: Optional[str] = "qwen3.5-plus"  # 🔥 前端模型切换：默认阿里百炼 Qwen3.5-Plus，qwen 走 DashScope，其余走 SiliconFlow
+    target_domain: Optional[str] = None  # 🔥 快车道硬路由：技能广场点击时传入 'rna'|'metabolomics'|'radiomics'|'spatial'，跳过意图识别
 
 
 # 日志缓冲区（保留用于未来扩展）
@@ -1667,7 +1685,7 @@ async def index():
 
 @app.post("/api/upload")
 async def upload_file(
-    files: List[UploadFile] = File(...),
+    files: List[UploadFile] = File(...),  # 🔥 必须 List：单数 file 只会接收第一个，多文件会被静默丢弃
     owner_id: str = Depends(get_current_owner_id),
     db: Session = Depends(get_db_session),
 ):
@@ -1928,38 +1946,53 @@ async def upload_file(
                             logger.warning("⚠️ Spatial 目录规范化失败: %s", e)
                     inner_paths = paths_for_response(modality, payload, UPLOAD_DIR)
                     if inner_paths:
-                        uploaded_results = []
+                        # 🔥 多文件修复：用解压后的路径列表覆盖，但必须包含解压目录本身（避免只返回子路径丢失根目录）
+                        unpack_entries = []
                         for p in inner_paths:
                             try:
                                 size = p.stat().st_size if p.is_file() else 0
                             except OSError:
                                 size = 0
-                            rel = str(p.relative_to(UPLOAD_DIR))
-                            uploaded_results.append({
+                            unpack_entries.append({
                                 "file_id": p.name,
                                 "file_name": p.name,
-                                "file_path": str(p),
+                                "file_path": str(p.resolve()),
                                 "file_size": size,
+                                "metadata": None,
+                                "is_10x": False,
+                            })
+                        uploaded_results = unpack_entries
+                        # 确保解压目录路径在返回列表中（空间组学等依赖目录路径）
+                        effective_path = Path(effective_root)
+                        abs_eff = str(effective_path.resolve())
+                        if not any((r.get("file_path") or "").rstrip("/") == abs_eff.rstrip("/") for r in uploaded_results):
+                            uploaded_results.append({
+                                "file_id": effective_path.name,
+                                "file_name": effective_path.name,
+                                "file_path": abs_eff,
+                                "file_size": 0,
                                 "metadata": None,
                                 "is_10x": False,
                             })
                         logger.info("✅ [UniversalIngestion] 路径已重写为解压内容: %s", [str(p.relative_to(UPLOAD_DIR)) for p in inner_paths])
                 elif modality == "unknown" and effective_root is not None:
-                    # 解压成功但模态未知：仍将 file_paths 指向解压目录，避免下游工具收到 zip 路径
+                    # 🔥 多文件修复：解压目录追加到列表，不覆盖（保留已上传的 .h5 等，避免多文件变单文件）
                     effective_path = Path(effective_root)
+                    abs_eff = str(effective_path.resolve())
+                    if not any((r.get("file_path") or "").rstrip("/") == abs_eff.rstrip("/") for r in uploaded_results):
+                        uploaded_results.append({
+                            "file_id": effective_path.name,
+                            "file_name": effective_path.name,
+                            "file_path": abs_eff,
+                            "file_size": 0,
+                            "metadata": None,
+                            "is_10x": False,
+                        })
                     try:
                         rel = str(effective_path.relative_to(UPLOAD_DIR))
                     except ValueError:
                         rel = effective_path.name
-                    uploaded_results = [{
-                        "file_id": effective_path.name,
-                        "file_name": effective_path.name,
-                        "file_path": str(effective_path.resolve()),
-                        "file_size": 0,
-                        "metadata": None,
-                        "is_10x": False,
-                    }]
-                    logger.info("✅ [UniversalIngestion] 模态未知，路径已重写为解压目录（供下游使用）: %s", rel)
+                    logger.info("✅ [UniversalIngestion] 已追加解压目录到返回列表（供下游使用）: %s", rel)
         except Exception as e:
             logger.warning("⚠️ Universal unpack / Modality Sniffer 失败（不影响上传）: %s", e)
         
@@ -2238,16 +2271,31 @@ async def chat_endpoint(
                         user_id=req.user_id or "guest",
                         owner_id=owner_id,
                         db=db,
-                        model_name=model_name
+                        model_name=model_name,
+                        target_domain=req.target_domain
                     ):
                         if isinstance(event, str) and "event: state_snapshot" in event:
-                            try:
-                                for line in event.split("\n"):
-                                    if line.startswith("data:"):
-                                        state_snapshot_for_db = json.loads(line[5:].strip())
-                                        break
-                            except Exception:
-                                pass
+                            for line in event.split("\n"):
+                                if line.startswith("data:"):
+                                    raw_line = line[5:].strip()
+                                    try:
+                                        state_snapshot_for_db = json.loads(raw_line)
+                                    except Exception as parse_err:
+                                        logger.error(
+                                            "❌ [Chat] state_snapshot JSON 解析失败，将原始数据备份入库: %s",
+                                            parse_err,
+                                            exc_info=True,
+                                        )
+                                        raw_preview = raw_line[:1000] if len(raw_line) > 1000 else raw_line
+                                        logger.error("❌ [Chat] 原始 data 前 1000 字符: %s", raw_preview)
+                                        raw_backup = raw_line[:50000] if len(raw_line) > 50000 else raw_line
+                                        state_snapshot_for_db = {
+                                            "text": "⚠️ [系统警告] 工作流数据解析失败，原始数据备份:\n" + raw_backup,
+                                            "workflow": None,
+                                            "steps": [],
+                                            "report": None,
+                                        }
+                                    break
                         yield event
                 except Exception as e:
                     logger.error(f"❌ SSE 流式传输错误: {e}", exc_info=True)
@@ -2255,6 +2303,9 @@ async def chat_endpoint(
                     yield error_event
                 finally:
                     # Phase 4: 流结束后写 agent 消息（有状态切片入库，废弃 content.events）
+                    # 🔥 强制快照同步：前端传来的 workflow_data 含真实 enabled/selected，必须原样写入快照
+                    if req.workflow_data and state_snapshot_for_db is not None:
+                        state_snapshot_for_db["workflow"] = req.workflow_data
                     try:
                         content = {"state_snapshot": state_snapshot_for_db if state_snapshot_for_db is not None else {"text": "", "workflow": None, "steps": [], "report": None}}
                         msg = MessageModel(session_id=req.session_id, role="agent", content=content)
@@ -2263,8 +2314,15 @@ async def chat_endpoint(
                         # 下发 message_saved 事件，前端可绑定到当前 AI 气泡的 dataset.messageId（commit 后 msg.id 已填充）
                         if getattr(msg, "id", None) is not None:
                             yield f"event: message_saved\ndata: {json.dumps({'message_id': msg.id}, ensure_ascii=False)}\n\n"
+                    except (DataError, OperationalError) as db_err:
+                        logger.error(
+                            "❌ [Chat] Agent 消息入库失败（数据库错误，可能超出 max_allowed_packet 或字段限制）: %s",
+                            db_err,
+                            exc_info=True,
+                        )
+                        db.rollback()
                     except Exception as persist_err:
-                        logger.warning("⚠️ [Chat] Agent 消息入库失败: %s", persist_err)
+                        logger.error("❌ [Chat] Agent 消息入库失败: %s", persist_err, exc_info=True)
                         db.rollback()
                     # 恢复各 agent 原有 LLM 客户端
                     if original_llm_clients and hasattr(agent, "agents"):
@@ -2306,6 +2364,20 @@ async def chat_endpoint(
             try:
                 # 🔧 修复：优先使用 workflow_data 中的 file_paths（前端已经设置好）
                 file_paths = req.workflow_data.get("file_paths", [])
+                # 🔥 拆开逗号/分号拼接的路径（历史或旧前端可能传 "path1; path2" 单字符串），保证每条独立
+                _flat = []
+                for p in file_paths or []:
+                    s = (p if isinstance(p, str) else str(p)).strip()
+                    if not s:
+                        continue
+                    if ";" in s or "," in s:
+                        for part in s.replace(";", ",").split(","):
+                            t = part.strip()
+                            if t:
+                                _flat.append(t)
+                    else:
+                        _flat.append(s)
+                file_paths = _flat
                 logger.info(f"📁 从 workflow_data 获取的文件路径: {file_paths}")
                 
                 # 如果 workflow_data 中没有 file_paths，再从 uploaded_files 中提取
