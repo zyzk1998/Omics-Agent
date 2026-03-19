@@ -1323,7 +1323,12 @@ Use Simplified Chinese for all content."""
             is_rna_analysis = omics_type.lower() in ["scrna", "scrna-seq", "single_cell", "single-cell", "rna", "rna-seq"]
             is_spatial_analysis = omics_type.lower() in ["spatial", "visium", "spatial transcriptomics"]
             is_radiomics_analysis = omics_type.lower() in ["radiomics", "imaging"]
-            
+            is_sted_ec_analysis = (
+                "sted" in (omics_type or "").lower()
+                or "sted_ec" in (omics_type or "").lower()
+                or (workflow_name and ("sted" in (workflow_name or "").lower() or "轨迹" in (workflow_name or "")))
+            )
+
             if is_spatial_analysis:
                 key_findings = {
                     "n_spots": "N/A",
@@ -1341,6 +1346,14 @@ Use Simplified Chinese for all content."""
                     "rad_score": "N/A",
                     "risk_probability": "N/A",
                     "top_features": [],
+                }
+            elif is_sted_ec_analysis:
+                key_findings = {
+                    "n_cells": "N/A",
+                    "time_key": "N/A",
+                    "cell_type_key": "N/A",
+                    "n_timepoints": "N/A",
+                    "trajectory_summary": "N/A",
                 }
             elif is_rna_analysis:
                 key_findings = {
@@ -1418,8 +1431,8 @@ Use Simplified Chinese for all content."""
                         pc2_val = str(pc2_var)
                     
                     key_findings["pca_variance"] = {"PC1": pc1_val, "PC2": pc2_val}
-                    # 🔥 修复：pca_separation只在代谢组学分析中存在（非 RNA、非 Spatial）
-                    if not is_rna_analysis and not is_spatial_analysis and not is_radiomics_analysis:
+                    # 🔥 修复：pca_separation只在代谢组学分析中存在（非 RNA、非 Spatial、非 STED-EC）
+                    if not is_rna_analysis and not is_spatial_analysis and not is_radiomics_analysis and not is_sted_ec_analysis:
                         if separation == "clear":
                             key_findings["pca_separation"] = f"清晰分离 (PC1: {pc1_var}, PC2: {pc2_var})"
                         else:
@@ -1457,8 +1470,8 @@ Use Simplified Chinese for all content."""
                         key_findings["rad_score"] = step_info.get("rad_score", step_info.get("score", "N/A"))
                         key_findings["risk_probability"] = step_info.get("risk_probability", step_info.get("probability", "N/A"))
                 
-                # 🔥 修复：只提取关键计数，不包含完整的top_up/top_down列表（仅代谢组学，非 Spatial）
-                if not is_rna_analysis and not is_spatial_analysis and not is_radiomics_analysis and "differential" in step_name:
+                # 🔥 修复：只提取关键计数，不包含完整的top_up/top_down列表（仅代谢组学，非 Spatial/STED-EC）
+                if not is_rna_analysis and not is_spatial_analysis and not is_radiomics_analysis and not is_sted_ec_analysis and "differential" in step_name:
                     sig_count = step_info.get("significant_count", "N/A")
                     total_count = step_info.get("total_count", "N/A")
                     # 🔥 不提取top_up和top_down列表（可能很长），只使用计数
@@ -1481,8 +1494,8 @@ Use Simplified Chinese for all content."""
                         # Fallback to top_up_names（如果存在）
                         key_findings["top_differential_metabolites"] = step_info.get("top_up_names", [])[:3]
                 
-                # 🔥 修复：只提取top VIP代谢物名称，不包含完整数据（仅代谢组学，非 Spatial）
-                if not is_rna_analysis and not is_spatial_analysis and not is_radiomics_analysis and ("plsda" in step_name or "pls-da" in step_name):
+                # 🔥 修复：只提取top VIP代谢物名称，不包含完整数据（仅代谢组学，非 Spatial/STED-EC）
+                if not is_rna_analysis and not is_spatial_analysis and not is_radiomics_analysis and not is_sted_ec_analysis and ("plsda" in step_name or "pls-da" in step_name):
                     top_vip = step_info.get("top_vip_markers", [])
                     if top_vip:
                         # Extract metabolite NAMES only (for biological interpretation)
@@ -1490,8 +1503,8 @@ Use Simplified Chinese for all content."""
                             v.get('name', 'Unknown') for v in top_vip[:3]  # 🔥 只保留top 3
                         ]
                 
-                # 🔥 修复：只提取top通路名称，不包含完整数据（仅代谢组学，非 Spatial）
-                if not is_rna_analysis and not is_spatial_analysis and not is_radiomics_analysis and ("pathway" in step_name or "enrichment" in step_name):
+                # 🔥 修复：只提取top通路名称，不包含完整数据（仅代谢组学，非 Spatial/STED-EC）
+                if not is_rna_analysis and not is_spatial_analysis and not is_radiomics_analysis and not is_sted_ec_analysis and ("pathway" in step_name or "enrichment" in step_name):
                     top_pathways = step_info.get("top_pathways", [])
                     if top_pathways:
                         # Extract pathway NAMES only (for biological interpretation)
@@ -1539,15 +1552,44 @@ Use Simplified Chinese for all content."""
             
             logger.info(f"📊 [AnalysisSummary] execution_results_text长度: {len(execution_results_text)}字符")
             
-            if is_spatial_analysis:
+            if is_sted_ec_analysis:
+                critical_instruction_text = (
+                    "你是一位顶尖的单细胞与发育生物学专家。请根据以下 STED-EC (基于最优传输的单细胞时空轨迹推断) 的执行日志和图表数据，撰写一份专业的分析报告。"
+                    "报告需包含以下结构：\n"
+                    "1. 📊 时空分布概览 (Spatiotemporal Overview)：解读细胞在时间序列上的整体发育趋势与 UMAP 分布特征。\n"
+                    "2. 🧬 细胞命运与演化动力学 (Cell Fate Dynamics)：基于细胞类型演化堆叠图，分析关键细胞亚群的扩增、衰退或分化轨迹。\n"
+                    "3. 🔬 潜在生物学机制 (Biological Insights)：推测这些轨迹变化背后的生物学意义（如器官发育、疾病进展等）。\n"
+                    "4. 💡 结论与建议 (Conclusions & Next Steps)：总结核心发现，并为后续的基因调控网络 (GRN) 或空间转录组验证提供建议。\n"
+                    "请保持客观、专业的学术口吻，使用 Markdown 格式输出。"
+                )
+            elif is_spatial_analysis:
                 critical_instruction_text = "Analyze Spatial transcriptomics (10x Visium) results. Discuss: (1) Tissue Architecture and Clusters (spatial domains, Leiden); (2) Spatially Variable Genes (SVGs, Moran's I); (3) Biological Functions (pathway enrichment if present). Use terminology: Spots, Clusters, Spatial Domains, Gene Expression, Moran's I, SVGs. DO NOT use Metabolomics terms (no metabolites, LC-MS, or differential metabolites). Generate a structured Markdown report."
             elif is_radiomics_analysis:
                 critical_instruction_text = "You are a Medical Imaging Expert. Summarize the radiomics analysis. Mention: Image Dimensions, Mask Alignment, Texture Features (shape, first-order, GLCM), and Rad-Score / risk probability. Use terminology: ROI, mask, PyRadiomics, NIfTI, DICOM. DO NOT mention Metabolites, LC-MS, Genes, or transcriptomics. Generate a structured Markdown report in Simplified Chinese."
             else:
                 critical_instruction_text = "Based on the provided metrics above, interpret the biological significance. Use your internal knowledge base (PubMed/Literature) to explain **WHY** these specific metabolites/pathways might be altered in this context. Generate a structured Markdown report with deep biological interpretation."
-            
-            # 空间/影像组学使用专用输出结构，禁止出现其他领域术语
-            if is_spatial_analysis:
+
+            # 空间/影像/STED-EC 使用专用输出结构，禁止出现其他领域术语
+            if is_sted_ec_analysis:
+                output_structure_section = """
+### 1. 📊 时空分布概览 (Spatiotemporal Overview)
+- 解读细胞在时间序列上的整体发育趋势与 UMAP 分布特征
+- 数据质量与时间点覆盖简要说明
+
+### 2. 🧬 细胞命运与演化动力学 (Cell Fate Dynamics)
+- 基于细胞类型演化堆叠图，分析关键细胞亚群的扩增、衰退或分化轨迹
+- 使用 Optimal Transport、Moscot、时空轨迹等术语
+
+### 3. 🔬 潜在生物学机制 (Biological Insights)
+- 推测这些轨迹变化背后的生物学意义（如器官发育、疾病进展等）
+
+### 4. 💡 结论与建议 (Conclusions & Next Steps)
+- 总结核心发现
+- 为后续的基因调控网络 (GRN) 或空间转录组验证提供建议
+
+**禁止**：不要套用代谢组学模板（勿提及代谢物、LC-MS、VIP、差异代谢物等）。仅使用单细胞时空轨迹与发育生物学术语。
+"""
+            elif is_spatial_analysis:
                 output_structure_section = """
 ### 1. 统计概览 (Statistical Overview) — 空间转录组
 - 定量总结：Spot 数量、基因数量、Leiden 聚类数、PCA 方差解释（PC1/PC2）

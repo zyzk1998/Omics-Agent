@@ -49,6 +49,13 @@ services:
     image: gibh-v2-api:latest
     container_name: gibh_v2_api
     restart: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     ports:
       - "8028:8028"  # 直接暴露 API 服务器端口
     # 绝对持久化：uploads/results 挂载到宿主机 ./data，容器重建不丢
@@ -69,7 +76,7 @@ services:
       - NUMBA_CACHE_DIR=/home/appuser/.cache/numba
       - MPLCONFIGDIR=/home/appuser/.config/matplotlib
       - HOME=/home/appuser
-      # 禁用 Numba 缓存调试（帮助解决缓存问题）
+      - NUMBA_DISABLE_JIT_CACHING=1
       - NUMBA_DEBUG_CACHE=1
       # Phase 1: MySQL 连接（可选，未配置时应用仍可启动）
       - MYSQL_HOST=mysql
@@ -141,7 +148,7 @@ services:
       - NUMBA_CACHE_DIR=/home/appuser/.cache/numba
       - MPLCONFIGDIR=/home/appuser/.config/matplotlib
       - HOME=/home/appuser
-      # 禁用 Numba 缓存调试（帮助解决缓存问题）
+      - NUMBA_DISABLE_JIT_CACHING=1
       - NUMBA_DEBUG_CACHE=1
     volumes:
       - .:/app

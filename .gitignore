@@ -59,6 +59,8 @@ config/settings.local.yaml
 
 # 测试数据目录（大文件，不提交）
 test_data/
+test_data_run/
+results_full/
 *.tar
 *.tar.gz
 *.fastq.gz

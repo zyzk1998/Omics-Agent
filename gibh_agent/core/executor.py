@@ -191,6 +191,63 @@ class WorkflowExecutor:
         logger.error(f"❌ [Path Resolver] {error_msg}")
         raise FileNotFoundError(error_msg)
 
+    def _to_results_url(self, raw_path: Any) -> Any:
+        """将工具返回的物理路径规范化为 /results/... URL（用于 SSE 与 state_snapshot 持久化一致性）。"""
+        if not isinstance(raw_path, str):
+            return raw_path
+        p = raw_path.strip()
+        if not p:
+            return p
+        if p.startswith("/results/") or p.startswith("/uploads/") or p.startswith("http://") or p.startswith("https://"):
+            return p
+        results_prefix = str(self.results_dir).rstrip("/")
+        if p.startswith(results_prefix + "/") or p == results_prefix:
+            rel = p[len(results_prefix):].lstrip("/")
+            return f"/results/{rel}" if rel else "/results"
+        if p.startswith("results/"):
+            return "/" + p
+        if p.startswith("/app/results/"):
+            return "/results/" + p[len("/app/results/"):]
+        # 其他相对路径按 run 目录兜底（与 server.py 逻辑对齐）
+        run_name = os.path.basename(self.output_dir or "").strip()
+        if run_name and "/" not in p:
+            return f"/results/{run_name}/{p}"
+        if p.startswith("/"):
+            return p
+        return f"/results/{p}"
+
+    def _normalize_result_paths(self, payload: Any) -> Any:
+        """递归规范化结果中的图片/下载链接/常见路径字段。"""
+        if isinstance(payload, dict):
+            out: Dict[str, Any] = {}
+            for k, v in payload.items():
+                if k in (
+                    "path", "plot_path", "output_plot_path", "h5ad_path", "trajectory_data_path",
+                    "tmaps_dir", "output_path", "output_file", "file_path", "zip_path",
+                ):
+                    out[k] = self._to_results_url(v)
+                elif k == "download_links" and isinstance(v, list):
+                    fixed = []
+                    for item in v:
+                        if isinstance(item, dict):
+                            item = {**item, "path": self._to_results_url(item.get("path"))}
+                        fixed.append(item)
+                    out[k] = fixed
+                elif k == "images" and isinstance(v, list):
+                    fixed_imgs = []
+                    for item in v:
+                        if isinstance(item, dict):
+                            fixed_imgs.append({**item, "path": self._to_results_url(item.get("path"))})
+                        else:
+                            fixed_imgs.append(self._to_results_url(item))
+                    out[k] = fixed_imgs
+                else:
+                    out[k] = self._normalize_result_paths(v)
+            return out
+        if isinstance(payload, list):
+            return [self._normalize_result_paths(x) for x in payload]
+        return payload
+
     @staticmethod
     def _coerce_value(annotation: Any, value: Any) -> Any:
         """根据参数注解将 LLM 输出的值转换为目标类型。转换失败返回 _COERCE_FAILED，由调用方丢弃该参数，避免毒药透传导致底层 TypeError。"""
@@ -1011,8 +1068,8 @@ class WorkflowExecutor:
                 if isinstance(v, str) and "<output_dir>" in v:
                     processed[k] = v.replace("<output_dir>", out_dir)
 
-        # STED-EC：从数据校验步骤向时间序列标准化与 moscot 步骤注入 time_key / cell_type_key
-        if current_tool_id in ("sted_ec_time_series_formatting", "sted_ec_moscot_trajectory"):
+        # STED-EC：从数据校验步骤向时间序列标准化、moscot、轨迹可视化 三步注入 time_key / cell_type_key，避免画图步骤只出 1 张图
+        if current_tool_id in ("sted_ec_time_series_formatting", "sted_ec_moscot_trajectory", "sted_ec_plot_trajectory"):
             pre = self.step_results.get("sted_ec_data_validation")
             if isinstance(pre, dict) and pre.get("status") == "success":
                 if pre.get("time_key"):
@@ -1203,14 +1260,21 @@ class WorkflowExecutor:
         logger.info(f"📋 步骤数: {len(steps)}")
         logger.info("=" * 80)
         
-        # 设置输出目录
+        # 设置输出目录：与前端/API 一致，统一使用 RESULTS_DIR 下的可写绝对路径，避免相对路径导致权限或 cwd 依赖问题
         if output_dir is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_dir = f"./results/run_{timestamp}"
+            base = os.path.abspath(self.results_dir)
+            output_dir = os.path.join(base, f"run_{timestamp}")
         
         output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
-        self.output_dir = str(output_path)
+        try:
+            output_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning("⚠️ [Executor] 默认结果目录不可写 %s，尝试使用当前目录下 results: %s", output_dir, e)
+            output_dir = os.path.join(os.getcwd(), "results", f"run_{timestamp}")
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+        self.output_dir = str(output_path.resolve())
         
         logger.info(f"📂 输出目录: {self.output_dir}")
         
@@ -1283,6 +1347,7 @@ class WorkflowExecutor:
                                 "name": step_name,
                                 "status": "success",
                                 "summary": "10x格式已自动转换为h5ad格式",
+                                "duration": 0,
                                 "step_result": {
                                     "step_name": step_name,
                                     "status": "success",
@@ -1310,6 +1375,7 @@ class WorkflowExecutor:
                             "name": step_name,
                             "status": "skipped",
                             "summary": "步骤已跳过：输入文件已经是10x格式",
+                            "duration": 0,
                             "step_result": {
                                 "step_name": step_name,
                                 "status": "skipped",
@@ -1460,15 +1526,24 @@ class WorkflowExecutor:
             # 构建步骤详情（符合前端格式）；data 合并顶层 plot_path/output_plot_path 以便前端报告渲染
             result_data = step_result.get("result", {}) or {}
             if isinstance(result_data, dict):
+                # 🔥 强制前置路径规范化：SSE 实时流与 state_snapshot 入库前统一为 /results/... URL
+                result_data = self._normalize_result_paths(result_data)
+            if isinstance(result_data, dict):
                 for k in ("plot_path", "output_plot_path", "lollipop_path", "clustermap_path"):
                     if step_result.get(k) and k not in result_data:
                         result_data = {**result_data, k: step_result.get(k)}
+                # STED-EC 等工具返回 report_data.images: [{title, path}]，展平为 data.images 供前端与 server 路径标准化使用
+                rp_images = (result_data.get("report_data") or {}).get("images") or []
+                if rp_images and "images" not in result_data:
+                    result_data["images"] = [
+                        p.get("path") if isinstance(p, dict) else p for p in rp_images
+                    ]
             step_detail = {
                 "step_id": step_id,
                 "tool_id": step.get("tool_id"),
                 "name": step_name,
                 "status": step_result.get("status", "error"),
-                "summary": step_result.get("message", ""),
+                "summary": step_result.get("message", "") or step_result.get("summary", ""),
                 "step_result": {
                     "step_name": step_name,
                     "status": step_result.get("status", "error"),
@@ -1504,14 +1579,15 @@ class WorkflowExecutor:
                 img_cand = result_data.get("image_path") or result_data.get("lollipop_path") or result_data.get("clustermap_path")
                 if img_cand and self._is_image_file(img_cand):
                     cand = img_cand
-            plot_path = cand
+            plot_path = self._to_results_url(cand)
             path_lower = (plot_path or "").lower()
             if plot_path and self._is_image_file(plot_path) and not path_lower.endswith(".nii.gz") and not path_lower.endswith(".nii") and not path_lower.endswith(".dcm"):
                 step_detail["plot"] = plot_path
                 logger.info(f"🖼️ 检测到图片文件: {plot_path}")
             elif plot_path:
                 logger.debug(f"📄 跳过非可展示文件作为 plot: {plot_path}")
-            
+            # 🔥 时光机：单步耗时入快照，供历史还原「耗时 Xs」
+            step_detail["duration"] = round(time.time() - tool_start, 1)
             steps_details.append(step_detail)
             steps_results.append(step_detail["step_result"])
             

@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+# 启用 BuildKit 以支持 RUN --mount=type=cache（pip 缓存加速重建）
 FROM python:3.9-slim
 
 WORKDIR /app
@@ -38,9 +40,10 @@ RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && 
 # 先复制依赖文件（利用 Docker 层缓存）
 COPY requirements.txt .
 
-# 安装 Python 依赖（这一层会被缓存，除非 requirements.txt 改变）
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# 安装 Python 依赖（层缓存失效时用 BuildKit 缓存挂载加速 pip 下载；需 DOCKER_BUILDKIT=1）
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip && \
+    pip install -r requirements.txt
 
 # 最后复制项目代码（代码变化时只需要重新构建这一层）
 # 使用 .dockerignore 排除大文件，只复制必要的代码

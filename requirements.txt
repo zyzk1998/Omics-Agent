@@ -60,9 +60,9 @@ cryptography>=41.0.0
 pwdlib[bcrypt]
 python-jose[cryptography]>=3.3.0
 
-# --- STED-EC Trajectory Inference (moscot 0.3.5 支持 pandas>=2，ott-jax 0.4.6 与 jax 0.4.x 兼容) ---
+# --- STED-EC Trajectory Inference（GPU：jax 与 jaxlib 必须同版本，否则 RuntimeError）---
 moscot==0.3.5
 ott-jax==0.4.6
-jax==0.4.20
+jax[cuda12]==0.4.20
 jaxlib==0.4.20
 

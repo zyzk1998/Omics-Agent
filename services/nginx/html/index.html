@@ -506,6 +506,11 @@
             }
             #workspace-header .workspace-title { font-size: 14px; font-weight: 600; color: #111827; }
             #workspace-header .workspace-actions { display: flex; align-items: center; gap: 8px; }
+            .execution-instance-highlight {
+                outline: 3px solid #3b82f6;
+                outline-offset: 4px;
+                border-radius: 10px;
+            }
             /* 底部工具栏：上传、模型、MCP、发送 */
             .chat-input-panel .toolbar {
                 display: flex;
@@ -1048,7 +1053,14 @@
             .message-container { max-width: 100%; flex: 1; min-width: 0; }
             .message-row.user .message-container { flex: initial; max-width: 85%; display: flex; flex-direction: column; align-items: flex-end; }
 
-            /* 🔥 CRITICAL: 三个独立区域的样式 */
+            /* 🔥 CRITICAL: 消息气泡内 4 个物理隔离容器，顺序固定 1→2→3→4，严禁整泡覆盖 */
+            .bubble > .reasoning-container,
+            .bubble > .text-container,
+            .bubble > .log-container,
+            .bubble > .workflow-container {
+                width: 100%;
+                min-width: 0;
+            }
             .message-content {
                 display: flex;
                 flex-direction: column;
@@ -2261,6 +2273,7 @@
                     <span id="workspace-task-title" class="workspace-title">分析报告</span>
                     <div class="workspace-actions">
                         <button type="button" class="header-action-btn" id="btn-workspace-print" title="打印/下载报告">🖨️ 打印/下载报告</button>
+                        <button type="button" class="header-action-btn" id="btn-workspace-expand-all" title="查看所有运行结果">查看所有运行结果</button>
                         <button type="button" class="icon-btn" id="btn-workspace-close" title="关闭工作台">✕</button>
                     </div>
                 </header>
@@ -2603,7 +2616,7 @@
                     sub_category: '轨迹推断',
                     description: '基于最优传输理论 (Optimal Transport) 的单细胞时空轨迹推断工具。通过整合单细胞转录组与时间序列信息，精准重构细胞发育、分化或疾病演进的动态轨迹，揭示细胞命运决定的关键调控机制。',
                     tags: ['单细胞', '轨迹推断', '最优传输', '时序分析'],
-                    prompt_template: '请执行单细胞时空轨迹推断：基于最优传输理论，对时间序列单细胞数据做轨迹推断，重构发育/分化或疾病演进动态轨迹。'
+                    prompt_template: '请帮我执行单细胞时空轨迹推断分析。我希望基于最优传输理论 (Optimal Transport)，探索细胞在时间序列上的发育与分化轨迹。\n\n期望的分析流程如下：\n1. [数据与元数据校验]：严格校验表达矩阵，并嗅探时间序列与细胞类型注释。\n2. [时间序列标准化]：智能清洗时间标签，将其转化为算法可识别的连续数值。\n3. [最优传输轨迹推断]：调用 Moscot 引擎，计算相邻时间点细胞的转移概率矩阵 (Transport Matrices)。\n4. [轨迹可视化]：绘制时空分布 UMAP 图，以及细胞类型演化的动态堆叠柱状图。\n\n请直接为我生成该工作流的配置面板。'
                 }
             ];
 
@@ -3872,7 +3885,17 @@
                     var sub = isSkipped ? '条件不足，已跳过' : (step.duration != null ? ('耗时 ' + (typeof step.duration === 'number' ? step.duration.toFixed(1) : step.duration) + 's') : (step.summary || ''));
                     var item = document.createElement('div');
                     item.className = 'checklist-item';
-                    item.innerHTML = '<span class="checklist-icon ' + iconClass + '">' + iconChar + '</span><div class="checklist-content"><span class="checklist-title">' + (name || '').replace(/</g, '&lt;') + '</span>' + (sub ? '<span class="checklist-subtitle">' + (sub + '').replace(/</g, '&lt;') + '</span>' : '') + '</div>';
+                    var subHtml = '';
+                    if (sub) {
+                        try {
+                            subHtml = (typeof safeMarkedParse === 'function')
+                                ? '<div class="checklist-subtitle">' + safeMarkedParse(String(sub)) + '</div>'
+                                : '<div class="checklist-subtitle">' + (sub + '').replace(/</g, '&lt;') + '</div>';
+                        } catch (e) {
+                            subHtml = '<div class="checklist-subtitle">' + (sub + '').replace(/</g, '&lt;') + '</div>';
+                        }
+                    }
+                    item.innerHTML = '<span class="checklist-icon ' + iconClass + '">' + iconChar + '</span><div class="checklist-content"><span class="checklist-title">' + (name || '').replace(/</g, '&lt;') + '</span>' + subHtml + '</div>';
                     list.appendChild(item);
                 });
                 logZone.appendChild(container);
@@ -3890,15 +3913,16 @@
                     if (!p || typeof p !== 'string') return '';
                     if (/^https?:\/\//i.test(p)) return p;
                     var src = String(p).trim();
-                    // 将后端物理绝对路径 /app/uploads 映射为前端静态路由 /results，避免请求 /results/app/uploads/... 导致 404
+                    // 将后端物理绝对路径映射为前端静态路由
                     if (src.indexOf('/app/uploads') !== -1) {
                         src = src.replace('/app/uploads', '/results');
                     } else if (src.indexOf('app/uploads') === 0) {
                         src = '/results/' + src.replace(/^app\/uploads\/?/, '');
+                    } else if (src.indexOf('/app/test_data') !== -1) {
+                        src = src.replace(/\/app\/test_data/, '/results/test_data');
                     } else if (src.indexOf('/results') !== 0 && src.indexOf('http') !== 0) {
                         src = (src.indexOf('/') === 0 ? src : '/results/' + src.replace(/^results\/?/, ''));
                     }
-                    // 避免双重拼接 /results/results/
                     src = src.replace(/\/results\/results\//g, '/results/');
                     return src || p;
                 }
@@ -3937,17 +3961,62 @@
                     var list = execWrap.querySelector('.snapshot-steps');
                     stepsDetails.forEach(function(step, idx) {
                         var name = step.step_name || step.name || step.step_id || step.tool_id || ('步骤 ' + (idx + 1));
-                        var plot = step.plot || (step.step_result && step.step_result.plot_path) || (step.data && step.data.plot_path);
-                        var images = (step.step_result && step.step_result.data && step.step_result.data.images) || (step.data && step.data.images) || [];
+                        var stepResult = step.step_result || {};
+                        var stepData = stepResult.data || step.data || {};
+                        var reportData = stepResult.report_data || (stepData && stepData.report_data) || {};
+                        var plot = step.plot || stepResult.plot_path || (stepData && stepData.plot_path);
+                        var images = (stepData && stepData.images) || [];
                         if (plot && !images.length) images = [plot];
-                        var tables = (step.step_result && step.step_result.data && step.step_result.data.tables) || (step.data && step.data.tables) || [];
+                        var tables = (stepData && stepData.tables) || [];
+                        var summary = step.summary || (stepResult && stepResult.summary) || (stepData && stepData.summary) || '';
+                        var duration = step.duration != null ? step.duration : (stepResult && stepResult.duration);
+                        var metrics = (stepData && stepData.metrics) || (stepResult && stepResult.metrics) || {};
+                        var downloadLinks = (reportData && reportData.download_links) || [];
                         var stepId = 'collapse-step-' + accordionId + '-' + idx;
                         var contentHtml = '';
+                        // 🔥 历史 100% 镜像：摘要（Markdown）在图表上方
+                        if (summary && typeof summary === 'string' && summary.trim()) {
+                            var summaryRendered = '';
+                            try {
+                                summaryRendered = (options && typeof options.markdown === 'function') ? options.markdown(summary) : (typeof safeMarkedParse === 'function' ? safeMarkedParse(summary) : esc(summary));
+                            } catch (e) {
+                                summaryRendered = esc(summary);
+                            }
+                            contentHtml += '<div class="mt-2 step-summary-content" style="font-size:13px;line-height:1.7;padding:0 0 0 10px;border-left:3px solid #94a3b8;overflow:auto;">' + summaryRendered + '</div>';
+                        }
+                        // 🔥 历史 100% 镜像：metrics 徽章（与直播流一致）
+                        if (metrics && typeof metrics === 'object' && Object.keys(metrics).length > 0) {
+                            contentHtml += '<div class="mt-2">';
+                            Object.keys(metrics).forEach(function(k) {
+                                var v = metrics[k];
+                                contentHtml += '<span class="badge bg-secondary me-1">' + esc(k) + ': ' + esc(String(v != null ? v : '')) + '</span>';
+                            });
+                            contentHtml += '</div>';
+                        }
                         if (images && images.length > 0) {
                             images.filter(Boolean).forEach(function(src) {
-                                var url = normImgPath(src);
+                                var imgSrc = (typeof src === 'string') ? src : (src && src.path);
+                                var url = normImgPath(imgSrc);
                                 if (url) contentHtml += '<div class="mt-2 mb-2"><img src="' + esc(url) + '" class="report-image img-fluid rounded border" style="max-width:100%;cursor:zoom-in;" onerror="this.style.display=\'none\'"></div>';
                             });
+                        }
+                        // 🔥 历史 100% 镜像：下载按钮（tmaps zip 等），与直播流 URL 逻辑一致
+                        if (downloadLinks && downloadLinks.length > 0) {
+                            contentHtml += '<div class="mt-4 text-center">';
+                            downloadLinks.forEach(function(link) {
+                                var linkPath = (link && link.path) ? link.path : (typeof link === 'string' ? link : '');
+                                var linkTitle = (link && link.title) ? link.title : '📦 下载完整结果';
+                                if (!linkPath) return;
+                                var linkUrl = normImgPath(linkPath);
+                                if (!linkUrl) {
+                                    linkUrl = String(linkPath).replace(/^\/app\/results\//, '').replace(/^\/app\/uploads\//, '').replace(/^\/app\//, '');
+                                    if (linkUrl.indexOf('results/') === 0) linkUrl = '/' + linkUrl;
+                                    else if (linkUrl.indexOf('uploads/') === 0) linkUrl = '/uploads/' + linkUrl.replace(/^uploads\/?/, '');
+                                    else linkUrl = '/results/' + (linkUrl.replace(/^results\/?/, ''));
+                                }
+                                contentHtml += '<a href="' + esc(linkUrl) + '" target="_blank" rel="noopener" class="btn btn-sm btn-primary ms-2"><i class="bi bi-file-earmark-zip"></i> ' + esc(linkTitle) + '</a>';
+                            });
+                            contentHtml += '</div>';
                         }
                         if (tables && Array.isArray(tables) && tables.length > 0) {
                             var rows = tables[0];
@@ -3961,10 +4030,11 @@
                                 contentHtml += '</tbody></table></div>';
                             }
                         }
+                        var durationHtml = (duration != null && duration !== '') ? ('<div class="checklist-subtitle step-duration text-muted small mt-1">耗时 ' + (typeof duration === 'number' ? duration.toFixed(1) : duration) + 's</div>') : '';
                         var itemHtml = '<div class="accordion-item snapshot-step-section">' +
                             '<h2 class="accordion-header">' +
-                            '<button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#' + stepId + '" aria-expanded="true">' +
-                            '<span class="checklist-icon icon-success me-2">✓</span>' + esc(name) +
+                            '<button class="accordion-button text-start" type="button" data-bs-toggle="collapse" data-bs-target="#' + stepId + '" aria-expanded="true">' +
+                            '<span class="checklist-icon icon-success me-2">✓</span><div class="flex-grow-1"><span class="checklist-title">' + esc(name) + '</span>' + durationHtml + '</div>' +
                             '</button></h2>' +
                             '<div id="' + stepId + '" class="accordion-collapse collapse show">' +
                             '<div class="accordion-body">' + (contentHtml || '') + '</div></div></div>';
@@ -3979,17 +4049,53 @@
                     var visWrap = document.createElement('div');
                     visWrap.className = 'report-visuals mt-4';
                     visWrap.innerHTML = '<h6 class="text-muted mb-2">图表</h6>';
-                    topImages.forEach(function(src) {
+                    topImages.forEach(function(item) {
+                        var src = (typeof item === 'string') ? item : (item && item.path);
+                        var title = (item && typeof item === 'object' && item.title) ? item.title : null;
                         var url = normImgPath(src);
                         if (url) {
-                            var img = document.createElement('div');
-                            img.className = 'mt-2 mb-2';
-                            img.innerHTML = '<img src="' + esc(url) + '" class="report-image img-fluid rounded border" style="max-width:100%;cursor:zoom-in;" onerror="this.style.display=\'none\'">';
-                            visWrap.appendChild(img);
+                            var block = document.createElement('div');
+                            block.className = 'mt-2 mb-2';
+                            if (title) block.innerHTML = '<p class="small text-muted mb-1">' + esc(title) + '</p>';
+                            var imgEl = document.createElement('img');
+                            imgEl.src = url;
+                            imgEl.className = 'report-image img-fluid rounded border';
+                            imgEl.style.cssText = 'max-width:100%;cursor:zoom-in;';
+                            imgEl.onerror = function() { this.style.display = 'none'; };
+                            block.appendChild(imgEl);
+                            visWrap.appendChild(block);
                         }
                     });
                     body.appendChild(visWrap);
                 }
+                // 🔥 时光机：建议 chips 与质量评估（数据在 report_data，历史还原时一并展示）
+                var suggestions = (rd && rd.suggestions) ? rd.suggestions : (reportData.report_data && reportData.report_data.suggestions) ? reportData.report_data.suggestions : [];
+                if (Array.isArray(suggestions) && suggestions.length > 0) {
+                    var sugWrap = document.createElement('div');
+                    sugWrap.className = 'report-suggestions mt-4';
+                    sugWrap.innerHTML = '<h6 class="text-muted mb-2">后续建议</h6>';
+                    var chipContainer = document.createElement('div');
+                    chipContainer.className = 'd-flex flex-wrap gap-2';
+                    suggestions.forEach(function(s) {
+                        var label = (typeof s === 'string') ? s : (s && s.label) ? s.label : String(s);
+                        var chip = document.createElement('span');
+                        chip.className = 'badge bg-light text-dark border suggestion-chip';
+                        chip.textContent = label;
+                        chipContainer.appendChild(chip);
+                    });
+                    sugWrap.appendChild(chipContainer);
+                    body.appendChild(sugWrap);
+                }
+                // 🔥 质量评估模块已下线，暂不在 UI 展示
+                // var evaluation = (rd && rd.evaluation) ? rd.evaluation : (reportData.report_data && reportData.report_data.evaluation) ? reportData.report_data.evaluation : null;
+                // if (evaluation && typeof evaluation === 'object') {
+                //     var evalWrap = document.createElement('div');
+                //     evalWrap.className = 'report-evaluation mt-4';
+                //     var score = evaluation.score != null ? evaluation.score : evaluation.score_value;
+                //     var comment = evaluation.comment || evaluation.feedback || evaluation.summary || '';
+                //     evalWrap.innerHTML = '<h6 class="text-muted mb-2">质量评估</h6><div class="report-content-box" style="font-size:14px;line-height:1.6;color:#333;background:#f8f9fa;padding:12px;border-radius:8px;border-left:4px solid #6c757d">' + (score != null ? '<p class="mb-1"><strong>得分：</strong>' + esc(String(score)) + '</p>' : '') + (comment ? '<p class="mb-0">' + textToHtml(comment, true) + '</p>' : '') + '</div>';
+                //     body.appendChild(evalWrap);
+                // }
                 targetContainer.appendChild(root);
             }
             // 🔥 内部：仅渲染工作流卡片到 targetZone，返回 formId（供 renderStaticHistorySnapshot 调用）；messageId 用于 data-message-id 与自动保存
@@ -4129,14 +4235,16 @@
                 if (snap.workflow && targetZone) {
                     try { formId = _renderStaticWorkflowCard(snap.workflow, targetZone, messageId); } catch (e) { console.warn('[Snapshot] _renderStaticWorkflowCard:', e); }
                 }
-                if (snap.steps && Array.isArray(snap.steps) && snap.steps.length > 0 && logZone) {
+                // 已有 process_log 时 logZone 已在 createRestoreAIMessageRowWithSnapshot 中填充，不重复
+                if (snap.steps && Array.isArray(snap.steps) && snap.steps.length > 0) {
                     var normalized = snap.steps.filter(Boolean).map(function(s) {
                         var c = {}; for (var k in s) c[k] = s[k];
                         var st = (s.status || '').toLowerCase();
                         c.status = (st === 'running' || st === 'pending') ? 'pending' : (s.status || 'success');
                         return c;
                     });
-                    renderStaticChecklistToLogZone(logZone, normalized);
+                    if (logZone && (!snap.process_log || snap.process_log.length === 0))
+                        renderStaticChecklistToLogZone(logZone, normalized);
                     if (typeof renderExecutionSteps === 'function') renderExecutionSteps(normalized);
                 }
                 if (snap.report) {
@@ -4155,11 +4263,38 @@
                 }
                 return formId;
             }
-            // 🔥 历史恢复（状态快照注水）：入参为 msg.content.state_snapshot，瞬间渲染，无闪烁、无 visibility  hack
+            // 🔥 时光机：根据 process_log 还原执行记录，与直播 addProcessStep 的 CSS/图标 100% 一致
+            function renderProcessLogToLogZone(logZone, processLog) {
+                if (!logZone || !processLog || !Array.isArray(processLog) || processLog.length === 0) return;
+                var container = document.createElement('div');
+                container.className = 'process-log-container';
+                container.innerHTML = '<div class="process-header" onclick="this.classList.toggle(\'collapsed\'); this.nextElementSibling.classList.toggle(\'collapsed\');"><span>⚡ 执行记录 (' + processLog.length + ')</span><span class="look-right-hint">  <span class="arrow-bounce">➔</span></span><span class="icon">▼</span></div><div class="process-steps checklist-container"></div>';
+                var list = container.querySelector('.process-steps');
+                if (!list) return;
+                processLog.forEach(function(entry) {
+                    var state = (entry.state || 'running') + '';
+                    var content = entry.content || '';
+                    var stepIconChar = '○', stepIconClass = 'icon-pending';
+                    if (state === 'done' || state === 'completed') { stepIconChar = '✓'; stepIconClass = 'icon-success'; }
+                    else if (state === 'error') { stepIconChar = '✕'; stepIconClass = 'icon-error'; }
+                    else if (['active', 'running', 'start', 'analyzing', 'thinking', 'loading'].indexOf(state) !== -1) {
+                        // 🔥 历史记录禁止转圈：静态还原时一律显示已完成，不渲染 icon-running
+                        stepIconChar = '✓'; stepIconClass = 'icon-success';
+                    }
+                    else { stepIconClass = 'icon-pending'; }
+                    var sublabel = (state === 'active' || state === 'running' || state === 'start' || state === 'analyzing' || state === 'thinking' || state === 'loading') ? '执行中...' : (state === 'done' || state === 'completed') ? '' : (state === 'error' ? '失败' : '排队中');
+                    var item = document.createElement('div');
+                    item.className = 'checklist-item';
+                    item.innerHTML = '<span class="checklist-icon ' + stepIconClass + '">' + stepIconChar + '</span><div class="checklist-content"><div class="checklist-title">' + (content.replace(/</g, '&lt;').replace(/>/g, '&gt;')) + '</div>' + (sublabel ? '<div class="checklist-subtitle">' + sublabel + '</div>' : '') + '</div>';
+                    list.appendChild(item);
+                });
+                logZone.appendChild(container);
+            }
+            // 🔥 历史恢复（状态快照注水）：入参为 msg.content.state_snapshot，严格 reasoning → process-log → text → cards 顺序
             function createRestoreAIMessageRowWithSnapshot(state_snapshot, messageId) {
                 var chatContent = document.getElementById('chatContent');
                 if (!chatContent) return;
-                var snap = state_snapshot && typeof state_snapshot === 'object' ? state_snapshot : { text: '', workflow: null, steps: [], report: null };
+                var snap = state_snapshot && typeof state_snapshot === 'object' ? state_snapshot : { text: '', reasoning: '', workflow: null, steps: [], process_log: [], report: null, duration: null };
                 var row = document.createElement('div');
                 row.className = 'message-row ai';
                 if (messageId != null) row.dataset.messageId = String(messageId);
@@ -4170,32 +4305,49 @@
                 container.className = 'message-container';
                 var bubble = document.createElement('div');
                 bubble.className = 'bubble';
-                var messageContent = document.createElement('div');
-                messageContent.className = 'message-content';
+                // 🔥 约束三：DOM 骨架固定顺序，无数据也保留 zone
+                var reasoningZone = document.createElement('div');
+                reasoningZone.className = 'reasoning-zone reasoning-container';
+                reasoningZone.setAttribute('data-protected', 'true');
                 var logZone = document.createElement('div');
-                logZone.className = 'process-log-zone';
+                logZone.className = 'process-log-zone log-container';
                 var textZone = document.createElement('div');
-                textZone.className = 'text-content-zone markdown-body bubble';
+                textZone.className = 'text-zone text-container text-content-zone markdown-body bubble';
                 var cardZone = document.createElement('div');
-                cardZone.className = 'cards-zone';
-                messageContent.appendChild(logZone);
-                messageContent.appendChild(textZone);
-                messageContent.appendChild(cardZone);
+                cardZone.className = 'cards-zone workflow-container';
+                bubble.appendChild(reasoningZone);
+                bubble.appendChild(logZone);
+                bubble.appendChild(textZone);
+                bubble.appendChild(cardZone);
                 var footer = document.createElement('div');
                 footer.className = 'message-footer';
-                footer.innerHTML = '<div class="message-action-bar"><button type="button" class="action-btn" onclick="copyText(this)" title="复制"><i class="bi bi-copy"></i>复制</button><button type="button" class="action-btn" onclick="regenerateMessage(this)" title="重新生成"><i class="bi bi-arrow-clockwise"></i>重新生成</button><button type="button" class="action-btn" onclick="deleteMessage(this)" title="删除"><i class="bi bi-trash"></i>删除</button></div>';
+                var timerHtml = (snap.duration != null && snap.duration !== '') ? '<span class="generation-timer"><i class="bi bi-stopwatch"></i> ' + (typeof snap.duration === 'number' ? snap.duration.toFixed(1) : snap.duration) + 's</span>' : '';
+                footer.innerHTML = timerHtml + '<div class="message-action-bar"><button type="button" class="action-btn" onclick="copyText(this)" title="复制"><i class="bi bi-copy"></i>复制</button><button type="button" class="action-btn" onclick="regenerateMessage(this)" title="重新生成"><i class="bi bi-arrow-clockwise"></i>重新生成</button><button type="button" class="action-btn" onclick="deleteMessage(this)" title="删除"><i class="bi bi-trash"></i>删除</button></div>';
                 container.appendChild(bubble);
-                container.appendChild(messageContent);
                 container.appendChild(footer);
                 row.appendChild(avatar);
                 row.appendChild(container);
-                // 【核心】必须先挂载到真实 DOM，再执行渲染，否则卡片内 getElementById/querySelector 会静默失败
                 chatContent.appendChild(row);
 
                 var prevZones = window.currentMessageZones;
-                window.currentMessageZones = { logZone: logZone, textZone: textZone, cardZone: cardZone };
+                window.currentMessageZones = { reasoningZone: reasoningZone, logZone: logZone, textZone: textZone, cardZone: cardZone };
 
-                // 3. 挂载完成后，再执行所有渲染逻辑（text / suggestions + 时光机全量注水）
+                var messageContent = bubble;
+                // 1) reasoning-zone：仅思考过程，与 text 隔离
+                if (snap.reasoning && typeof snap.reasoning === 'string' && snap.reasoning.trim() && reasoningZone) {
+                    var thoughtBlock = document.createElement('details');
+                    thoughtBlock.className = 'agent-thought-block';
+                    thoughtBlock.setAttribute('open', '');
+                    thoughtBlock.innerHTML = '<summary><svg class="thought-icon-open" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="32 20" style="animation: geek-thought-spin 0.8s linear infinite;"></circle></svg><svg class="thought-icon-closed" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="none" stroke="currentColor" stroke-width="2" d="M9 18l6-6-6-6"/></svg><span class="thought-summary-text">思考过程</span></summary><div class="thought-content"></div>';
+                    var thoughtContent = thoughtBlock.querySelector('.thought-content');
+                    if (thoughtContent) thoughtContent.textContent = snap.reasoning.trim();
+                    reasoningZone.appendChild(thoughtBlock);
+                }
+                // 2) process-log-zone：优先 process_log（与直播一致），否则用 steps 静态 checklist
+                if (snap.process_log && Array.isArray(snap.process_log) && snap.process_log.length > 0 && logZone) {
+                    renderProcessLogToLogZone(logZone, snap.process_log);
+                }
+                // 3) text-zone
                 if (snap.text && textZone) {
                     var pair = typeof snap.text === 'string' ? extractAndStripSuggestionTags(snap.text) : { cleanText: '', suggestions: [] };
                     var text = sanitizeSystemInjections(pair.cleanText || '');
@@ -4205,6 +4357,7 @@
                     if (Array.isArray(pair.suggestions) && pair.suggestions.length > 0 && typeof renderSuggestionChipsInCurrentMessage === 'function')
                         renderSuggestionChipsInCurrentMessage(pair.suggestions, messageContent);
                 }
+                // 4) cards-zone + 未用 process_log 时的 logZone 用 steps 填充
                 if (snap.workflow || (snap.steps && snap.steps.length > 0) || snap.report) {
                     var histFormId = typeof renderStaticHistorySnapshot === 'function' ? renderStaticHistorySnapshot(snap, cardZone, logZone, messageId) : null;
                     if (histFormId && snap.workflow) {
@@ -4323,6 +4476,34 @@
                 };
                 var btnPrint = document.getElementById('btn-workspace-print');
                 if (btnPrint) btnPrint.onclick = function() { typeof window.printReport === 'function' && window.printReport(); };
+                var btnExpandAll = document.getElementById('btn-workspace-expand-all');
+                if (btnExpandAll) btnExpandAll.onclick = function() {
+                    var root = document.getElementById('active-workspace-content');
+                    if (!root) return;
+                    var collapses = root.querySelectorAll('.execution-instance .accordion-collapse');
+                    collapses.forEach(function(c) {
+                        if (!c) return;
+                        c.classList.add('show');
+                        c.style.display = '';
+                        c.setAttribute('aria-expanded', 'true');
+                        var targetId = c.id;
+                        if (targetId) {
+                            var safe = (window.CSS && CSS.escape) ? CSS.escape(targetId) : targetId;
+                            var btn = root.querySelector('[data-bs-target="#' + safe + '"]');
+                            if (btn) {
+                                btn.classList.remove('collapsed');
+                                btn.setAttribute('aria-expanded', 'true');
+                            }
+                        }
+                        // 若 bootstrap 实例存在，用其 show 让动画/状态更一致
+                        try {
+                            if (window.bootstrap && typeof window.bootstrap.Collapse === 'function') {
+                                var inst = window.bootstrap.Collapse.getOrCreateInstance ? window.bootstrap.Collapse.getOrCreateInstance(c, { toggle: false }) : null;
+                                if (inst && inst.show) inst.show();
+                            }
+                        } catch (e) {}
+                    });
+                };
                 var btnClose = document.getElementById('btn-workspace-close');
                 if (btnClose) btnClose.onclick = function() {
                     var wp = document.getElementById('workspace-pane');
@@ -5070,45 +5251,47 @@
                     throw new Error('DOM 结构错误：找不到 message-container');
                 }
                 
-                // 🔥 CRITICAL REFACTOR: 创建三个独立区域（logZone, textZone, cardZone）
-                let messageContent = messageContainer.querySelector('.message-content');
-                if (!messageContent) {
-                    messageContent = document.createElement('div');
-                    messageContent.className = 'message-content';
-                    // 插入到 bubble 之后，footer 之前
-                    const bubble = messageContainer.querySelector('.bubble');
-                    const footer = messageContainer.querySelector('.message-footer');
-                    if (bubble && footer) {
-                        messageContainer.insertBefore(messageContent, footer);
-                    } else if (bubble) {
-                        messageContainer.appendChild(messageContent);
-                    } else {
-                        messageContainer.insertBefore(messageContent, messageContainer.firstChild);
+                // 🔥 容器隔离：使用 bubble 内预置的 4 个独立容器，不再创建 message-content
+                const bubble = messageContainer.querySelector('.bubble');
+                let reasoningZone = bubble ? bubble.querySelector('.reasoning-container') : null;
+                let textZone = bubble ? bubble.querySelector('.text-container') : null;
+                let logZone = bubble ? bubble.querySelector('.log-container') : null;
+                let cardZone = bubble ? bubble.querySelector('.workflow-container') : null;
+                // 兼容旧结构：若无预置容器则回退创建（历史会话等）
+                if (!reasoningZone || !textZone || !logZone || !cardZone) {
+                    let messageContent = messageContainer.querySelector('.message-content');
+                    if (!messageContent) {
+                        messageContent = document.createElement('div');
+                        messageContent.className = 'message-content';
+                        const footer = messageContainer.querySelector('.message-footer');
+                        if (bubble && footer) messageContainer.insertBefore(messageContent, footer);
+                        else if (bubble) messageContainer.appendChild(messageContent);
+                        else messageContainer.insertBefore(messageContent, messageContainer.firstChild);
                     }
-                }
-                
-                // Zone 1: Process Log (Timeline) - 如果不存在则创建
-                let logZone = messageContent.querySelector('.process-log-zone');
-                if (!logZone) {
-                    logZone = document.createElement('div');
-                    logZone.className = 'process-log-zone';
-                    messageContent.appendChild(logZone);
-                }
-                
-                // Zone 2: Text Content (Markdown/Streaming) - 如果不存在则创建
-                let textZone = messageContent.querySelector('.text-content-zone');
-                if (!textZone) {
-                    textZone = document.createElement('div');
-                    textZone.className = 'text-content-zone markdown-body bubble';
-                    messageContent.appendChild(textZone);
-                }
-                
-                // Zone 3: Cards Container (Diagnosis & Workflow) - 如果不存在则创建
-                let cardZone = messageContent.querySelector('.cards-zone');
-                if (!cardZone) {
-                    cardZone = document.createElement('div');
-                    cardZone.className = 'cards-zone';
-                    messageContent.appendChild(cardZone);
+                    if (!reasoningZone) {
+                        reasoningZone = messageContent.querySelector('.reasoning-zone') || (function() {
+                            const z = document.createElement('div'); z.className = 'reasoning-zone'; z.setAttribute('data-protected', 'true');
+                            messageContent.insertBefore(z, messageContent.firstChild); return z;
+                        })();
+                    }
+                    if (!logZone) {
+                        logZone = messageContent.querySelector('.process-log-zone') || (function() {
+                            const z = document.createElement('div'); z.className = 'process-log-zone';
+                            messageContent.insertBefore(z, messageContent.children[1] || null); return z;
+                        })();
+                    }
+                    if (!textZone) {
+                        textZone = messageContent.querySelector('.text-zone') || messageContent.querySelector('.text-content-zone') || (function() {
+                            const z = document.createElement('div'); z.className = 'text-zone text-content-zone markdown-body bubble';
+                            messageContent.appendChild(z); return z;
+                        })();
+                    }
+                    if (!cardZone) {
+                        cardZone = messageContent.querySelector('.cards-zone') || (function() {
+                            const z = document.createElement('div'); z.className = 'cards-zone';
+                            messageContent.appendChild(z); return z;
+                        })();
+                    }
                 }
                 
                 // 🔥 CRITICAL: 设置内容引用（向后兼容）
@@ -5117,8 +5300,9 @@
                 
                 // 🔥 CRITICAL: 存储区域引用到全局变量（供事件处理器使用）
                 window.currentMessageZones = {
-                    logZone: logZone,
                     textZone: textZone,
+                    reasoningZone: reasoningZone,
+                    logZone: logZone,
                     cardZone: cardZone
                 };
                 
@@ -5300,8 +5484,10 @@
                             processStepsDiv.scrollTop = processStepsDiv.scrollHeight;
                         }
                         
-                        // 清空初始的思考中消息
-                        aiContentDiv.innerHTML = '';
+                        // 仅清空文本占位区，严禁清空 message-content 或 reasoning-zone（思考框永久保留）
+                        if (aiContentDiv && !aiContentDiv.closest('.reasoning-zone')) {
+                            aiContentDiv.innerHTML = '';
+                        }
                         
                         // 🔥 FIX TASK: 实现健壮的 SSE 解析器和事件分发器
                         const reader = res.body.getReader();
@@ -5321,6 +5507,61 @@
                             const div = document.createElement('div');
                             div.textContent = text;
                             return div.innerHTML;
+                        }
+
+                        // 🔥 Multi-instance（Append-Only）支持：本次执行的唯一 executionId
+                        // 约定：前端把 execution_id 挂在 workflowData 根对象；如缺失则降级为旧的单实例渲染方式
+                        const execId = (workflowData && (workflowData.execution_id || workflowData.executionId))
+                            ? String(workflowData.execution_id || workflowData.executionId)
+                            : null;
+                        let execInstanceEl = null;
+
+                        // 生成/复用本次执行的右侧工作台容器（id = execId），用于步骤/报告追加式渲染
+                        function ensureExecutionInstanceContainer() {
+                            if (!execId) return null;
+                            if (execInstanceEl && execInstanceEl.id === execId) return execInstanceEl;
+                            const workspaceRoot = document.getElementById('active-workspace-content');
+                            if (!workspaceRoot) return null;
+
+                            const existing = document.getElementById(execId);
+                            if (existing) {
+                                execInstanceEl = existing;
+                                return execInstanceEl;
+                            }
+
+                            const now = new Date();
+                            const timeLabel = now.toLocaleString();
+                            const headingId = execId + '-heading';
+                            const collapseId = execId + '-collapse';
+
+                            execInstanceEl = document.createElement('div');
+                            execInstanceEl.id = execId;
+                            execInstanceEl.className = 'execution-instance';
+
+                            execInstanceEl.innerHTML = `
+                                <div class="accordion-item" style="border:0;">
+                                    <h2 class="accordion-header" id="${headingId}">
+                                        <button class="accordion-button" type="button"
+                                            data-bs-toggle="collapse"
+                                            data-bs-target="#${collapseId}"
+                                            aria-expanded="true"
+                                            aria-controls="${collapseId}">
+                                            <i class="bi bi-diagram-3" style="margin-right:8px;"></i> 执行结果 - ${escapeHtml(timeLabel)}
+                                        </button>
+                                    </h2>
+                                    <div id="${collapseId}" class="accordion-collapse collapse show" aria-labelledby="${headingId}">
+                                        <div class="accordion-body">
+                                            <div class="unified-report-container mt-0">
+                                                <div class="report-diagnosis-content"></div>
+                                                <div class="report-execution-content mt-4"></div>
+                                                <div class="report-summary-content mt-4"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                            workspaceRoot.appendChild(execInstanceEl);
+                            return execInstanceEl;
                         }
                         
                         // Universal: only image extensions render as <img>; data files get File Card (Icon + Filename + Download)
@@ -5379,45 +5620,46 @@
                             }
                         }
                         
-                        // 🔥 极客风思考区：挂载到当前正在生成的 AI 气泡最顶端，生命周期由 currentThoughtContainer 锁定
-                        // 优先用「最后一个 AI 气泡」保证思考内容一定挂到用户可见的当前回复上，避免串线
+                        // 🔥 极客风思考区：挂载到当前 AI 气泡的 reasoning-container 或 message-content 顶端，严禁覆盖整泡
                         function ensureThoughtBlock() {
                             var messageContent = null;
                             var lastAi = document.querySelector('#chatContent .message-row.ai:last-of-type');
+                            var reasoningContainer = null;
                             if (lastAi) {
+                                var bubble = lastAi.querySelector('.bubble');
+                                reasoningContainer = bubble ? (bubble.querySelector('.reasoning-container') || bubble.querySelector('.reasoning-zone')) : null;
                                 messageContent = lastAi.querySelector('.message-content');
-                                if (!messageContent) {
+                                if (!messageContent && !reasoningContainer) {
                                     var container = lastAi.querySelector('.message-container');
                                     if (container) {
                                         messageContent = document.createElement('div');
                                         messageContent.className = 'message-content';
                                         var footer = container.querySelector('.message-footer');
-                                        var bubble = container.querySelector('.bubble');
-                                        if (bubble && footer)
+                                        var bubbleRef = container.querySelector('.bubble');
+                                        if (bubbleRef && footer)
                                             container.insertBefore(messageContent, footer);
-                                        else if (bubble)
+                                        else if (bubbleRef)
                                             container.appendChild(messageContent);
                                         else
                                             container.insertBefore(messageContent, container.firstChild);
                                     }
                                 }
                             }
-                            if (!messageContent) {
+                            if (!messageContent && !reasoningContainer) {
                                 var zones = window.currentMessageZones;
-                                if (zones) {
-                                    if (zones.logZone && zones.logZone.parentElement)
-                                        messageContent = zones.logZone.parentElement;
-                                    if (!messageContent && zones.textZone && zones.textZone.parentElement)
-                                        messageContent = zones.textZone.parentElement;
-                                    if (!messageContent && zones.cardZone && zones.cardZone.parentElement)
-                                        messageContent = zones.cardZone.parentElement;
+                                if (zones && zones.reasoningZone) reasoningContainer = zones.reasoningZone;
+                                else if (zones) {
+                                    if (zones.logZone && zones.logZone.parentElement) messageContent = zones.logZone.parentElement;
+                                    if (!messageContent && zones.textZone && zones.textZone.parentElement) messageContent = zones.textZone.parentElement;
+                                    if (!messageContent && zones.cardZone && zones.cardZone.parentElement) messageContent = zones.cardZone.parentElement;
                                 }
                             }
-                            if (!messageContent) {
-                                console.error('❌ [ensureThoughtBlock] 无法定位当前 AI 消息容器（messageContent 为 null）');
+                            var insertParent = reasoningContainer || messageContent;
+                            if (!insertParent) {
+                                console.error('❌ [ensureThoughtBlock] 无法定位当前 AI 消息容器');
                                 return null;
                             }
-                            var block = messageContent.querySelector('.agent-thought-block');
+                            var block = insertParent.querySelector('.agent-thought-block');
                             if (!block) {
                                 block = document.createElement('details');
                                 block.className = 'agent-thought-block';
@@ -5425,7 +5667,7 @@
                                 var spinnerSvg = '<svg class="thought-icon-open" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="32 20" style="animation: geek-thought-spin 0.8s linear infinite;"></circle></svg>';
                                 var arrowSvg = '<svg class="thought-icon-closed" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="none" stroke="currentColor" stroke-width="2" d="M9 18l6-6-6-6"/></svg>';
                                 block.innerHTML = '<summary>' + spinnerSvg + arrowSvg + '<span class="thought-summary-text">思考中...</span></summary><div class="thought-content"></div>';
-                                messageContent.insertBefore(block, messageContent.firstChild);
+                                insertParent.insertBefore(block, insertParent.firstChild);
                             }
                             var contentEl = block.querySelector('.thought-content');
                             if (!contentEl) {
@@ -5452,16 +5694,23 @@
                                 }
                                 window.currentThoughtContainer = null;
                             }
+                            // 🔥 收尾：移除 reasoning-zone 内「思考中...」转圈，防止残留
+                            var bubble = container && container.closest ? container.closest('.bubble') : null;
+                            if (!bubble && window.currentMessageZones && window.currentMessageZones.reasoningZone) bubble = window.currentMessageZones.reasoningZone.closest('.bubble');
+                            if (bubble) {
+                                var rz = bubble.querySelector('.reasoning-zone') || bubble.querySelector('.reasoning-container');
+                                if (rz) {
+                                    var sp = rz.querySelector('.spinner-border');
+                                    if (sp) sp.remove();
+                                    var thinkingLabel = rz.querySelector('span');
+                                    if (thinkingLabel && /思考中/.test(thinkingLabel.textContent || '')) thinkingLabel.remove();
+                                }
+                            }
                         }
                         function clearThoughtBlock() {
                             window.currentThoughtContainer = null;
-                            var messageContent = (window.currentMessageZones && window.currentMessageZones.logZone && window.currentMessageZones.logZone.parentElement)
-                                || (document.querySelector('#chatContent .message-row.ai:last-of-type .message-content'));
-                            var block = messageContent && messageContent.querySelector('.agent-thought-block');
-                            if (block) {
-                                var content = block.querySelector('.thought-content');
-                                if (content) content.textContent = '';
-                            }
+                            // 仅重置全局引用，绝不清空历史消息 DOM（让历史思考过程可复现）
+                            window.currentMessageZones = null;
                         }
 
                         // 🔥 核心函数：事件分发器 - 将 SSE 事件分发到 UI 更新函数
@@ -5504,6 +5753,7 @@
                                     }
                                     thoughtBuffer += thoughtText;
                                     if (thoughtText) console.log('💭 思考过程:', thoughtText.length > 80 ? thoughtText.substring(0, 80) + '...' : thoughtText);
+                                    // 🔥 全局统一：一律走 .reasoning-zone + appendChild 增量打字机，严禁 innerHTML 覆盖
                                     var el = window.currentThoughtContainer;
                                     if (!el) {
                                         try { el = ensureThoughtBlock(); } catch (e) { console.error('❌ [thought] ensureThoughtBlock 异常:', e); }
@@ -5527,13 +5777,9 @@
                                     if (typeof finalizeThoughtBlock === 'function') finalizeThoughtBlock();
                                     var rawContent = data.content || '';
                                     messageBuffer += (typeof rawContent === 'string' ? rawContent : '');
-                                    var deltaContent = (typeof rawContent === 'string') ? rawContent.replace(/<\/?think>/g, '') : rawContent;
-                                    if (deltaContent) {
-                                        var parsed = parseReasoningTagsStream(deltaContent);
-                                        if (parsed.hasNewContent) {
-                                            updateChatBubbleWithReasoning(parsed);
-                                        }
-                                    }
+                                    // 🔥 防泄漏：彻底清洗 <think> 与 <thinking> 后再写入 .text-zone
+                                    var cleaned = String(messageBuffer || '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+                                    if (typeof updateChatBubble === 'function') updateChatBubble(cleaned);
                                     break;
                                     
                                 case 'diagnosis':
@@ -5978,104 +6224,25 @@
                             return parseReasoningTagsStream('');
                         }
                         
-                        // 🔥 CRITICAL FIX: Update chat bubble with reasoning support (using parsed object)
-                        function updateChatBubbleWithReasoning(parsed) {
-                            const textZoneRef = window.currentMessageZones?.textZone || aiContentDiv;
-                            
-                            if (!textZoneRef) {
-                                console.error('❌ [SSE] textZone 不存在，无法更新聊天气泡');
-                                return;
-                            }
-                            
-                            // 移除"思考中..."的 spinner
-                            const spinner = textZoneRef.querySelector('.spinner-border');
-                            if (spinner) {
-                                spinner.remove();
-                            }
-                            
-                            // Initialize thought box if needed (when thinking content appears)
-                            if (!thoughtBoxElement && parsed.thinking) {
-                                thoughtBoxElement = document.createElement('details');
-                                thoughtBoxElement.className = 'thinking-box';
-                                thoughtBoxElement.open = true; // Open by default
-                                
-                                const summary = document.createElement('summary');
-                                summary.className = 'thinking-summary';
-                                summary.innerHTML = '<i class="bi bi-lightbulb"></i> 💭 DeepSeek 正在思考...';
-                                
-                                thoughtContentElement = document.createElement('div');
-                                thoughtContentElement.className = 'thinking-content';
-                                
-                                thoughtBoxElement.appendChild(summary);
-                                thoughtBoxElement.appendChild(thoughtContentElement);
-                                
-                                // Insert before final answer
-                                if (textZoneRef.firstChild) {
-                                    textZoneRef.insertBefore(thoughtBoxElement, textZoneRef.firstChild);
-                                } else {
-                                    textZoneRef.appendChild(thoughtBoxElement);
-                                }
-                            }
-                            
-                            // Update thinking content (streaming)
-                            if (parsed.thinking !== undefined && thoughtContentElement) {
-                                // Update thinking content in real-time
-                                thoughtContentElement.textContent = parsed.thinking;
-                                
-                                // Update summary text if reasoning is complete
-                                if (parsed.isComplete && thoughtBoxElement) {
-                                    const summary = thoughtBoxElement.querySelector('summary');
-                                    if (summary) {
-                                        summary.innerHTML = '<i class="bi bi-lightbulb-fill"></i> 💭 思考过程 (已完成)';
-                                    }
-                                }
-                            }
-                            
-                            // Update final answer (streaming)
-                            if (parsed.answer !== undefined) {
-                                if (!finalAnswerElement) {
-                                    finalAnswerElement = document.createElement('div');
-                                    finalAnswerElement.className = 'final-answer';
-                                    textZoneRef.appendChild(finalAnswerElement);
-                                }
-                                
-                                try {
-                                    // Use markdown parser for final answer
-                                    finalAnswerElement.innerHTML = safeMarkedParse(parsed.answer);
-                                } catch (e) {
-                                    console.error('❌ [SSE] Markdown 解析错误:', e);
-                                    finalAnswerElement.textContent = parsed.answer;
-                                }
-                            }
-                            
-                            // Scroll to bottom
-                            textZoneRef.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                        }
+                        // 🔥 已废弃：思考过程一律走 ensureThoughtBlock + appendChild 增量渲染，严禁 innerHTML 覆盖
+                        function updateChatBubbleWithReasoning(parsed) { return; }
                         
-                        // 🔥 CRITICAL REFACTOR: 更新聊天气泡 - 只更新 textZone，不覆盖 cardZone
+                        // 🔥 CRITICAL REFACTOR: 只更新 .text-zone，不覆盖 .cards-zone / .reasoning-zone；写入前彻底清洗 think 标签
                         function updateChatBubble(text) {
-                            // 🔥 CRITICAL: 使用 textZone（如果存在），否则回退到 aiContentDiv
                             const textZoneRef = window.currentMessageZones?.textZone || aiContentDiv;
-                            
                             if (!textZoneRef) {
                                 console.error('❌ [SSE] textZone 不存在，无法更新聊天气泡');
                                 return;
                             }
-                            
-                            // 移除"思考中..."的 spinner
-                            const spinner = textZoneRef.querySelector('.spinner-border');
-                            if (spinner) {
-                                spinner.remove();
-                            }
-                            
-                            // 🔥 CRITICAL: 只更新 textZone 的内容，不覆盖 cardZone
+                            var cleaned = (typeof text === 'string' ? text : '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+                            var spinner = textZoneRef.querySelector('.spinner-border');
+                            if (spinner) spinner.remove();
                             try {
-                                textZoneRef.innerHTML = safeMarkedParse(text);
-                                // 滚动到底部
+                                textZoneRef.innerHTML = safeMarkedParse(cleaned);
                                 textZoneRef.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                             } catch (e) {
                                 console.error('❌ [SSE] Markdown 解析错误:', e);
-                                textZoneRef.innerHTML = escapeHtml(text);
+                                textZoneRef.innerHTML = escapeHtml(cleaned);
                             }
                         }
                         
@@ -6086,7 +6253,9 @@
                             if (wp) wp.classList.add('workspace-active');
                             if (typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
                             const workspaceRoot = document.getElementById('active-workspace-content');
-                            const cardZoneRef = workspaceRoot || window.currentMessageZones?.cardZone || aiContentDiv;
+                            // Append-Only：本次执行（execId）隔离渲染，避免覆盖旧结果
+                            const execContainerRef = ensureExecutionInstanceContainer ? ensureExecutionInstanceContainer() : null;
+                            const cardZoneRef = execContainerRef || workspaceRoot || window.currentMessageZones?.cardZone || aiContentDiv;
                             if (!cardZoneRef) {
                                 console.error('❌ [renderReportSection] 工作台与 cardZone 均不存在');
                                 return;
@@ -6098,24 +6267,14 @@
                             else if (content) rawMessage = JSON.stringify(content, null, 2);
                             const integrityVerified = (content && content.integrity_status === 'verified') ||
                                 (fullData && (fullData.integrity_status === 'verified' || (fullData.report_data && fullData.report_data.integrity_status === 'verified')));
+                            // 报告区 Markdown 必须是“纯净内容”：在渲染前直接移除 <think>...</think>
                             let reportContent = rawMessage;
-                            let thinkingContent = '';
-                            const thinkPatterns = [/<think>(.*?)<\/think>/gs, /<think>(.*?)<\/redacted_reasoning>/gs, /<reasoning>(.*?)<\/reasoning>/gs];
-                            for (const p of thinkPatterns) {
-                                const m = [...rawMessage.matchAll(p)];
-                                if (m.length) {
-                                    thinkingContent = m.map(x => x[1]).join('\n\n');
-                                    reportContent = rawMessage.replace(p, '').trim();
-                                    break;
-                                }
-                            }
-                            let thinkingHtml = '';
-                            if (thinkingContent) {
-                                const tid = 'thinking-' + Date.now();
-                                thinkingHtml = '<div class="mb-3"><button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#' + tid + '"><i class="bi bi-lightbulb"></i> 💭 查看思考过程</button><div class="collapse mt-2" id="' + tid + '"><div class="card card-body bg-light" style="font-size:13px;line-height:1.6;color:#555;max-height:400px;overflow-y:auto;"><pre style="white-space:pre-wrap;font-family:\'Courier New\',monospace;margin:0">' + escapeHtml(thinkingContent) + '</pre></div></div></div>';
+                            if (typeof reportContent === 'string') {
+                                // 支持 <think>...</think> 与 <thinking>...</thinking>（忽略大小写）
+                                reportContent = reportContent.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
                             }
                             const integrityBadge = integrityVerified ? '<p class="mb-2 small text-success"><i class="bi bi-shield-check"></i> 数据完整性校验通过</p>' : '';
-                            const bodyHtml = integrityBadge + thinkingHtml + '<div class="report-content-box" style="font-size:14px;line-height:1.8;color:#333;background:#f0f7ff;padding:20px;border-radius:8px;border-left:4px solid #4d6bfe">' + safeMarkedParse(reportContent) + '</div>';
+                            const bodyHtml = integrityBadge + '<div class="report-content-box" style="font-size:14px;line-height:1.8;color:#333;background:#f0f7ff;padding:20px;border-radius:8px;border-left:4px solid #4d6bfe">' + safeMarkedParse(reportContent) + '</div>';
                             var reportContainer = cardZoneRef.querySelector('.unified-report-container');
                             if (!reportContainer) {
                                 reportContainer = document.createElement('div');
@@ -6166,13 +6325,15 @@
                                 }
                             }
                         }
-                        // 🔥 三栏工作台：执行步骤与报告挂载到右栏 #active-workspace-content，每次新执行清空右栏再渲染
+                        // 🔥 三栏工作台：仅更新 cardZone/workflow-container 内 .report-execution-content，严禁清空 .bubble 或 .reasoning-container
                         function renderExecutionSteps(stepsDetails) {
                             var wp = document.getElementById('workspace-pane');
                             if (wp) wp.classList.add('workspace-active');
                             if (typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
                             const workspaceRoot = document.getElementById('active-workspace-content');
-                            const cardZoneRef = workspaceRoot || window.currentMessageZones?.cardZone || aiContentDiv;
+                            // Append-Only：本次执行（execId）隔离渲染
+                            const execContainerRef = ensureExecutionInstanceContainer ? ensureExecutionInstanceContainer() : null;
+                            const cardZoneRef = execContainerRef || workspaceRoot || window.currentMessageZones?.cardZone || aiContentDiv;
                             
                             if (!cardZoneRef) {
                                 console.error('❌ [renderExecutionSteps] 工作台与 cardZone 均不存在，无法渲染步骤列表');
@@ -6257,10 +6418,13 @@
                                 // 🔥 PHASE 1: Enhanced result data extraction
                                 const stepResult = step.step_result || {};
                                 const stepData = stepResult.data || step.data || {};
+                                const reportData = stepResult.report_data || stepData.report_data || {};
                                 
-                                // Extract plot paths (multiple sources)
+                                // Extract plot paths (multiple sources); STED-EC 等多图步骤优先用 report_data.images
                                 const plotPath = step.plot || stepData.plot_path || stepData.image_path || stepData.plot;
-                                const images = stepData.images || stepResult.images || [];
+                                const images = (reportData.images && reportData.images.length > 0)
+                                    ? reportData.images
+                                    : (stepData.images || stepResult.images || []);
                                 const tables = stepData.tables || stepData.preview || stepResult.tables || [];
                                 const summary = step.summary || stepData.summary || stepResult.summary || '';
                                 const metrics = stepData.metrics || stepResult.metrics || {};
@@ -6271,11 +6435,17 @@
                                 // 🔥 PHASE 1: Always show content if available (even for warnings)
                                 if (stepStatus === 'success' || stepStatus === 'warning') {
                                     
-                                    // Render summary/metrics as badges
+                                    // Render summary as markdown/html（唯一展示处，支持表格；无灰框，仅左边线）
                                     if (summary) {
+                                        let summaryHtml = '';
+                                        try {
+                                            summaryHtml = (typeof safeMarkedParse === 'function') ? safeMarkedParse(summary) : escapeHtml(summary);
+                                        } catch (e) {
+                                            summaryHtml = escapeHtml(summary);
+                                        }
                                         resultContentHtml += `
-                                            <div class="mt-2">
-                                                <span class="badge bg-info text-dark">${escapeHtml(summary)}</span>
+                                            <div class="mt-2 step-summary-content" style="font-size:13px;line-height:1.7;padding:0 0 0 10px;border-left:3px solid #94a3b8;overflow:auto;">
+                                                ${summaryHtml}
                                             </div>
                                         `;
                                     }
@@ -6292,8 +6462,38 @@
                                         `;
                                     }
                                     
-                                    // Render plot / result file: .png/.jpg/.svg 等一律 <img>；仅 .nii/.dcm/.h5/.csv 显示「不可预览」徽章
-                                    if (plotPath) {
+                                    // Render images array: 支持 string 或 {title, path}；严格循环渲染全部，禁止只取 images[0]
+                                    // 若存在 report_data.images，则完全忽略旧版 plotPath，避免重复渲染第一张图
+                                    if (images && Array.isArray(images) && images.length > 0) {
+                                        images.forEach((item, idx) => {
+                                            const imgPath = (typeof item === 'string') ? item : (item && item.path);
+                                            const imgTitle = (item && typeof item === 'object' && item.title) ? item.title : (stepName + ' 结果图 ' + (idx + 1));
+                                            if (!imgPath) return;
+                                            if (isDisplayableImage(imgPath)) {
+                                                let imageUrl = String(imgPath).replace(/^\/app\/results\//, '').replace(/^\/app\/uploads\//, '').replace(/^\/app\//, '');
+                                                if (imageUrl.startsWith('results/')) imageUrl = imageUrl.replace(/^results\//, '');
+                                                if (imageUrl.startsWith('uploads/')) imageUrl = imageUrl.replace(/^uploads\//, '');
+                                                if (!imageUrl.startsWith('/')) {
+                                                    imageUrl = (imgPath && String(imgPath).indexOf('uploads') !== -1) ? `/uploads/${imageUrl}` : `/results/${imageUrl}`;
+                                                }
+                                                resultContentHtml += `
+                                                    <div class="mt-2">
+                                                        ${imgTitle ? `<p class="small text-muted mb-1">${escapeHtml(imgTitle)}</p>` : ''}
+                                                        <img src="${typeof getAbsoluteMediaUrl === 'function' ? getAbsoluteMediaUrl(imageUrl) : imageUrl}" 
+                                                            class="img-fluid rounded shadow-sm" 
+                                                            alt="${escapeHtml(imgTitle)}" 
+                                                            style="max-width: 100%; height: auto; cursor: pointer;"
+                                                            onclick="openLightbox(this.src)"
+                                                            onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                                                        <p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${imageUrl}</p>
+                                                    </div>
+                                                `;
+                                            } else {
+                                                resultContentHtml += renderUniversalFileCard(imgPath, isDataFile(imgPath) ? '数据文件' : '结果文件');
+                                            }
+                                        });
+                                    } else if (plotPath) {
+                                        // 仅在没有 images 数组时，才回退渲染单一 plotPath
                                         if (isDisplayableImage(plotPath)) {
                                             let imageUrl = plotPath;
                                             imageUrl = imageUrl.replace(/^\/app\/results\//, '').replace(/^\/app\/uploads\//, '').replace(/^\/app\//, '');
@@ -6318,32 +6518,24 @@
                                         }
                                     }
                                     
-                                    // Render images array: .png/.jpg/.svg 一律 <img>，仅 .nii/.dcm/.h5/.csv 显示不可预览徽章
-                                    if (images && images.length > 0) {
-                                        images.forEach((imgPath, idx) => {
-                                            if (isDisplayableImage(imgPath)) {
-                                                let imageUrl = imgPath;
-                                                imageUrl = imageUrl.replace(/^\/app\/results\//, '').replace(/^\/app\/uploads\//, '').replace(/^\/app\//, '');
-                                                if (imageUrl.startsWith('results/')) imageUrl = imageUrl.replace(/^results\//, '');
-                                                if (imageUrl.startsWith('uploads/')) imageUrl = imageUrl.replace(/^uploads\//, '');
-                                                if (!imageUrl.startsWith('/')) {
-                                                    imageUrl = (imgPath && imgPath.indexOf('uploads') !== -1) ? `/uploads/${imageUrl}` : `/results/${imageUrl}`;
-                                                }
-                                                resultContentHtml += `
-                                                    <div class="mt-2">
-                                                        <img src="${typeof getAbsoluteMediaUrl === 'function' ? getAbsoluteMediaUrl(imageUrl) : imageUrl}" 
-                                                            class="img-fluid rounded shadow-sm" 
-                                                            alt="${stepName} 结果图 ${idx + 1}" 
-                                                            style="max-width: 100%; height: auto; cursor: pointer;"
-                                                            onclick="openLightbox(this.src)"
-                                                            onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                                                        <p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${imageUrl}</p>
-                                                    </div>
-                                                `;
-                                            } else {
-                                                resultContentHtml += renderUniversalFileCard(imgPath, isDataFile(imgPath) ? '数据文件' : '结果文件');
+                                    // 🔥 STED-EC 等：渲染 report_data.download_links（ZIP 等下载链接）
+                                    if (reportData.download_links && reportData.download_links.length > 0) {
+                                        resultContentHtml += '<div class="mt-4 text-center">';
+                                        reportData.download_links.forEach(function(link) {
+                                            var linkPath = (link && link.path) ? link.path : (typeof link === 'string' ? link : '');
+                                            var linkTitle = (link && link.title) ? link.title : '📦 下载完整结果';
+                                            if (!linkPath) return;
+                                            var linkUrl = String(linkPath);
+                                            if (linkUrl.indexOf('/app/test_data') !== -1) linkUrl = linkUrl.replace(/\/app\/test_data/, '/results/test_data');
+                                            else {
+                                                linkUrl = linkUrl.replace(/^\/app\/results\//, '').replace(/^\/app\/uploads\//, '').replace(/^\/app\//, '');
+                                                if (linkUrl.indexOf('results/') === 0) linkUrl = linkUrl.replace(/^results\//, '');
+                                                if (linkUrl.indexOf('uploads/') === 0) linkUrl = linkUrl.replace(/^uploads\//, '');
+                                                if (linkUrl && linkUrl.indexOf('/') !== 0) linkUrl = (String(linkPath).indexOf('uploads') !== -1 ? '/uploads/' : '/results/') + linkUrl;
                                             }
+                                            resultContentHtml += '<a href="' + (typeof getAbsoluteMediaUrl === 'function' ? getAbsoluteMediaUrl(linkUrl) : linkUrl) + '" target="_blank" rel="noopener" class="btn btn-sm btn-primary ms-2"><i class="bi bi-file-earmark-zip"></i> ' + escapeHtml(linkTitle) + '</a>';
                                         });
+                                        resultContentHtml += '</div>';
                                     }
                                     
                                     // 🔥 TASK 1: Render tables with table-responsive wrapper
@@ -6417,7 +6609,6 @@
                                                         </h2>
                                                         <div id="${stepId}" class="accordion-collapse collapse show">
                                                             <div class="accordion-body">
-                                                                ${step.summary ? `<div class="small text-muted mb-2">${escapeHtml(step.summary)}</div>` : ''}
                                                                 ${stepError && (stepStatus === 'error' || stepStatus === 'skipped') ? `
                                                                     <div class="alert alert-sm mb-2 error-box ${stepStatus === 'skipped' ? 'skipped-box' : 'alert-danger'}" style="font-size: 0.875rem; padding: 0.5rem;">
                                                                         <strong class="error-title">${stepStatus === 'skipped' ? '⏭ 步骤已跳过' : '❌ 执行失败：'}</strong>
@@ -6461,7 +6652,7 @@
                             console.log(`✅ [renderExecutionSteps] 已渲染 ${stepsDetails.length} 个步骤到统一报告容器`);
                         }
                         
-                        // 🔥 实现挂到 _renderWorkflowCardImpl，供全局 window.renderWorkflowCard 委托调用（修复 Favorites ReferenceError）
+                        // 🔥 实现挂到 _renderWorkflowCardImpl：仅向 workflow-container/cardZone 追加内容，严禁 innerHTML 整泡或 reasoning-container
                         window._renderWorkflowCardImpl = function(workflowData, targetZone) {
                             if (targetZone === undefined) targetZone = null;
                             console.log("🔍 [renderWorkflowCard] Rendering (live):", workflowData);
@@ -6643,6 +6834,24 @@
                                 formHtml += `</div>`;
                             }
                             
+                            // 🔥 STED-EC 预览强交互：仅 STED-EC 在 template 模式下仍可勾选步骤、填写参数；其他技能保持禁用
+                            const isStedEcWorkflow = workflowSteps.some(function(s) {
+                                var id = (s.tool_id || s.step_id || '').toString();
+                                return id.indexOf('sted_ec') !== -1;
+                            });
+                            const allowPreviewInteraction = !!isStedEcWorkflow;
+                            const effectiveDisablePreview = isTemplateMode && !allowPreviewInteraction;
+                            if (allowPreviewInteraction && isTemplateMode) {
+                                console.log('🔓 [renderWorkflowCard] STED-EC 预览模式已放开交互：可勾选步骤、填写参数，载入演示数据时将携带当前表单值');
+                            }
+                            // 🔥 STED-EC 生信通用默认参数（预览模式下注入到输入框，用户可修改；载入演示数据时由 getWorkflowDataFromForm 实时读 DOM 发送）
+                            var STED_EC_DEFAULT_PARAMS = {
+                                sted_ec_data_validation: { time_key: 'day', cell_type_key: 'cell_type' },
+                                sted_ec_time_series_formatting: { time_key: 'day', cell_type_key: '' },
+                                sted_ec_moscot_trajectory: { n_pcs: 40, epsilon: 0.001, tau_a: 0.99, tau_b: 0.999, scale_cost: 'mean', max_iterations: 20, time_key: 'day', cell_type_key: '' },
+                                sted_ec_plot_trajectory: { plot_type: 'umap', time_key: 'day', cell_type_key: '' }
+                            };
+                            
                             // 🔥 Task 2: Render Steps as Accordion with Checkboxes
                             if (workflowSteps.length > 0) {
                                 formHtml += `<p class="text-muted">请确认或修改每一步的参数：</p>
@@ -6680,13 +6889,13 @@
                                                     ${isSelected ? 'checked' : ''} 
                                                     data-index="${index}" 
                                                     data-step-id="${step.step_id || toolId}"
-                                                    ${isTemplateMode ? 'disabled' : ''}>
+                                                    ${effectiveDisablePreview ? 'disabled' : ''}>
                                             </div>
                                             <button class="accordion-button ${index > 0 ? 'collapsed' : ''}" 
                                                     type="button" 
                                                     data-bs-toggle="collapse" 
                                                     data-bs-target="#${stepId}"
-                                                    ${isTemplateMode ? 'style="pointer-events: none; opacity: 0.6;"' : ''}>
+                                                    ${effectiveDisablePreview ? 'style="pointer-events: none; opacity: 0.6;"' : ''}>
                                                 ${escapeHtml(stepName)}
                                             </button>
                                         </h2>
@@ -6729,7 +6938,17 @@
                                             // 🔥 TASK 3 FIX: 检查是否有参数推荐
                                             const hasRecommendation = recommendation && recommendation.params && recommendation.params[paramName];
                                             const recommendedValue = hasRecommendation ? String(recommendation.params[paramName].value) : null;
-                                            const defaultValue = String(paramValue || '');
+                                            let defaultValue = String(paramValue || '');
+                                            let numValue = typeof paramValue === 'number' ? paramValue : (parseFloat(paramValue) || 0);
+                                            // 🔥 STED-EC 默认参数注入：预览模式下空/占位时用生信默认值，用户可改
+                                            if (allowPreviewInteraction && (toolId || '').indexOf('sted_ec') !== -1 && STED_EC_DEFAULT_PARAMS[toolId] && paramName in STED_EC_DEFAULT_PARAMS[toolId]) {
+                                                const isPlaceholder = !defaultValue || /^<[^>]+>$/.test(defaultValue.trim());
+                                                if (isPlaceholder) {
+                                                    const def = STED_EC_DEFAULT_PARAMS[toolId][paramName];
+                                                    defaultValue = (def === null || def === undefined) ? '' : String(def);
+                                                    if (typeof def === 'number') numValue = def;
+                                                }
+                                            }
                                             
                                             // 添加数据属性，用于切换参数
                                             const dataAttrs = `data-param-name="${escapeHtml(paramName)}" data-default-value="${escapeHtml(defaultValue)}" ${recommendedValue ? `data-recommended-value="${escapeHtml(recommendedValue)}"` : ''}`;
@@ -6742,15 +6961,15 @@
                                                         name="${inputName}" 
                                                         ${checked}
                                                         ${dataAttrs}
-                                                        ${isTemplateMode ? 'disabled' : ''}>
+                                                        ${effectiveDisablePreview ? 'disabled' : ''}>
                                                 </div>`;
                                             } else if (typeof paramValue === 'number') {
                                                 formHtml += `<input type="number" 
                                                         class="form-control form-control-sm" 
                                                         name="${inputName}" 
-                                                        value="${paramValue}" 
+                                                        value="${numValue}" 
                                                         ${dataAttrs}
-                                                        ${isTemplateMode ? 'readonly style="background-color: #e9ecef;"' : ''}>`;
+                                                        ${effectiveDisablePreview ? 'readonly style="background-color: #e9ecef;"' : ''}>`;
                                             } else {
                                                 formHtml += `<input type="text" 
                                                         class="form-control form-control-sm" 
@@ -6758,7 +6977,7 @@
                                                         value="${escapeHtml(defaultValue)}" 
                                                         placeholder="${displayName}"
                                                         ${dataAttrs}
-                                                        ${isTemplateMode ? 'readonly style="background-color: #e9ecef;"' : ''}>`;
+                                                        ${effectiveDisablePreview ? 'readonly style="background-color: #e9ecef;"' : ''}>`;
                                             }
                                             
                                             // 🔥 TASK 3 FIX: 显示推荐值提示
@@ -6812,6 +7031,9 @@
                             
                             // 🔥 CRITICAL: 追加到 cardZone
                             cardZoneRef.insertAdjacentHTML('beforeend', formHtml);
+                            // 🔥 全场景覆盖：实时预览卡片渲染后立即挂载底部按钮（含 STED-EC「载入官方演示数据」）
+                            var cardEl = cardZoneRef.querySelector('[data-form-id="' + formId + '"]');
+                            if (cardEl && typeof window.mountUploadExecuteButton === 'function') window.mountUploadExecuteButton(cardEl);
                             
                             // 🔥 存储推荐参数供「一键应用」事件委托使用；供 btn-apply-params 读取
                             if (typeof window.workflowRecommendations === 'undefined') window.workflowRecommendations = {};
@@ -6826,6 +7048,7 @@
                         };
                         
                         // 🔥 从表单收集工作流状态（步骤勾选与参数），供执行与自动保存复用
+                        // 🔥 补丁三：始终实时读取 DOM 中 input.value 与 checkbox.checked，绝不使用缓存！用户改 n_pcs=50 则 payload 必为 50
                         window.getWorkflowDataFromForm = function(formId) {
                             var formElement = document.querySelector('[data-form-id="' + formId + '"]');
                             if (!formElement) return null;
@@ -6834,8 +7057,10 @@
                             var updatedSteps = [];
                             checkboxes.forEach(function(checkbox, index) {
                                 var stepId = checkbox.dataset.stepId || '';
-                                var toolId = (formElement.querySelector('input[name="tool_id_' + index + '"]') || {}).value || '';
-                                var stepName = (formElement.querySelector('input[name="step_name_' + index + '"]') || {}).value || '';
+                                var toolIdEl = formElement.querySelector('input[name="tool_id_' + index + '"]');
+                                var stepNameEl = formElement.querySelector('input[name="step_name_' + index + '"]');
+                                var toolId = (toolIdEl && toolIdEl.value) || '';
+                                var stepName = (stepNameEl && stepNameEl.value) || '';
                                 var params = {};
                                 var paramInputs = formElement.querySelectorAll('input[name^="param_' + index + '_"], select[name^="param_' + index + '_"]');
                                 paramInputs.forEach(function(input) {
@@ -7088,13 +7313,16 @@
                             console.log("📁 [executeWorkflowFromForm] 最终文件路径（已去重）:", uniquePaths);
                             
                             // 🔥 CRITICAL REGRESSION FIX: Construct workflow payload correctly（使用去重后的路径）
+                            // 🔥 Multi-instance 支持：为本次执行生成唯一 executionId
+                            const execId = 'exec-' + Date.now();
                             const workflowName = formElement.querySelector('h5')?.textContent?.replace('📋 ', '').replace(' [模版预览 Mode]', '') || '工作流';
                             const workflowPayload = {
                                 workflow_data: {
                                     workflow_name: workflowName,
                                     steps: updatedSteps
                                 },
-                                file_paths: uniquePaths
+                                file_paths: uniquePaths,
+                                execution_id: execId
                             };
                             
                             console.log("🚀 [executeWorkflowFromForm] 发送工作流执行请求:", workflowPayload);
@@ -7217,6 +7445,32 @@
                                 ? window.currentMessageZones.textZone.closest('.message-row').querySelector('.generation-timer')
                                 : document.querySelector('#chatContent .message-row.ai:last-of-type .generation-timer');
                             if (timerEl) timerEl.innerHTML = '<i class="bi bi-stopwatch"></i> ' + duration + 's';
+
+                            // 🔥 Multi-instance：在当前消息 footer 添加“查看此次运行结果”按钮
+                            if (execId) {
+                                try { ensureExecutionInstanceContainer && ensureExecutionInstanceContainer(); } catch (e) {}
+                                const currentRow = (window.currentMessageZones && window.currentMessageZones.textZone)
+                                    ? window.currentMessageZones.textZone.closest('.message-row.ai')
+                                    : document.querySelector('#chatContent .message-row.ai:last-of-type');
+                                const footerRef = currentRow ? currentRow.querySelector('.message-footer') : null;
+                                const actionBar = footerRef ? (footerRef.querySelector('.message-action-bar') || footerRef) : null;
+                                if (actionBar && !actionBar.querySelector('button[data-exec-id="' + execId + '"]')) {
+                                    const btn = document.createElement('button');
+                                    btn.type = 'button';
+                                    btn.className = 'action-btn';
+                                    btn.dataset.execId = execId;
+                                    btn.textContent = '查看此次运行结果';
+                                    btn.style.marginLeft = '8px';
+                                    btn.addEventListener('click', function() {
+                                        const el = document.getElementById(execId);
+                                        if (!el) return;
+                                        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                        el.classList.add('execution-instance-highlight');
+                                        setTimeout(function() { el.classList.remove('execution-instance-highlight'); }, 1800);
+                                    });
+                                    actionBar.appendChild(btn);
+                                }
+                            }
                             
                             // 🔥 强制扫尾：将所有还在转圈的图标变成打钩（防止流程结束后中栏仍显示 ↻）
                             document.querySelectorAll('.icon-running').forEach(function(icon) {
@@ -7677,7 +7931,8 @@
                         return;
                     }
 
-                    aiContentDiv.innerHTML = ''; 
+                    // 🔥 仅清空文本区，严禁清空 reasoning-container（思考区物理隔离）
+                    if (aiContentDiv && !aiContentDiv.classList.contains('reasoning-container')) aiContentDiv.innerHTML = '';
                     const reader = res.body.getReader();
                     const decoder = new TextDecoder();
                     let fullText = "";
@@ -7686,6 +7941,7 @@
                     let hasThoughtBlock = false;
                     let finalAnswer = "";
                     let pendingChunk = "";  // 用于处理跨 chunk 的标签
+                    var legacyReasoningZone = window.currentMessageZones && window.currentMessageZones.reasoningZone;
 
                     while (true) {
                         const { done, value } = await reader.read();
@@ -7698,20 +7954,22 @@
                         const processChunk = pendingChunk + chunk;
                         pendingChunk = "";
 
-                        // 检测思考过程开始标签（支持 DeepSeek-R1 的 <think> 和旧协议的 <think>）
+                        // 检测思考过程开始标签：思考区挂到 reasoning-container，正文挂到 text-container
                         if (processChunk.includes('<think>') || processChunk.includes('<think>')) {
                             isThinking = true;
                             hasThoughtBlock = true;
-                            if (!aiContentDiv.querySelector('.thought-process')) {
-                                aiContentDiv.innerHTML = `
-                                    <div class="thought-process">
-                                        <div class="thought-summary" onclick="toggleThought(this)">
-                                            <i class="bi bi-stars"></i> 深度思考过程 (点击展开)
-                                        </div>
-                                        <div class="thought-content"></div>
-                                    </div>
-                                    <div class="final-answer"></div>
-                                `;
+                            var thoughtParent = legacyReasoningZone || aiContentDiv;
+                            if (thoughtParent && !thoughtParent.querySelector('.thought-process')) {
+                                if (legacyReasoningZone) {
+                                    legacyReasoningZone.innerHTML = '';
+                                }
+                                var thoughtWrap = document.createElement('div');
+                                thoughtWrap.className = 'thought-process';
+                                thoughtWrap.innerHTML = '<div class="thought-summary" onclick="toggleThought(this)"><i class="bi bi-stars"></i> 深度思考过程 (点击展开)</div><div class="thought-content"></div>';
+                                thoughtParent.appendChild(thoughtWrap);
+                                var answerDiv = document.createElement('div');
+                                answerDiv.className = 'final-answer';
+                                aiContentDiv.appendChild(answerDiv);
                             }
                         }
 
@@ -7729,7 +7987,8 @@
                                 thoughtBuffer += parts[0].replace(/<think>/g, '');
                             }
                             
-                            const thoughtDiv = aiContentDiv.querySelector('.thought-content');
+                            var thoughtContainer = (legacyReasoningZone && legacyReasoningZone.querySelector('.thought-content')) ? legacyReasoningZone : aiContentDiv;
+                            const thoughtDiv = thoughtContainer.querySelector('.thought-content');
                             if(thoughtDiv) thoughtDiv.innerText = thoughtBuffer;
 
                             // 处理结束标签后的内容
@@ -7743,13 +8002,13 @@
 
                         // 处理思考过程中的内容
                         if (isThinking) {
-                            // 移除开始标签（如果存在）
                             let cleanChunk = processChunk.replace(/<think>/g, '').replace(/<think>/g, '');
                             thoughtBuffer += cleanChunk;
-                            const thoughtDiv = aiContentDiv.querySelector('.thought-content');
-                            if(thoughtDiv) thoughtDiv.innerText = thoughtBuffer; 
+                            var thoughtContainer2 = (legacyReasoningZone && legacyReasoningZone.querySelector('.thought-content')) ? legacyReasoningZone : aiContentDiv;
+                            const thoughtDiv2 = thoughtContainer2.querySelector('.thought-content');
+                            if(thoughtDiv2) thoughtDiv2.innerText = thoughtBuffer; 
                         } else {
-                            // 处理正文内容
+                            // 处理正文内容（仅更新 text 区，不碰 reasoning-container）
                             if (!hasThoughtBlock) {
                                 finalAnswer += processChunk;
                                 aiContentDiv.innerHTML = safeMarkedParse(finalAnswer);
@@ -7846,8 +8105,11 @@
                 // 🔒 安全：确保 Markdown 渲染和思考过程不受影响；展示前清洗系统注入文案（不改变发给后端的 Payload）
                 const rawForDisplay = typeof content === 'string' ? sanitizeSystemInjections(content) : content;
                 const bubbleContent = isHtml ? content : safeMarkedParse(rawForDisplay);
-                // 文件卡片独立于 bubble；操作栏统一在 message-action-bar
-                row.innerHTML = `${role === 'ai' ? avatarHtml : ''}<div class="message-container">${fileCardsHtml}<div class="bubble">${bubbleContent}</div>${role === 'user' ? userActionsHtml : ''}${role === 'ai' ? footerHtml : ''}</div>`;
+                // 🔥 严格 DOM 骨架：1 思考过程 → 2 执行记录 → 3 正式回复 → 4 工作流卡片；双类名兼容旧选择器
+                const aiBubbleInner = role === 'ai'
+                    ? `<div class="reasoning-zone reasoning-container" data-protected="true">${bubbleContent}</div><div class="process-log-zone log-container"></div><div class="text-zone text-container text-content-zone markdown-body bubble"></div><div class="cards-zone workflow-container"></div>`
+                    : bubbleContent;
+                row.innerHTML = `${role === 'ai' ? avatarHtml : ''}<div class="message-container">${fileCardsHtml}<div class="bubble">${aiBubbleInner}</div>${role === 'user' ? userActionsHtml : ''}${role === 'ai' ? footerHtml : ''}</div>`;
                 chatContent.appendChild(row);
                 if (role === 'user') {
                     var wrapper = document.getElementById('empty-state-wrapper');
@@ -8277,6 +8539,92 @@
                 hint.style.fontSize = '12px';
                 btnRow.appendChild(btn);
                 btnRow.appendChild(btnAsset);
+                // 🔥 商业化核按钮：仅 STED-EC 工作流卡片显示「载入官方演示数据」
+                var isStedEc = false;
+                try {
+                    var stepIdInputs = cardElement.querySelectorAll('input[name^="step_id_"]');
+                    for (var si = 0; si < stepIdInputs.length; si++) {
+                        if (stepIdInputs[si].value && stepIdInputs[si].value.indexOf('sted_ec') !== -1) { isStedEc = true; break; }
+                    }
+                } catch (e) {}
+                if (isStedEc) {
+                    var btnDemo = document.createElement('button');
+                    btnDemo.type = 'button';
+                    btnDemo.className = 'btn btn-sm btn-outline-success ms-2 btn-use-demo';
+                    btnDemo.innerHTML = '<i class="bi bi-rocket-takeoff-fill"></i> 载入官方演示数据';
+                    btnDemo.style.cssText = 'padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer;';
+                    btnDemo.addEventListener('click', function() {
+                        var SAMPLE_PATH = '/app/test_data/mini_sted_ec.h5ad';
+                        var FULL_PATH = '/app/test_data/sted-ec.h5ad';
+
+                        function runDemoByPath(demoPath) {
+                            var demoFileName = (demoPath.split('/').pop() || 'sted-ec.h5ad');
+                            var demoFiles = [{ name: demoFileName, path: demoPath, file_path: demoPath }];
+                            var toastEl = document.createElement('div');
+                            toastEl.setAttribute('role', 'alert');
+                            toastEl.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#16a34a;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,0.25);transition:opacity 0.3s ease;';
+                            toastEl.textContent = (demoPath === FULL_PATH)
+                                ? '🚀 已选择全量分析（高精度），正在启动，请稍候...'
+                                : '🚀 已选择样本分析（快速预览），正在启动，请稍候...';
+                            document.body.appendChild(toastEl);
+                            setTimeout(function() { toastEl.style.opacity = '0'; setTimeout(function() { if (toastEl.parentNode) toastEl.parentNode.removeChild(toastEl); }, 300); }, 3000);
+                            var timeInputs = cardElement.querySelectorAll('input[name*="time_key"]');
+                            for (var ti = 0; ti < timeInputs.length; ti++) timeInputs[ti].value = 'day';
+                            var cellInputs = cardElement.querySelectorAll('input[name*="cell_type_key"]');
+                            for (var ci = 0; ci < cellInputs.length; ci++) cellInputs[ci].value = '';
+                            if (typeof window.appendPathsToCard === 'function') window.appendPathsToCard(formId, cardElement, [demoPath]);
+                            var data = (typeof window.getWorkflowDataFromForm === 'function') ? window.getWorkflowDataFromForm(formId) : null;
+                            if (!data || !data.workflow_data || !data.workflow_data.steps) {
+                                console.warn('[Demo] getWorkflowDataFromForm 未返回有效数据，尝试仅用文件触发');
+                                if (typeof sendMessage === 'function') sendMessage(null, '执行工作流', null, null, false, demoFiles);
+                                return;
+                            }
+                            var pathKeys = ['h5ad_path', 'file_path', 'adata_path', 'data_path', 'data_path_2', 'input_path'];
+                            data.workflow_data.steps.forEach(function(step) {
+                                var p = step.params || {};
+                                for (var k = 0; k < pathKeys.length; k++) {
+                                    if (Object.prototype.hasOwnProperty.call(p, pathKeys[k])) p[pathKeys[k]] = demoPath;
+                                }
+                            });
+                            var execId = 'exec-' + Date.now();
+                            var workflowPayload = { workflow_data: data.workflow_data, file_paths: [demoPath], execution_id: execId };
+                            if (typeof sendMessage === 'function') sendMessage(null, '执行工作流', null, workflowPayload, false, demoFiles);
+                        }
+
+                        // Bootstrap 风格双通道选择弹窗
+                        var modalId = 'stedEcPipelineSelectModal';
+                        var old = document.getElementById(modalId);
+                        if (old && old.parentNode) old.parentNode.removeChild(old);
+                        var modalWrap = document.createElement('div');
+                        modalWrap.innerHTML =
+                            '<div class="modal fade" id="' + modalId + '" tabindex="-1" aria-hidden="true">' +
+                            '  <div class="modal-dialog modal-dialog-centered">' +
+                            '    <div class="modal-content">' +
+                            '      <div class="modal-header"><h5 class="modal-title"><i class="bi bi-sliders"></i> 选择 STED-EC 数据规模</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>' +
+                            '      <div class="modal-body">' +
+                            '        <p class="text-muted mb-3">请选择执行通道：</p>' +
+                            '        <div class="d-grid gap-2">' +
+                            '          <button type="button" class="btn btn-outline-primary" data-pipeline="sample"><i class="bi bi-lightning-charge"></i> 样本分析（快速预览）</button>' +
+                            '          <button type="button" class="btn btn-outline-danger" data-pipeline="full"><i class="bi bi-activity"></i> 全量分析（高精度，耗时较长）</button>' +
+                            '        </div>' +
+                            '      </div>' +
+                            '    </div>' +
+                            '  </div>' +
+                            '</div>';
+                        var modalEl = modalWrap.firstChild;
+                        document.body.appendChild(modalEl);
+                        modalEl.querySelector('[data-pipeline="sample"]').addEventListener('click', function() { runDemoByPath(SAMPLE_PATH); if (window.bootstrap) { bootstrap.Modal.getInstance(modalEl).hide(); } });
+                        modalEl.querySelector('[data-pipeline="full"]').addEventListener('click', function() { runDemoByPath(FULL_PATH); if (window.bootstrap) { bootstrap.Modal.getInstance(modalEl).hide(); } });
+                        if (window.bootstrap && bootstrap.Modal) {
+                            var m = new bootstrap.Modal(modalEl);
+                            m.show();
+                        } else {
+                            // 兜底：无 bootstrap 时使用 confirm 简化双通道选择
+                            runDemoByPath(window.confirm('选择“确定”执行全量分析，选择“取消”执行样本分析。') ? FULL_PATH : SAMPLE_PATH);
+                        }
+                    });
+                    btnRow.appendChild(btnDemo);
+                }
                 btnRow.appendChild(hint);
                 wrap.appendChild(btnRow);
                 cardElement.after(wrap);
@@ -8383,13 +8731,15 @@
                 if (!chatContent) return;
                 var aiRow = document.createElement('div');
                 aiRow.className = 'message-row ai';
-                aiRow.innerHTML = '<div class="avatar ai"><i class="bi bi-robot"></i></div><div class="message-container"><div class="message-content"><div class="cards-zone"></div></div></div>';
+                aiRow.innerHTML = '<div class="avatar ai"><i class="bi bi-robot"></i></div><div class="message-container"><div class="bubble"><div class="reasoning-zone reasoning-container" data-protected="true"></div><div class="process-log-zone log-container"></div><div class="text-zone text-container text-content-zone markdown-body bubble"></div><div class="cards-zone workflow-container"></div></div></div>';
                 chatContent.appendChild(aiRow);
+                var bubbleDiv = aiRow.querySelector('.bubble');
                 var cardZone = aiRow.querySelector('.cards-zone');
                 window.currentMessageZones = window.currentMessageZones || {};
                 window.currentMessageZones.cardZone = cardZone;
-                window.currentMessageZones.logZone = null;
-                window.currentMessageZones.textZone = aiRow.querySelector('.message-content');
+                window.currentMessageZones.reasoningZone = aiRow.querySelector('.reasoning-zone');
+                window.currentMessageZones.logZone = aiRow.querySelector('.process-log-zone');
+                window.currentMessageZones.textZone = aiRow.querySelector('.text-zone');
                 try {
                     var formId = null;
                     if (typeof window.renderWorkflowCard === 'function') {
@@ -8559,15 +8909,46 @@
                     // 动态生成标题：保留步骤编号 (如 "5. PCA" -> "5. PCA 可视化结果")
                     const plotTitle = `${keyStep.name} 可视化结果`;
 
-                    // 🔥 修复图片路径（支持多种格式）
+                    // 🔥 修复图片路径（支持多种格式）；支持多图 images[] 与 {title, path}
                     let imagePath = keyStep.plot;
+                    const imagesArr = keyStep.data && keyStep.data.images && Array.isArray(keyStep.data.images) ? keyStep.data.images : null;
                     if (keyStep.data && keyStep.data.image) {
                         imagePath = keyStep.data.image;
-                    } else if (keyStep.data && keyStep.data.images && Array.isArray(keyStep.data.images) && keyStep.data.images.length > 0) {
-                        imagePath = keyStep.data.images[0];
+                    } else if (imagesArr && imagesArr.length > 0) {
+                        imagePath = null;
+                    } else if (imagesArr && imagesArr.length === 0) {
+                        imagePath = null;
+                    } else if (imagesArr) {
+                        imagePath = null;
                     }
-                    
-                    if (imagePath && isDisplayableImage(imagePath)) {
+                    if (imagesArr && imagesArr.length > 0) {
+                        let imgsHtml = '';
+                        imagesArr.forEach((item) => {
+                            const path = (typeof item === 'string') ? item : (item && item.path);
+                            const title = (item && typeof item === 'object' && item.title) ? item.title : '';
+                            if (!path) return;
+                            let normalizedPath = String(path).replace(/^\/app\/results\//, '').replace(/^\/app\//, '');
+                            normalizedPath = normalizedPath.replace(/^results\//, '');
+                            if (!normalizedPath.startsWith('/results/') && !normalizedPath.startsWith('http')) {
+                                normalizedPath = '/results/' + normalizedPath;
+                            }
+                            if (isDisplayableImage(path)) {
+                                imgsHtml += `<div class="mb-4"><p class="text-muted small mb-1">${title ? title : ''}</p><div class="text-center mt-1"><img src="${typeof getAbsoluteMediaUrl === 'function' ? getAbsoluteMediaUrl(normalizedPath) : normalizedPath}" style="max-width:95%; border-radius:8px; cursor:zoom-in;" onclick="openLightbox(this.src)" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"><p style="display:none; color: #999; font-size: 12px;">图片加载失败</p></div></div>`;
+                            } else {
+                                imgsHtml += `<div class="mb-2">${renderUniversalFileCard(path, '结果文件')}</div>`;
+                            }
+                        });
+                        keyPlotHtml = `
+                        <div class="report-section">
+                            <h6>3. ${plotTitle}</h6>
+                            <div class="card border-0 shadow-sm">
+                                <div class="card-body">
+                                    ${imgsHtml}
+                                    ${keyStep.summary ? `<p class="mt-2 text-secondary">${keyStep.summary}</p>` : ''}
+                                </div>
+                            </div>
+                        </div>`;
+                    } else if (imagePath && isDisplayableImage(imagePath)) {
                         let normalizedPath = imagePath.replace(/^\/app\/results\//, '').replace(/^\/app\//, '');
                         normalizedPath = normalizedPath.replace(/^results\//, '');
                         if (!normalizedPath.startsWith('/results/')) {
@@ -8643,18 +9024,36 @@
                             contentHtml += `<div class="alert alert-info mb-3"><strong>📋 摘要：</strong>${step.summary}</div>`;
                         }
                         
-                        // 2. 处理图片路径（格式感知：仅可展示图片用 <img>，数据文件用徽章）
+                        // 2. 处理图片路径（支持多图 images[] 与 {title, path}）
+                        const stepImages = step.data && step.data.images && Array.isArray(step.data.images) ? step.data.images : null;
                         let imagePath = null;
                         if (step.data && step.data.image) {
                             imagePath = step.data.image;
                         } else if (step.plot) {
                             imagePath = step.plot;
-                        } else if (step.data && step.data.images && Array.isArray(step.data.images) && step.data.images.length > 0) {
-                            imagePath = step.data.images[0];
+                        } else if (stepImages && stepImages.length > 0) {
+                            imagePath = (typeof stepImages[0] === 'string') ? stepImages[0] : (stepImages[0] && stepImages[0].path);
                         }
-                        
-                        if (imagePath) {
-                            const isKeyPlot = keyStep && keyStep.name === step.name;
+                        const isKeyPlot = keyStep && keyStep.name === step.name;
+                        if (stepImages && stepImages.length > 0) {
+                            if (isKeyPlot) {
+                                contentHtml += `<div class="mt-2 small text-muted"><i class="bi bi-image"></i> 共 ${stepImages.length} 张图已在下方"最终结果"区域展示</div>`;
+                            } else {
+                                stepImages.forEach((item) => {
+                                    const path = (typeof item === 'string') ? item : (item && item.path);
+                                    const title = (item && typeof item === 'object' && item.title) ? item.title : '';
+                                    if (!path) return;
+                                    if (isDisplayableImage(path)) {
+                                        let normalizedPath = String(path).replace(/^\/app\/results\//, '').replace(/^\/app\//, '');
+                                        normalizedPath = normalizedPath.replace(/^results\//, '');
+                                        if (!normalizedPath.startsWith('/results/')) normalizedPath = '/results/' + normalizedPath;
+                                        contentHtml += `<div class="mt-2 mb-3">${title ? `<p class="small text-muted mb-1">${title}</p>` : ''}<img src="${typeof getAbsoluteMediaUrl === 'function' ? getAbsoluteMediaUrl(normalizedPath) : normalizedPath}" class="img-fluid rounded border" style="max-width:100%; cursor:zoom-in;" onclick="openLightbox(this.src)" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"><p style="display:none; color: #999; font-size: 12px;">图片加载失败</p></div>`;
+                                    } else {
+                                        contentHtml += `<div class="mt-2 mb-3">${renderUniversalFileCard(path, '数据文件')}</div>`;
+                                    }
+                                });
+                            }
+                        } else if (imagePath) {
                             if (isKeyPlot) {
                                 contentHtml += `<div class="mt-2 small text-muted"><i class="bi bi-image"></i> 图片已在下方"最终结果"区域展示</div>`;
                             } else if (isDisplayableImage(imagePath)) {

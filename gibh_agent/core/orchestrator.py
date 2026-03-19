@@ -13,6 +13,7 @@ import asyncio
 import os
 import re
 import time
+from datetime import datetime
 from typing import Dict, Any, List, Optional, AsyncIterator
 from pathlib import Path
 
@@ -214,11 +215,15 @@ class AgentOrchestrator:
         # 🔥 头尾记忆：保留首轮锚点 + 最近 6 条，大 JSON 仅做占位清洗
         history = self._truncate_and_sanitize_history(history, max_tail_messages=6)
         # 🔥 有状态应用切片：内存状态快照，供流式过程中聚合，最终入库 content.state_snapshot
+        # 🔥 时光机约束：reasoning 与 text 绝对隔离；process_log 与 duration 用于历史 100% 还原
         state_snapshot = {
             "text": "",
+            "reasoning": "",       # 仅思考过程，绝不入 text
             "workflow": None,
             "steps": [],
+            "process_log": [],     # 执行记录逐条 [{content, state}]，与前端 CSS/图标一致
             "report": None,
+            "duration": None,      # 总耗时（秒），done 时写入
             "_start_time": time.time(),  # 用于 done 事件下发 duration，与前端计时器统一
         }
         owner_id = kwargs.get("owner_id") or kwargs.get("user_id")
@@ -530,10 +535,14 @@ class AgentOrchestrator:
                     await asyncio.sleep(0.01)
                 
                 # Execute workflow (this will actually execute all steps)
+                # 🔥 与 API 一致：使用 RESULTS_DIR 下的绝对路径作为 output_dir，保证 STED-EC 等工具的 tmaps/report_images 可写、前后端输出一致
+                _results_base = os.path.abspath(os.getenv("RESULTS_DIR", "/app/results"))
+                _run_dir = os.path.join(_results_base, f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
                 try:
                     results = executor.execute_workflow(
                         workflow_data=workflow_config,
                         file_paths=file_paths,
+                        output_dir=_run_dir,
                         agent=self.agent
                     )
                 except SecurityException as e:
@@ -814,6 +823,38 @@ class AgentOrchestrator:
                     })
                     await asyncio.sleep(0.01)
                     
+                    # 规范化 steps_details 中图片路径为 /results/ 前缀，使前端可正确加载（与 API 返回一致）
+                    _results_prefix = os.path.abspath(os.getenv("RESULTS_DIR", "/app/results")).rstrip("/")
+                    for _sd in steps_details:
+                        if _sd.get("step_result") and _sd["step_result"].get("data", {}).get("images"):
+                            imgs = _sd["step_result"]["data"]["images"]
+                            out = []
+                            for _p in imgs:
+                                if not isinstance(_p, str):
+                                    continue
+                                if _p.startswith("/results/"):
+                                    out.append(_p)
+                                elif _p.startswith(_results_prefix + "/") or _p.startswith(_results_prefix):
+                                    out.append("/results/" + _p[len(_results_prefix):].lstrip("/"))
+                                elif _p.startswith("results/"):
+                                    out.append("/" + _p)
+                                elif "/" in _p:
+                                    out.append("/results/" + _p)
+                                else:
+                                    _run = (results.get("output_dir") or "").strip()
+                                    _run_name = os.path.basename(_run) if _run else "run_unknown"
+                                    out.append(f"/results/{_run_name}/{_p}")
+                            _sd["step_result"]["data"]["images"] = out
+                        if _sd.get("plot") and not str(_sd["plot"]).startswith("/results/"):
+                            _plot = _sd["plot"]
+                            if _plot.startswith(_results_prefix + "/") or _plot.startswith(_results_prefix):
+                                _sd["plot"] = "/results/" + _plot[len(_results_prefix):].lstrip("/")
+                            elif "/" in _plot:
+                                _sd["plot"] = "/results/" + _plot
+                            else:
+                                _run = (results.get("output_dir") or "").strip()
+                                _run_name = os.path.basename(_run) if _run else "run_unknown"
+                                _sd["plot"] = f"/results/{_run_name}/{_plot}"
                     # Yield step_result event with execution steps
                     step_result_response = {
                         "report_data": {
@@ -2145,8 +2186,17 @@ class AgentOrchestrator:
         - result, done -> 若带 diagnosis 或 report_data 则整体写入 report
         - report_data -> 合并入 report.report_data
         """
-        if event_type in ("message", "thought"):
+        # 🔥 约束一：数据绝对隔离。thought 只进 reasoning，message 只进 text，绝不允许混入
+        if event_type == "thought":
+            state_snapshot["reasoning"] = (state_snapshot.get("reasoning") or "") + (data.get("content") or "")
+        elif event_type == "message":
             state_snapshot["text"] = (state_snapshot.get("text") or "") + (data.get("content") or "")
+        elif event_type == "status" and data:
+            # 🔥 约束二：process_log 与前端 state 一致（running/completed/error/start 等），保证图标/动画一致
+            state_snapshot.setdefault("process_log", []).append({
+                "content": data.get("content", ""),
+                "state": data.get("state", "running"),
+            })
         elif event_type in ("workflow", "plan") and data:
             state_snapshot["workflow"] = data
         elif event_type == "step" and data:
@@ -2216,10 +2266,21 @@ class AgentOrchestrator:
             report = state_snapshot.get("report") or {}
             report.setdefault("report_data", {}).update(data)
             state_snapshot["report"] = report
-        # 🔥 统一计时器：done 事件携带后端总耗时，前端与执行记录面板一致
+        # 🔥 统一计时器：done 时写入快照 duration 与 process_log 最后一条「完成 (Xs)」，供时光机还原
         if event_type == "done":
             t0 = state_snapshot.get("_start_time")
             duration = round((time.time() - t0), 1) if t0 else 0
+            state_snapshot["duration"] = duration
+            state_snapshot.setdefault("process_log", []).append({
+                "content": f"完成 ({duration}s)",
+                "state": "completed",
+            })
+            # 🔥 状态机闭环：入库前将 process_log 中所有遗留的 running/loading 等强制改为 completed，避免历史记录转圈
+            for entry in state_snapshot.get("process_log", []):
+                if isinstance(entry, dict) and entry.get("state") in (
+                    "running", "loading", "start", "active", "analyzing", "thinking",
+                ):
+                    entry["state"] = "completed"
             data = {**(data or {}), "duration": duration, "total_duration": duration}
         return self._format_sse(event_type, data)
 

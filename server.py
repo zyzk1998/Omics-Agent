@@ -4,6 +4,7 @@ GIBH-AGENT-V2 测试服务器
 """
 import os
 import sys
+
 import json
 import logging
 import traceback
@@ -3018,19 +3019,24 @@ async def execute_workflow(request: dict):
                             plot_path = f"/results/{run_name}/{plot_path}"
                     step["plot"] = plot_path
                 
-                # 处理 step_result 中的图片路径
+                # 处理 step_result 中的图片路径（含 STED-EC report_data.images 展平后的绝对路径）
                 if step.get("step_result") and step["step_result"].get("data", {}).get("images"):
                     images = step["step_result"]["data"]["images"]
                     fixed_images = []
+                    _results_prefix = str(RESULTS_DIR).rstrip("/")
                     for img_path in images:
-                        if not img_path.startswith("/results/"):
-                            if img_path.startswith("results/"):
-                                img_path = "/" + img_path
-                            elif "/" in img_path:
-                                img_path = f"/results/{img_path}"
-                            else:
-                                img_path = f"/results/{run_name}/{img_path}"
-                        fixed_images.append(img_path)
+                        if not isinstance(img_path, str):
+                            continue
+                        if img_path.startswith("/results/"):
+                            fixed_images.append(img_path)
+                        elif img_path.startswith(_results_prefix + "/") or img_path.startswith(_results_prefix):
+                            fixed_images.append("/results/" + img_path[len(_results_prefix):].lstrip("/"))
+                        elif img_path.startswith("results/"):
+                            fixed_images.append("/" + img_path)
+                        elif "/" in img_path:
+                            fixed_images.append(f"/results/{img_path}")
+                        else:
+                            fixed_images.append(f"/results/{run_name}/{img_path}")
                     step["step_result"]["data"]["images"] = fixed_images
         
         # 确保 steps_results 存在（前端可直接使用）
@@ -3039,21 +3045,24 @@ async def execute_workflow(request: dict):
             for step_detail in report.get("steps_details", []):
                 if "step_result" in step_detail:
                     step_result = step_detail["step_result"].copy()
-                    # 确保图片路径正确
+                    # 确保图片路径正确（含 STED-EC 绝对路径规范化）
                     if step_result.get("data", {}).get("images"):
                         images = step_result["data"]["images"]
                         fixed_images = []
+                        _results_prefix = str(RESULTS_DIR).rstrip("/")
                         for img_path in images:
-                            if not img_path.startswith("/results/"):
-                                if img_path.startswith("results/"):
-                                    img_path = "/" + img_path
-                                elif "/" in img_path:
-                                    img_path = f"/results/{img_path}"
-                                else:
-                                    img_path = f"/results/{run_name}/{img_path}"
+                            if not isinstance(img_path, str):
+                                continue
+                            if img_path.startswith("/results/"):
                                 fixed_images.append(img_path)
+                            elif img_path.startswith(_results_prefix + "/") or img_path.startswith(_results_prefix):
+                                fixed_images.append("/results/" + img_path[len(_results_prefix):].lstrip("/"))
+                            elif img_path.startswith("results/"):
+                                fixed_images.append("/" + img_path)
+                            elif "/" in img_path:
+                                fixed_images.append(f"/results/{img_path}")
                             else:
-                                fixed_images.append(img_path)
+                                fixed_images.append(f"/results/{run_name}/{img_path}")
                         step_result["data"]["images"] = fixed_images
                     steps_results.append(step_result)
                 else:
@@ -3078,23 +3087,26 @@ async def execute_workflow(request: dict):
                     steps_results.append(step_result)
             report["steps_results"] = steps_results
         
-        # 处理 steps_results 中的图片路径（如果存在）
+        # 处理 steps_results 中的图片路径（如果存在，含 STED-EC 绝对路径规范化）
         if report.get("steps_results"):
+            _results_prefix = str(RESULTS_DIR).rstrip("/")
             for step_result in report["steps_results"]:
                 if step_result.get("data", {}).get("images"):
                     images = step_result["data"]["images"]
                     fixed_images = []
                     for img_path in images:
-                        if not img_path.startswith("/results/"):
-                            if img_path.startswith("results/"):
-                                img_path = "/" + img_path
-                            elif "/" in img_path:
-                                img_path = f"/results/{img_path}"
-                            else:
-                                img_path = f"/results/{run_name}/{img_path}"
+                        if not isinstance(img_path, str):
+                            continue
+                        if img_path.startswith("/results/"):
                             fixed_images.append(img_path)
+                        elif img_path.startswith(_results_prefix + "/") or img_path.startswith(_results_prefix):
+                            fixed_images.append("/results/" + img_path[len(_results_prefix):].lstrip("/"))
+                        elif img_path.startswith("results/"):
+                            fixed_images.append("/" + img_path)
+                        elif "/" in img_path:
+                            fixed_images.append(f"/results/{img_path}")
                         else:
-                            fixed_images.append(img_path)
+                            fixed_images.append(f"/results/{run_name}/{img_path}")
                     step_result["data"]["images"] = fixed_images
         
         # 🔧 修复：返回正确的工作流执行结果格式
