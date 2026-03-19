@@ -75,8 +75,8 @@ Domain Agents (领域智能体)
     ├── EpigenomicsAgent (表观遗传) ⏳ 占位符
     ├── MetabolomicsAgent (代谢组) ✅ 已实现
     ├── ProteomicsAgent (蛋白质组) ⏳ 占位符
-    ├── SpatialAgent (空间组学) ⏳ 占位符
-    └── ImagingAgent (影像分析) ⏳ 占位符
+    ├── SpatialAgent (空间组学) ✅ 已实现
+    └── ImagingAgent (影像分析) ✅ 已实现
     ↓
 ToolRegistry (工具注册表) - 模块化插件系统
     ├── 自动发现和注册工具
