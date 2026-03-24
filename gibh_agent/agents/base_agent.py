@@ -10,6 +10,10 @@ from ..core.llm_client import LLMClient
 from ..core.prompt_manager import PromptManager, DATA_DIAGNOSIS_PROMPT
 from ..core.data_diagnostician import DataDiagnostician
 from ..core.stream_utils import strip_suggestions_from_text
+from .reporting.sted_ec_expert_report_prompts import (
+    CRITICAL_INSTRUCTION_STED_EC_FOR_PARENT,
+    OUTPUT_STRUCTURE_STED_EC_FOR_PARENT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -888,6 +892,8 @@ Use Simplified Chinese for all content."""
         try:
             logger.info(f"📝 [AnalysisSummary] 开始生成分析摘要 - 组学类型: {omics_type}")
             
+            # 🔥 STED_EC / SPATIOTEMPORAL_DYNAMICS：与 RNA、Metabolomics 一致，统一走本方法 + LLM（无 DAG 内 expert 节点）
+            
             # 🔥 TASK 3: Read actual execution results from files
             execution_results = self._read_execution_results(output_dir)
             
@@ -1323,10 +1329,12 @@ Use Simplified Chinese for all content."""
             is_rna_analysis = omics_type.lower() in ["scrna", "scrna-seq", "single_cell", "single-cell", "rna", "rna-seq"]
             is_spatial_analysis = omics_type.lower() in ["spatial", "visium", "spatial transcriptomics"]
             is_radiomics_analysis = omics_type.lower() in ["radiomics", "imaging"]
+            _omics_l = (omics_type or "").strip().lower()
             is_sted_ec_analysis = (
-                "sted" in (omics_type or "").lower()
-                or "sted_ec" in (omics_type or "").lower()
-                or (workflow_name and ("sted" in (workflow_name or "").lower() or "轨迹" in (workflow_name or "")))
+                "sted" in _omics_l
+                or "sted_ec" in _omics_l
+                or "spatiotemporal_dynamics" in _omics_l
+                or (workflow_name and ("sted" in (workflow_name or "").lower() or "轨迹" in (workflow_name or "") or "时空动力学" in (workflow_name or "")))
             )
 
             if is_spatial_analysis:
@@ -1553,15 +1561,7 @@ Use Simplified Chinese for all content."""
             logger.info(f"📊 [AnalysisSummary] execution_results_text长度: {len(execution_results_text)}字符")
             
             if is_sted_ec_analysis:
-                critical_instruction_text = (
-                    "你是一位顶尖的单细胞与发育生物学专家。请根据以下 STED-EC (基于最优传输的单细胞时空轨迹推断) 的执行日志和图表数据，撰写一份专业的分析报告。"
-                    "报告需包含以下结构：\n"
-                    "1. 📊 时空分布概览 (Spatiotemporal Overview)：解读细胞在时间序列上的整体发育趋势与 UMAP 分布特征。\n"
-                    "2. 🧬 细胞命运与演化动力学 (Cell Fate Dynamics)：基于细胞类型演化堆叠图，分析关键细胞亚群的扩增、衰退或分化轨迹。\n"
-                    "3. 🔬 潜在生物学机制 (Biological Insights)：推测这些轨迹变化背后的生物学意义（如器官发育、疾病进展等）。\n"
-                    "4. 💡 结论与建议 (Conclusions & Next Steps)：总结核心发现，并为后续的基因调控网络 (GRN) 或空间转录组验证提供建议。\n"
-                    "请保持客观、专业的学术口吻，使用 Markdown 格式输出。"
-                )
+                critical_instruction_text = CRITICAL_INSTRUCTION_STED_EC_FOR_PARENT
             elif is_spatial_analysis:
                 critical_instruction_text = "Analyze Spatial transcriptomics (10x Visium) results. Discuss: (1) Tissue Architecture and Clusters (spatial domains, Leiden); (2) Spatially Variable Genes (SVGs, Moran's I); (3) Biological Functions (pathway enrichment if present). Use terminology: Spots, Clusters, Spatial Domains, Gene Expression, Moran's I, SVGs. DO NOT use Metabolomics terms (no metabolites, LC-MS, or differential metabolites). Generate a structured Markdown report."
             elif is_radiomics_analysis:
@@ -1571,24 +1571,7 @@ Use Simplified Chinese for all content."""
 
             # 空间/影像/STED-EC 使用专用输出结构，禁止出现其他领域术语
             if is_sted_ec_analysis:
-                output_structure_section = """
-### 1. 📊 时空分布概览 (Spatiotemporal Overview)
-- 解读细胞在时间序列上的整体发育趋势与 UMAP 分布特征
-- 数据质量与时间点覆盖简要说明
-
-### 2. 🧬 细胞命运与演化动力学 (Cell Fate Dynamics)
-- 基于细胞类型演化堆叠图，分析关键细胞亚群的扩增、衰退或分化轨迹
-- 使用 Optimal Transport、Moscot、时空轨迹等术语
-
-### 3. 🔬 潜在生物学机制 (Biological Insights)
-- 推测这些轨迹变化背后的生物学意义（如器官发育、疾病进展等）
-
-### 4. 💡 结论与建议 (Conclusions & Next Steps)
-- 总结核心发现
-- 为后续的基因调控网络 (GRN) 或空间转录组验证提供建议
-
-**禁止**：不要套用代谢组学模板（勿提及代谢物、LC-MS、VIP、差异代谢物等）。仅使用单细胞时空轨迹与发育生物学术语。
-"""
+                output_structure_section = OUTPUT_STRUCTURE_STED_EC_FOR_PARENT
             elif is_spatial_analysis:
                 output_structure_section = """
 ### 1. 统计概览 (Statistical Overview) — 空间转录组

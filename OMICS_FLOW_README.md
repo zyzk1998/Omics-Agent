@@ -149,13 +149,19 @@ visualization = visualizer.visualize_workflow(result.get("workflow_data"))
 from gibh_agent.core.planner import SOPPlanner
 from gibh_agent.core.visualizer import WorkflowVisualizer
 
-# 生成计划
+# 生成计划（generate_plan 为异步生成器：消费 "workflow" 事件得到与旧版 return 相同的 dict）
 planner = SOPPlanner(tool_retriever, llm_client)
-plan = await planner.generate_plan(query="代谢组分析", file_metadata=metadata)
+plan = None
+async for _ev, _data in planner.generate_plan(
+    user_query="代谢组分析",
+    file_metadata=metadata,
+):
+    if _ev == "workflow":
+        plan = _data
 
 # 可视化计划
 visualizer = WorkflowVisualizer(tool_registry=registry)
-graph = OmicsGraph.from_workflow_data(plan.get("workflow_data"), tool_registry=registry)
+graph = OmicsGraph.from_workflow_data((plan or {}).get("workflow_data"), tool_registry=registry)
 ```
 
 ## 📝 示例工作流

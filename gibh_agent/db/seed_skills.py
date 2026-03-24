@@ -226,7 +226,12 @@ BIOMEDICINE_SKILLS = [
     {"name": "RFdiffusion", "sub_category": "预测与建模", "description": "用于蛋白质结合剂设计的蛋白质骨架生成模型。"},
     {"name": "BioGPT", "sub_category": "文本处理", "description": "可用于生物医学命名实体识别、关系提取、文本摘要、对话生成等任务。"},
     {"name": "BioGraph", "sub_category": "数据可视化", "description": "专为基因表达数据和生物信息分析设计的可视化工具，可用于生成基因表达热图、PCA降维图等。"},
-    {"name": "基因蛋白信息查询器", "sub_category": "信息检索", "description": "根据基因名查询并返回其在不同物种中的蛋白质注释、序列、亚细胞定位等详细信息。"},
+    {
+        "name": "基因蛋白信息查询器",
+        "sub_category": "信息检索",
+        "description": "根据基因名查询并返回其在不同物种中的蛋白质注释、序列、亚细胞定位等详细信息。",
+        "prompt_template": "帮我查询 TP53 基因的详细信息，包括它的全称、染色体位置以及主要生物学功能。",
+    },
     {"name": "蛋白质资料提取工具", "sub_category": "信息检索", "description": "基于蛋白质ID快速获取其功能注释、亚细胞定位、组织表达及疾病关联信息。"},
     {"name": "蛋白同源结构评估器", "sub_category": "数据分析", "description": "集成 BLAST 序列比对与结构相似性分析，用于精准判定蛋白质同源关系与三维结构差异。"},
     {"name": "蛋白质结构渲染工具", "sub_category": "数据可视化", "description": "支持从PDB格式导入并可视化蛋白质三维结构。"},
@@ -234,7 +239,12 @@ BIOMEDICINE_SKILLS = [
     {"name": "残基互作分析器", "sub_category": "数据分析", "description": "基于PyMOL分析PDB文件中的残基互作关系，支持复合物结构解析。"},
     {"name": "抗体人源化", "sub_category": "预测与建模", "description": "使用对天然抗体库（Sapiens）或 CDR 移植的深度学习来实现抗体人源化。"},
     {"name": "分析细菌生长曲线", "sub_category": "数据分析", "description": "基于OD600数据拟合细菌生长曲线，提供参数分析、倍增时间和延迟期等结果。"},
-    {"name": "UniProt数据库查询", "sub_category": "信息检索", "description": "包含蛋白质序列、功能信息和研究论文索引的蛋白质数据库查询。"},
+    {
+        "name": "UniProt数据库查询",
+        "sub_category": "信息检索",
+        "description": "包含蛋白质序列、功能信息和研究论文索引的蛋白质数据库查询。",
+        "prompt_template": "请帮我检索 UniProt 数据库中关于 EGFR 蛋白的功能注释和亚细胞定位信息。",
+    },
     {"name": "PubMed数据库查询", "sub_category": "信息检索", "description": "生物医学文献信息检索系统。"},
     {"name": "GWAS catalog 数据库查询", "sub_category": "信息检索", "description": "遗传学研究的重要资源，收录了许多基因组关联数据。"},
     {"name": "dbSNP 数据库查询", "sub_category": "信息检索", "description": "单核苷酸多态性（SNP）数据库，快速检索SNP信息。"},
@@ -244,21 +254,32 @@ BIOMEDICINE_SKILLS = [
     {"name": "LigandMPNN", "sub_category": "预测与建模", "description": "深度学习驱动的蛋白质序列设计模型，能够显式考虑小分子、核酸等非蛋白质环境的作用。"},
 ]
 
-# 自动补全通用字段
+# 自动补全通用字段（已配置 prompt_template 的条目保留，其余用占位文案）
 for skill in BIOMEDICINE_SKILLS:
     skill["main_category"] = "生物医药"
-    skill["prompt_template"] = PLACEHOLDER_PROMPT
+    if "prompt_template" not in skill:
+        skill["prompt_template"] = PLACEHOLDER_PROMPT
 
 # 补全遗漏的生物医药技能 (Phase 2)
 ADDITIONAL_BIOMED_SKILLS = [
     {"name": "ESM-Variants", "sub_category": "预测与建模", "description": "交互式可视化蛋白质序列中的氨基酸变化。"},
     {"name": "人源性评估", "sub_category": "数据分析", "description": "使用天然抗体库（OASis）中的肽搜索和种系序列同一性来评估抗体的人性。"},
     {"name": "抗体序列生成", "sub_category": "预测与建模", "description": "对抗体序列进行突变，同时实时监测序列特性。"},
-    {"name": "AlphaFold数据库查询", "sub_category": "信息检索", "description": "查询 AlphaFold 数据库并可选下载结构文件。"},
+    {
+        "name": "AlphaFold数据库查询",
+        "sub_category": "信息检索",
+        "description": "查询 AlphaFold 数据库并可选下载结构文件。",
+        "prompt_template": "帮我查询 UniProt ID 为 P04637 (p53) 的蛋白在 AlphaFold 数据库中的 3D 结构预测信息。",
+    },
     {"name": "GEO 数据库查询", "sub_category": "信息检索", "description": "快速检索基因表达数据的重要数据库。"},
     {"name": "ClinVar 数据库查询", "sub_category": "信息检索", "description": "快速检索遗传变异的临床相关信息。"},
     {"name": "UCSC 基因组浏览器查询", "sub_category": "信息检索", "description": "基因组学研究中的重要工具，快速检索基因组数据。"},
-    {"name": "Reactome 数据库查询", "sub_category": "信息检索", "description": "经过手动筛选和同行评审的生物分子通路知识数据库。"},
+    {
+        "name": "Reactome 数据库查询",
+        "sub_category": "信息检索",
+        "description": "经过手动筛选和同行评审的生物分子通路知识数据库。",
+        "prompt_template": "帮我查询细胞凋亡 (Apoptosis) 相关的 Reactome 通路信息。",
+    },
     {"name": "InterPro 数据库查询", "sub_category": "信息检索", "description": "整合了多个蛋白质家族、结构域和功能位点的数据库系统。"},
     {"name": "获取mRNA序列工具", "sub_category": "信息检索", "description": "根据目标疾病靶点基因名称检索 mRNA 序列，并返回 FASTA 文件。"},
     {"name": "圆二色谱分析工具", "sub_category": "数据分析", "description": "用于分析圆二色性(CD)光谱数据以确定二级结构和热稳定性。"},
@@ -274,7 +295,8 @@ ADDITIONAL_BIOMED_SKILLS = [
 ]
 for skill in ADDITIONAL_BIOMED_SKILLS:
     skill["main_category"] = "生物医药"
-    skill["prompt_template"] = PLACEHOLDER_PROMPT
+    if "prompt_template" not in skill:
+        skill["prompt_template"] = PLACEHOLDER_PROMPT
 
 # 化学大类技能 (UI 占位，可后续扩充；先有基础列表，再追加海量资产)
 CHEMISTRY_SKILLS = []

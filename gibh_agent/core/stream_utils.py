@@ -1,9 +1,14 @@
 """
 Stream and text parsing utilities for LLM responses.
 - 通用双轨（无模型硬编码）：reasoning_content → thought；content 内 <think>...</think> → 状态机分流，缓冲区防跨 chunk 截断；<<<SUGGESTIONS>>> 解析不变。
+- stream_and_extract_json：Planner 流式升级专用分拣器——thought 与 JSON 正文严格隔离；流结束后先剥 fence，再按平衡括号或首 `{`/末 `}` 暴力切出 JSON，最后 json.loads。
 """
 import json
-from typing import AsyncIterator, List, Optional, Tuple, Any
+import re
+import logging
+from typing import AsyncIterator, List, Optional, Tuple, Any, Union
+
+logger = logging.getLogger(__name__)
 
 SUGGEST_START = "<<<SUGGESTIONS>>>"
 SUGGEST_END = "<<<END_SUGGESTIONS>>>"
@@ -288,3 +293,284 @@ async def stream_with_thought_and_suggestions(
         remaining = buffer[last_message_pos:].split(SUGGEST_START)[0]
         if remaining:
             yield ("message", {"content": remaining})
+
+
+def _strip_json_code_fences(text: str) -> str:
+    """去除 ``` / ```json 包裹，供流结束后 json.loads 使用。"""
+    s = (text or "").strip()
+    if not s:
+        return s
+    # 整块 ```json ... ``` 或 ``` ... ```
+    m = re.match(r"^```(?:json)?\s*\r?\n?(.*)\r?\n?```\s*$", s, re.DOTALL | re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    if s.startswith("```"):
+        lines = s.split("\n", 1)
+        s = lines[1] if len(lines) > 1 else ""
+        s = re.sub(r"\n?```\s*$", "", s, flags=re.DOTALL).strip()
+    return s
+
+
+def _extract_balanced_json_object(text: str) -> Optional[str]:
+    """从文本中切出第一个花括号平衡的 JSON 对象子串（字符串内括号不计入深度）。"""
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif c == "\\":
+                escape = True
+            elif c == '"':
+                in_string = False
+            continue
+        if c == '"':
+            in_string = True
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+def _extract_balanced_json_array(text: str) -> Optional[str]:
+    """从文本中切出第一个方括号平衡的 JSON 数组子串。"""
+    start = text.find("[")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif c == "\\":
+                escape = True
+            elif c == '"':
+                in_string = False
+            continue
+        if c == '"':
+            in_string = True
+            continue
+        if c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+def _slice_json_by_brace_fallback(text: str) -> Optional[str]:
+    """首 `{` 与末 `}` 之间的暴力切片（模型夹带自然语言时的最后手段）。"""
+    t = text or ""
+    start_idx = t.find("{")
+    end_idx = t.rfind("}")
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        return t[start_idx : end_idx + 1]
+    return None
+
+
+def _slice_json_by_bracket_fallback(text: str) -> Optional[str]:
+    """首 `[` 与末 `]` 之间的暴力切片（根为数组时）。"""
+    t = text or ""
+    start_idx = t.find("[")
+    end_idx = t.rfind("]")
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        return t[start_idx : end_idx + 1]
+    return None
+
+
+def _prepare_json_text_for_loads(cleaned: str) -> List[str]:
+    """
+    生成若干候选子串供 json.loads 依次尝试。
+    若首个 `{` 在首个 `[` 之前（典型「废话 + JSON 对象」），**不**加入根级 array 候选，
+    避免残缺 object 内的 `\"key\": []` 被误解析为根 `[]`。
+    纯数组根（如 `[{...}]`）则保留 array 候选。
+    """
+    t = (cleaned or "").strip()
+    if not t:
+        return []
+    seen = set()
+    out: List[str] = []
+
+    def _add(s: Optional[str]) -> None:
+        if not s:
+            return
+        s = s.strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+
+    i_brace = t.find("{")
+    i_bracket = t.find("[")
+    object_first = i_brace != -1 and (i_bracket == -1 or i_brace < i_bracket)
+
+    _add(_extract_balanced_json_object(t))
+    if not object_first:
+        _add(_extract_balanced_json_array(t))
+    _add(_slice_json_by_brace_fallback(t))
+    if not object_first:
+        _add(_slice_json_by_bracket_fallback(t))
+    _add(t)
+    return out
+
+
+JsonExtractResult = Union[dict, list]
+
+
+async def stream_and_extract_json(
+    chunk_iter: AsyncIterator[Any],
+) -> AsyncIterator[Tuple[str, object]]:
+    """
+    流式状态机分拣器（Stateful Stream Dispatcher）：与 Planner 业务解耦，专用于「思考实时透出 + JSON 尾部结算」。
+
+    行为摘要：
+    1. 每个 chunk：若存在 delta.reasoning_content，立即 yield ("thought", {"content": ...})（原生字段优先）。
+    2. delta.content：维护 is_thinking；`</think>` 与 `</think>` 之间仅 yield thought，之外仅累积 json_buffer，禁止交叉污染。
+    3. 流结束：清理 fence 后，按平衡 {} / [] 或首末括号暴力切片生成候选串依次 json.loads；
+       成功 yield ("json", obj)；均失败 yield ("json_error", {...})，不抛未捕获异常。
+
+    Yields:
+        ("thought", {"content": str})  — 推理片段（可多次）
+        ("json", dict | list)           — 解析成功（通常一次）
+        ("json_error", dict)            — 结构化错误，含 error / message / raw_preview
+    """
+    is_thinking = False
+    json_buffer = ""
+    work_buf = ""
+
+    async for chunk in chunk_iter:
+        try:
+            choices = getattr(chunk, "choices", None) if not isinstance(chunk, dict) else chunk.get("choices")
+            if not choices or len(choices) == 0:
+                continue
+            first = choices[0]
+            delta = getattr(first, "delta", None) if not isinstance(first, dict) else first.get("delta")
+
+            reasoning = _delta_get(delta, "reasoning_content")
+            if reasoning:
+                yield ("thought", {"content": reasoning})
+
+            content = _delta_get(delta, "content")
+            if not content:
+                continue
+
+            work_buf += content
+
+            while True:
+                if is_thinking:
+                    if THINK_CLOSE in work_buf:
+                        idx = work_buf.find(THINK_CLOSE)
+                        thought_seg = work_buf[:idx]
+                        if thought_seg:
+                            yield ("thought", {"content": thought_seg})
+                        work_buf = work_buf[idx + THINK_CLOSE_LEN :]
+                        is_thinking = False
+                        continue
+                    if len(work_buf) > THINK_CLOSE_LEN:
+                        safe = work_buf[:-THINK_CLOSE_LEN]
+                        work_buf = work_buf[-THINK_CLOSE_LEN:]
+                        if safe:
+                            yield ("thought", {"content": safe})
+                    break
+                else:
+                    if THINK_OPEN in work_buf:
+                        idx = work_buf.find(THINK_OPEN)
+                        before = work_buf[:idx]
+                        if before:
+                            json_buffer += before
+                        work_buf = work_buf[idx + THINK_OPEN_LEN :]
+                        is_thinking = True
+                        continue
+                    if len(work_buf) > THINK_OPEN_LEN:
+                        safe = work_buf[:-THINK_OPEN_LEN]
+                        work_buf = work_buf[-THINK_OPEN_LEN:]
+                        if safe:
+                            json_buffer += safe
+                    break
+        except Exception as e:
+            logger.exception("stream_and_extract_json: chunk 处理异常，已转为 json_error: %s", e)
+            yield (
+                "json_error",
+                {
+                    "error": "stream_chunk_error",
+                    "message": str(e),
+                    "raw_preview": (json_buffer + work_buf)[:2000],
+                },
+            )
+            return
+
+    # 流结束：冲刷 work_buf
+    if work_buf:
+        if is_thinking:
+            yield ("thought", {"content": work_buf})
+        else:
+            json_buffer += work_buf
+        work_buf = ""
+
+    cleaned = _strip_json_code_fences(json_buffer)
+    if not cleaned:
+        yield (
+            "json_error",
+            {
+                "error": "empty_json_buffer",
+                "message": "流结束后 JSON 缓冲区为空（模型未输出可解析正文或仅含思考标签）",
+                "raw_preview": (json_buffer or "")[:2000],
+            },
+        )
+        return
+
+    candidates = _prepare_json_text_for_loads(cleaned)
+    last_decode_error: Optional[json.JSONDecodeError] = None
+    for cand in candidates:
+        try:
+            parsed: JsonExtractResult = json.loads(cand)
+            if not isinstance(parsed, (dict, list)):
+                yield (
+                    "json_error",
+                    {
+                        "error": "json_type_unexpected",
+                        "message": f"根类型必须为 object 或 array，实际: {type(parsed).__name__}",
+                        "raw_preview": cleaned[:2000],
+                    },
+                )
+                return
+            # 残缺 object 中常含 "key": [] 片段；勿将内层 [] 误当根 JSON（否则 Planner 会误判为成功、阻断重试）
+            if isinstance(parsed, list) and not cand.lstrip().startswith("["):
+                continue
+            yield ("json", parsed)
+            return
+        except json.JSONDecodeError as e:
+            last_decode_error = e
+            continue
+        except Exception as e:
+            logger.exception("stream_and_extract_json: json.loads 意外异常: %s", e)
+            yield (
+                "json_error",
+                {
+                    "error": "parse_unexpected_error",
+                    "message": str(e),
+                    "raw_preview": cleaned[:2000],
+                },
+            )
+            return
+
+    yield (
+        "json_error",
+        {
+            "error": "json_decode_error",
+            "message": str(last_decode_error) if last_decode_error else "所有候选子串均无法解析为 JSON",
+            "raw_preview": cleaned[:2000],
+        },
+    )

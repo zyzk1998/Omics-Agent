@@ -142,7 +142,7 @@ except Exception as e:
 try:
     from gibh_agent.api.routers.skills import router as skills_router
     app.include_router(skills_router)
-    logger.info("✅ Skills 路由已注册: POST /api/skills, GET/PUT /api/admin/skills")
+    logger.info("✅ Skills 路由已注册: POST /api/skills, GET /api/admin/skills, PUT status, POST review")
 except Exception as e:
     logger.warning("⚠️ Skills 路由注册失败: %s", e)
 
@@ -473,6 +473,99 @@ except Exception as e:
     logger.error(f"❌ 创建目录失败: {e}", exc_info=True)
     raise
 
+# ---------------------------------------------------------------------------
+# 存储守护：APScheduler 定时清理 + 管理员手动触发 API（依赖 UPLOAD_DIR / RESULTS_DIR）
+# ---------------------------------------------------------------------------
+_storage_scheduler = None
+
+
+def _scheduled_storage_cleanup_job() -> None:
+    """后台任务：清理过期重型文件，保留 .csv/.md/.png/.json 等报告。"""
+    try:
+        from gibh_agent.utils.storage_manager import StorageManager
+
+        sm = StorageManager(results_dir=str(RESULTS_DIR), upload_dir=str(UPLOAD_DIR))
+        r = sm.auto_cleanup(
+            max_days=int(os.getenv("STORAGE_CLEANUP_MAX_DAYS", "7")),
+            max_size_gb=float(os.getenv("STORAGE_CLEANUP_MAX_SIZE_GB", "100")),
+            deep=False,
+            dry_run=False,
+        )
+        logger.info(
+            "[StorageDaemon] 定时清理完成 deleted=%s freed_gb=%.4f errors=%s",
+            r.get("deleted_count"),
+            r.get("freed_gb", 0),
+            len(r.get("errors") or []),
+        )
+    except Exception:
+        logger.exception("[StorageDaemon] 定时清理失败")
+
+
+@app.on_event("startup")
+def _mount_storage_cleanup_scheduler() -> None:
+    global _storage_scheduler
+    if os.getenv("STORAGE_CLEANUP_DISABLED", "").lower() in ("1", "true", "yes"):
+        logger.info("📦 存储自动清理已禁用（STORAGE_CLEANUP_DISABLED）")
+        return
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+    except ImportError:
+        logger.warning("⚠️ 未安装 APScheduler，跳过存储定时清理。请: pip install APScheduler")
+        return
+    _storage_scheduler = BackgroundScheduler()
+    hours = int(os.getenv("STORAGE_CLEANUP_INTERVAL_HOURS", "12"))
+    _storage_scheduler.add_job(
+        _scheduled_storage_cleanup_job,
+        "interval",
+        hours=hours,
+        id="storage_auto_cleanup",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    _storage_scheduler.start()
+    logger.info("📦 存储守护已挂载：每 %s 小时执行 StorageManager.auto_cleanup", hours)
+
+
+@app.on_event("shutdown")
+def _shutdown_storage_cleanup_scheduler() -> None:
+    global _storage_scheduler
+    if _storage_scheduler is not None:
+        try:
+            _storage_scheduler.shutdown(wait=False)
+        except Exception:
+            pass
+        _storage_scheduler = None
+
+
+@app.delete("/api/admin/storage/cleanup")
+def admin_storage_cleanup(
+    max_days: int = Query(7, ge=1, le=3650),
+    max_size_gb: float = Query(100.0, ge=1.0, le=100000.0),
+    deep: bool = Query(False),
+    dry_run: bool = Query(False),
+    _admin=Depends(get_current_admin_user),
+):
+    """
+    管理员：强制触发存储清理。返回删除数量与释放空间（MB/GB）。
+    deep=true 时有效保留期缩短；dry_run=true 仅统计不删除。
+    """
+    try:
+        from gibh_agent.utils.storage_manager import StorageManager
+
+        sm = StorageManager(results_dir=str(RESULTS_DIR), upload_dir=str(UPLOAD_DIR))
+        r = sm.auto_cleanup(
+            max_days=max_days,
+            max_size_gb=max_size_gb,
+            deep=deep,
+            dry_run=dry_run,
+        )
+        return JSONResponse(status_code=200, content={"ok": True, **r})
+    except Exception as e:
+        logger.exception("管理员存储清理失败: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # 安全配置
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 200 * 1024 * 1024))  # 默认 200MB
 # .h5 = 10x Visium / scRNA Feature Barcode Matrix (industry standard); .h5ad = AnnData
@@ -562,6 +655,13 @@ if _static_dir.is_dir():
 
 # 帮助文档与 API 文档（与 index.html 同级，供用户菜单点击访问）
 _html_dir = Path(__file__).parent / "services" / "nginx" / "html"
+# 直连 API 端口（如 :8028）时首页由本进程返回 HTML，但浏览器仍请求 /css、/js；需挂载否则 404
+_css_dir = _html_dir / "css"
+_js_dir = _html_dir / "js"
+if _css_dir.is_dir():
+    app.mount("/css", StaticFiles(directory=str(_css_dir)), name="css")
+if _js_dir.is_dir():
+    app.mount("/js", StaticFiles(directory=str(_js_dir)), name="js")
 
 
 @app.get("/whotowork.html")
@@ -686,6 +786,14 @@ async def sync_tools_on_startup():
     except Exception as e:
         logger.error(f"❌ 工具模块加载失败: {e}", exc_info=True)
         logger.warning("   继续启动，但工具可能未完全加载")
+
+    # 🔌 MCP 插件（与 tools/ 物理隔离，注册到同一 ToolRegistry）
+    try:
+        from gibh_agent.mcp import load_mcp_plugins
+        load_mcp_plugins()
+        logger.info("✅ MCP 插件模块已加载")
+    except Exception as e:
+        logger.warning("⚠️ MCP 插件加载失败: %s", e, exc_info=True)
     
     # 然后同步到 ChromaDB
     if tool_retriever is None:
@@ -713,6 +821,7 @@ class ChatRequest(BaseModel):
     user_id: Optional[str] = "guest"  # 🔥 BUG FIX: 添加 user_id 字段，默认为 guest
     model_name: Optional[str] = "qwen3.5-plus"  # 🔥 前端模型切换：默认阿里百炼 Qwen3.5-Plus，qwen 走 DashScope，其余走 SiliconFlow
     target_domain: Optional[str] = None  # 🔥 快车道硬路由：技能广场点击时传入 'rna'|'metabolomics'|'radiomics'|'spatial'，跳过意图识别
+    enabled_mcps: Optional[List[str]] = None  # 🔌 前端 MCP 开关：如 ["web_search"]，与系统设置联动
 
 
 # 日志缓冲区（保留用于未来扩展）
@@ -2273,7 +2382,8 @@ async def chat_endpoint(
                         owner_id=owner_id,
                         db=db,
                         model_name=model_name,
-                        target_domain=req.target_domain
+                        target_domain=req.target_domain,
+                        enabled_mcps=req.enabled_mcps or [],
                     ):
                         if isinstance(event, str) and "event: state_snapshot" in event:
                             for line in event.split("\n"):
@@ -2780,6 +2890,15 @@ async def execute_workflow(request: dict):
     try:
         workflow_data = request.get("workflow_data")
         file_paths = request.get("file_paths", [])
+        enabled_mcps = request.get("enabled_mcps") or []
+        if isinstance(enabled_mcps, str):
+            try:
+                enabled_mcps = json.loads(enabled_mcps)
+            except Exception:
+                enabled_mcps = []
+        if not isinstance(enabled_mcps, list):
+            enabled_mcps = []
+        enabled_mcps = [str(x).strip() for x in enabled_mcps if x]
         
         logger.info(f"🚀 开始执行工作流: {len(file_paths)} 个文件")
         
@@ -2888,7 +3007,8 @@ async def execute_workflow(request: dict):
                 workflow_data=workflow_data,
                 file_paths=file_paths,
                 output_dir=output_dir,
-                agent=target_agent  # 🔥 传递 agent 实例以生成 AI Expert Diagnosis
+                agent=target_agent,  # 🔥 传递 agent 实例以生成 AI Expert Diagnosis
+                enabled_mcps=enabled_mcps,
             )
             
             logger.info("✅ 通用执行器执行完成")
@@ -3326,12 +3446,17 @@ async def plan_workflow(req: WorkflowPlanRequest):
         else:
             planner = workflow_planner
         
-        # 生成工作流计划
-        workflow_config = await planner.generate_plan(
+        # 生成工作流计划（SOPPlanner.generate_plan 为异步生成器，取最终 workflow 事件）
+        workflow_config = None
+        async for _ev, _data in planner.generate_plan(
             user_query=req.query,
-            file_metadata=req.file_metadata
-        )
-        
+            file_metadata=req.file_metadata,
+        ):
+            if _ev == "workflow":
+                workflow_config = _data
+        if workflow_config is None:
+            raise HTTPException(status_code=500, detail="工作流规划未返回结果")
+
         return {
             "status": "success",
             "workflow": workflow_config,

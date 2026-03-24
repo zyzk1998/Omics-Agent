@@ -164,15 +164,6 @@
                 </div>
             </div>
 
-            <!-- 管理员控制台（待审核技能列表） -->
-            <div id="admin-console-pane" style="display: none; flex: 1; padding: 40px; overflow-y: auto; background: #fff;">
-                <div class="admin-banner" style="position: relative;">
-                    <h2 style="margin-bottom: 20px; font-size: 1.5rem; color: #111827;">🛡️ 待审核技能</h2>
-                    <button type="button" onclick="switchToChatView()" class="admin-console-close-btn" aria-label="关闭">✕</button>
-                </div>
-                <div id="admin-pending-skills-table-wrap"></div>
-            </div>
-
             <!-- 中栏：对话 + 空状态引导 -->
             <main id="chat-pane">
         <header id="chat-pane-header">
@@ -288,6 +279,12 @@
                         <input type="text" id="auth-username-login" class="auth-input" placeholder="用户名" autocomplete="username" required>
                         <input type="password" id="auth-password-login" class="auth-input" placeholder="密码" autocomplete="current-password" required>
                         <button type="submit" class="auth-submit-btn">立即登录</button>
+                        <p class="auth-oauth-divider" aria-hidden="true">— 或使用以下方式登录 —</p>
+                        <div class="auth-oauth-row" role="group" aria-label="第三方登录">
+                            <button type="button" class="auth-oauth-btn auth-oauth-wechat" title="微信" aria-label="微信登录" onclick="console.log('第三方登录待接入')"><span class="auth-oauth-inner" aria-hidden="true">微</span></button>
+                            <button type="button" class="auth-oauth-btn auth-oauth-github" title="GitHub" aria-label="GitHub 登录" onclick="console.log('第三方登录待接入')"><i class="bi bi-github" aria-hidden="true"></i></button>
+                            <button type="button" class="auth-oauth-btn auth-oauth-google" title="Google" aria-label="Google 登录" onclick="console.log('第三方登录待接入')"><i class="bi bi-google" aria-hidden="true"></i></button>
+                        </div>
                     </form>
                 </div>
                 <div id="auth-modal-panel-register" class="auth-panel" style="display: none;">
@@ -399,6 +396,15 @@
             .auth-submit-btn { width: 100%; padding: 14px; border: none; border-radius: 12px; background: #111; color: #fff; font-size: 15px; font-weight: 500; cursor: pointer; margin-top: 8px; }
             .auth-submit-btn:hover { background: #333; }
             .auth-submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+            .auth-oauth-divider { margin: 4px 0 0 0; text-align: center; font-size: 12px; color: #9ca3af; font-weight: 400; letter-spacing: 0.02em; }
+            .auth-oauth-row { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 4px; padding: 4px 0 2px; }
+            .auth-oauth-btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid #e5e7eb; background: #fafafa; color: #374151; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: background 0.2s, border-color 0.2s, transform 0.15s; }
+            .auth-oauth-btn:hover { background: #f3f4f6; border-color: #d1d5db; transform: translateY(-1px); }
+            .auth-oauth-btn .bi { font-size: 1.25rem; line-height: 1; }
+            .auth-oauth-inner { font-size: 14px; font-weight: 600; color: #07c160; }
+            .auth-oauth-wechat:hover { border-color: rgba(7, 193, 96, 0.35); }
+            .auth-oauth-github:hover { color: #24292f; }
+            .auth-oauth-google:hover { color: #4285f4; }
             .auth-error { color: #dc2626; font-size: 13px; margin-top: 12px; }
         </style>
 
@@ -595,6 +601,35 @@
                     description: '基于最优传输理论 (Optimal Transport) 的单细胞时空轨迹推断工具。通过整合单细胞转录组与时间序列信息，精准重构细胞发育、分化或疾病演进的动态轨迹，揭示细胞命运决定的关键调控机制。',
                     tags: ['单细胞', '轨迹推断', '最优传输', '时序分析'],
                     prompt_template: '请帮我执行单细胞时空轨迹推断分析。我希望基于最优传输理论 (Optimal Transport)，探索细胞在时间序列上的发育与分化轨迹。\n\n期望的分析流程如下：\n1. [数据与元数据校验]：严格校验表达矩阵，并嗅探时间序列与细胞类型注释。\n2. [时间序列标准化]：智能清洗时间标签，将其转化为算法可识别的连续数值。\n3. [最优传输轨迹推断]：调用 Moscot 引擎，计算相邻时间点细胞的转移概率矩阵 (Transport Matrices)。\n4. [轨迹可视化]：绘制时空分布 UMAP 图，以及细胞类型演化的动态堆叠柱状图。\n\n请直接为我生成该工作流的配置面板。'
+                },
+                {
+                    id: 'spatiotemporal_dynamics_sc',
+                    name: '单细胞时空动力学分析',
+                    main_category: '特色科研流程',
+                    sub_category: '动力学分析',
+                    description: '基于最优传输理论（Optimal Transport）的单细胞时空演化与细胞命运动力学全景分析。包含轨迹推断、驱动基因挖掘与通路富集分析。',
+                    tags: ['特色科研流程', '动力学分析'],
+                    prompt_template: '帮我执行单细胞时空动力学分析。我希望基于最优传输理论（Optimal Transport），探索细胞在时间序列上的发育与分化轨迹。请执行包含数据校验、时序标准化、轨迹推断、动态可视化、驱动基因挖掘及通路富集分析的全流程，并最终生成专家解读报告。'
+                },
+                {
+                    id: 'research_ppt_outline_md',
+                    name: '科研汇报 PPT 大纲生成',
+                    main_category: '特色科研流程',
+                    sub_category: '文档产出',
+                    plain_doc_skill: true,
+                    description: '在分析完成后，将结论整理为分页面的 Markdown 幻灯片大纲（页间以 --- 分隔），便于导入演示文稿或组会汇报。',
+                    tags: ['文档', '汇报'],
+                    prompt_template: '请根据之前的单细胞分析结果，为我生成一份结构清晰的科研汇报 PPT 大纲（Markdown 格式），包含研究背景、核心发现与结论。请调用 generate_presentation_md 工具完成生成与落盘。'
+                },
+                {
+                    id: 'analysis_mindmap_md',
+                    name: '分析逻辑思维导图生成',
+                    main_category: '特色科研流程',
+                    sub_category: '文档产出',
+                    plain_doc_skill: true,
+                    description: '将分析逻辑、关键节点与驱动因素整理为层级 Markdown 列表，便于在思维导图工具中展开。',
+                    tags: ['文档', '思维导图'],
+                    prompt_template: '请将本次时空动力学分析的核心逻辑与关键驱动基因，整理成一份层级分明的思维导图 Markdown 文档。请调用 generate_mindmap_md 工具完成生成与落盘。'
                 }
             ];
 
@@ -653,7 +688,10 @@
                                     var desc = (s.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
                                     var mainCat = (s.main_category || '').replace(/</g, '&lt;');
                                     var subCat = (s.sub_category || '').replace(/</g, '&lt;');
-                                    var icon = skillCardIcons[s.sub_category] || '🧬';
+                                    var icon = s.plain_doc_skill
+                                        ? '<span class="skill-icon-neutral" aria-hidden="true">Aa</span>'
+                                        : (skillCardIcons[s.sub_category] || '🧬');
+                                    var cardClass = s.plain_doc_skill ? 'skill-card skill-card--research-doc' : 'skill-card';
                                     var catBadges = '';
                                     if (mainCat) catBadges += '<span class="cat-badge">' + mainCat + '</span>';
                                     if (subCat) catBadges += '<span class="cat-badge">' + subCat + '</span>';
@@ -668,7 +706,7 @@
                                         '<button type="button" class="icon-btn btn-skill-bookmark" title="' + addBtnTitle + '" data-skill-id="' + s.id + '" data-saved="' + (isSaved ? '1' : '0') + '">' + addBtnSvg + '</button>' +
                                         '<button type="button" class="icon-btn" title="分享"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg></button>' +
                                         '<button type="button" class="icon-btn" title="复制"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div>';
-                                    return '<div class="skill-card" data-skill-id="' + s.id + '">' +
+                                    return '<div class="' + cardClass + '" data-skill-id="' + s.id + '">' +
                                         '<div class="skill-card-header">' +
                                         '<div class="skill-icon">' + icon + '</div>' +
                                         '<div class="skill-title-group">' +
@@ -794,6 +832,7 @@
                 var sub = (skill.sub_category || '').toLowerCase();
                 var combined = nameLower + ' ' + main + ' ' + sub;
                 if (nameLower.indexOf('sted-ec') !== -1 || name.indexOf('轨迹推断') !== -1) return 'sted_ec_trajectory';
+                if (skill.id === 'spatiotemporal_dynamics_sc' || name.indexOf('时空动力学分析') !== -1) return 'spatiotemporal_dynamics';
                 if (/转录组|单细胞|rna|scrna|scrna-seq|rna-seq/i.test(combined)) return 'rna';
                 if (/代谢组|metabolom/i.test(combined)) return 'metabolomics';
                 if (/影像组|radiomics|nii|dicom|医学影像/i.test(combined)) return 'radiomics';
@@ -814,7 +853,7 @@
             }
 
             function hideAllMainPanes() {
-                var panes = ['chat-pane', 'skills-square-pane', 'history-page-pane', 'file-management-pane', 'admin-console-pane'];
+                var panes = ['chat-pane', 'skills-square-pane', 'history-page-pane', 'file-management-pane'];
                 panes.forEach(function(id) {
                     var el = document.getElementById(id);
                     if (el) el.style.display = 'none';
@@ -969,14 +1008,9 @@
                 }
             };
             function switchToAdminView() {
-                hideAllMainPanes();
-                var adminPane = document.getElementById('admin-console-pane');
-                var wsPane = document.getElementById('workspace-pane');
-                var rzR = document.getElementById('resizer-right');
-                if (adminPane) adminPane.style.display = 'flex';
-                if (wsPane) wsPane.style.display = 'none';
-                if (rzR) rzR.style.display = 'none';
-                if (typeof fetchAdminPendingSkills === 'function') fetchAdminPendingSkills();
+                if (typeof window.showAdminConsole === 'function') {
+                    window.showAdminConsole();
+                }
             }
             function useSkillById(skillId) {
                 var item = window._lastSkillsItems && window._lastSkillsItems.find(function(s) { return String(s.id) === String(skillId); });
@@ -1890,28 +1924,38 @@
                     return esc(raw).replace(/\n/g, '<br>');
                 }
                 var rd = reportData.report_data || reportData;
-                var root = document.createElement('div');
-                root.className = 'unified-report-container mt-3';
-                root.innerHTML = '<div class="card border-0 shadow-sm"><div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> 📊 分析结题报告</h5></div><div class="card-body report-static-body"></div></div>';
-                var body = root.querySelector('.report-static-body');
-                if (!body) return;
-                var diagnosis = reportData.diagnosis != null ? reportData.diagnosis : (rd && rd.diagnosis != null ? rd.diagnosis : null);
-                if (diagnosis != null) {
-                    var diagEl = document.createElement('div');
-                    diagEl.className = 'report-diagnosis-content mb-4';
-                    diagEl.innerHTML = '<h6 class="text-muted mb-2">数据诊断</h6><div class="report-content-box" style="font-size:14px;line-height:1.8;color:#333;background:#f0f7ff;padding:16px;border-radius:8px;border-left:4px solid #4d6bfe">' + textToHtml(diagnosis) + '</div>';
-                    body.appendChild(diagEl);
+                var outer = document.createElement('div');
+                outer.className = 'unified-report-container mt-3';
+                function hasRenderableDiagnosis(d) {
+                    if (d == null) return false;
+                    if (typeof d === 'string') return d.trim().length > 0;
+                    if (typeof d === 'object' && d.message != null) return String(d.message).trim().length > 0;
+                    return true;
                 }
-                var summary = reportData.summary != null ? reportData.summary : (rd && rd.summary != null ? rd.summary : null);
-                if (summary != null) {
-                    var sumEl = document.createElement('div');
-                    sumEl.className = 'report-summary-content mb-4';
-                    sumEl.innerHTML = '<h6 class="text-muted mb-2">专家总结</h6><div class="report-content-box" style="font-size:14px;line-height:1.8;color:#333;background:#f0f7ff;padding:16px;border-radius:8px;border-left:4px solid #4d6bfe">' + textToHtml(summary) + '</div>';
-                    body.appendChild(sumEl);
+                // 名副其实：数据诊断仅来自 report_data.diagnosis（禁止用 summary/report 顶替）
+                var diagnosis = (rd && rd.diagnosis != null) ? rd.diagnosis : null;
+                var diagBlock = null;
+                if (hasRenderableDiagnosis(diagnosis)) {
+                    diagBlock = document.createElement('div');
+                    diagBlock.className = 'report-diagnosis-content mb-4';
+                    diagBlock.innerHTML = '<h6 class="text-muted mb-2">数据诊断报告</h6><div class="report-content-box" style="font-size:14px;line-height:1.8;color:#333;background:#f0f7ff;padding:16px;border-radius:8px;border-left:4px solid #4d6bfe">' + textToHtml(diagnosis) + '</div>';
                 }
+                // 分析结题仅来自 report_data.report；兼容旧快照的 summary 作为专家正文（绝不写入诊断区）
+                var expertMarkdown = (rd && rd.report != null && String(rd.report).trim() !== '') ? rd.report
+                    : (reportData.report != null && String(reportData.report).trim() !== '') ? reportData.report
+                    : (rd && rd.summary != null && String(rd.summary).trim() !== '') ? rd.summary
+                    : (reportData.summary != null && String(reportData.summary).trim() !== '') ? reportData.summary
+                    : null;
                 var stepsDetails = ((rd && rd.steps_details) ? rd.steps_details : []).filter(Boolean);
+                if ((!stepsDetails || stepsDetails.length === 0) && rd && Array.isArray(rd.steps) && rd.steps.length > 0) {
+                    stepsDetails = rd.steps.filter(Boolean);
+                }
+                if ((!stepsDetails || stepsDetails.length === 0) && reportData && Array.isArray(reportData.steps) && reportData.steps.length > 0) {
+                    stepsDetails = reportData.steps.filter(Boolean);
+                }
+                var execWrap = null;
                 if (stepsDetails.length > 0) {
-                    var execWrap = document.createElement('div');
+                    execWrap = document.createElement('div');
                     execWrap.className = 'report-execution-content mt-4';
                     var accordionId = 'snapshot-accordion-' + Date.now();
                     execWrap.innerHTML = '<h6 class="text-muted mb-3">执行结果详情</h6><div class="accordion checklist-container snapshot-steps" id="' + accordionId + '"></div>';
@@ -1920,49 +1964,44 @@
                         var name = step.step_name || step.name || step.step_id || step.tool_id || ('步骤 ' + (idx + 1));
                         var stepResult = step.step_result || {};
                         var stepData = stepResult.data || step.data || {};
-                        var reportData = stepResult.report_data || (stepData && stepData.report_data) || {};
+                        var stepRd = stepResult.report_data || (stepData && stepData.report_data) || {};
                         var plot = step.plot || stepResult.plot_path || (stepData && stepData.plot_path);
-                        var images = (stepData && stepData.images) || [];
-                        if (plot && !images.length) images = [plot];
-                        var tables = (stepData && stepData.tables) || [];
-                        var summary = step.summary || (stepResult && stepResult.summary) || (stepData && stepData.summary) || '';
+                        var images = [];
+                        if (stepRd.images && stepRd.images.length > 0) {
+                            images = images.concat(stepRd.images);
+                        } else if (stepData && stepData.images && stepData.images.length > 0) {
+                            images = images.concat(stepData.images);
+                        }
+                        if (!images.length && plot) images = [plot];
+                        var tables = (stepData && stepData.tables) || (stepResult && stepResult.tables) || [];
+                        var stepSummary = (stepData && typeof stepData.summary === 'string' && stepData.summary.trim())
+                            ? stepData.summary
+                            : (step.summary || (stepResult && stepResult.summary) || (stepData && stepData.summary) || '');
                         var duration = step.duration != null ? step.duration : (stepResult && stepResult.duration);
+                        if (duration == null && stepData && stepData.duration != null) duration = stepData.duration;
                         var metrics = (stepData && stepData.metrics) || (stepResult && stepResult.metrics) || {};
-                        var downloadLinks = (reportData && reportData.download_links) || [];
+                        var downloadLinks = (stepRd && stepRd.download_links) || (stepData && stepData.download_links) || (stepResult && stepResult.download_links) || [];
                         var stepId = 'collapse-step-' + accordionId + '-' + idx;
                         var contentHtml = '';
-                        // 🔥 历史 100% 镜像：摘要（Markdown）在图表上方
-                        if (summary && typeof summary === 'string' && summary.trim()) {
+                        // 🔥 时光机与直播对齐：正文内顺序 = 耗时 → Markdown 摘要 → 下载 → 图表 → metrics → 表格
+                        if (duration != null && duration !== '') {
+                            contentHtml += '<div class="step-duration text-muted small mb-2">耗时: ' + (typeof duration === 'number' ? duration.toFixed(1) : esc(String(duration))) + 's</div>';
+                        }
+                        if (stepSummary && typeof stepSummary === 'string' && stepSummary.trim()) {
                             var summaryRendered = '';
                             try {
-                                summaryRendered = (options && typeof options.markdown === 'function') ? options.markdown(summary) : (typeof safeMarkedParse === 'function' ? safeMarkedParse(summary) : esc(summary));
+                                summaryRendered = (options && typeof options.markdown === 'function') ? options.markdown(stepSummary) : (typeof safeMarkedParse === 'function' ? safeMarkedParse(stepSummary) : esc(stepSummary));
                             } catch (e) {
-                                summaryRendered = esc(summary);
+                                summaryRendered = esc(stepSummary);
                             }
                             contentHtml += '<div class="mt-2 step-summary-content" style="font-size:13px;line-height:1.7;padding:0 0 0 10px;border-left:3px solid #94a3b8;overflow:auto;">' + summaryRendered + '</div>';
                         }
-                        // 🔥 历史 100% 镜像：metrics 徽章（与直播流一致）
-                        if (metrics && typeof metrics === 'object' && Object.keys(metrics).length > 0) {
-                            contentHtml += '<div class="mt-2">';
-                            Object.keys(metrics).forEach(function(k) {
-                                var v = metrics[k];
-                                contentHtml += '<span class="badge bg-secondary me-1">' + esc(k) + ': ' + esc(String(v != null ? v : '')) + '</span>';
-                            });
-                            contentHtml += '</div>';
-                        }
-                        if (images && images.length > 0) {
-                            images.filter(Boolean).forEach(function(src) {
-                                var imgSrc = (typeof src === 'string') ? src : (src && src.path);
-                                var url = normImgPath(imgSrc);
-                                if (url) contentHtml += '<div class="mt-2 mb-2"><img src="' + esc(url) + '" class="report-image img-fluid rounded border" style="max-width:100%;cursor:zoom-in;" onerror="this.style.display=\'none\'"></div>';
-                            });
-                        }
-                        // 🔥 历史 100% 镜像：下载按钮（tmaps zip 等），与直播流 URL 逻辑一致
                         if (downloadLinks && downloadLinks.length > 0) {
-                            contentHtml += '<div class="mt-4 text-center">';
+                            contentHtml += '<div class="mt-3 text-center d-flex flex-wrap gap-2 justify-content-center align-items-center">';
                             downloadLinks.forEach(function(link) {
                                 var linkPath = (link && link.path) ? link.path : (typeof link === 'string' ? link : '');
                                 var linkTitle = (link && link.title) ? link.title : '📦 下载完整结果';
+                                var linkKind = (link && link.kind) ? String(link.kind) : '';
                                 if (!linkPath) return;
                                 var linkUrl = normImgPath(linkPath);
                                 if (!linkUrl) {
@@ -1971,7 +2010,30 @@
                                     else if (linkUrl.indexOf('uploads/') === 0) linkUrl = '/uploads/' + linkUrl.replace(/^uploads\/?/, '');
                                     else linkUrl = '/results/' + (linkUrl.replace(/^results\/?/, ''));
                                 }
-                                contentHtml += '<a href="' + esc(linkUrl) + '" target="_blank" rel="noopener" class="btn btn-sm btn-primary ms-2"><i class="bi bi-file-earmark-zip"></i> ' + esc(linkTitle) + '</a>';
+                                var isMdSnap = (linkKind === 'markdown') || /\.md($|\?|#)/i.test(linkUrl) || /[Mm]arkdown/.test(linkTitle);
+                                if (isMdSnap) {
+                                    contentHtml += '<a href="' + esc(linkUrl) + '" download target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary border-secondary text-dark download-md-doc-btn">' + esc(linkTitle) + '</a>';
+                                } else {
+                                    contentHtml += '<a href="' + esc(linkUrl) + '" target="_blank" rel="noopener" class="btn btn-sm btn-primary ms-2"><i class="bi bi-file-earmark-zip"></i> ' + esc(linkTitle) + '</a>';
+                                }
+                            });
+                            contentHtml += '</div>';
+                        }
+                        if (images && images.length > 0) {
+                            images.filter(Boolean).forEach(function(src) {
+                                var imgSrc = (typeof src === 'string') ? src : (src && src.path);
+                                var imgTitle = (src && typeof src === 'object' && src.title) ? src.title : '';
+                                var url = normImgPath(imgSrc);
+                                if (url) {
+                                    contentHtml += '<div class="mt-2 mb-2">' + (imgTitle ? '<p class="small text-muted mb-1">' + esc(imgTitle) + '</p>' : '') + '<img src="' + esc(url) + '" class="report-image img-fluid rounded border" style="max-width:100%;cursor:zoom-in;" onclick="if(typeof openLightbox===\'function\')openLightbox(this.src);" onerror="this.style.display=\'none\'"></div>';
+                                }
+                            });
+                        }
+                        if (metrics && typeof metrics === 'object' && Object.keys(metrics).length > 0) {
+                            contentHtml += '<div class="mt-2">';
+                            Object.keys(metrics).forEach(function(k) {
+                                var v = metrics[k];
+                                contentHtml += '<span class="badge bg-secondary me-1">' + esc(k) + ': ' + esc(String(v != null ? v : '')) + '</span>';
                             });
                             contentHtml += '</div>';
                         }
@@ -1987,18 +2049,31 @@
                                 contentHtml += '</tbody></table></div>';
                             }
                         }
-                        var durationHtml = (duration != null && duration !== '') ? ('<div class="checklist-subtitle step-duration text-muted small mt-1">耗时 ' + (typeof duration === 'number' ? duration.toFixed(1) : duration) + 's</div>') : '';
+                        var durationHeader = (duration != null && duration !== '') ? ('<div class="checklist-subtitle text-muted small mt-1">耗时 ' + (typeof duration === 'number' ? duration.toFixed(1) : duration) + 's</div>') : '';
                         var itemHtml = '<div class="accordion-item snapshot-step-section">' +
                             '<h2 class="accordion-header">' +
                             '<button class="accordion-button text-start" type="button" data-bs-toggle="collapse" data-bs-target="#' + stepId + '" aria-expanded="true">' +
-                            '<span class="checklist-icon icon-success me-2">✓</span><div class="flex-grow-1"><span class="checklist-title">' + esc(name) + '</span>' + durationHtml + '</div>' +
+                            '<span class="checklist-icon icon-success me-2">✓</span><div class="flex-grow-1"><span class="checklist-title">' + esc(name) + '</span>' + durationHeader + '</div>' +
                             '</button></h2>' +
                             '<div id="' + stepId + '" class="accordion-collapse collapse show">' +
                             '<div class="accordion-body">' + (contentHtml || '') + '</div></div></div>';
                         list.insertAdjacentHTML('beforeend', itemHtml);
                     });
-                    body.appendChild(execWrap);
                 }
+                var expertCard = null;
+                if (expertMarkdown != null) {
+                    expertCard = document.createElement('div');
+                    expertCard.className = 'card border-0 shadow-sm mt-3';
+                    expertCard.innerHTML = '<div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> 分析结题报告</h5></div><div class="card-body report-static-body report-expert-body"></div>';
+                    var expertBody = expertCard.querySelector('.report-expert-body');
+                    if (expertBody) {
+                        expertBody.innerHTML = '<div class="report-content-box" style="font-size:14px;line-height:1.8;color:#333;background:#f0f7ff;padding:16px;border-radius:8px;border-left:4px solid #4d6bfe">' + textToHtml(expertMarkdown) + '</div>';
+                    }
+                }
+                // 强制秩序：1 数据诊断 → 2 执行结果详情 → 3 分析结题报告（appendChild 顺序不可打乱）
+                if (diagBlock) outer.appendChild(diagBlock);
+                if (execWrap) outer.appendChild(execWrap);
+                if (expertCard) outer.appendChild(expertCard);
                 var topImages = (rd && rd.images) ? rd.images : (rd && rd.plot_paths) ? rd.plot_paths : (rd && rd.final_plot) ? [rd.final_plot] : [];
                 if (!Array.isArray(topImages)) topImages = [topImages];
                 topImages = topImages.filter(Boolean);
@@ -2023,7 +2098,7 @@
                             visWrap.appendChild(block);
                         }
                     });
-                    body.appendChild(visWrap);
+                    outer.appendChild(visWrap);
                 }
                 // 🔥 时光机：建议 chips 与质量评估（数据在 report_data，历史还原时一并展示）
                 var suggestions = (rd && rd.suggestions) ? rd.suggestions : (reportData.report_data && reportData.report_data.suggestions) ? reportData.report_data.suggestions : [];
@@ -2041,7 +2116,7 @@
                         chipContainer.appendChild(chip);
                     });
                     sugWrap.appendChild(chipContainer);
-                    body.appendChild(sugWrap);
+                    outer.appendChild(sugWrap);
                 }
                 // 🔥 质量评估模块已下线，暂不在 UI 展示
                 // var evaluation = (rd && rd.evaluation) ? rd.evaluation : (reportData.report_data && reportData.report_data.evaluation) ? reportData.report_data.evaluation : null;
@@ -2051,9 +2126,9 @@
                 //     var score = evaluation.score != null ? evaluation.score : evaluation.score_value;
                 //     var comment = evaluation.comment || evaluation.feedback || evaluation.summary || '';
                 //     evalWrap.innerHTML = '<h6 class="text-muted mb-2">质量评估</h6><div class="report-content-box" style="font-size:14px;line-height:1.6;color:#333;background:#f8f9fa;padding:12px;border-radius:8px;border-left:4px solid #6c757d">' + (score != null ? '<p class="mb-1"><strong>得分：</strong>' + esc(String(score)) + '</p>' : '') + (comment ? '<p class="mb-0">' + textToHtml(comment, true) + '</p>' : '') + '</div>';
-                //     body.appendChild(evalWrap);
+                //     outer.appendChild(evalWrap);
                 // }
-                targetContainer.appendChild(root);
+                targetContainer.appendChild(outer);
             }
             // 🔥 内部：仅渲染工作流卡片到 targetZone，返回 formId（供 renderStaticHistorySnapshot 调用）；messageId 用于 data-message-id 与自动保存
             function _renderStaticWorkflowCard(workflowData, targetZone, messageId) {
@@ -2210,12 +2285,16 @@
                     var workspaceContent = document.getElementById('active-workspace-content');
                     if (workspaceContent && typeof renderStaticSnapshotReport === 'function') {
                         var r = snap.report;
-                        var reportData = r.report_data || r;
-                        if (r.diagnosis != null) reportData.diagnosis = r.diagnosis;
-                        if (r.summary != null) reportData.summary = r.summary;
-                        if (r.report_data && typeof r.report_data === 'object') reportData.report_data = r.report_data;
+                        var innerRd = (r.report_data && typeof r.report_data === 'object') ? Object.assign({}, r.report_data) : {};
+                        if (!r.report_data || typeof r.report_data !== 'object') {
+                            Object.assign(innerRd, r);
+                        }
+                        if (r.diagnosis_report != null) innerRd.diagnosis = r.diagnosis_report;
+                        else if (innerRd.diagnosis == null && r.diagnosis != null) innerRd.diagnosis = r.diagnosis;
+                        if (innerRd.report == null && r.report != null) innerRd.report = r.report;
+                        if (innerRd.report == null && r.summary != null) innerRd.report = r.summary;
                         var opts = (typeof safeMarkedParse === 'function') ? { markdown: function(s) { return safeMarkedParse(s); } } : undefined;
-                        renderStaticSnapshotReport(reportData, workspaceContent, opts);
+                        renderStaticSnapshotReport({ report_data: innerRd }, workspaceContent, opts);
                     }
                 }
                 return formId;
@@ -2731,10 +2810,11 @@
                     }).then(function(r) {
                         if (!r.ok) return r.json().then(function(d) { throw d; });
                         return r.json();
-                    }).then(function() {
+                    }).then(function(data) {
                         closeSkillUploadModal();
                         skillUploadForm.reset();
-                        alert('提交成功，等待管理员审核');
+                        var msg = (data && data.message) ? data.message : '提交成功';
+                        alert(msg);
                     }).catch(function(err) {
                         errEl.textContent = (err && (err.detail || err.message)) || '提交失败';
                         errEl.style.display = 'block';
@@ -2743,47 +2823,6 @@
                 var adminConsoleBtn = document.getElementById('admin-console-btn');
                 if (adminConsoleBtn) adminConsoleBtn.onclick = function() { switchToAdminView(); };
             };
-
-            function fetchAdminPendingSkills() {
-                var wrap = document.getElementById('admin-pending-skills-table-wrap');
-                if (!wrap) return;
-                wrap.innerHTML = '<p style="color:#6b7280;">加载中...</p>';
-                fetch('/api/admin/skills', { method: 'GET', headers: getAuthHeaders() })
-                    .then(function(r) {
-                        if (r.status === 403) { wrap.innerHTML = '<p style="color:#ef4444;">无管理员权限</p>'; return []; }
-                        return r.ok ? r.json() : r.json().then(function(d) { throw d; });
-                    })
-                    .then(function(list) {
-                        if (!Array.isArray(list) || list.length === 0) { wrap.innerHTML = '<p style="color:#6b7280;">暂无待审核技能</p>'; return; }
-                        var table = '<table id="admin-pending-skills-list" style="width:100%; border-collapse: collapse; font-size: 14px;"><thead><tr style="border-bottom: 2px solid #e5e7eb;"><th style="text-align:left; padding: 10px;">名称</th><th style="text-align:left; padding: 10px;">学科分类</th><th style="text-align:left; padding: 10px;">作者</th><th style="text-align:left; padding: 10px;">操作</th></tr></thead><tbody>';
-                        list.forEach(function(s) {
-                            var id = s.id;
-                            var name = (s.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-                            var cat = (s.main_category || '-').replace(/</g, '&lt;');
-                            var author = (s.author_id || '-').replace(/</g, '&lt;');
-                            table += '<tr style="border-bottom: 1px solid #e5e7eb;"><td style="padding: 10px;">' + name + '</td><td style="padding: 10px;">' + cat + '</td><td style="padding: 10px;">' + author + '</td><td style="padding: 10px;"><button type="button" class="ghost-btn" style="color: #10b981; margin-right: 8px;" onclick="reviewSkill(' + id + ', \'approved\')">✅ 通过</button><button type="button" class="ghost-btn" style="color: #ef4444;" onclick="reviewSkill(' + id + ', \'rejected\')">❌ 驳回</button></td></tr>';
-                        });
-                        table += '</tbody></table>';
-                        wrap.innerHTML = table;
-                    })
-                    .catch(function(e) { wrap.innerHTML = '<p style="color:#ef4444;">' + (e.detail || e.message || '加载失败') + '</p>'; });
-            }
-            function fetchPendingSkills() { if (typeof fetchAdminPendingSkills === 'function') fetchAdminPendingSkills(); }
-            function reviewSkill(id, status) {
-                if (!id) return;
-                var wrap = document.getElementById('admin-pending-skills-table-wrap');
-                fetch('/api/admin/skills/' + id + '/status', {
-                    method: 'PUT',
-                    headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({ status: status })
-                }).then(function(r) {
-                    if (r.status === 403) { alert('需要管理员权限'); return; }
-                    if (!r.ok) return r.json().then(function(d) { throw d; });
-                    return r.json();
-                }).then(function() {
-                    if (typeof fetchAdminPendingSkills === 'function') fetchAdminPendingSkills();
-                }).catch(function(e) { alert(e.detail || e.message || '操作失败'); });
-            }
 
             function checkInput() {
                 if (isProcessing) { sendBtn.classList.remove('active'); return; }
@@ -3721,11 +3760,11 @@
                                     break;
                                     
                                 case 'diagnosis':
-                                    // 数据驱动：diagnosis_report → 数据诊断(#report-diagnosis)；report_data.diagnosis → 专家分析(#report-summary)
+                                    // 数据诊断仅写入「数据诊断报告」区，与结题/专家 Markdown 严格分离
                                     if (data.diagnosis_report != null) {
                                         renderReportSection('diagnosis', data.diagnosis_report, data);
                                     } else if (data.report_data && data.report_data.diagnosis != null) {
-                                        renderReportSection('summary', data.report_data.diagnosis, data);
+                                        renderReportSection('diagnosis', data.report_data.diagnosis, data);
                                     }
                                     const diagnosisSuggestions = (data.report_data && data.report_data.suggestions) || data.suggestions;
                                     if (Array.isArray(diagnosisSuggestions) && diagnosisSuggestions.length > 0) {
@@ -3794,7 +3833,10 @@
                                             renderExecutionSteps(data.report_data.steps_details);
                                         }
                                         if (data.report_data.diagnosis != null) {
-                                            renderReportSection('summary', data.report_data.diagnosis, data);
+                                            renderReportSection('diagnosis', data.report_data.diagnosis, data);
+                                        }
+                                        if (data.report_data.report != null) {
+                                            renderReportSection('summary', data.report_data.report, data);
                                         }
                                     } else {
                                         if (data.steps_details && data.steps_details.length > 0) {
@@ -4212,18 +4254,19 @@
                                 reportContent = reportContent.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
                             }
                             const integrityBadge = integrityVerified ? '<p class="mb-2 small text-success"><i class="bi bi-shield-check"></i> 数据完整性校验通过</p>' : '';
-                            const bodyHtml = integrityBadge + '<div class="report-content-box" style="font-size:14px;line-height:1.8;color:#333;background:#f0f7ff;padding:20px;border-radius:8px;border-left:4px solid #4d6bfe">' + safeMarkedParse(reportContent) + '</div>';
+                            const sectionTitle = section === 'diagnosis' ? '数据诊断报告' : '分析结题报告';
+                            const bodyHtml = '<h6 class="text-muted mb-2">' + sectionTitle + '</h6>' + integrityBadge + '<div class="report-content-box" style="font-size:14px;line-height:1.8;color:#333;background:#f0f7ff;padding:20px;border-radius:8px;border-left:4px solid #4d6bfe">' + safeMarkedParse(reportContent) + '</div>';
                             var reportContainer = cardZoneRef.querySelector('.unified-report-container');
                             if (!reportContainer) {
                                 reportContainer = document.createElement('div');
                                 reportContainer.className = 'unified-report-container mt-3';
-                                reportContainer.innerHTML = '<div class="card border-0 shadow-sm"><div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> 📊 分析结题报告</h5></div><div class="card-body"><div class="report-diagnosis-content"></div><div class="report-execution-content mt-4"></div><div class="report-summary-content mt-4"></div></div></div>';
+                                reportContainer.innerHTML = '<div class="card border-0 shadow-sm"><div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> 分析报告</h5></div><div class="card-body"><div class="report-diagnosis-content"></div><div class="report-execution-content mt-4"></div><div class="report-summary-content mt-4"></div></div></div>';
                                 cardZoneRef.appendChild(reportContainer);
                             }
                             var target = reportContainer.querySelector(section === 'diagnosis' ? '.report-diagnosis-content' : '.report-summary-content');
                             if (target) {
                                 target.innerHTML = bodyHtml;
-                                console.log('✅ [renderReportSection] 已写入 ' + (section === 'diagnosis' ? '数据诊断' : '专家分析'));
+                                console.log('✅ [renderReportSection] 已写入 ' + sectionTitle);
                             }
                         }
                         
@@ -4282,7 +4325,7 @@
                             if (!reportContainer) {
                                 reportContainer = document.createElement('div');
                                 reportContainer.className = 'unified-report-container mt-3';
-                                reportContainer.innerHTML = '<div class="card border-0 shadow-sm"><div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> 📊 分析结题报告</h5></div><div class="card-body"><div class="report-diagnosis-content"></div><div class="report-execution-content mt-4"></div><div class="report-summary-content mt-4"></div></div></div>';
+                                reportContainer.innerHTML = '<div class="card border-0 shadow-sm"><div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> 分析报告</h5></div><div class="card-body"><div class="report-diagnosis-content"></div><div class="report-execution-content mt-4"></div><div class="report-summary-content mt-4"></div></div></div>';
                                 cardZoneRef.appendChild(reportContainer);
                             }
                             const executionSection = reportContainer.querySelector('.report-execution-content');
@@ -4356,7 +4399,12 @@
                                 // 🔥 PHASE 1: Enhanced result data extraction
                                 const stepResult = step.step_result || {};
                                 const stepData = stepResult.data || step.data || {};
-                                const reportData = stepResult.report_data || stepData.report_data || {};
+                                const _baseRd = stepResult.report_data || stepData.report_data || {};
+                                const reportData = Object.assign({}, _baseRd);
+                                var _dlFallback = stepData.download_links || stepResult.download_links;
+                                if ((!reportData.download_links || !reportData.download_links.length) && _dlFallback && _dlFallback.length) {
+                                    reportData.download_links = _dlFallback;
+                                }
                                 
                                 // Extract plot paths (multiple sources); STED-EC 等多图步骤优先用 report_data.images
                                 const plotPath = step.plot || stepData.plot_path || stepData.image_path || stepData.plot;
@@ -4364,7 +4412,9 @@
                                     ? reportData.images
                                     : (stepData.images || stepResult.images || []);
                                 const tables = stepData.tables || stepData.preview || stepResult.tables || [];
-                                const summary = step.summary || stepData.summary || stepResult.summary || '';
+                                const summary = (typeof stepData.summary === 'string' && stepData.summary.trim())
+                                    ? stepData.summary
+                                    : (step.summary || stepResult.summary || '');
                                 const metrics = stepData.metrics || stepResult.metrics || {};
                                 
                                 // Build result content HTML
@@ -4456,12 +4506,13 @@
                                         }
                                     }
                                     
-                                    // 🔥 STED-EC 等：渲染 report_data.download_links（ZIP 等下载链接）
+                                    // 🔥 STED-EC 等：渲染 report_data.download_links（ZIP / Markdown 等）
                                     if (reportData.download_links && reportData.download_links.length > 0) {
-                                        resultContentHtml += '<div class="mt-4 text-center">';
+                                        resultContentHtml += '<div class="mt-4 text-center d-flex flex-wrap gap-2 justify-content-center align-items-center">';
                                         reportData.download_links.forEach(function(link) {
                                             var linkPath = (link && link.path) ? link.path : (typeof link === 'string' ? link : '');
                                             var linkTitle = (link && link.title) ? link.title : '📦 下载完整结果';
+                                            var linkKind = (link && link.kind) ? String(link.kind) : '';
                                             if (!linkPath) return;
                                             var linkUrl = String(linkPath);
                                             if (linkUrl.indexOf('/app/test_data') !== -1) linkUrl = linkUrl.replace(/\/app\/test_data/, '/results/test_data');
@@ -4471,7 +4522,13 @@
                                                 if (linkUrl.indexOf('uploads/') === 0) linkUrl = linkUrl.replace(/^uploads\//, '');
                                                 if (linkUrl && linkUrl.indexOf('/') !== 0) linkUrl = (String(linkPath).indexOf('uploads') !== -1 ? '/uploads/' : '/results/') + linkUrl;
                                             }
-                                            resultContentHtml += '<a href="' + (typeof getAbsoluteMediaUrl === 'function' ? getAbsoluteMediaUrl(linkUrl) : linkUrl) + '" target="_blank" rel="noopener" class="btn btn-sm btn-primary ms-2"><i class="bi bi-file-earmark-zip"></i> ' + escapeHtml(linkTitle) + '</a>';
+                                            var isMd = (linkKind === 'markdown') || /\.md($|\?|#)/i.test(linkUrl) || /[Mm]arkdown/.test(linkTitle);
+                                            var absFinal = (typeof getAbsoluteMediaUrl === 'function' ? getAbsoluteMediaUrl(linkUrl) : linkUrl);
+                                            if (isMd) {
+                                                resultContentHtml += '<a href="' + absFinal + '" download target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary border-secondary text-dark download-md-doc-btn">' + escapeHtml(linkTitle) + '</a>';
+                                            } else {
+                                                resultContentHtml += '<a href="' + absFinal + '" target="_blank" rel="noopener" class="btn btn-sm btn-primary ms-2"><i class="bi bi-file-earmark-zip"></i> ' + escapeHtml(linkTitle) + '</a>';
+                                            }
                                         });
                                         resultContentHtml += '</div>';
                                     }

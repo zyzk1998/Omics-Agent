@@ -231,14 +231,17 @@ async def test_complete_workflow():
             planner = SOPPlanner(tool_retriever, llm_client)
             
             print("📋 生成工作流配置...")
-            result = await planner.generate_plan(
+            result = None
+            async for _ev, _data in planner.generate_plan(
                 user_query="分析这个代谢组学数据",
                 file_metadata=file_metadata,
-                is_template=False
-            )
+                is_template=False,
+            ):
+                if _ev == "workflow":
+                    result = _data
             
-            if result.get("type") != "workflow_config":
-                print(f"❌ 规划失败: {result.get('error', 'Unknown error')}")
+            if not result or result.get("type") != "workflow_config":
+                print(f"❌ 规划失败: {(result or {}).get('error', 'Unknown error')}")
                 results['step3'] = False
             else:
                 workflow_config = result.get("workflow_data", {})

@@ -102,7 +102,8 @@ services:
       - gibh-network
     # 🔧 修复：使用 entrypoint 脚本修复权限
     entrypoint: ["/entrypoint.sh"]
-    command: gunicorn server:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8028 --timeout 300
+    # timeout：长流程（时空动力学/Cell Ranger 等）可能超过 300s；过短会导致 worker 被强杀 → SSE 分块不完整(ERR_INCOMPLETE_CHUNKED_ENCODING)
+    command: gunicorn server:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8028 --timeout 1200 --graceful-timeout 60
 
   # =========================================
   # 3. Nginx 反向代理服务器（可选，推荐生产环境）

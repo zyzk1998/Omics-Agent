@@ -10,13 +10,17 @@
 """
 import json
 import logging
+import re
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, AsyncIterator, Tuple
 from pathlib import Path
 
 from .tool_retriever import ToolRetriever
 from .tool_registry import registry
 from .llm_client import LLMClient
+from .stream_utils import stream_and_extract_json, _strip_json_code_fences, _prepare_json_text_for_loads
+from .sted_ec_intent_keywords import STED_EC_INTENT_KEYWORDS
+from .spatiotemporal_dynamics_keywords import SPATIOTEMPORAL_DYNAMICS_KEYWORDS
 from .workflows import WorkflowRegistry
 
 logger = logging.getLogger(__name__)
@@ -27,6 +31,11 @@ def _is_flat_params(d: dict) -> bool:
     if not d or not isinstance(d, dict):
         return False
     return not any(isinstance(v, dict) for v in d.values())
+
+
+def _has_spatiotemporal_dynamics_keyword(query_lower: str) -> bool:
+    """通道 B 硬核关键词（优先级高于 STED_EC / 普通 RNA）。"""
+    return any(kw in query_lower for kw in SPATIOTEMPORAL_DYNAMICS_KEYWORDS)
 
 
 # Step semantics for Dynamic Planning: LLM uses these to map "skip X" / "no Y" to step IDs.
@@ -53,6 +62,20 @@ SOP_PLANNER_STEP_SEMANTICS = {
         ("radiomics_model_comparison", "Multi-algorithm LR/SVM/RF ROC comparison (秀肌肉)"),
         ("calc_score", "Rad-Score and risk probability (scoring)"),
         ("viz_score", "Rad-Score visualization (bar/gauge chart)"),
+    ],
+    "STED_EC": [
+        ("sted_ec_data_validation", "H5AD 与 time_key/cell_type_key 元数据校验"),
+        ("sted_ec_time_series_formatting", "时间序列标准化，输出规范 h5ad"),
+        ("sted_ec_moscot_trajectory", "moscot 最优传输轨迹推断"),
+        ("sted_ec_plot_trajectory", "时空动力学图可视化（UMAP/演化图）"),
+    ],
+    "SPATIOTEMPORAL_DYNAMICS": [
+        ("sted_ec_data_validation", "H5AD 与 time_key/cell_type_key 元数据校验"),
+        ("sted_ec_time_series_formatting", "时间序列标准化，输出规范 h5ad"),
+        ("sted_ec_moscot_trajectory", "moscot 最优传输轨迹推断"),
+        ("sted_ec_plot_trajectory", "时空动力学图可视化（UMAP/演化图）"),
+        ("sted_ec_driver_gene_extraction", "轨迹驱动基因挖掘（rank_genes_groups → driver_genes.csv）"),
+        ("sted_ec_pathway_enrichment", "通路富集（Enrichr：KEGG/GO，CSV + 图）"),
     ],
 }
 
@@ -320,39 +343,30 @@ Remember: Output ONLY the JSON object, no markdown, no code blocks, no explanati
         Returns:
             解析后的工作流计划字典
         """
-        # 尝试提取 JSON（可能被 markdown 代码块包裹）
-        response = response.strip()
-        
-        # 移除 markdown 代码块标记
-        if response.startswith("```json"):
-            response = response[7:]
-        elif response.startswith("```"):
-            response = response[3:]
-        
-        if response.endswith("```"):
-            response = response[:-3]
-        
-        response = response.strip()
-        
-        try:
-            plan = json.loads(response)
-            return plan
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ JSON 解析失败: {e}")
-            logger.error(f"响应内容: {response[:500]}")
-            
-            # 尝试提取 JSON 对象（使用正则表达式）
-            import re
-            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response, re.DOTALL)
-            if json_match:
-                try:
-                    plan = json.loads(json_match.group())
+        cleaned = _strip_json_code_fences((response or "").strip())
+        if not cleaned:
+            raise ValueError("无法解析 LLM 响应: 空内容")
+        last_err: Optional[json.JSONDecodeError] = None
+        for cand in _prepare_json_text_for_loads(cleaned):
+            try:
+                plan = json.loads(cand)
+                if isinstance(plan, dict):
+                    return plan
+            except json.JSONDecodeError as e:
+                last_err = e
+                continue
+        logger.error("❌ JSON 解析失败: %s", last_err)
+        logger.error("响应内容: %s", cleaned[:500])
+        json_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", cleaned, re.DOTALL)
+        if json_match:
+            try:
+                plan = json.loads(json_match.group())
+                if isinstance(plan, dict):
                     logger.info("✅ 使用正则表达式成功提取 JSON")
                     return plan
-                except:
-                    pass
-            
-            raise ValueError(f"无法解析 LLM 响应为 JSON: {e}")
+            except json.JSONDecodeError:
+                pass
+        raise ValueError(f"无法解析 LLM 响应为 JSON: {last_err}")
     
     def _validate_and_adapt(
         self,
@@ -554,9 +568,13 @@ class SOPPlanner:
         is_template: bool = False,  # 🔥 ARCHITECTURAL RESET: Explicit template flag
         target_domain: Optional[str] = None,  # 🔥 快车道硬路由：技能广场传入时已由 Orchestrator 做意图 bypass，此处仅做兼容；workflow 已按 domain_name 物理隔离
         steps_to_skip: Optional[List[str]] = None,  # 🔥 快车道时由 Orchestrator 传入 _analyze_user_intent 的 skip_steps，否则由内部意图分析得到
-    ) -> Dict[str, Any]:
+    ) -> AsyncIterator[Tuple[str, Any]]:
         """
-        生成基于 SOP 规则的工作流计划（架构重置版 - 严格分离执行和预览）
+        生成基于 SOP 规则的工作流计划（异步生成器，供 Orchestrator `async for` 消费）。
+        
+        Yields:
+            ("workflow", dict) — 成功时为 workflow_config 形态；失败时为 {"type": "error", ...}
+            未来可扩展 ("thought", {...}) 等事件
         
         🔥 ARCHITECTURAL RESET: Strict Separation of Execution and Preview
         - If is_template=False: MUST use _fill_parameters, MUST return template_mode=False
@@ -570,9 +588,6 @@ class SOPPlanner:
             target_steps: 可选的目标步骤列表（如果提供，跳过意图分析）
             is_template: 是否为模板模式（True=预览，False=执行）
             target_domain: 快车道时由 Orchestrator 传入，workflow 已按 domain 物理阉割，无跨界工具
-        
-        Returns:
-            符合前端格式的工作流配置字典
         """
         try:
             _t_plan_start = time.time()
@@ -620,16 +635,21 @@ class SOPPlanner:
             # Step 2: 严格域绑定检查
             if not self.workflow_registry.is_supported(domain_name):
                 logger.warning(f"⚠️ [SOPPlanner] 不支持的域名: {domain_name}")
-                return self.workflow_registry.get_unsupported_error(domain_name)
+                yield ("workflow", self.workflow_registry.get_unsupported_error(domain_name))
+                return
             
             # Step 3: 获取工作流实例
             workflow = self.workflow_registry.get_workflow(domain_name)
             if not workflow:
-                return {
-                    "type": "error",
-                    "error": f"无法获取工作流: {domain_name}",
-                    "message": "工作流注册表错误"
-                }
+                yield (
+                    "workflow",
+                    {
+                        "type": "error",
+                        "error": f"无法获取工作流: {domain_name}",
+                        "message": "工作流注册表错误",
+                    },
+                )
+                return
             
             # 🔥 ARCHITECTURAL FIX: 优先运行意图分析（Plan-First）；快车道可由 Orchestrator 传入 steps_to_skip
             # Step 4: Analyze User Intent (LLM) - 从可用工具集中选择目标步骤（如果未提供）
@@ -638,7 +658,14 @@ class SOPPlanner:
             if target_steps is None:
                 logger.info("🔍 [SOPPlanner] Step 2: 分析用户意图（选择目标步骤）...")
                 _t_intent2 = time.time()
-                intent_result = await self._analyze_user_intent(user_query, workflow)
+                intent_result = None
+                async for evt, data in self._analyze_user_intent(user_query, workflow):
+                    if evt == "thought":
+                        yield ("thought", data)
+                    elif evt == "intent_parse_error":
+                        yield ("thought", data)
+                    elif evt == "intent_result":
+                        intent_result = data
                 logger.info("[Profiler] 用户意图分析(LLM)完成 - 耗时: %.2fs", time.time() - _t_intent2)
                 logger.info("⏱️ [性能探针] generate_plan 阶段2(用户意图分析) 耗时: %.2fs", time.time() - _t_stage2_start)
                 if isinstance(intent_result, dict):
@@ -721,12 +748,16 @@ class SOPPlanner:
                     logger.warning(f"⚠️ [SOPPlanner] resolved_steps 不为空但模板为空，尝试手动构建步骤...")
                     # 这里不应该手动构建，应该修复 generate_template
                     # 但为了不破坏流程，我们返回错误
-                    return {
-                        "type": "error",
-                        "error": "工作流模板生成失败",
-                        "message": f"无法生成工作流模板：步骤列表为空。resolved_steps: {resolved_steps}",
-                        "workflow_data": workflow_config.get("workflow_data", {})
-                    }
+                    yield (
+                        "workflow",
+                        {
+                            "type": "error",
+                            "error": "工作流模板生成失败",
+                            "message": f"无法生成工作流模板：步骤列表为空。resolved_steps: {resolved_steps}",
+                            "workflow_data": workflow_config.get("workflow_data", {}),
+                        },
+                    )
+                    return
             
             logger.info(f"✅ [SOPPlanner] 模板生成成功: {steps_count} 个步骤")
             
@@ -807,12 +838,16 @@ class SOPPlanner:
             
             if final_steps_count == 0:
                 logger.error(f"❌ [SOPPlanner] 最终工作流配置步骤为空！")
-                return {
-                    "type": "error",
-                    "error": "工作流步骤为空",
-                    "message": "工作流规划失败：最终步骤列表为空。",
-                    "workflow_data": workflow_config.get("workflow_data", {})
-                }
+                yield (
+                    "workflow",
+                    {
+                        "type": "error",
+                        "error": "工作流步骤为空",
+                        "message": "工作流规划失败：最终步骤列表为空。",
+                        "workflow_data": workflow_config.get("workflow_data", {}),
+                    },
+                )
+                return
             
             logger.info("⏱️ [性能探针] generate_plan 总耗时: %.2fs", time.time() - _t_plan_start)
             # 🔥 CRITICAL FIX: 构建返回结果，清理冗余字段
@@ -827,17 +862,22 @@ class SOPPlanner:
             if template_mode and "diagnosis" in workflow_config:
                 result["diagnosis"] = workflow_config["diagnosis"]
             
-            return result
+            yield ("workflow", result)
+            return
         
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
             logger.error("❌ [SOPPlanner] 工作流规划失败 | 根因: %s | traceback:\n%s", e, tb, exc_info=False)
-            return {
-                "type": "error",
-                "error": str(e),
-                "message": f"工作流规划失败: {str(e)}",
-            }
+            yield (
+                "workflow",
+                {
+                    "type": "error",
+                    "error": str(e),
+                    "message": f"工作流规划失败: {str(e)}",
+                },
+            )
+            return
     
     def _get_domain_knowledge(self, workflow: "BaseWorkflow") -> str:
         """
@@ -864,20 +904,14 @@ class SOPPlanner:
                     lines.append(f"- {sid}: {hint}")
         return "\n".join(lines)
 
-    async def _analyze_user_intent(
+    async def _analyze_user_intent_core(
         self,
         user_query: str,
-        workflow: "BaseWorkflow"
-    ):
+        workflow: "BaseWorkflow",
+    ) -> Dict[str, Any]:
         """
-        分析用户意图，从可用工具集中选择目标步骤，并识别需要“跳过”的步骤。
-        
-        支持 Dynamic Planning：用户说 "skip preprocessing" / "不要通路富集" 时，
-        返回 skip_steps，规划器会将对应步骤设为 selected: false。
-        
-        Returns:
-            dict: {"target_steps": ["step1", ...], "skip_steps": ["step_x"]}
-            或 list: 兼容旧版，表示 target_steps，skip_steps 视为 []。
+        用户意图分析（单次 LLM 调用），返回 dict。
+        由 _analyze_user_intent 异步生成器包装，供 Orchestrator `async for` 消费。
         """
         _t_analyze_start = time.time()
         # 获取可用步骤列表
@@ -977,6 +1011,14 @@ From the user query, output a JSON object with "target_steps" and "skip_steps". 
             logger.error(f"响应内容: {response_text[:200] if 'response_text' in locals() else str(response)[:200]}")
             fallback_list = self._fallback_intent_analysis(user_query, available_steps)
             return {"target_steps": fallback_list, "skip_steps": []}
+
+    async def _analyze_user_intent(self, user_query: str, workflow: "BaseWorkflow"):
+        """
+        异步生成器契约：至少 yield 一次，供 `async for evt, data in ...` 使用。
+        事件：("intent_result", dict)；可扩展 ("thought", ...) / ("intent_parse_error", ...)。
+        """
+        data = await self._analyze_user_intent_core(user_query, workflow)
+        yield ("intent_result", data)
     
     def _fallback_intent_analysis(self, user_query: str, available_steps: List[str]) -> List[str]:
         """
@@ -1180,15 +1222,17 @@ From the user query, output a JSON object with "target_steps" and "skip_steps". 
         system_prompt = """You are an Intent Classifier for Bioinformatics Workflows.
 
 Your task is to classify user queries into:
-1. Domain Name: "Metabolomics", "RNA", "Spatial", or "Radiomics" (strictly one of these four)
+1. Domain Name: exactly one of "Metabolomics", "RNA", "Spatial", "Radiomics", "STED_EC", "SPATIOTEMPORAL_DYNAMICS"
 2. Mode: "EXECUTION" or "PLANNING" (determines if user wants to run or preview)
 3. Target Steps: List of specific steps the user wants (e.g., ["pca_analysis"], ["load_image", "preview_slice", "extract_features"])
 
 **Available Domains:**
-- Metabolomics: For metabolite data analysis (CSV files with metabolite measurements)
-- RNA: For single-cell RNA-seq analysis (H5AD files, FASTQ files)
-- Spatial: For spatial transcriptomics / 10x Visium (Visium directories, spatial coordinates, spots, Moran's I, SVGs)
-- Radiomics: For medical imaging (NIfTI, DICOM), CT/MRI, texture analysis, biomarker discovery
+- Metabolomics: metabolite CSV / tabular omics
+- RNA: scRNA-seq, FASTQ, generic H5AD when user does NOT ask for trajectory / spatiotemporal dynamics
+- Spatial: 10x Visium directories, spots, Moran's I, spatial layers
+- Radiomics: NIfTI/DICOM medical imaging, texture, Rad-Score (NOT single-cell trajectory wording)
+- STED_EC: moscot / optimal transport / trajectory inference on time-series h5ad (channel A, 4-step demo pipeline)
+- SPATIOTEMPORAL_DYNAMICS: user explicitly wants full spatiotemporal dynamics pipeline (Chinese e.g. 时空动力学, English spatiotemporal dynamics); channel B, 6-step pipeline
 
 **Available Steps (Metabolomics):**
 - inspect_data, preprocess_data, pca_analysis, metabolomics_plsda, differential_analysis, visualize_volcano, metabolomics_pathway_enrichment
@@ -1202,47 +1246,47 @@ Your task is to classify user queries into:
 **Available Steps (Radiomics):**
 - load_image, preprocess, preview_slice, extract_features, calc_score, viz_score
 
+**Available Steps (STED_EC / SPATIOTEMPORAL_DYNAMICS):**
+- sted_ec_data_validation, sted_ec_time_series_formatting, sted_ec_moscot_trajectory, sted_ec_plot_trajectory
+- (SPATIOTEMPORAL_DYNAMICS only) sted_ec_driver_gene_extraction, sted_ec_pathway_enrichment
+
 **Mode Classification Rules (CRITICAL):**
 1. IF File is **False** (no file uploaded): ALWAYS return "PLANNING".
 2. IF File is **True** (file uploaded):
    - Query implies ACTION ("analyze", "run", "do", "start", "执行", "分析", "运行", "开始"): -> Return "EXECUTION"
    - Query implies INQUIRY ("show me the plan", "what steps?", "preview", "预览", "显示", "查看"): -> Return "PLANNING"
-   - Query is VAGUE ("metabolomics", "RNA", "Spatial", "Radiomics", "代谢组", "转录组", "空间", "影像组学"): -> Default to "EXECUTION"
+   - Query is VAGUE: -> Default to "EXECUTION"
 
 **Output Format:**
-Return ONLY a JSON object:
+Return ONLY a JSON object (no markdown fences, no extra text):
 {
-  "domain_name": "Metabolomics" | "RNA" | "Spatial" | "Radiomics",
+  "domain_name": "Metabolomics" | "RNA" | "Spatial" | "Radiomics" | "STED_EC" | "SPATIOTEMPORAL_DYNAMICS",
   "mode": "EXECUTION" | "PLANNING",
-  "target_steps": ["step1", "step2", ...]  // Empty array [] means full workflow
+  "target_steps": ["step1", "step2", ...]
 }
 
-**Few-Shot Example (Spatial):**
-- User: "Analyze spatial autocorrelation." -> {"domain_name": "Spatial", "mode": "EXECUTION" or "PLANNING" (depends on file), "target_steps": ["spatial_autocorr", "plot_genes"]}
-- User: "Show me the spatial workflow." (no file) -> {"domain_name": "Spatial", "mode": "PLANNING", "target_steps": []}
-
-**Few-Shot Example (Radiomics):**
-- User: "Extract features from this CT." -> {"domain_name": "Radiomics", "mode": "EXECUTION", "target_steps": ["load_image", "preprocess", "preview_slice", "extract_features", "calc_score", "viz_score"]}
-- User: "Run radiomics on this image." (with file) -> {"domain_name": "Radiomics", "mode": "EXECUTION", "target_steps": []}
-
 **Rules:**
-- **User Intent Priority**: If user asks for specific analysis (e.g., "PCA", "spatial autocorrelation", "extract features"), target_steps MUST include only those steps or the full Radiomics pipeline [load_image, preview_slice, extract_features]. Do NOT return full pipeline unless vague.
-- If user asks for "full analysis" or "完整分析" or "analyze this file" (vague), use empty array []
-- Domain name MUST be exactly "Metabolomics", "RNA", "Spatial", or "Radiomics" (case-sensitive)
-- Mode MUST be exactly "EXECUTION" or "PLANNING" (case-sensitive)"""
+- If user asks for "full analysis" or "完整分析" or vague "analyze this file", use empty target_steps [].
+- Domain name MUST match one of the six strings above (case-sensitive).
+- Mode MUST be exactly "EXECUTION" or "PLANNING" (case-sensitive)."""
 
         # 🔥 TASK 3 FIX: 增强用户查询和文件格式的关联
         query_lower = user_query.lower()
         rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "cell ranger", "fastq", "测序", "sequencing"]
         metabolomics_keywords = ["metabolomics", "metabolite", "代谢组", "代谢物", "代谢"]
         spatial_keywords = ["visium", "spatial", "slice", "spot", "moran", "spatial transcriptomics", "空间转录组", "空间组学"]
-        radiomics_keywords = ["ct", "mri", "radiomics", "texture", "nifti", "dicom", "影像组学", "放射组学", "纹理特征"]
+        radiomics_keywords = [
+            "ct scan", "头颅ct", "胸部ct", "肺部ct", "ct平扫",
+            "mri", "radiomics", "texture", "nifti", "dicom", "影像组学", "放射组学", "纹理特征",
+        ]
 
         # 检测用户查询中的领域关键词
         has_rna_keyword = any(kw in query_lower for kw in rna_keywords)
         has_metabolomics_keyword = any(kw in query_lower for kw in metabolomics_keywords)
         has_spatial_keyword = any(kw in query_lower for kw in spatial_keywords)
         has_radiomics_keyword = any(kw in query_lower for kw in radiomics_keywords)
+        has_spatiotemporal_keyword = _has_spatiotemporal_dynamics_keyword(query_lower)
+        has_sted_ec_keyword = any(kw in query_lower for kw in STED_EC_INTENT_KEYWORDS)
 
         user_prompt = f"""**User Query:**
 {user_query}
@@ -1257,13 +1301,15 @@ File Uploaded: {has_file} ({'True' if has_file else 'False'})
 1. **Visium/Spatial files** (file_type="visium" or domain="Spatial") MUST route to "Spatial" domain.
 2. **Medical imaging / Radiomics files** (file_type="medical_image" or domain="Radiomics" or extension .nii/.nii.gz/.dcm) MUST route to "Radiomics" domain.
 3. **FASTQ files** (file_type="fastq" or extension=".fastq"/".fq") MUST route to "RNA" domain, regardless of query.
-4. **H5AD/10x files** (file_type="h5ad" or "10x_mtx"): If file_type is "visium" or domain is "Spatial" → "Spatial"; else → "RNA".
+4. **H5AD/10x files** (file_type="h5ad" or "10x_mtx"): If visium/Spatial → "Spatial". Else if user asks spatiotemporal dynamics / 时空动力学 → "SPATIOTEMPORAL_DYNAMICS". Else if trajectory / moscot / optimal transport (without B-channel wording) → "STED_EC". Else → "RNA".
 5. **CSV/Tabular files** (file_type="tabular" or extension=".csv") MUST route to "Metabolomics" domain, unless user explicitly mentions RNA.
 6. **User Query Keywords:**
    - If query contains Spatial keywords (visium, spatial, slice, spot, moran): Prefer "Spatial" domain
-   - If query contains Radiomics keywords (ct, mri, radiomics, texture, nifti, dicom): Prefer "Radiomics" domain
+   - If query contains Radiomics keywords (CT scan, MRI, radiomics, texture, nifti, dicom): Prefer "Radiomics" domain
    - If query contains RNA keywords ({', '.join(rna_keywords[:5])}): Prefer "RNA" domain
    - If query contains Metabolomics keywords ({', '.join(metabolomics_keywords[:3])}): Prefer "Metabolomics" domain
+   - If query contains spatiotemporal dynamics / 时空动力学 keywords: Prefer "SPATIOTEMPORAL_DYNAMICS" over STED_EC and RNA when file is h5ad
+   - If query contains trajectory / moscot / optimal transport: Prefer "STED_EC" when file is h5ad (unless B-channel wording above wins)
 7. **Priority Order:** File format (visium→Spatial, medical_image→Radiomics) > User query keywords > LLM inference
 
 **Task:**
@@ -1281,144 +1327,191 @@ Classify the intent and return JSON only. Remember:
         _t_probe_a_end = time.time()
         logger.info("⏱️ [性能探针] 意图分类-组装 Prompt 耗时: %.2fs", _t_probe_a_end - _t_classify_start)
         _t_llm_start = time.time()
-        response = await self.llm_client.achat(
-            messages=messages,
-            temperature=0.1,
-            max_tokens=512
-        )
-        llm_duration = time.time() - _t_llm_start
-        logger.info("⏱️ [性能探针] 意图分类-LLM 规划生成耗时: %.2fs", llm_duration)
-        # 🔥 FIX: 提取 ChatCompletion 对象的内容
-        if hasattr(response, 'choices') and response.choices:
-            response_text = response.choices[0].message.content or ""
-        else:
-            response_text = str(response)
-        
-        # 解析响应
-        _t_parse_start = time.time()
+        intent_raw: Optional[Dict[str, Any]] = None
         try:
-            intent_result = json.loads(response_text.strip())
-            domain_name = intent_result.get("domain_name", "Metabolomics")
-            mode = intent_result.get("mode", "PLANNING")  # 🔥 NEW: Extract mode
-            target_steps = intent_result.get("target_steps", [])
-            
-            # 🔥 TASK 3 FIX: 增强文件格式和用户查询的关联路由（优先级：文件格式 > 用户查询关键词 > LLM推理）
-            logger.info(f"🔍 [SOPPlanner] 意图分类后检查: domain_name={domain_name}, file_metadata exists={file_metadata is not None}")
-            
-            # 检测用户查询中的领域关键词
-            query_lower = user_query.lower()
-            rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "cell ranger", "fastq", "测序", "sequencing"]
-            metabolomics_keywords = ["metabolomics", "metabolite", "代谢组", "代谢物", "代谢"]
-            has_rna_keyword = any(kw in query_lower for kw in rna_keywords)
-            has_metabolomics_keyword = any(kw in query_lower for kw in metabolomics_keywords)
-            
-            if file_metadata:
-                file_path = file_metadata.get("file_path", "")
-                file_type = file_metadata.get("file_type", "")
-                file_domain = file_metadata.get("domain", "")
-                logger.info(f"🔍 [SOPPlanner] 文件元数据: file_path={file_path}, file_type={file_type}, domain={file_domain}")
-                
-                # 🔥 Spatial: Visium / domain=Spatial → Spatial
-                if file_type == "visium" or file_domain == "Spatial":
-                    if domain_name != "Spatial":
-                        logger.warning(f"⚠️ [SOPPlanner] 检测到 Visium/Spatial 文件，强制覆盖域名: {domain_name} → Spatial")
-                        domain_name = "Spatial"
+            stream_iter = self.llm_client.astream(
+                messages=messages,
+                temperature=0.1,
+                max_tokens=512,
+            )
+            async for evt, payload in stream_and_extract_json(stream_iter):
+                if evt == "json" and isinstance(payload, dict):
+                    intent_raw = payload
+                    break
+                if evt == "json_error" and isinstance(payload, dict):
+                    logger.warning(
+                        "⚠️ [SOPPlanner] 意图分类流式 JSON 提取失败: %s",
+                        payload.get("message", payload),
+                    )
+        except Exception as e:
+            logger.exception("❌ [SOPPlanner] 意图分类流式调用异常: %s", e)
+
+        llm_duration = time.time() - _t_llm_start
+        logger.info("⏱️ [性能探针] 意图分类-LLM 流式耗时: %.2fs", llm_duration)
+
+        _t_parse_start = time.time()
+        if not isinstance(intent_raw, dict):
+            logger.error(
+                "❌ [SOPPlanner] 意图分类未得到 JSON 对象（think/废话已由 stream_and_extract_json 剥离；仍失败则回退）| type=%s",
+                type(intent_raw).__name__ if intent_raw is not None else "None",
+            )
+            return self._fallback_intent_classification(user_query, has_file, file_metadata)
+
+        domain_name = intent_raw.get("domain_name", "Metabolomics")
+        mode = intent_raw.get("mode", "PLANNING")
+        target_steps = intent_raw.get("target_steps", [])
+
+        # 🔥 TASK 3 FIX: 增强文件格式和用户查询的关联路由（优先级：文件格式 > 用户查询关键词 > LLM推理）
+        logger.info(f"🔍 [SOPPlanner] 意图分类后检查: domain_name={domain_name}, file_metadata exists={file_metadata is not None}")
+
+        if file_metadata:
+            file_path = file_metadata.get("file_path", "")
+            file_type = file_metadata.get("file_type", "")
+            file_domain = file_metadata.get("domain", "")
+            logger.info(f"🔍 [SOPPlanner] 文件元数据: file_path={file_path}, file_type={file_type}, domain={file_domain}")
+
+            # 🔥 Spatial: Visium / domain=Spatial → Spatial（永远优先于 h5ad/STED）
+            if file_type == "visium" or file_domain == "Spatial":
+                if domain_name != "Spatial":
+                    logger.warning(f"⚠️ [SOPPlanner] 检测到 Visium/Spatial 文件，强制覆盖域名: {domain_name} → Spatial")
+                    domain_name = "Spatial"
+                else:
+                    logger.info("✅ [SOPPlanner] Visium/Spatial 文件已正确分类为 Spatial")
+            # 🔥 Radiomics: medical_image / domain=Radiomics → Radiomics
+            elif file_type == "medical_image" or file_domain == "Radiomics":
+                if domain_name != "Radiomics":
+                    logger.warning(f"⚠️ [SOPPlanner] 检测到医学影像/Radiomics 文件，强制覆盖域名: {domain_name} → Radiomics")
+                    domain_name = "Radiomics"
+                else:
+                    logger.info("✅ [SOPPlanner] 医学影像已正确分类为 Radiomics")
+            # 1. FASTQ → RNA
+            elif file_type == "fastq" or (file_path and any(ext in file_path.lower() for ext in [".fastq", ".fq", "fastq"])):
+                if domain_name != "RNA":
+                    logger.warning(f"⚠️ [SOPPlanner] 检测到FASTQ文件，强制覆盖域名: {domain_name} → RNA")
+                    domain_name = "RNA"
+                else:
+                    logger.info("✅ [SOPPlanner] FASTQ文件已正确分类为 RNA")
+            # 2. H5AD/10x：B 通道词 → SPATIOTEMPORAL；A 通道词（且无 B）→ STED_EC；否则 RNA
+            elif file_type in ["h5ad", "10x_mtx", "anndata"] or (file_path and ".h5ad" in file_path.lower()):
+                if has_spatiotemporal_keyword and domain_name != "SPATIOTEMPORAL_DYNAMICS":
+                    logger.info(
+                        "ℹ️ [SOPPlanner] h5ad + SPATIOTEMPORAL 硬核关键词，覆盖 LLM 域名 %s → SPATIOTEMPORAL_DYNAMICS",
+                        domain_name,
+                    )
+                    domain_name = "SPATIOTEMPORAL_DYNAMICS"
+                elif (
+                    has_sted_ec_keyword
+                    and not has_spatiotemporal_keyword
+                    and domain_name != "STED_EC"
+                ):
+                    logger.info(
+                        "ℹ️ [SOPPlanner] h5ad + STED-EC/轨迹关键词，覆盖 LLM 域名 %s → STED_EC",
+                        domain_name,
+                    )
+                    domain_name = "STED_EC"
+                elif domain_name not in ("SPATIOTEMPORAL_DYNAMICS", "STED_EC") and domain_name != "RNA":
+                    logger.warning(f"⚠️ [SOPPlanner] 检测到{file_type}文件，强制覆盖域名: {domain_name} → RNA")
+                    domain_name = "RNA"
+                else:
+                    logger.info(f"✅ [SOPPlanner] {file_type}文件域名已对齐: {domain_name}")
+            # 3. CSV/Tabular → Metabolomics（除非用户明确 RNA）
+            elif file_type == "tabular" or (file_path and file_path.lower().endswith(".csv")):
+                if domain_name == "RNA" and not has_rna_keyword:
+                    logger.warning(f"⚠️ [SOPPlanner] 检测到CSV/Tabular文件且用户未明确提到RNA，强制覆盖域名: {domain_name} → Metabolomics")
+                    domain_name = "Metabolomics"
+                elif domain_name == "Metabolomics":
+                    logger.info("✅ [SOPPlanner] CSV/Tabular文件已正确分类为 Metabolomics")
+
+            # 4. 扩展名补充
+            if file_path:
+                file_ext = file_path.lower().split(".")[-1] if "." in file_path else ""
+                logger.info(f"🔍 [SOPPlanner] 文件扩展名: {file_ext}")
+                if file_ext == "csv" and domain_name == "RNA" and not has_rna_keyword:
+                    logger.warning(f"⚠️ [SOPPlanner] CSV扩展名检测，强制覆盖域名: {domain_name} → Metabolomics")
+                    domain_name = "Metabolomics"
+                elif file_ext in ["fastq", "fq"] and domain_name == "Metabolomics":
+                    logger.warning(f"⚠️ [SOPPlanner] FASTQ扩展名检测，强制覆盖域名: {domain_name} → RNA")
+                    domain_name = "RNA"
+                elif file_ext == "h5ad" and domain_name == "Metabolomics":
+                    if has_spatiotemporal_keyword:
+                        logger.info("ℹ️ [SOPPlanner] H5AD + SPATIOTEMPORAL 关键词，使用 SPATIOTEMPORAL_DYNAMICS")
+                        domain_name = "SPATIOTEMPORAL_DYNAMICS"
+                    elif has_sted_ec_keyword:
+                        logger.info("ℹ️ [SOPPlanner] H5AD + 轨迹关键词，使用 STED_EC 而非 RNA")
+                        domain_name = "STED_EC"
                     else:
-                        logger.info("✅ [SOPPlanner] Visium/Spatial 文件已正确分类为 Spatial")
-                # 🔥 Radiomics: medical_image / domain=Radiomics → Radiomics
-                elif file_type == "medical_image" or file_domain == "Radiomics":
-                    if domain_name != "Radiomics":
-                        logger.warning(f"⚠️ [SOPPlanner] 检测到医学影像/Radiomics 文件，强制覆盖域名: {domain_name} → Radiomics")
-                        domain_name = "Radiomics"
-                    else:
-                        logger.info("✅ [SOPPlanner] 医学影像已正确分类为 Radiomics")
-                # 🔥 TASK 3 FIX: 文件格式优先路由（最高优先级）
-                # 1. FASTQ文件 → 强制路由到RNA
-                elif file_type == "fastq" or (file_path and any(ext in file_path.lower() for ext in [".fastq", ".fq", "fastq"])):
-                    if domain_name != "RNA":
-                        logger.warning(f"⚠️ [SOPPlanner] 检测到FASTQ文件，强制覆盖域名: {domain_name} → RNA")
-                        domain_name = "RNA"
-                    else:
-                        logger.info(f"✅ [SOPPlanner] FASTQ文件已正确分类为 RNA")
-                
-                # 2. H5AD/10x文件 → 强制路由到RNA
-                elif file_type in ["h5ad", "10x_mtx", "anndata"] or (file_path and ".h5ad" in file_path.lower()):
-                    if domain_name != "RNA":
-                        logger.warning(f"⚠️ [SOPPlanner] 检测到{file_type}文件，强制覆盖域名: {domain_name} → RNA")
-                        domain_name = "RNA"
-                    else:
-                        logger.info(f"✅ [SOPPlanner] {file_type}文件已正确分类为 RNA")
-                
-                # 3. CSV/Tabular文件 → 优先路由到Metabolomics（除非用户明确提到RNA）
-                elif file_type == "tabular" or (file_path and file_path.lower().endswith(".csv")):
-                    if domain_name == "RNA" and not has_rna_keyword:
-                        # 如果LLM分类为RNA但用户查询中没有RNA关键词，强制覆盖为Metabolomics
-                        logger.warning(f"⚠️ [SOPPlanner] 检测到CSV/Tabular文件且用户未明确提到RNA，强制覆盖域名: {domain_name} → Metabolomics")
-                        domain_name = "Metabolomics"
-                    elif domain_name == "Metabolomics":
-                        logger.info(f"✅ [SOPPlanner] CSV/Tabular文件已正确分类为 Metabolomics")
-                
-                # 4. 检查文件扩展名（作为补充）
-                if file_path:
-                    file_ext = file_path.lower().split('.')[-1] if '.' in file_path else ""
-                    logger.info(f"🔍 [SOPPlanner] 文件扩展名: {file_ext}")
-                    
-                    if file_ext == "csv" and domain_name == "RNA" and not has_rna_keyword:
-                        logger.warning(f"⚠️ [SOPPlanner] CSV扩展名检测，强制覆盖域名: {domain_name} → Metabolomics")
-                        domain_name = "Metabolomics"
-                    elif file_ext in ["fastq", "fq"] and domain_name == "Metabolomics":
-                        logger.warning(f"⚠️ [SOPPlanner] FASTQ扩展名检测，强制覆盖域名: {domain_name} → RNA")
-                        domain_name = "RNA"
-                    elif file_ext == "h5ad" and domain_name == "Metabolomics":
                         logger.warning(f"⚠️ [SOPPlanner] H5AD扩展名检测，强制覆盖域名: {domain_name} → RNA")
                         domain_name = "RNA"
-            else:
-                logger.warning(f"⚠️ [SOPPlanner] 没有文件元数据，使用用户查询关键词进行路由")
-                # 如果没有文件，使用用户查询关键词进行路由
-                if has_spatial_keyword and not has_rna_keyword and not has_metabolomics_keyword:
-                    if domain_name != "Spatial":
-                        logger.info(f"ℹ️ [SOPPlanner] 用户查询包含空间组学关键词，调整域名: {domain_name} → Spatial")
-                        domain_name = "Spatial"
-                elif has_rna_keyword and not has_metabolomics_keyword and not has_spatial_keyword:
-                    if domain_name != "RNA":
-                        logger.info(f"ℹ️ [SOPPlanner] 用户查询包含RNA关键词，调整域名: {domain_name} → RNA")
-                        domain_name = "RNA"
-                elif has_metabolomics_keyword and not has_rna_keyword and not has_spatial_keyword and not has_radiomics_keyword:
-                    if domain_name != "Metabolomics":
-                        logger.info(f"ℹ️ [SOPPlanner] 用户查询包含代谢组关键词，调整域名: {domain_name} → Metabolomics")
-                        domain_name = "Metabolomics"
-                elif has_radiomics_keyword and not has_spatial_keyword:
-                    if domain_name != "Radiomics":
-                        logger.info(f"ℹ️ [SOPPlanner] 用户查询包含影像组学关键词，调整域名: {domain_name} → Radiomics")
-                        domain_name = "Radiomics"
+        else:
+            logger.warning("⚠️ [SOPPlanner] 没有文件元数据，使用用户查询关键词进行路由")
+            if has_spatial_keyword and not has_rna_keyword and not has_metabolomics_keyword:
+                if domain_name != "Spatial":
+                    logger.info(f"ℹ️ [SOPPlanner] 用户查询包含空间组学关键词，调整域名: {domain_name} → Spatial")
+                    domain_name = "Spatial"
+            elif has_spatiotemporal_keyword and not has_spatial_keyword:
+                if domain_name != "SPATIOTEMPORAL_DYNAMICS":
+                    logger.info(f"ℹ️ [SOPPlanner] 无文件 + SPATIOTEMPORAL 硬核关键词，调整域名: {domain_name} → SPATIOTEMPORAL_DYNAMICS")
+                    domain_name = "SPATIOTEMPORAL_DYNAMICS"
+            elif has_sted_ec_keyword and not has_spatial_keyword and not has_spatiotemporal_keyword:
+                if domain_name != "STED_EC":
+                    logger.info(f"ℹ️ [SOPPlanner] 用户查询包含 STED-EC/轨迹关键词，调整域名: {domain_name} → STED_EC")
+                    domain_name = "STED_EC"
+            elif (
+                has_rna_keyword
+                and not has_metabolomics_keyword
+                and not has_spatial_keyword
+                and not has_sted_ec_keyword
+                and not has_spatiotemporal_keyword
+            ):
+                if domain_name != "RNA":
+                    logger.info(f"ℹ️ [SOPPlanner] 用户查询包含RNA关键词，调整域名: {domain_name} → RNA")
+                    domain_name = "RNA"
+            elif has_metabolomics_keyword and not has_rna_keyword and not has_spatial_keyword and not has_radiomics_keyword:
+                if domain_name != "Metabolomics":
+                    logger.info(f"ℹ️ [SOPPlanner] 用户查询包含代谢组关键词，调整域名: {domain_name} → Metabolomics")
+                    domain_name = "Metabolomics"
+            elif has_radiomics_keyword and not has_spatial_keyword:
+                if domain_name != "Radiomics":
+                    logger.info(f"ℹ️ [SOPPlanner] 用户查询包含影像组学关键词，调整域名: {domain_name} → Radiomics")
+                    domain_name = "Radiomics"
 
-            # 验证域名（支持 Spatial, Radiomics）
-            if domain_name not in ["Metabolomics", "RNA", "Spatial", "Radiomics"]:
-                logger.warning(f"⚠️ LLM 返回了无效的域名: {domain_name}，使用默认值 Metabolomics")
-                domain_name = "Metabolomics"
-            
-            # 🔥 CRITICAL: Validate and enforce mode rules
-            if not has_file and mode == "EXECUTION":
-                logger.warning(f"⚠️ LLM 返回了不一致的模式: 无文件但 mode=EXECUTION，强制设置为 PLANNING")
-                mode = "PLANNING"
-            
-            # 验证模式
-            if mode not in ["EXECUTION", "PLANNING"]:
-                logger.warning(f"⚠️ LLM 返回了无效的模式: {mode}，使用默认值 PLANNING")
-                mode = "PLANNING"
-            
-            logger.info(f"✅ [SOPPlanner] 意图分类结果: domain={domain_name}, mode={mode}, target_steps={len(target_steps)}")
-            logger.info("⏱️ [性能探针] 意图分类-JSON 解析与后处理耗时: %.2fs", time.time() - _t_parse_start)
-            return {
-                "domain_name": domain_name,
-                "mode": mode,  # 🔥 NEW: Include mode in result
-                "target_steps": target_steps if isinstance(target_steps, list) else []
-            }
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ 意图分类 JSON 解析失败: {e}")
-            logger.error(f"响应内容: {response_text[:200] if 'response_text' in locals() else str(response)[:200]}")
-            # 回退：尝试从查询和文件元数据中推断
-            return self._fallback_intent_classification(user_query, has_file, file_metadata)
+        if has_spatiotemporal_keyword and domain_name == "Radiomics":
+            logger.warning(
+                "⚠️ [SOPPlanner] SPATIOTEMPORAL 关键词与 domain Radiomics 互斥，纠正为 SPATIOTEMPORAL_DYNAMICS"
+            )
+            domain_name = "SPATIOTEMPORAL_DYNAMICS"
+        elif has_sted_ec_keyword and domain_name == "Radiomics":
+            logger.warning(
+                "⚠️ [SOPPlanner] STED-EC/轨迹关键词与 domain Radiomics 互斥，纠正为 STED_EC"
+            )
+            domain_name = "STED_EC"
+
+        if domain_name not in [
+            "Metabolomics",
+            "RNA",
+            "Spatial",
+            "Radiomics",
+            "STED_EC",
+            "SPATIOTEMPORAL_DYNAMICS",
+        ]:
+            logger.warning(f"⚠️ LLM 返回了无效的域名: {domain_name}，使用默认值 Metabolomics")
+            domain_name = "Metabolomics"
+
+        if not has_file and mode == "EXECUTION":
+            logger.warning("⚠️ LLM 返回了不一致的模式: 无文件但 mode=EXECUTION，强制设置为 PLANNING")
+            mode = "PLANNING"
+
+        if mode not in ["EXECUTION", "PLANNING"]:
+            logger.warning(f"⚠️ LLM 返回了无效的模式: {mode}，使用默认值 PLANNING")
+            mode = "PLANNING"
+
+        logger.info(f"✅ [SOPPlanner] 意图分类结果: domain={domain_name}, mode={mode}, target_steps={len(target_steps)}")
+        logger.info("⏱️ [性能探针] 意图分类-JSON 解析与后处理耗时: %.2fs", time.time() - _t_parse_start)
+        return {
+            "domain_name": domain_name,
+            "mode": mode,
+            "target_steps": target_steps if isinstance(target_steps, list) else [],
+        }
     
     def _fallback_intent_classification(self, user_query: str, has_file: bool = False, file_metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
@@ -1454,9 +1547,18 @@ Classify the intent and return JSON only. Remember:
             elif file_type == "medical_image" or file_domain == "Radiomics":
                 domain_name = "Radiomics"
                 logger.info("✅ [SOPPlanner] Fallback: 检测到医学影像/Radiomics 文件，使用 Radiomics 域名")
-            elif file_type == "anndata" or (file_path and file_path.lower().endswith(('.h5ad', '.h5', '.loom'))):
-                logger.info("✅ [SOPPlanner] 检测到 RNA 文件类型（anndata/h5ad），使用 RNA 域名")
-                domain_name = "RNA"
+            elif file_type == "anndata" or (file_path and file_path.lower().endswith((".h5ad", ".h5", ".loom"))):
+                if file_path and file_path.lower().endswith(".h5ad") and _has_spatiotemporal_dynamics_keyword(query_lower):
+                    domain_name = "SPATIOTEMPORAL_DYNAMICS"
+                    logger.info("✅ [SOPPlanner] Fallback: h5ad + SPATIOTEMPORAL 硬核关键词 → SPATIOTEMPORAL_DYNAMICS")
+                elif file_path and file_path.lower().endswith(".h5ad") and any(
+                    kw in query_lower for kw in STED_EC_INTENT_KEYWORDS
+                ):
+                    domain_name = "STED_EC"
+                    logger.info("✅ [SOPPlanner] Fallback: h5ad + STED-EC 关键词 → STED_EC")
+                else:
+                    logger.info("✅ [SOPPlanner] 检测到 RNA 文件类型（anndata/h5ad/h5/loom），使用 RNA 域名")
+                    domain_name = "RNA"
             elif file_type == "tabular" or (file_path and file_path.lower().endswith('.csv')):
                 feature_columns = file_metadata.get("feature_columns", [])
                 metadata_columns = file_metadata.get("metadata_columns", [])
@@ -1489,10 +1591,18 @@ Classify the intent and return JSON only. Remember:
                         is_likely_metabolomics = True
                         logger.info(f"✅ [SOPPlanner] 检测到中等数量特征列 ({len(feature_columns)})，推断为 Metabolomics")
                 
-                # 决策逻辑
-                if has_rna_keywords or is_likely_rna:
+                # 决策逻辑（B 通道词优先于 A/STED_EC）
+                if (has_rna_keywords or is_likely_rna) and not any(
+                    kw in query_lower for kw in STED_EC_INTENT_KEYWORDS
+                ) and not _has_spatiotemporal_dynamics_keyword(query_lower):
                     domain_name = "RNA"
                     logger.info("✅ [SOPPlanner] 基于列名/数据结构，使用 RNA 域名")
+                elif _has_spatiotemporal_dynamics_keyword(query_lower):
+                    domain_name = "SPATIOTEMPORAL_DYNAMICS"
+                    logger.info("✅ [SOPPlanner] 查询含 SPATIOTEMPORAL 硬核关键词，覆盖 RNA 结构启发 → SPATIOTEMPORAL_DYNAMICS")
+                elif any(kw in query_lower for kw in STED_EC_INTENT_KEYWORDS):
+                    domain_name = "STED_EC"
+                    logger.info("✅ [SOPPlanner] 查询含 STED_EC 关键词，覆盖 RNA 结构启发 → STED_EC")
                 elif has_metabolomics_keywords or is_likely_metabolomics:
                     domain_name = "Metabolomics"
                     logger.info("✅ [SOPPlanner] 基于列名/数据结构，使用 Metabolomics 域名")
@@ -1506,28 +1616,74 @@ Classify the intent and return JSON only. Remember:
                         rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger"]
                         if any(kw in query_lower for kw in spatial_keywords_fallback):
                             domain_name = "Spatial"
+                        elif _has_spatiotemporal_dynamics_keyword(query_lower):
+                            domain_name = "SPATIOTEMPORAL_DYNAMICS"
+                        elif any(kw in query_lower for kw in STED_EC_INTENT_KEYWORDS):
+                            domain_name = "STED_EC"
                         else:
-                            domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
+                            domain_name = (
+                                "RNA"
+                                if (
+                                    any(kw in query_lower for kw in rna_keywords)
+                                    and not any(kw in query_lower for kw in STED_EC_INTENT_KEYWORDS)
+                                    and not _has_spatiotemporal_dynamics_keyword(query_lower)
+                                )
+                                else "Metabolomics"
+                            )
             else:
-                # 未知文件类型，使用关键词匹配
+                # 未知文件类型，使用关键词匹配（STED 先于 Radiomics，且禁用裸 "ct"）
                 rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "h5ad"]
-                radiomics_keywords_fallback = ["ct", "mri", "radiomics", "texture", "nifti", "dicom", "影像组学"]
+                radiomics_keywords_fallback = [
+                    "ct scan", "头颅ct", "胸部ct", "肺部ct", "ct平扫",
+                    "mri", "radiomics", "texture", "nifti", "dicom", "影像组学",
+                ]
                 if any(kw in query_lower for kw in spatial_keywords_fallback):
                     domain_name = "Spatial"
+                elif _has_spatiotemporal_dynamics_keyword(query_lower):
+                    domain_name = "SPATIOTEMPORAL_DYNAMICS"
+                    logger.info("✅ [SOPPlanner] Fallback: SPATIOTEMPORAL 硬核关键词 → SPATIOTEMPORAL_DYNAMICS（先于 STED_EC / Radiomics）")
+                elif any(kw in query_lower for kw in STED_EC_INTENT_KEYWORDS):
+                    domain_name = "STED_EC"
+                    logger.info("✅ [SOPPlanner] Fallback: STED-EC/轨迹关键词 → STED_EC（先于 Radiomics）")
                 elif any(kw in query_lower for kw in radiomics_keywords_fallback):
                     domain_name = "Radiomics"
                 else:
-                    domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
+                    domain_name = (
+                        "RNA"
+                        if (
+                            any(kw in query_lower for kw in rna_keywords)
+                            and not any(kw in query_lower for kw in STED_EC_INTENT_KEYWORDS)
+                            and not _has_spatiotemporal_dynamics_keyword(query_lower)
+                        )
+                        else "Metabolomics"
+                    )
         else:
             # No file metadata - check query keywords
             rna_keywords = ["rna", "scrna", "single cell", "单细胞", "转录组", "cellranger", "h5ad"]
-            radiomics_keywords_fallback = ["ct", "mri", "radiomics", "texture", "nifti", "dicom", "影像组学"]
+            radiomics_keywords_fallback = [
+                "ct scan", "头颅ct", "胸部ct", "肺部ct", "ct平扫",
+                "mri", "radiomics", "texture", "nifti", "dicom", "影像组学",
+            ]
             if any(kw in query_lower for kw in spatial_keywords_fallback):
                 domain_name = "Spatial"
+            elif _has_spatiotemporal_dynamics_keyword(query_lower):
+                domain_name = "SPATIOTEMPORAL_DYNAMICS"
+                logger.info("✅ [SOPPlanner] Fallback: 无文件 + SPATIOTEMPORAL 硬核关键词 → SPATIOTEMPORAL_DYNAMICS")
+            elif any(kw in query_lower for kw in STED_EC_INTENT_KEYWORDS):
+                domain_name = "STED_EC"
+                logger.info("✅ [SOPPlanner] Fallback: 无文件 + STED-EC/轨迹关键词 → STED_EC")
             elif any(kw in query_lower for kw in radiomics_keywords_fallback):
                 domain_name = "Radiomics"
             else:
-                domain_name = "RNA" if any(kw in query_lower for kw in rna_keywords) else "Metabolomics"
+                domain_name = (
+                    "RNA"
+                    if (
+                        any(kw in query_lower for kw in rna_keywords)
+                        and not any(kw in query_lower for kw in STED_EC_INTENT_KEYWORDS)
+                        and not _has_spatiotemporal_dynamics_keyword(query_lower)
+                    )
+                    else "Metabolomics"
+                )
         
         # 🔥 CRITICAL: Determine mode based on query and file presence
         # Action keywords
@@ -2318,39 +2474,30 @@ Total Features: {file_metadata.get('total_feature_columns', 'N/A')}
         Returns:
             解析后的工作流计划字典
         """
-        # 尝试提取 JSON（可能被 markdown 代码块包裹）
-        response = response.strip()
-        
-        # 移除 markdown 代码块标记
-        if response.startswith("```json"):
-            response = response[7:]
-        elif response.startswith("```"):
-            response = response[3:]
-        
-        if response.endswith("```"):
-            response = response[:-3]
-        
-        response = response.strip()
-        
-        try:
-            plan = json.loads(response)
-            return plan
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ [SOPPlanner] JSON 解析失败: {e}")
-            logger.error(f"响应内容: {response[:500]}")
-            
-            # 尝试提取 JSON 对象（使用正则表达式）
-            import re
-            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response, re.DOTALL)
-            if json_match:
-                try:
-                    plan = json.loads(json_match.group())
+        cleaned = _strip_json_code_fences((response or "").strip())
+        if not cleaned:
+            raise ValueError("无法解析 LLM 响应: 空内容")
+        last_err: Optional[json.JSONDecodeError] = None
+        for cand in _prepare_json_text_for_loads(cleaned):
+            try:
+                plan = json.loads(cand)
+                if isinstance(plan, dict):
+                    return plan
+            except json.JSONDecodeError as e:
+                last_err = e
+                continue
+        logger.error("❌ [SOPPlanner] JSON 解析失败: %s", last_err)
+        logger.error("响应内容: %s", cleaned[:500])
+        json_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", cleaned, re.DOTALL)
+        if json_match:
+            try:
+                plan = json.loads(json_match.group())
+                if isinstance(plan, dict):
                     logger.info("✅ [SOPPlanner] 使用正则表达式成功提取 JSON")
                     return plan
-                except:
-                    pass
-            
-            raise ValueError(f"无法解析 LLM 响应为 JSON: {e}")
+            except json.JSONDecodeError:
+                pass
+        raise ValueError(f"无法解析 LLM 响应为 JSON: {last_err}")
     
     def _validate_and_adapt_sop_plan(
         self,

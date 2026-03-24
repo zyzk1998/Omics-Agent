@@ -76,8 +76,11 @@ async def test_preview_mode():
     retriever = ToolRetriever()
     planner = SOPPlanner(tool_retriever=retriever, llm_client=llm)
     query = "Show me the spatial analysis workflow"
-    plan_result = await planner.generate_plan(user_query=query, file_metadata=None)
-    if plan_result.get("type") == "error":
+    plan_result = None
+    async for _ev, _data in planner.generate_plan(user_query=query, file_metadata=None):
+        if _ev == "workflow":
+            plan_result = _data
+    if not plan_result or plan_result.get("type") == "error":
         print("⚠️  Planner returned error (may still be Spatial intent):", plan_result.get("error", "")[:200])
         # Fallback: direct workflow template
         template = workflow.generate_template(target_steps=None, file_metadata=None)

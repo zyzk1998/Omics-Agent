@@ -7,6 +7,8 @@ from typing import Dict, Any, List, Optional
 from .base_agent import BaseAgent
 from ..core.llm_client import LLMClient
 from ..core.prompt_manager import PromptManager
+from ..core.sted_ec_intent_keywords import STED_EC_INTENT_KEYWORDS
+from ..core.spatiotemporal_dynamics_keywords import SPATIOTEMPORAL_DYNAMICS_KEYWORDS
 
 
 class RouterAgent(BaseAgent):
@@ -51,10 +53,20 @@ class RouterAgent(BaseAgent):
             "image", "microscopy", "histology", "病理", "影像"
         ],
         "radiomics": [
-            "ct", "mri", "radiomics", "texture", "nifti", "dicom", "medical imaging",
+            "ct scan", "chest ct", "头颅ct", "胸部ct", "肺部ct", "ct图像", "ct平扫",
+            "mri", "radiomics", "texture", "nifti", "dicom", "medical imaging",
             "影像组学", "放射组学", "纹理特征", "肿瘤异质性",
-            "pyradiomics", "simpleitk", ".nii", ".dcm"
-        ]
+            "pyradiomics", "simpleitk", ".nii", ".dcm",
+        ],
+        # 通道 A：STED_EC 四步基础（不含「时空动力学」等 B 通道词，避免与 transcriptomics 误判混淆时抢 B）
+        "sted_ec_trajectory": [
+            "sted-ec", "sted ec", "sted_ec", "stedec", "st-ed-ec",
+            "单细胞轨迹", "轨迹分析", "轨迹推断", "细胞轨迹", "时空轨迹",
+            "发育轨迹", "分化轨迹", "optimal transport", "最优传输", "moscot",
+            "pseudotime", "拟时间", "time series trajectory", "trajectory", "jiekailab sted",
+        ],
+        # 通道 B：单细胞时空动力学完全体（Planner 域名 SPATIOTEMPORAL_DYNAMICS）
+        "spatiotemporal_dynamics": list(SPATIOTEMPORAL_DYNAMICS_KEYWORDS),
     }
     
     # 路由映射
@@ -66,7 +78,9 @@ class RouterAgent(BaseAgent):
         "proteomics": "proteomics_agent",
         "spatial_omics": "spatial_agent",
         "radiomics": "radiomics_agent",
-        "imaging": "imaging_agent"
+        "imaging": "imaging_agent",
+        "sted_ec_trajectory": "rna_agent",
+        "spatiotemporal_dynamics": "rna_agent",
     }
     
     def __init__(self, llm_client: LLMClient, prompt_manager: PromptManager):
@@ -207,6 +221,31 @@ class RouterAgent(BaseAgent):
                             "routing": "metabolomics_agent",
                             "reasoning": f"Latest file extension-based routing: {last_ext}"
                         }
+
+                # 🔥 通道 B 先于 A：同句出现时空动力学硬核词时走 spatiotemporal_dynamics
+                if query and any(kw in query_lower for kw in SPATIOTEMPORAL_DYNAMICS_KEYWORDS):
+                    logger.info(
+                        "✅ 文件优先路由: RNA 类扩展名 + SPATIOTEMPORAL 硬核关键词 → spatiotemporal_dynamics"
+                    )
+                    return {
+                        "modality": "spatiotemporal_dynamics",
+                        "intent": self._detect_intent(query) if query else "analysis",
+                        "confidence": 0.97,
+                        "routing": "rna_agent",
+                        "reasoning": "H5AD/RNA extension + SPATIOTEMPORAL keywords overrides generic transcriptomics",
+                    }
+                # 🔥 通道 A：轨迹 / moscot 等不得以「有 h5ad」为由劫持为普通转录组
+                if query and any(kw in query_lower for kw in STED_EC_INTENT_KEYWORDS):
+                    logger.info(
+                        "✅ 文件优先路由: RNA 类扩展名 + STED_EC 意图关键词 → sted_ec_trajectory（执行层仍走 rna_agent）"
+                    )
+                    return {
+                        "modality": "sted_ec_trajectory",
+                        "intent": self._detect_intent(query) if query else "analysis",
+                        "confidence": 0.96,
+                        "routing": "rna_agent",
+                        "reasoning": "H5AD/RNA extension + STED_EC query overrides generic transcriptomics",
+                    }
                 
                 logger.info(f"✅ 文件优先路由: 检测到 RNA 文件扩展名 {file_extensions & rna_extensions} → rna_agent")
                 return {
@@ -253,10 +292,11 @@ class RouterAgent(BaseAgent):
                 "reasoning": "Query contains spatial/Visium keywords"
             }
 
-        # Radiomics quick-route (CT, MRI, NIfTI, DICOM, Texture)
+        # Radiomics quick-route（勿用裸 "ct"：会子串命中 "trajectory" → 错路由）
         radiomics_keywords = [
-            "ct", "mri", "radiomics", "texture", "nifti", "dicom", "medical imaging",
-            "影像组学", "放射组学", "纹理特征", "肿瘤异质性", "pyradiomics"
+            "ct scan", "chest ct", "头颅ct", "胸部ct", "肺部ct", "ct图像", "ct平扫",
+            "mri", "radiomics", "texture", "nifti", "dicom", "medical imaging",
+            "影像组学", "放射组学", "纹理特征", "肿瘤异质性", "pyradiomics",
         ]
         if any(kw in query_lower for kw in radiomics_keywords):
             logger.info("✅ 快速路由: 查询包含影像组学关键词 → radiomics_agent")
@@ -266,6 +306,27 @@ class RouterAgent(BaseAgent):
                 "confidence": 0.90,
                 "routing": "radiomics_agent",
                 "reasoning": "Query contains CT/MRI/Radiomics/NIfTI/DICOM keywords"
+            }
+
+        # 通道 B 硬核词优先于通道 A / 转录组
+        if any(kw in query_lower for kw in SPATIOTEMPORAL_DYNAMICS_KEYWORDS):
+            logger.info("✅ 快速路由: 查询命中 SPATIOTEMPORAL_DYNAMICS_KEYWORDS → spatiotemporal_dynamics")
+            return {
+                "modality": "spatiotemporal_dynamics",
+                "intent": self._detect_intent(query),
+                "confidence": 0.95,
+                "routing": "rna_agent",
+                "reasoning": "Query matches SPATIOTEMPORAL_DYNAMICS hard keywords (channel B)",
+            }
+        # 通道 A：与 Planner 共用 STED_EC 关键词表
+        if any(kw in query_lower for kw in STED_EC_INTENT_KEYWORDS):
+            logger.info("✅ 快速路由: 查询命中 STED_EC_INTENT_KEYWORDS → sted_ec_trajectory")
+            return {
+                "modality": "sted_ec_trajectory",
+                "intent": self._detect_intent(query),
+                "confidence": 0.94,
+                "routing": "rna_agent",
+                "reasoning": "Query matches STED_EC intent keywords (channel A: moscot, trajectory, etc.)",
             }
 
         # 🔧 修复：优先检查查询中的代谢组关键词（即使没有文件）
@@ -336,6 +397,15 @@ class RouterAgent(BaseAgent):
                 logger.debug(f"  {modality}: score={score} (matched: {matched_keywords[:3]})")
         
         if scores:
+            # 🔥 B / A 防撞：已从关键词表命中时，禁止 transcriptomics 靠「单细胞」等词计分胜出
+            if any(kw in query_lower for kw in SPATIOTEMPORAL_DYNAMICS_KEYWORDS):
+                scores.pop("transcriptomics", None)
+                scores["spatiotemporal_dynamics"] = scores.get("spatiotemporal_dynamics", 0) + 60
+                logger.info("🔀 快速路由计分: SPATIOTEMPORAL 意图已激活，已移除 transcriptomics 并抬高 spatiotemporal_dynamics")
+            elif any(kw in query_lower for kw in STED_EC_INTENT_KEYWORDS):
+                scores.pop("transcriptomics", None)
+                scores["sted_ec_trajectory"] = scores.get("sted_ec_trajectory", 0) + 50
+                logger.info("🔀 快速路由计分: STED_EC 意图已激活，已移除 transcriptomics 并按需抬高 sted_ec_trajectory")
             best_modality = max(scores.items(), key=lambda x: x[1])
             modality, score = best_modality
             
@@ -378,12 +448,14 @@ Files: {', '.join(file_paths) if file_paths else 'None'}
 
 Return JSON:
 {{
-    "modality": "transcriptomics|genomics|epigenomics|metabolomics|proteomics|spatial_omics|imaging",
+    "modality": "transcriptomics|genomics|epigenomics|metabolomics|proteomics|spatial_omics|imaging|sted_ec_trajectory|spatiotemporal_dynamics",
     "intent": "analysis|visualization|interpretation|workflow",
     "confidence": 0.0-1.0,
-    "routing": "rna_agent|dna_agent|...",
+    "routing": "rna_agent|dna_agent|metabolomics_agent|spatial_agent|radiomics_agent|...",
     "reasoning": "brief explanation"
-}}"""
+}}
+If the user asks for **spatiotemporal dynamics** / **时空动力学** / **动力学分析** / **spatiotemporal** / **dynamics** (trajectory sense), use modality \"spatiotemporal_dynamics\" and routing \"rna_agent\".
+If the user asks for STED-EC / moscot / optimal transport / trajectory **without** the above full-dynamics wording, use modality \"sted_ec_trajectory\" and routing \"rna_agent\"."""
         )
         
         messages = [

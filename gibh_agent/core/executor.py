@@ -6,6 +6,7 @@
 支持动态参数智能推荐与注入：按函数签名过滤并做类型转换，防止幻觉参数与 TypeError。
 """
 import inspect
+import json
 import os
 import logging
 import time
@@ -37,6 +38,11 @@ try:
         logger.info("🔍 [Executor] 工具注册表为空，正在加载工具...")
         load_all_tools()
         logger.info(f"✅ [Executor] 工具加载完成，已注册 {len(registry._tools)} 个工具")
+    try:
+        from ..mcp import load_mcp_plugins
+        load_mcp_plugins()
+    except Exception as _mcp_e:
+        logger.warning("⚠️ [Executor] MCP 插件加载失败: %s", _mcp_e)
 except Exception as e:
     logger.warning(f"⚠️ [Executor] 工具加载失败: {e}")
 
@@ -224,6 +230,7 @@ class WorkflowExecutor:
                 if k in (
                     "path", "plot_path", "output_plot_path", "h5ad_path", "trajectory_data_path",
                     "tmaps_dir", "output_path", "output_file", "file_path", "zip_path",
+                    "markdown_file_path",
                 ):
                     out[k] = self._to_results_url(v)
                 elif k == "download_links" and isinstance(v, list):
@@ -699,6 +706,16 @@ class WorkflowExecutor:
                     "message": f"步骤 {step_name} 执行失败：缺少必需参数 group_column"
                 }
         
+        # 专家报告（sted_ec_expert_report）等：将 MCP 开关注入 **kwargs，供工具内动态挂载 OpenAI tools
+        if step_context and step_context.get("enabled_mcps") is not None:
+            try:
+                sig = inspect.signature(tool_func)
+                has_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+                if has_kw or "enabled_mcps" in sig.parameters:
+                    processed_params["enabled_mcps"] = step_context["enabled_mcps"]
+            except Exception:
+                pass
+
         # 防幻觉 + 类型转换：只保留签名内参数并做类型转换（如 resolution="0.8" -> 0.8）
         processed_params = self._filter_and_coerce_params_to_signature(processed_params, tool_func)
 
@@ -805,6 +822,64 @@ class WorkflowExecutor:
                 "debug_info": tb_str,
             }
     
+    def _build_sted_ec_expert_readonly_context_json(self) -> str:
+        """
+        从 step_results 组装 STED-EC 只读 JSON（遗留：供独立调用 sted_ec_expert_report 工具时使用）。
+        标准流程下专家报告由 BaseAgent._generate_analysis_summary + Orchestrator diagnosis 生成。
+        """
+        payload: Dict[str, Any] = {
+            "steps": [],
+            "output_dir": getattr(self, "output_dir", None),
+        }
+        for sid in sorted(self.step_results.keys()):
+            if sid == "sted_ec_expert_report" or not str(sid).startswith("sted_ec_"):
+                continue
+            raw = self.step_results[sid]
+            if not isinstance(raw, dict):
+                continue
+            entry: Dict[str, Any] = {
+                "step_id": sid,
+                "status": raw.get("status"),
+                "message_excerpt": str(raw.get("message", ""))[:2000],
+            }
+            summ = raw.get("summary")
+            if isinstance(summ, dict):
+                try:
+                    entry["summary_excerpt"] = json.dumps(summ, ensure_ascii=False, default=str)[:2800]
+                except TypeError:
+                    entry["summary_excerpt"] = str(summ)[:2000]
+            elif isinstance(summ, str):
+                entry["summary_excerpt"] = summ[:2000]
+
+            rd = raw.get("report_data") if isinstance(raw.get("report_data"), dict) else {}
+            imgs = rd.get("images") or raw.get("images")
+            paths: List[Dict[str, str]] = []
+            if isinstance(imgs, list):
+                for it in imgs[:10]:
+                    if isinstance(it, dict):
+                        p = it.get("path") or it.get("url") or ""
+                        t = str(it.get("title", ""))
+                        if p:
+                            paths.append({"title": t, "path": str(p)})
+                    elif isinstance(it, str):
+                        paths.append({"path": it})
+            entry["figure_paths"] = paths[:10]
+            dls = rd.get("download_links") or raw.get("download_links")
+            if isinstance(dls, list) and dls:
+                entry["download_links_excerpt"] = [
+                    (
+                        str(x.get("path", x))
+                        if isinstance(x, dict)
+                        else str(x)
+                    )
+                    for x in dls[:5]
+                ]
+            for k in ("time_key", "cell_type_key", "n_obs", "h5ad_path", "n_cells"):
+                if k in raw and raw[k] is not None:
+                    entry[k] = raw[k]
+            payload["steps"].append(entry)
+        return json.dumps(payload, ensure_ascii=False, default=str)
+
     def _process_data_flow(
         self,
         params: Dict[str, Any],
@@ -1020,18 +1095,50 @@ class WorkflowExecutor:
                                 step_result.get("result_path") or
                                 step_result.get("preprocessed_file")
                             )
+                        # STED-EC：通路富集等步骤的 CSV 必须由「驱动基因」步骤显式给出，避免误用前序 h5ad 路径
+                        if (
+                            key == "driver_genes_csv"
+                            or placeholder == "sted_ec_driver_gene_extraction"
+                        ):
+                            output_path = (
+                                step_result.get("driver_genes_csv")
+                                or step_result.get("csv_path")
+                                or step_result.get("output_file")
+                            )
+                            if output_path and not isinstance(
+                                output_path, (str, bytes, os.PathLike)
+                            ):
+                                output_path = None
                         if output_path and isinstance(output_path, (str, bytes, os.PathLike)):
                             processed[key] = output_path
                             logger.info(f"🔄 数据流: {key} = <{placeholder}> -> {output_path}")
                         else:
                             # 路径参数不能赋值为 dict，保留占位符或原值，避免 TypeError
-                            if key in ("h5ad_path", "adata_path", "file_path", "trajectory_data_path", "output_path", "image_path", "mask_path"):
+                            if key in (
+                                "h5ad_path",
+                                "adata_path",
+                                "file_path",
+                                "trajectory_data_path",
+                                "output_path",
+                                "image_path",
+                                "mask_path",
+                                "driver_genes_csv",
+                            ):
                                 logger.warning(f"⚠️ 占位符 <{placeholder}> 未解析出路径，保留原值")
                                 processed[key] = value
                             else:
                                 processed[key] = step_result
                     else:
-                        if key in ("h5ad_path", "adata_path", "file_path", "trajectory_data_path", "output_path", "image_path", "mask_path"):
+                        if key in (
+                            "h5ad_path",
+                            "adata_path",
+                            "file_path",
+                            "trajectory_data_path",
+                            "output_path",
+                            "image_path",
+                            "mask_path",
+                            "driver_genes_csv",
+                        ):
                             processed[key] = value
                         else:
                             processed[key] = step_result
@@ -1069,7 +1176,12 @@ class WorkflowExecutor:
                     processed[k] = v.replace("<output_dir>", out_dir)
 
         # STED-EC：从数据校验步骤向时间序列标准化、moscot、轨迹可视化 三步注入 time_key / cell_type_key，避免画图步骤只出 1 张图
-        if current_tool_id in ("sted_ec_time_series_formatting", "sted_ec_moscot_trajectory", "sted_ec_plot_trajectory"):
+        if current_tool_id in (
+            "sted_ec_time_series_formatting",
+            "sted_ec_moscot_trajectory",
+            "sted_ec_plot_trajectory",
+            "sted_ec_driver_gene_extraction",
+        ):
             pre = self.step_results.get("sted_ec_data_validation")
             if isinstance(pre, dict) and pre.get("status") == "success":
                 if pre.get("time_key"):
@@ -1239,7 +1351,8 @@ class WorkflowExecutor:
         workflow_data: Dict[str, Any],
         file_paths: List[str] = None,
         output_dir: Optional[str] = None,
-        agent: Optional[Any] = None  # 可选的 Agent 实例，用于生成诊断
+        agent: Optional[Any] = None,  # 可选的 Agent 实例，用于生成诊断
+        enabled_mcps: Optional[List[Any]] = None,
     ) -> Dict[str, Any]:
         """
         执行整个工作流
@@ -1277,6 +1390,8 @@ class WorkflowExecutor:
         self.output_dir = str(output_path.resolve())
         
         logger.info(f"📂 输出目录: {self.output_dir}")
+
+        self._enabled_mcps: List[Any] = list(enabled_mcps or [])
         
         # 初始化步骤结果列表
         steps_details = []
@@ -1355,6 +1470,7 @@ class WorkflowExecutor:
                                     "data": convert_result
                                 }
                             }
+                            step_detail = sanitize_for_json(step_detail)
                             steps_details.append(step_detail)
                             steps_results.append(step_detail["step_result"])
                             continue
@@ -1383,6 +1499,7 @@ class WorkflowExecutor:
                                 "data": {"message": "输入文件已经是10x格式，无需执行Cell Ranger计数"}
                             }
                         }
+                        step_detail = sanitize_for_json(step_detail)
                         steps_details.append(step_detail)
                         steps_results.append(step_detail["step_result"])
                         continue
@@ -1415,7 +1532,10 @@ class WorkflowExecutor:
             # 只有在没有占位符且参数缺失时，才自动注入
             if not has_placeholder:
                 # 自动注入文件路径（如果缺失且我们有当前文件路径）
-                if file_param_name not in params and current_file_path:
+                if (
+                    file_param_name not in params
+                    and current_file_path
+                ):
                     params[file_param_name] = current_file_path
                     logger.info(f"🔄 自动注入 {file_param_name}: {current_file_path}")
             else:
@@ -1432,6 +1552,7 @@ class WorkflowExecutor:
                 "current_file_path": current_file_path,
                 "recommended_params": workflow_data.get("recommended_params"),
                 "steps_order": steps_order,
+                "enabled_mcps": getattr(self, "_enabled_mcps", None) or [],
             }
             
             # 🔥 参数映射：如果工具期望 adata_path 但提供了 file_path，进行映射
@@ -1538,21 +1659,34 @@ class WorkflowExecutor:
                     result_data["images"] = [
                         p.get("path") if isinstance(p, dict) else p for p in rp_images
                     ]
+            _tb = step_result.get("traceback", "") or step_result.get("debug_info", "")
+            _display_summary = ""
+            if isinstance(result_data, dict):
+                _rs = result_data.get("summary")
+                if isinstance(_rs, str) and _rs.strip():
+                    _display_summary = _rs
+            if not _display_summary:
+                _display_summary = step_result.get("message", "") or ""
+            _sr_inner: Dict[str, Any] = {
+                "step_name": step_name,
+                "status": step_result.get("status", "error"),
+                "logs": step_result.get("message", ""),
+                "data": result_data,
+                "error": step_result.get("error", ""),
+                "message": step_result.get("message", ""),
+                "user_message": step_result.get("user_message", ""),
+                "traceback": _tb,
+            }
+            # 专家报告等：工具返回 result.report_data（含 references），同步到 step_result 顶层供 SSE/前端「参考文献」Tab
+            if isinstance(result_data, dict) and isinstance(result_data.get("report_data"), dict):
+                _sr_inner["report_data"] = result_data["report_data"]
             step_detail = {
                 "step_id": step_id,
                 "tool_id": step.get("tool_id"),
                 "name": step_name,
                 "status": step_result.get("status", "error"),
-                "summary": step_result.get("message", "") or step_result.get("summary", ""),
-                "step_result": {
-                    "step_name": step_name,
-                    "status": step_result.get("status", "error"),
-                    "logs": step_result.get("message", ""),
-                    "data": result_data,
-                    "error": step_result.get("error", ""),
-                    "message": step_result.get("message", ""),
-                    "user_message": step_result.get("user_message", ""),
-                }
+                "summary": _display_summary,
+                "step_result": _sr_inner,
             }
             if step_result.get("status") == "error":
                 step_detail["error"] = step_result.get("error", "")
@@ -1588,6 +1722,7 @@ class WorkflowExecutor:
                 logger.debug(f"📄 跳过非可展示文件作为 plot: {plot_path}")
             # 🔥 时光机：单步耗时入快照，供历史还原「耗时 Xs」
             step_detail["duration"] = round(time.time() - tool_start, 1)
+            step_detail = sanitize_for_json(step_detail)
             steps_details.append(step_detail)
             steps_results.append(step_detail["step_result"])
             

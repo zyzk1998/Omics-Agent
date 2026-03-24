@@ -14,7 +14,7 @@ import os
 import re
 import time
 from datetime import datetime
-from typing import Dict, Any, List, Optional, AsyncIterator
+from typing import Dict, Any, List, Optional, AsyncIterator, Tuple
 from pathlib import Path
 
 from .agentic import QueryRewriter, Clarifier, Reflector
@@ -24,6 +24,14 @@ from .stream_utils import stream_with_suggestions
 from .workflows import WorkflowRegistry
 
 logger = logging.getLogger(__name__)
+
+# 聊天模式默认挂载的公开 REST 工具（与 gibh_agent.tools.api_query_tools 注册名一致）
+_CHAT_MODE_PUBLIC_API_TOOLS: Tuple[str, ...] = (
+    "query_gene_info",
+    "query_uniprot_protein",
+    "query_reactome_pathway",
+    "query_alphafold_db",
+)
 
 
 class AgentOrchestrator:
@@ -86,7 +94,47 @@ class AgentOrchestrator:
         except Exception as e:
             logger.warning(f"⚠️ 获取 LLM 客户端失败: {e}")
             return None
-    
+
+    def _is_public_api_chat_intent(self, query: str) -> bool:
+        """
+        MyGene / UniProt / Reactome / AlphaFold 类轻查询：禁止进入 Task 工作流（避免误触发代谢组等默认 DAG）。
+        命中则 _classify_global_intent 必须返回 "chat"。
+        """
+        if not query or not str(query).strip():
+            return False
+        q = str(query).strip()
+        ql = q.lower()
+        if any(k in ql for k in ("uniprot", "reactome", "alphafold", "mygene")):
+            return True
+        if "tp53" in ql or "p04637" in ql:
+            return True
+        if "细胞凋亡" in q and ("通路" in q or "apoptosis" in ql):
+            return True
+        if ("亚细胞定位" in q or "功能注释" in q) and ("蛋白" in q or "蛋白质" in q):
+            return True
+        if ("染色体" in q) and ("位置" in q or "定位" in q):
+            return True
+        if ("结构预测" in q or "3d结构" in ql or "三维结构" in q) and (
+            "蛋白" in q or "蛋白质" in q or "alphafold" in ql
+        ):
+            return True
+        if ("基因" in q) and ("查询" in q or "检索" in q):
+            if any(x in q for x in ("表达", "差异", "富集", "矩阵", "测序", "单细胞")):
+                return False
+            if any(x in ql for x in ("expression", "deg", "deseq", "enrich", "scrna")):
+                return False
+            return True
+        return False
+
+    @staticmethod
+    def _global_chat_keyword_hit(query: str) -> bool:
+        """闲聊/资讯类关键词（无 I/O，供 stream_process 与 _classify_global_intent 共用）。"""
+        query_lower = (query or "").lower()
+        chat_keywords = [
+            "天气", "新闻", "今天", "最新", "搜索", "查一下", "汇率", "介绍", "你好", "是谁",
+        ]
+        return any(kw in query_lower for kw in chat_keywords)
+
     async def _classify_global_intent(self, query: str, files: List[Dict[str, str]] = None) -> str:
         """
         🔥 PHASE 1: Classify global intent (Chat vs Task)
@@ -95,10 +143,19 @@ class AgentOrchestrator:
             "chat" for general conversation
             "task" for bioinformatics analysis tasks
         """
+        if AgentOrchestrator._global_chat_keyword_hit(query):
+            return "chat"
+
+        query_lower = (query or "").lower()
+
         # Quick heuristic: If files are present, it's likely a task
         if files and len(files) > 0:
             return "task"
-        
+
+        if self._is_public_api_chat_intent(query or ""):
+            logger.info("🔌 [Orchestrator] 公开数据库轻查询命中，强制 global intent = chat（跳过 Task / 工作流）")
+            return "chat"
+
         # Quick keyword check for obvious tasks
         task_keywords = [
             "analyze", "analysis", "analyze", "分析", "处理", "计算", "统计",
@@ -106,7 +163,6 @@ class AgentOrchestrator:
             "metabolomics", "transcriptomics", "rna", "代谢组", "转录组",
             "workflow", "pipeline", "工作流", "流程"
         ]
-        query_lower = query.lower()
         if any(kw in query_lower for kw in task_keywords):
             return "task"
         
@@ -235,6 +291,23 @@ class AgentOrchestrator:
         _t_start = time.time()
         logger.info("[Profiler] stream_process 入口 - 开始处理请求 (model_name=%s, target_domain=%s)", model_name, target_domain)
 
+        enabled_mcps = kwargs.get("enabled_mcps") or []
+        if isinstance(enabled_mcps, str):
+            try:
+                enabled_mcps = json.loads(enabled_mcps)
+            except Exception:
+                enabled_mcps = []
+        if not isinstance(enabled_mcps, list):
+            enabled_mcps = []
+        enabled_mcps = [str(x).strip() for x in enabled_mcps if x]
+        if enabled_mcps:
+            logger.info("🔌 [Orchestrator] enabled_mcps=%s", enabled_mcps)
+        try:
+            if hasattr(self.agent, "context") and isinstance(self.agent.context, dict):
+                self.agent.context["enabled_mcps"] = enabled_mcps
+        except Exception:
+            pass
+
         # 🔥 工作流收藏复用：正则拦截「用户请求复用工作流模板」，跳过 LLM 规划，直接下发 DB 中的 config_json 作为 workflow 事件
         _query_str = (query or "").strip()
         match = re.search(r"\[系统注入：用户请求复用工作流模板：\s*(\d+)\s*\]", _query_str)
@@ -284,9 +357,12 @@ class AgentOrchestrator:
             return
 
         # 🔥 PHASE 1: Layer 0 - Global Intent Routing (Chat vs Task)
-        # 快车道：若带 target_domain 则跳过意图分类，强制任务模式
+        # 闲聊关键词优先于 target_domain 快车道，避免「广州今天天气」等仍进 Task DAG
         try:
-            if target_domain:
+            if AgentOrchestrator._global_chat_keyword_hit(query):
+                intent_type = "chat"
+                logger.info("🔌 [Orchestrator] 命中全局闲聊关键词，强制 chat（覆盖 target_domain 快车道）")
+            elif target_domain:
                 intent_type = "task"
                 logger.info(f"🔍 [Orchestrator] 快车道硬路由: target_domain={target_domain}，跳过全局意图分类")
             else:
@@ -309,48 +385,20 @@ class AgentOrchestrator:
                 })
                 await asyncio.sleep(0.01)
                 
-                # Stream LLM response
+                # Stream LLM response（支持 MCP 全网搜索等 tools）
                 llm_client = self._get_llm_client()
                 if llm_client:
-                    chat_system = (
-                        "你是一个友好的AI助手，帮助用户解答问题。使用中文回答。\n\n"
-                        "在回复的**最后**，根据当前分析上下文生成 1～2 个用户可能想问的后续问题，严格按以下格式输出（不要输出到可见正文）：\n"
-                        "<<<SUGGESTIONS>>>[\"问题1\", \"问题2\"]<<<END_SUGGESTIONS>>>\n"
-                        "若对话在结束（如告别、再见）则不要输出上述块。"
-                    )
-                    # 🔥 显式注入当前工作台文件状态，防止大模型失忆
-                    user_content = query
-                    files_hint = self._build_current_files_hint(files)
-                    if files_hint:
-                        user_content = files_hint + "\n\n" + user_content
-                    messages = [
-                        {"role": "system", "content": chat_system},
-                        {"role": "user", "content": user_content}
-                    ]
-                    
-                    # Add history context if available
-                    if history:
-                        for h in history[-5:]:  # Last 5 messages
-                            if isinstance(h, dict):
-                                role = h.get("role", "user")
-                                content = h.get("content", h.get("message", ""))
-                                if content:
-                                    messages.append({"role": role, "content": content})
-                    
-                    # 🔥 双轨提取：reasoning_content（官方）→ thought；content → message/suggestions；<think> 作 Fallback
                     _t_llm_start = time.time()
-                    _llm_first_byte = None
-
-                    from .stream_utils import stream_from_llm_chunks
-                    async for event_type, data in stream_from_llm_chunks(
-                        llm_client.astream(messages, temperature=0.7, max_tokens=1000, model=model_name),
+                    async for sse_chunk in self._stream_chat_mode(
+                        query=query,
+                        files=files,
+                        history=history,
+                        llm_client=llm_client,
+                        state_snapshot=state_snapshot,
                         model_name=model_name,
+                        enabled_mcps=enabled_mcps,
                     ):
-                        if _llm_first_byte is None:
-                            _llm_first_byte = time.time()
-                            logger.info("[Profiler] 收到 LLM 首字节 - 耗时: %.2fs", _llm_first_byte - _t_llm_start)
-                        yield self._emit_sse(state_snapshot,event_type, data)
-                        await asyncio.sleep(0.01)
+                        yield sse_chunk
                     logger.info("[Profiler] LLM 思考与生成总耗时: %.2fs", time.time() - _t_llm_start)
 
                     yield self._emit_sse(state_snapshot,"status", {
@@ -464,6 +512,7 @@ class AgentOrchestrator:
                         modality_map = {
                             "rna": "rna", "metabolomics": "metabolomics", "spatial": "spatial", "radiomics": "radiomics",
                             "sted_ec_trajectory": "sted_ec",
+                            "spatiotemporal_dynamics": "sted_ec",
                             "genomics": "genomics", "epigenomics": "epigenomics", "proteomics": "proteomics",
                         }
                         workflow_type = modality_map.get(_domain)
@@ -539,11 +588,17 @@ class AgentOrchestrator:
                 _results_base = os.path.abspath(os.getenv("RESULTS_DIR", "/app/results"))
                 _run_dir = os.path.join(_results_base, f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
                 try:
-                    results = executor.execute_workflow(
-                        workflow_data=workflow_config,
-                        file_paths=file_paths,
-                        output_dir=_run_dir,
-                        agent=self.agent
+                    # 🔥 必须在线程中执行：execute_workflow 为同步重型计算，若在 async 生成器里直接调用会
+                    # 长时间阻塞事件循环，导致 Uvicorn/Gunicorn/反向代理认为连接假死并断开，浏览器报
+                    # net::ERR_INCOMPLETE_CHUNKED_ENCODING（与磁盘空间无关）。
+                    results = await asyncio.to_thread(
+                        lambda: executor.execute_workflow(
+                            workflow_config,
+                            file_paths,
+                            _run_dir,
+                            self.agent,
+                            enabled_mcps=enabled_mcps,
+                        )
                     )
                 except SecurityException as e:
                     logger.warning("❌ [Orchestrator] 执行阶段数据完整性校验未通过: %s", e)
@@ -630,7 +685,22 @@ class AgentOrchestrator:
                     # 检测领域类型，选择对应的智能体
                     domain_name = "Metabolomics"  # Default
                     workflow_name = workflow_config.get("workflow_name", "")
-                    if "RNA" in workflow_name or "rna" in workflow_name.lower():
+                    # 优先使用 Planner / generate_template 写入的域名（与用户选择的 A/B 通道一致）
+                    _cfg_domain = workflow_config.get("domain_name")
+                    if _cfg_domain in ("STED_EC", "SPATIOTEMPORAL_DYNAMICS"):
+                        domain_name = _cfg_domain
+                    else:
+                        _tool_ids = [str((s or {}).get("tool_id") or "") for s in (steps or [])]
+                        _has_sted_tool = any(t.startswith("sted_ec_") for t in _tool_ids)
+                        if _has_sted_tool:
+                            domain_name = (
+                                "SPATIOTEMPORAL_DYNAMICS"
+                                if "sted_ec_pathway_enrichment" in _tool_ids
+                                else "STED_EC"
+                            )
+                    if domain_name == "Metabolomics" and (
+                        "RNA" in workflow_name or "rna" in workflow_name.lower()
+                    ):
                         domain_name = "RNA"
                         # 检查步骤中的工具ID来确定领域
                         for step in steps:
@@ -642,9 +712,11 @@ class AgentOrchestrator:
                                 domain_name = "Metabolomics"
                                 break
                     
-                    # 根据领域选择智能体
+                    # 根据领域选择智能体（STED 系列与执行层一致走 rna_agent，便于共用 BaseAgent 与 LLM）
                     if hasattr(self.agent, 'agents') and self.agent.agents:
-                        if domain_name == "RNA" and "rna_agent" in self.agent.agents:
+                        if domain_name in ("STED_EC", "SPATIOTEMPORAL_DYNAMICS") and "rna_agent" in self.agent.agents:
+                            target_agent = self.agent.agents["rna_agent"]
+                        elif domain_name == "RNA" and "rna_agent" in self.agent.agents:
                             target_agent = self.agent.agents["rna_agent"]
                         elif domain_name == "Metabolomics" and "metabolomics_agent" in self.agent.agents:
                             target_agent = self.agent.agents["metabolomics_agent"]
@@ -874,9 +946,10 @@ class AgentOrchestrator:
                     })
                     await asyncio.sleep(0.01)
                     
+                    # 专家结题 Markdown 写入 report_data.report，严禁写入 diagnosis（避免与数据诊断张冠李戴）
                     diagnosis_response = {
                         "report_data": {
-                            "diagnosis": summary,
+                            "report": summary,
                             "workflow_name": workflow_config.get("workflow_name", "工作流")
                         }
                     }
@@ -896,7 +969,7 @@ class AgentOrchestrator:
                 final_response = {
                     "report_data": {
                         "steps_details": steps_details,
-                        "diagnosis": summary,
+                        "report": summary,
                         "workflow_name": workflow_config.get("workflow_name", "工作流")
                     }
                 }
@@ -1140,7 +1213,14 @@ class AgentOrchestrator:
                 steps_to_skip_fast = None  # 快车道时由 _analyze_user_intent 填充，非快车道不传
                 if target_domain:
                     _td = (target_domain or "").strip().lower()
-                    _map = {"rna": "RNA", "metabolomics": "Metabolomics", "radiomics": "Radiomics", "spatial": "Spatial", "sted_ec_trajectory": "STED_EC"}
+                    _map = {
+                        "rna": "RNA",
+                        "metabolomics": "Metabolomics",
+                        "radiomics": "Radiomics",
+                        "spatial": "Spatial",
+                        "sted_ec_trajectory": "STED_EC",
+                        "spatiotemporal_dynamics": "SPATIOTEMPORAL_DYNAMICS",
+                    }
                     domain_name = _map.get(_td)
                     if not domain_name or not self.workflow_registry.is_supported(domain_name):
                         logger.warning("⚠️ [Orchestrator] target_domain=%s 无法映射或不受支持，回退 Metabolomics", target_domain)
@@ -1149,7 +1229,17 @@ class AgentOrchestrator:
                     if not workflow:
                         raise ValueError(f"无法获取工作流: {domain_name}")
                     # 🔥 快车道修复：跳过领域识别，但必须保留步骤分析，根据用户 prompt（如「只做PCA」）动态规划
-                    intent_analysis = await planner._analyze_user_intent(refined_query, workflow)
+                    intent_analysis = None
+                    async for _ev, _payload in planner._analyze_user_intent(refined_query, workflow):
+                        if _ev == "thought":
+                            yield self._emit_sse(state_snapshot, "thought", _payload)
+                        elif _ev == "intent_parse_error":
+                            _em = (_payload or {}).get("message") or (_payload or {}).get("error") or "JSON 解析失败"
+                            yield self._emit_sse(state_snapshot, "thought", {
+                                "content": f"\n⚠️ [意图解析] 第{(_payload or {}).get('attempt', '?')}次尝试失败：{_em}（将尝试重试或关键词回退）\n",
+                            })
+                        elif _ev == "intent_result":
+                            intent_analysis = _payload
                     if isinstance(intent_analysis, dict):
                         target_steps = intent_analysis.get("target_steps") or []
                         steps_to_skip_fast = intent_analysis.get("skip_steps") or []
@@ -1201,7 +1291,17 @@ class AgentOrchestrator:
                     workflow = self.workflow_registry.get_workflow(domain_name)
                     if not workflow:
                         raise ValueError(f"无法获取工作流: {domain_name}")
-                    intent_analysis = await planner._analyze_user_intent(refined_query, workflow)
+                    intent_analysis = None
+                    async for _ev, _payload in planner._analyze_user_intent(refined_query, workflow):
+                        if _ev == "thought":
+                            yield self._emit_sse(state_snapshot, "thought", _payload)
+                        elif _ev == "intent_parse_error":
+                            _em = (_payload or {}).get("message") or (_payload or {}).get("error") or "JSON 解析失败"
+                            yield self._emit_sse(state_snapshot, "thought", {
+                                "content": f"\n⚠️ [意图解析] 第{(_payload or {}).get('attempt', '?')}次尝试失败：{_em}（将尝试重试或关键词回退）\n",
+                            })
+                        elif _ev == "intent_result":
+                            intent_analysis = _payload
                     if isinstance(intent_analysis, dict):
                         target_steps = intent_analysis.get("target_steps") or []
                     else:
@@ -1282,19 +1382,32 @@ class AgentOrchestrator:
                         
                         # Path B: PREVIEW MODE - Generate FULL workflow, UI will pre-select recommended_steps
                         _t_plan_start = time.time()
-                        template_result = await planner.generate_plan(
-                        user_query=refined_query,
-                        file_metadata=None,  # 明确传递 None
-                        category_filter=None,
-                        domain_name=domain_name,  # 使用已分析的域名
-                        target_steps=planner_target_steps,  # 快车道时为步骤分析结果，否则全量
-                        is_template=True,  # 🔥 CRITICAL: Explicitly IS a template
-                        target_domain=target_domain,  # 快车道：供 Planner 做工具物理阉割/domain_prompt
-                        steps_to_skip=steps_to_skip_fast  # 快车道时传入 _analyze_user_intent 的 skip_steps
-                        )
+                        template_result = None
+                        async for _pe, _pdata in planner.generate_plan(
+                            user_query=refined_query,
+                            file_metadata=None,  # 明确传递 None
+                            category_filter=None,
+                            domain_name=domain_name,  # 使用已分析的域名
+                            target_steps=planner_target_steps,  # 快车道时为步骤分析结果，否则全量
+                            is_template=True,  # 🔥 CRITICAL: Explicitly IS a template
+                            target_domain=target_domain,  # 快车道：供 Planner 做工具物理阉割/domain_prompt
+                            steps_to_skip=steps_to_skip_fast,  # 快车道时传入 _analyze_user_intent 的 skip_steps
+                        ):
+                            if _pe == "thought":
+                                yield self._emit_sse(state_snapshot, "thought", _pdata)
+                            elif _pe == "workflow":
+                                template_result = _pdata
                         logger.info("[Profiler] 规划(模板)完成 - 耗时: %.2fs", time.time() - _t_plan_start)
                         logger.info(f"✅ [Orchestrator] 模板生成完成: {len(all_steps)} 个步骤, 预选 {len(recommended_steps) or '全部'}")
                         
+                        if not isinstance(template_result, dict):
+                            logger.error("❌ [Orchestrator] Plan-First: generate_plan 未产出 workflow 字典")
+                            yield self._emit_sse(state_snapshot, "error", {
+                                "error": "模板生成失败",
+                                "message": "规划器未返回有效工作流，请重试",
+                            })
+                            return
+
                         # 🔥 CRITICAL: Save pending_modality AND preview_target_steps for Intent Inheritance
                         session_state["pending_modality"] = domain_name
                         session_state["preview_target_steps"] = target_steps
@@ -1337,9 +1450,12 @@ class AgentOrchestrator:
                             "Radiomics": "影像组 (Radiomics)",
                             "Spatial": "空间组学",
                             "RNA": "转录组",
-                            "STED_EC": "特色科研流程 (STED-EC)",
+                            "STED_EC": "STED_EC 分析流程（基础四步）",
+                            "SPATIOTEMPORAL_DYNAMICS": "单细胞时空动力学分析（完全体）",
                         }
                         modality_display = _modality_map.get(domain_name, domain_name or "分析")
+                        if workflow and callable(getattr(workflow, "get_display_title", None)):
+                            modality_display = workflow.get_display_title()
                         yield self._emit_sse(state_snapshot,"message", {
                             "content": f"已为您规划 **{modality_display}** 分析流程（包含 {steps_count} 个步骤）。请上传数据以激活。"
                         })
@@ -1536,6 +1652,9 @@ class AgentOrchestrator:
                                 if hasattr(self.agent, 'agents') and self.agent.agents:
                                     if domain_name == "RNA":
                                         agent_instance = self.agent.agents.get("rna_agent")
+                                    elif domain_name in ("STED_EC", "SPATIOTEMPORAL_DYNAMICS"):
+                                        # 与执行/Reporting 一致：H5AD 时空流程共用 rna_agent 的数据诊断能力
+                                        agent_instance = self.agent.agents.get("rna_agent")
                                     elif domain_name == "Metabolomics":
                                         agent_instance = self.agent.agents.get("metabolomics_agent")
                                     elif domain_name == "Radiomics":
@@ -1549,6 +1668,8 @@ class AgentOrchestrator:
                                         omics_type = "Metabolomics"
                                     elif domain_name == "Radiomics":
                                         omics_type = "Radiomics"
+                                    elif domain_name in ("STED_EC", "SPATIOTEMPORAL_DYNAMICS"):
+                                        omics_type = "scRNA"
                                     else:
                                         omics_type = "scRNA"
                                 
@@ -1679,7 +1800,8 @@ class AgentOrchestrator:
                     if files_hint:
                         plan_query = files_hint + "\n\n" + plan_query
                 _t_plan_start = time.time()
-                result = await planner.generate_plan(
+                result = None
+                async for _pe, _pdata in planner.generate_plan(
                     user_query=plan_query,
                     file_metadata=file_metadata,  # 🔥 CRITICAL: file_metadata exists
                     category_filter=None,
@@ -1687,10 +1809,21 @@ class AgentOrchestrator:
                     target_steps=planner_target_steps,  # 快车道时为步骤分析结果，否则全量
                     is_template=False,  # 🔥 CRITICAL: Explicitly NOT a template
                     target_domain=target_domain,  # 快车道：供 Planner 做工具物理阉割/domain_prompt
-                    steps_to_skip=steps_to_skip_fast  # 快车道时传入 _analyze_user_intent 的 skip_steps
-                )
+                    steps_to_skip=steps_to_skip_fast,  # 快车道时传入 _analyze_user_intent 的 skip_steps
+                ):
+                    if _pe == "thought":
+                        yield self._emit_sse(state_snapshot, "thought", _pdata)
+                    elif _pe == "workflow":
+                        result = _pdata
                 logger.info("[Profiler] 规划(执行)完成 - 耗时: %.2fs", time.time() - _t_plan_start)
                 logger.info(f"✅ [Orchestrator] Path A: 工作流规划完成")
+                if not isinstance(result, dict):
+                    logger.error("❌ [Orchestrator] Path A: generate_plan 未返回 workflow 字典")
+                    yield self._emit_sse(state_snapshot, "error", {
+                        "error": "规划失败",
+                        "message": "工作流规划未返回结果，请重试",
+                    })
+                    return
                 logger.info(f"✅ [Orchestrator] Path A: 返回结果 template_mode: {result.get('template_mode', 'N/A')}")
             
                 # 🔥 TASK: 检查是否有LLM错误（数据诊断阶段），如果有则通过SSE发送详细错误信息到前端
@@ -1867,6 +2000,8 @@ class AgentOrchestrator:
                                 "rna": "rna", "transcriptomics": "rna", "single_cell": "rna",
                                 "metabolomics": "metabolomics", "spatial": "spatial", "radiomics": "radiomics",
                                 "sted_ec_trajectory": "sted_ec",
+                                "sted_ec": "sted_ec",
+                                "spatiotemporal_dynamics": "sted_ec",
                                 "genomics": "genomics", "epigenomics": "epigenomics", "proteomics": "proteomics",
                             }
                             workflow_type = modality_map.get(_dm) or (_dm if _dm in modality_map.values() else None)
@@ -2087,7 +2222,17 @@ class AgentOrchestrator:
         Returns:
             SSE 格式字符串: "event: {type}\ndata: {json}\n\n"
         """
-        json_data = json.dumps(data, ensure_ascii=False)
+        from .utils import sanitize_for_json
+        try:
+            safe = sanitize_for_json(data if isinstance(data, dict) else {"payload": data})
+            json_data = json.dumps(safe, ensure_ascii=False, allow_nan=False)
+        except Exception as e:
+            logger.error("❌ SSE 序列化失败（已降级为错误事件，避免流中断）: %s", e, exc_info=True)
+            json_data = json.dumps(
+                {"error": "sse_serialize_error", "message": str(e)},
+                ensure_ascii=False,
+                allow_nan=False,
+            )
         return f"event: {event_type}\ndata: {json_data}\n\n"
 
     @staticmethod
@@ -2169,6 +2314,185 @@ class AgentOrchestrator:
             return ""
         return "[系统状态：当前工作台中已挂载文件：" + ", ".join(names) + "]"
 
+    def _assistant_openai_tool_message_to_dict(self, msg: Any) -> Dict[str, Any]:
+        """将 ChatCompletionMessage 转为 API 所需的 dict（含 tool_calls）。"""
+        out: Dict[str, Any] = {"role": "assistant", "content": getattr(msg, "content", None) or ""}
+        tcs = getattr(msg, "tool_calls", None)
+        if not tcs:
+            return out
+        tool_calls = []
+        for tc in tcs:
+            fn = getattr(tc, "function", None)
+            tool_calls.append(
+                {
+                    "id": getattr(tc, "id", ""),
+                    "type": getattr(tc, "type", "function") or "function",
+                    "function": {
+                        "name": getattr(fn, "name", "") if fn is not None else "",
+                        "arguments": (getattr(fn, "arguments", None) or "{}") if fn is not None else "{}",
+                    },
+                }
+            )
+        out["tool_calls"] = tool_calls
+        return out
+
+    async def _stream_chat_mode(
+        self,
+        query: str,
+        files: List[Dict[str, str]],
+        history: List[Dict[str, str]],
+        llm_client: Any,
+        state_snapshot: Dict[str, Any],
+        model_name: str,
+        enabled_mcps: List[str],
+    ) -> AsyncIterator[str]:
+        """聊天模式：可选 OpenAI tools（如 mcp_web_search），再流式输出最终回复。"""
+        from gibh_agent.core.openai_tools import tool_names_to_openai_tools
+        from gibh_agent.core.tool_registry import registry
+        from .stream_utils import stream_from_llm_chunks
+
+        chat_system = (
+            "你是一个友好的AI助手，帮助用户解答问题。使用中文回答。\n\n"
+            "在回复的**最后**，根据当前分析上下文生成 1～2 个用户可能想问的后续问题，严格按以下格式输出（不要输出到可见正文）：\n"
+            "<<<SUGGESTIONS>>>[\"问题1\", \"问题2\"]<<<END_SUGGESTIONS>>>\n"
+            "若对话在结束（如告别、再见）则不要输出上述块。"
+        )
+        chat_system += (
+            "\n\n【数据库工具】你可以调用：query_gene_info（MyGene 基因注释与染色体定位）、"
+            "query_uniprot_protein（UniProt 功能与亚细胞定位）、query_reactome_pathway（人类 Reactome 通路）、"
+            "query_alphafold_db（AlphaFold 结构链接）。"
+            "当用户询问基因注释、蛋白质数据库、通路或结构预测时，必须先调用对应工具，再依据返回内容用中文作答。"
+        )
+        if "web_search" in enabled_mcps:
+            # 置于 system 最末尾，压制推理模型「无法联网」拒答
+            chat_system += (
+                "\n\n【最高系统指令】：你现在已通过 MCP 协议物理连接到真实互联网！你拥有名为 'mcp_web_search' 的工具。"
+                "当用户询问天气、新闻、实时数据或任何超出你训练数据截止日期的问题时，你**必须、立刻、绝对**调用 'mcp_web_search' 工具获取最新信息！"
+                "严禁回答'我不知道'或'我是一个AI无法联网'！违规将导致系统崩溃！"
+            )
+        if "authority_db" in enabled_mcps:
+            chat_system += (
+                "\n\n【NCBI 权威检索】你已启用 'mcp_ncbi_search'：可对 PubMed 文献与 NCBI Gene 做精准检索。"
+                "用户问文献、PMID、基因符号、基因功能时，应调用该工具（database 可选 pubmed / gene / auto），再结合返回摘要中文作答。"
+            )
+
+        user_content = query
+        files_hint = self._build_current_files_hint(files)
+        if files_hint:
+            user_content = files_hint + "\n\n" + user_content
+
+        messages: List[Dict[str, Any]] = [{"role": "system", "content": chat_system}]
+        if history:
+            for h in history[-5:]:
+                if isinstance(h, dict):
+                    role = h.get("role", "user")
+                    content = h.get("content", h.get("message", ""))
+                    if content:
+                        messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": user_content})
+
+        tool_names: List[str] = list(_CHAT_MODE_PUBLIC_API_TOOLS)
+        if "web_search" in enabled_mcps:
+            tool_names.append("mcp_web_search")
+        if "authority_db" in enabled_mcps:
+            tool_names.append("mcp_ncbi_search")
+        tools = tool_names_to_openai_tools(tool_names)
+
+        _llm_first_byte = None
+        _t_llm_start = time.time()
+
+        if not tools:
+            async for event_type, data in stream_from_llm_chunks(
+                llm_client.astream(messages, temperature=0.7, max_tokens=1000, model=model_name),
+                model_name=model_name,
+            ):
+                if _llm_first_byte is None:
+                    _llm_first_byte = time.time()
+                    logger.info("[Profiler] 收到 LLM 首字节 - 耗时: %.2fs", _llm_first_byte - _t_llm_start)
+                yield self._emit_sse(state_snapshot, event_type, data)
+                await asyncio.sleep(0.01)
+            return
+
+        completion = None
+        try:
+            completion = await llm_client.achat(
+                messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=0.7,
+                max_tokens=1000,
+                model=model_name,
+            )
+        except Exception as e:
+            logger.warning("⚠️ [Orchestrator] 带 tools 的 achat 失败，回退无工具流式: %s", e, exc_info=True)
+
+        if completion and getattr(completion.choices[0].message, "tool_calls", None):
+            msg = completion.choices[0].message
+            messages.append(self._assistant_openai_tool_message_to_dict(msg))
+            for tc in msg.tool_calls:
+                fn = getattr(tc, "function", None)
+                name = getattr(fn, "name", None) if fn is not None else None
+                args_raw = (getattr(fn, "arguments", None) if fn is not None else None) or "{}"
+                if not name:
+                    continue
+                if name == "mcp_web_search":
+                    yield self._emit_sse(
+                        state_snapshot,
+                        "status",
+                        {"content": "[正在执行步骤: 全网实时检索...]", "state": "running"},
+                    )
+                    await asyncio.sleep(0.01)
+                elif name == "mcp_ncbi_search":
+                    yield self._emit_sse(
+                        state_snapshot,
+                        "status",
+                        {"content": "[正在执行步骤: NCBI 文献/基因检索...]", "state": "running"},
+                    )
+                    await asyncio.sleep(0.01)
+                elif name in _CHAT_MODE_PUBLIC_API_TOOLS:
+                    yield self._emit_sse(
+                        state_snapshot,
+                        "status",
+                        {"content": f"[正在调用公开数据库工具: {name}]", "state": "running"},
+                    )
+                    await asyncio.sleep(0.01)
+                try:
+                    args = json.loads(args_raw)
+                except json.JSONDecodeError:
+                    args = {}
+                tool_fn = registry.get_tool(name)
+                if not tool_fn:
+                    result_payload: Dict[str, Any] = {"status": "error", "error": f"未知工具: {name}"}
+                else:
+                    result_payload = tool_fn(**args)
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": getattr(tc, "id", ""),
+                        "content": json.dumps(result_payload, ensure_ascii=False),
+                    }
+                )
+            async for event_type, data in stream_from_llm_chunks(
+                llm_client.astream(messages, temperature=0.7, max_tokens=2000, model=model_name),
+                model_name=model_name,
+            ):
+                if _llm_first_byte is None:
+                    _llm_first_byte = time.time()
+                    logger.info("[Profiler] 收到 LLM 首字节 - 耗时: %.2fs", _llm_first_byte - _t_llm_start)
+                yield self._emit_sse(state_snapshot, event_type, data)
+                await asyncio.sleep(0.01)
+            return
+
+        async for event_type, data in stream_from_llm_chunks(
+            llm_client.astream(messages, temperature=0.7, max_tokens=1000, model=model_name),
+            model_name=model_name,
+        ):
+            if _llm_first_byte is None:
+                _llm_first_byte = time.time()
+                logger.info("[Profiler] 收到 LLM 首字节 - 耗时: %.2fs", _llm_first_byte - _t_llm_start)
+            yield self._emit_sse(state_snapshot, event_type, data)
+            await asyncio.sleep(0.01)
+
     def _emit_sse(
         self,
         state_snapshot: Dict[str, Any],
@@ -2246,8 +2570,9 @@ class AgentOrchestrator:
             report_data = report.get("report_data") or {}
             report_data.update(data.get("report_data") or {})
             report["report_data"] = report_data
-            diagnosis_val = data.get("diagnosis") or report_data.get("diagnosis") or data
-            report["diagnosis"] = diagnosis_val
+            diagnosis_val = data.get("diagnosis") or report_data.get("diagnosis")
+            if diagnosis_val is not None:
+                report["diagnosis"] = diagnosis_val
             for k, v in data.items():
                 if k not in ("report_data", "diagnosis"):
                     report[k] = v

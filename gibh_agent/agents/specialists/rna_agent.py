@@ -504,15 +504,18 @@ File Path: {file_path}
                 
                 # Step 2: 有文件用真实参数，无文件用模板模式（预览卡片，与 Spatial/Radiomics 一致）
                 is_template = not file_metadata or not (file_metadata.get("file_path") if file_metadata else None)
-                plan_result = await self.sop_planner.generate_plan(
+                plan_result = None
+                async for _ev, _data in self.sop_planner.generate_plan(
                     user_query=query,
                     file_metadata=file_metadata,
                     category_filter="scRNA-seq",
                     domain_name="RNA",
                     is_template=is_template,
-                )
+                ):
+                    if _ev == "workflow":
+                        plan_result = _data
                 
-                if plan_result.get("type") != "error":
+                if plan_result and plan_result.get("type") != "error":
                     logger.info("✅ [RNAPlanner] 动态规划成功 (template=%s)", is_template)
                     if file_metadata and not is_template:
                         diagnosis_report = None
@@ -529,7 +532,10 @@ File Path: {file_path}
                     if hasattr(self, "context") and self.context.get("parameter_recommendation"):
                         plan_result["recommendation"] = self.context.get("parameter_recommendation")
                     return plan_result
-                logger.warning("⚠️ [RNAPlanner] 规划失败: %s", plan_result.get("error"))
+                logger.warning(
+                    "⚠️ [RNAPlanner] 规划失败: %s",
+                    (plan_result or {}).get("error"),
+                )
             
             except Exception as e:
                 logger.error(f"❌ [RNAPlanner] 动态规划异常: {e}", exc_info=True)

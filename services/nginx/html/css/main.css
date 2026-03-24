@@ -618,6 +618,30 @@
                 background: #e0f2fe;
                 flex-shrink: 0;
             }
+            /* 文档类技能：极简科研风（无高饱和装饰） */
+            .skill-card.skill-card--research-doc:hover {
+                border-color: #d1d5db;
+                box-shadow: none;
+            }
+            .skill-card.skill-card--research-doc .skill-icon-neutral {
+                font-size: 12px;
+                font-weight: 600;
+                letter-spacing: 0.02em;
+                color: #374151;
+                background: #f3f4f6;
+                border: 1px solid #d1d5db;
+                border-radius: 6px;
+                width: 36px;
+                height: 36px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+            }
+            .skill-card.skill-card--research-doc .cat-badge {
+                color: #374151;
+                background: #e5e7eb;
+            }
             .skill-title-group { min-width: 0; flex: 1; }
             .skill-card .skill-title {
                 font-size: 15px;

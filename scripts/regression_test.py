@@ -14,15 +14,35 @@ import sys
 import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from unittest.mock import Mock, AsyncMock, MagicMock, patch
+from unittest.mock import Mock, patch
 import json
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from gibh_agent.core.orchestrator import AgentOrchestrator
-from gibh_agent.core.planner import SOPPlanner
-from gibh_agent.core.executor import ExecutionLayer
+
+
+def _fake_sop_planner_class(workflow_payload: Dict[str, Any]):
+    """SOPPlanner.generate_plan 已为异步生成器：用假类 yield (\"workflow\", payload) 供 orchestrator 消费。"""
+
+    class FakeSOPPlanner:
+        def __init__(self, tool_retriever, llm_client):
+            pass
+
+        async def _classify_intent(self, user_query, file_metadata=None):
+            return {"domain_name": "Metabolomics", "mode": "EXECUTION", "target_steps": []}
+
+        async def _analyze_user_intent(self, user_query, workflow):
+            yield ("intent_result", {"target_steps": [], "skip_steps": []})
+
+        async def generate_plan(self, **kwargs):
+            yield ("workflow", workflow_payload)
+
+        def _fallback_intent_analysis(self, user_query, available_steps):
+            return []
+
+    return FakeSOPPlanner
 
 
 class RegressionTestSuite:
@@ -63,12 +83,12 @@ class RegressionTestSuite:
                 "file_type": "CSV"
             }
             
+            mock_agent.agents = {"metabolomics": Mock(llm_client=Mock())}
             orchestrator = AgentOrchestrator(mock_agent, upload_dir="/app/uploads")
             orchestrator.file_inspector = mock_file_inspector
-            
-            # Mock planner
-            mock_planner = Mock()
-            mock_planner.generate_plan = AsyncMock(return_value={
+            orchestrator.query_rewriter = None
+
+            plan_payload = {
                 "type": "workflow_config",
                 "template_mode": False,
                 "workflow_data": {
@@ -78,23 +98,19 @@ class RegressionTestSuite:
                         {"id": "preprocess_data", "name": "数据预处理", "params": {}}
                     ]
                 }
-            })
-            
-            # Mock query rewriter
-            orchestrator.query_rewriter = None
-            
-            # Test: Upload CSV file
+            }
+
             files = [{"name": "cow_diet.csv", "path": "/app/uploads/cow_diet.csv"}]
             query = "分析这个文件"
-            
-            # Collect events
+
             events = []
-            async for event in orchestrator.stream_process(
-                query=query,
-                files=files,
-                workflow_data=None  # No workflow_data -> should plan
-            ):
-                events.append(event)
+            with patch("gibh_agent.core.planner.SOPPlanner", _fake_sop_planner_class(plan_payload)):
+                async for event in orchestrator.stream_process(
+                    query=query,
+                    files=files,
+                    workflow_data=None,
+                ):
+                    events.append(event)
             
             # Verify results
             has_diagnosis = any('diagnosis' in event for event in events)
@@ -121,11 +137,10 @@ class RegressionTestSuite:
         try:
             # Mock dependencies
             mock_agent = Mock()
+            mock_agent.agents = {"metabolomics": Mock(llm_client=Mock())}
             orchestrator = AgentOrchestrator(mock_agent, upload_dir="/app/uploads")
-            
-            # Mock planner for template mode
-            mock_planner = Mock()
-            mock_planner.generate_plan = AsyncMock(return_value={
+
+            template_payload = {
                 "type": "workflow_config",
                 "template_mode": True,
                 "workflow_data": {
@@ -134,16 +149,16 @@ class RegressionTestSuite:
                         {"id": "inspect_data", "name": "数据检查", "params": {"file_path": "<待上传数据>"}}
                     ]
                 }
-            })
-            
-            # Test Step 1: No File -> Expect template_mode=True
+            }
+
             events_no_file = []
-            async for event in orchestrator.stream_process(
-                query="显示代谢组分析流程",
-                files=[],
-                workflow_data=None
-            ):
-                events_no_file.append(event)
+            with patch("gibh_agent.core.planner.SOPPlanner", _fake_sop_planner_class(template_payload)):
+                async for event in orchestrator.stream_process(
+                    query="显示代谢组分析流程",
+                    files=[],
+                    workflow_data=None,
+                ):
+                    events_no_file.append(event)
             
             has_template_mode_true = any('"template_mode": true' in event or '"template_mode":true' in event for event in events_no_file)
             
@@ -156,8 +171,8 @@ class RegressionTestSuite:
                 "n_features": 100
             }
             orchestrator.file_inspector = mock_file_inspector
-            
-            mock_planner.generate_plan = AsyncMock(return_value={
+
+            exec_payload = {
                 "type": "workflow_config",
                 "template_mode": False,
                 "workflow_data": {
@@ -166,15 +181,16 @@ class RegressionTestSuite:
                         {"id": "inspect_data", "name": "数据检查", "params": {"file_path": "/app/uploads/cow_diet.csv"}}
                     ]
                 }
-            })
-            
+            }
+
             events_with_file = []
-            async for event in orchestrator.stream_process(
-                query="分析这个文件",
-                files=[{"name": "cow_diet.csv", "path": "/app/uploads/cow_diet.csv"}],
-                workflow_data=None
-            ):
-                events_with_file.append(event)
+            with patch("gibh_agent.core.planner.SOPPlanner", _fake_sop_planner_class(exec_payload)):
+                async for event in orchestrator.stream_process(
+                    query="分析这个文件",
+                    files=[{"name": "cow_diet.csv", "path": "/app/uploads/cow_diet.csv"}],
+                    workflow_data=None,
+                ):
+                    events_with_file.append(event)
             
             has_template_mode_false = any('"template_mode": false' in event or '"template_mode":false' in event for event in events_with_file)
             
@@ -209,10 +225,6 @@ class RegressionTestSuite:
                 "workflow_name": "Metabolomics 标准分析流程"
             }
             
-            # Mock planner (should NOT be called)
-            mock_planner_called = False
-            original_generate_plan = orchestrator.planner.generate_plan if hasattr(orchestrator, 'planner') else None
-            
             # Test: Request with workflow_data
             workflow_data = {
                 "workflow_data": {
@@ -225,7 +237,7 @@ class RegressionTestSuite:
             }
             
             # Patch executor
-            with patch('gibh_agent.core.orchestrator.ExecutionLayer', return_value=mock_executor):
+            with patch('gibh_agent.core.executor.WorkflowExecutor', return_value=mock_executor):
                 events = []
                 async for event in orchestrator.stream_process(
                     query="执行工作流",
@@ -287,7 +299,7 @@ class RegressionTestSuite:
             }
             
             # Patch executor
-            with patch('gibh_agent.core.orchestrator.ExecutionLayer', return_value=mock_executor):
+            with patch('gibh_agent.core.executor.WorkflowExecutor', return_value=mock_executor):
                 events = []
                 async for event in orchestrator.stream_process(
                     query="执行工作流",

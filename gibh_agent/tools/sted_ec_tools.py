@@ -1,5 +1,5 @@
 """
-STED-EC 单细胞时空轨迹推断工具（JiekaiLab / moscot）。
+STED_EC 域工具集：单细胞时空动力学分析（JiekaiLab / moscot 实现，底层 tool_id 不变）。
 
 逻辑提取自 https://github.com/JiekaiLab/STED-EC（6-trajetory_analysis.ipynb 与 Treesing/treesing.py）。
 使用 moscot.TemporalProblem 对连续时间点做最优传输，输出 transport 矩阵；轨迹图基于 UMAP + 时间/细胞类型着色。
@@ -7,6 +7,7 @@ STED-EC 单细胞时空轨迹推断工具（JiekaiLab / moscot）。
 全量分析：本流程对传入的 h5ad 做全量计算，无降采样；大文件场景依赖 sparse 矩阵与循环内显式 gc 防 OOM。
 """
 import gc
+import json
 import logging
 import os
 # 根治 Docker 环境下 Numba 编译缓存无权限/找不到路径的问题
@@ -14,11 +15,114 @@ os.environ["NUMBA_CACHE_DIR"] = "/tmp/numba_cache"
 import shutil
 import traceback
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 
 from ..core.tool_registry import registry
+from ..core.utils import sanitize_for_json
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_enabled_mcps_for_tools(raw: Any) -> List[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return [s.strip() for s in raw.split(",") if s.strip()]
+    if not isinstance(raw, list):
+        return []
+    return [str(x).strip() for x in raw if x and str(x).strip()]
+
+
+def _assistant_msg_to_openai_dict(msg: Any) -> Dict[str, Any]:
+    out: Dict[str, Any] = {"role": "assistant", "content": getattr(msg, "content", None) or ""}
+    tcs = getattr(msg, "tool_calls", None)
+    if not tcs:
+        return out
+    tool_calls = []
+    for tc in tcs:
+        fn = getattr(tc, "function", None)
+        tool_calls.append(
+            {
+                "id": getattr(tc, "id", ""),
+                "type": getattr(tc, "type", "function") or "function",
+                "function": {
+                    "name": getattr(fn, "name", "") if fn is not None else "",
+                    "arguments": (getattr(fn, "arguments", None) or "{}") if fn is not None else "{}",
+                },
+            }
+        )
+    out["tool_calls"] = tool_calls
+    return out
+
+
+def _extract_references_from_content(content: str) -> Tuple[str, List[Dict[str, str]]]:
+    """从定界 JSON 或文末 ```json 数组解析参考文献；返回 (正文, references)。"""
+    text = (content or "").strip()
+    refs: List[Dict[str, str]] = []
+    start_tag = "<<<REFERENCES_JSON>>>"
+    end_tag = "<<<END_REFERENCES>>>"
+    if start_tag in text and end_tag in text:
+        a = text.find(start_tag)
+        b = text.find(end_tag, a)
+        chunk = text[a + len(start_tag) : b].strip()
+        body = (text[:a].rstrip() + "\n" + text[b + len(end_tag) :]).strip()
+        try:
+            data = json.loads(chunk)
+            if isinstance(data, list):
+                for item in data:
+                    if not isinstance(item, dict):
+                        continue
+                    u = item.get("url") or item.get("href") or item.get("link")
+                    if not u:
+                        continue
+                    refs.append(
+                        {
+                            "title": str(item.get("title") or item.get("name") or "Reference")[:500],
+                            "url": str(u)[:2048],
+                        }
+                    )
+        except json.JSONDecodeError:
+            pass
+        return body, refs
+
+    # 回退：最后一个 ```json ... ``` 代码块且解析为数组
+    fence = "```json"
+    if fence in text.lower():
+        idx = text.lower().rfind(fence.lower())
+        rest = text[idx + len(fence) :]
+        end_fence = rest.find("```")
+        if end_fence != -1:
+            chunk = rest[:end_fence].strip()
+            try:
+                data = json.loads(chunk)
+                if isinstance(data, list) and data and isinstance(data[0], dict):
+                    for item in data:
+                        u = item.get("url") or item.get("href")
+                        if u:
+                            refs.append(
+                                {
+                                    "title": str(item.get("title") or "Reference")[:500],
+                                    "url": str(u)[:2048],
+                                }
+                            )
+                    if refs:
+                        body = (text[:idx].rstrip() + rest[end_fence + 3 :].lstrip()).strip()
+                        return body, refs
+            except json.JSONDecodeError:
+                pass
+    return text, []
+
+
+def _sted_safe_return(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """保证工具返回可被 JSON / SSE 序列化，避免 NaN、numpy 标量等导致流中断。"""
+    try:
+        return sanitize_for_json(payload)
+    except Exception as e:
+        logger.error("_sted_safe_return sanitize 失败: %s", e, exc_info=True)
+        return {"status": "error", "error": str(e)}
 
 # STED-EC 依赖说明：请使用 moscot>=0.3.5 + ott-jax>=0.4.6（与 pandas>=2、jax 0.4.x 兼容）；旧版 ott-jax 0.3.x 会触发 register_dataclass 错误
 
@@ -661,12 +765,30 @@ def sted_ec_plot_trajectory(
             if images_list
             else "轨迹图表已生成并打包至 ZIP。"
         )
+        # DAG 下游：写出含 X_umap / obs 时序列的 h5ad，供轨迹驱动基因挖掘等步骤作为唯一输入
+        h5ad_out = os.path.join(out_dir, "sted_ec_after_umap.h5ad")
+        try:
+            adata.write_h5ad(h5ad_out)
+            logger.info("sted_ec_plot_trajectory: 已写出下游用 AnnData %s", h5ad_out)
+        except Exception as w_err:
+            logger.error("sted_ec_plot_trajectory: 写出 h5ad 失败: %s", w_err, exc_info=True)
+            del adata
+            gc.collect()
+            return {
+                "status": "error",
+                "error": f"无法写出下游 h5ad: {w_err}",
+                "report_data": {"images": images_list, "download_links": download_links, "summary": summary},
+            }
         del adata
         gc.collect()
         return {
             "status": "success",
-            "message": "轨迹多维图表已保存并打包",
+            "message": "轨迹多维图表已保存并打包；已输出含 UMAP 的 h5ad 供下游分析",
             "output_plot_path": path1,
+            "h5ad_path": h5ad_out,
+            "output_h5ad": h5ad_out,
+            "time_key_used": time_key,
+            "cell_type_key_used": cell_type_key,
             "report_data": {
                 "images": images_list,
                 "download_links": download_links,
@@ -676,3 +798,602 @@ def sted_ec_plot_trajectory(
     except Exception as e:
         logger.error("sted_ec_plot_trajectory 执行失败: %s", e, exc_info=True)
         return {"status": "error", "error": str(e), "report_data": {"images": [], "download_links": [], "summary": ""}}
+
+
+@registry.register(
+    name="sted_ec_driver_gene_extraction",
+    description="轨迹驱动基因挖掘：对第 4 步输出的含 UMAP/时序 obs 的 h5ad 使用 scanpy.tl.rank_genes_groups (wilcoxon) 提取候选基因表 driver_genes.csv，供 GSEA 等下游使用。",
+    category="STED_EC",
+    output_type="mixed",
+)
+def sted_ec_driver_gene_extraction(
+    h5ad_path: str,
+    output_dir: Optional[str] = None,
+    top_n: int = 100,
+    groupby_mode: str = "auto",
+    time_key: Optional[str] = None,
+    cell_type_key: Optional[str] = None,
+    pval_adj_max: float = 0.05,
+    min_abs_logfoldchange: float = 0.25,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    承上启下：仅使用 Scanpy 原生 API，不做自定义假设检验实现。
+
+    Args:
+        h5ad_path: 通常为第 4 步 sted_ec_plot_trajectory 写出的 sted_ec_after_umap.h5ad。
+        output_dir: CSV 输出目录，默认与 h5ad 同目录。
+        top_n: 导出表格保留的基因行数上限（去重后）。
+        groupby_mode: 'auto' | 'time' | 'cell_type' — rank_genes_groups 的分组列优先策略。
+        time_key / cell_type_key: 可选；缺省时从 adata.uns 与前序列名推断。
+    """
+    try:
+        import numpy as np
+        import pandas as pd
+        import scanpy as sc
+    except ImportError as e:
+        trace_str = traceback.format_exc()
+        logger.error("Tool execution failed: sted_ec_driver_gene_extraction (ImportError)\n%s", trace_str)
+        return _sted_safe_return({"status": "error", "error": str(e), "traceback": trace_str})
+
+    if isinstance(h5ad_path, str) and h5ad_path.strip().startswith("<") and h5ad_path.strip().endswith(">"):
+        return _sted_safe_return({
+            "status": "error",
+            "error": "h5ad 路径未解析。请先成功完成「时空动力学图可视化」步骤。",
+        })
+
+    path_resolved = str(Path(h5ad_path).resolve())
+    if not os.path.isfile(path_resolved):
+        return _sted_safe_return({"status": "error", "error": f"文件不存在: {path_resolved}"})
+
+    out_base = output_dir or os.path.dirname(path_resolved)
+    os.makedirs(out_base, exist_ok=True)
+    csv_path = os.path.join(out_base, "driver_genes.csv")
+
+    adata = None
+    try:
+        adata = sc.read_h5ad(path_resolved)
+        tk = time_key or adata.uns.get("sted_ec_time_key", "day")
+        ck = cell_type_key if (cell_type_key and str(cell_type_key).strip()) else adata.uns.get("sted_ec_cell_type_key")
+
+        gb_source: Optional[str] = None
+        mode = (groupby_mode or "auto").lower().strip()
+        if mode == "time":
+            gb_source = tk if tk and tk in adata.obs.columns else None
+        elif mode == "cell_type":
+            gb_source = ck if ck and ck in adata.obs.columns else None
+        else:
+            if tk and tk in adata.obs.columns:
+                nu_t = adata.obs[tk].astype(str).nunique()
+                if 2 <= nu_t <= 80:
+                    gb_source = tk
+            if gb_source is None and ck and ck in adata.obs.columns:
+                nu_c = adata.obs[ck].astype(str).nunique()
+                if nu_c >= 2:
+                    gb_source = ck
+            if gb_source is None and tk and tk in adata.obs.columns:
+                gb_source = tk
+
+        if not gb_source or gb_source not in adata.obs.columns:
+            return _sted_safe_return({
+                "status": "error",
+                "error": "无法在 obs 中解析用于 rank_genes_groups 的分组列（time_key/cell_type_key）。",
+            })
+
+        target_col = gb_source
+        # 1. 提取目标列，并强制、立刻转换为普通的 object/string 类型！绝不保留 Categorical！
+        raw_series = adata.obs[target_col].astype(str)
+
+        # 2. 将所有可能的空值形态（"nan", "NaN", "None", "", 纯空格）统一替换为 "Unknown"
+        import numpy as np
+
+        raw_series = raw_series.replace(["nan", "NaN", "None", "", " "], "Unknown")
+        raw_series = raw_series.replace(r"^\s*$", "Unknown", regex=True)
+        raw_series = raw_series.fillna("Unknown")
+
+        # 3. 赋值给新的临时列
+        adata.obs["_sted_driver_groupby"] = raw_series
+
+        # 4. 检查唯一值数量
+        unique_vals = adata.obs["_sted_driver_groupby"].nunique()
+        if unique_vals <= 1:
+            del adata.obs["_sted_driver_groupby"]
+            return _sted_safe_return({
+                "status": "error",
+                "error": f"分组变量 {target_col} 只有一个有效类别，无法进行差异基因分析。",
+            })
+
+        # 5. 最后一步：安全地转换为 category 类型供 Scanpy 使用
+        adata.obs["_sted_driver_groupby"] = adata.obs["_sted_driver_groupby"].astype("category")
+
+        use_raw = adata.raw is not None
+        sc.tl.rank_genes_groups(
+            adata,
+            groupby="_sted_driver_groupby",
+            method="wilcoxon",
+            use_raw=use_raw,
+            key_added="rank_genes_driver",
+        )
+
+        df = None
+        try:
+            df = sc.get.rank_genes_groups_df(adata, key="rank_genes_driver", group=None)
+        except Exception:
+            df = None
+        if df is None or df.empty:
+            del adata.obs["_sted_driver_groupby"]
+            return _sted_safe_return({"status": "error", "error": "rank_genes_groups 未产生可用结果（get.rank_genes_groups_df 为空）。"})
+
+        df_f = df.replace([np.inf, -np.inf], np.nan).dropna(subset=["pvals_adj"])
+        df_f = df_f[df_f["pvals_adj"] < float(pval_adj_max)]
+        if "logfoldchanges" in df_f.columns:
+            df_f = df_f[np.isfinite(df_f["logfoldchanges"])]
+            df_f = df_f[df_f["logfoldchanges"].abs() >= float(min_abs_logfoldchange)]
+
+        note_suffix = ""
+        if df_f.empty:
+            df_f = df.replace([np.inf, -np.inf], np.nan).dropna(subset=["scores"])
+            df_f = df_f.sort_values("scores", ascending=False)
+            note_suffix = "（统计阈值下过检基因为空，已按 score 取 Top 去重）"
+        else:
+            df_f = df_f.sort_values("scores", ascending=False)
+
+        df_f = df_f.drop_duplicates(subset=["names"]).head(int(top_n))
+        df_f.to_csv(csv_path, index=False)
+
+        # Top 5 Markdown（展示用）；清洗 NaN/Inf，避免 markdown / JSON 序列化异常
+        # 注意：rank_genes_groups_df 常含 Categorical 列（如 group），对 Categorical 直接 fillna("")
+        # 会触发「Cannot setitem on a Categorical with a new category ()」，须先转为 object/str
+        preview = df_f.head(5).copy()
+        preview = preview.replace([np.inf, -np.inf], np.nan)
+        for _pcol in preview.columns:
+            if pd.api.types.is_categorical_dtype(preview[_pcol]):
+                preview[_pcol] = preview[_pcol].astype(object)
+        preview = preview.fillna("")
+        try:
+            md_table = preview.to_markdown(index=False)
+        except Exception:
+            md_table = "```\n" + preview.to_string(index=False) + "\n```"
+        driver_genes_markdown = (
+            f"**轨迹驱动基因挖掘**（groupby=`{gb_source}`，method=wilcoxon，导出 Top {len(df_f)} → `driver_genes.csv`）{note_suffix}\n\n"
+            f"{md_table}\n"
+        )
+
+        # UI：折叠面板 summary + Markdown 表格；report_data.download_links 供前端下载按钮（title/path 与 index.html 一致）
+        summary_str = (
+            f"已导出驱动基因表: {csv_path}\n\n**驱动基因 Top 5 预览：**\n{driver_genes_markdown}"
+        )
+        report_data = {
+            "images": [],
+            "download_links": [{"title": "下载驱动基因表 (CSV)", "path": csv_path}],
+            "summary": summary_str,
+        }
+
+        return _sted_safe_return({
+            "status": "success",
+            # message 须含完整 Markdown：executor 用 message 优先作为 step_detail.summary
+            "message": summary_str,
+            "summary": summary_str,
+            "driver_genes_csv": csv_path,
+            "csv_path": csv_path,
+            "output_file": csv_path,
+            "groupby_used": str(gb_source),
+            "n_genes_written": int(len(df_f)),
+            "driver_genes_markdown": driver_genes_markdown,
+            "report_data": report_data,
+        })
+    except Exception as e:
+        trace_str = traceback.format_exc()
+        logger.error("Tool execution failed: sted_ec_driver_gene_extraction\n%s", trace_str)
+        return _sted_safe_return({"status": "error", "error": str(e), "traceback": trace_str})
+    finally:
+        if adata is not None:
+            try:
+                if "_sted_driver_groupby" in adata.obs.columns:
+                    del adata.obs["_sted_driver_groupby"]
+            except Exception:
+                pass
+            del adata
+        gc.collect()
+
+
+@registry.register(
+    name="sted_ec_pathway_enrichment",
+    description="STED_EC 通路富集：读取轨迹驱动基因 CSV，调用 gseapy.enrichr（KEGG/GO 等 Enrichr 库），输出富集表 CSV 与条形图/气泡图 PNG，供专家报告引用。",
+    category="STED_EC",
+    output_type="mixed",
+)
+def sted_ec_pathway_enrichment(
+    driver_genes_csv: str,
+    output_dir: Optional[str] = None,
+    organism: str = "Human",
+    gene_sets: Optional[str] = None,
+    top_pathways_plot: int = 15,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    磐石能力对齐：复用与 spatial_pathway_enrichment 相同的 gseapy.enrichr + 本地绑图模式（no_plot=True）。
+
+    Args:
+        driver_genes_csv: 第 5 步 driver_genes.csv 的绝对路径（含 scanpy 的 names 列）。
+        output_dir: 结果输出目录；默认同 CSV 所在目录。
+        organism: Enrichr organism（Human / Mouse 等）。
+        gene_sets: 逗号分隔的 Enrichr 库名；默认 ``KEGG_2021_Human,GO_Biological_Process_2021``。
+        top_pathways_plot: 绑图中的通路条数上限。
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+        import pandas as pd
+    except ImportError as e:
+        return _sted_safe_return({"status": "error", "error": str(e)})
+
+    try:
+        # Executor 占位符若未命中路径字段，可能把整段 step_result dict 传入，需兜底解析
+        if isinstance(driver_genes_csv, dict):
+            _d = driver_genes_csv
+            driver_genes_csv = (
+                _d.get("driver_genes_csv")
+                or _d.get("csv_path")
+                or _d.get("output_file")
+                or ""
+            )
+            if not isinstance(driver_genes_csv, str) or not str(driver_genes_csv).strip():
+                return _sted_safe_return({
+                    "status": "error",
+                    "error": "driver_genes_csv 应为 CSV 文件路径，当前收到 dict 且无法提取路径。",
+                })
+
+        if isinstance(driver_genes_csv, str) and driver_genes_csv.strip().startswith("<") and driver_genes_csv.strip().endswith(">"):
+            return _sted_safe_return({
+                "status": "error",
+                "error": "driver_genes_csv 未解析，请先成功完成「轨迹驱动基因挖掘」步骤。",
+            })
+
+        csv_in = str(Path(str(driver_genes_csv)).resolve())
+        if not os.path.isfile(csv_in):
+            return _sted_safe_return({"status": "error", "error": f"驱动基因文件不存在: {csv_in}"})
+    except Exception as e:
+        logger.error("sted_ec_pathway_enrichment 路径校验异常: %s", e, exc_info=True)
+        return _sted_safe_return({"status": "error", "error": str(e)})
+
+    out_base = output_dir or os.path.dirname(csv_in)
+    os.makedirs(out_base, exist_ok=True)
+    base_tag = "sted_ec_pathway_enrichment"
+    out_csv = os.path.join(out_base, f"{base_tag}_enrichment_results.csv")
+    bar_png = os.path.join(out_base, f"{base_tag}_bar.png")
+    bubble_png = os.path.join(out_base, f"{base_tag}_bubble.png")
+
+    gs_default = "KEGG_2021_Human,GO_Biological_Process_2021"
+    gs_raw = (gene_sets or gs_default).strip()
+    gene_sets_list = [s.strip() for s in gs_raw.split(",") if s.strip()]
+    if not gene_sets_list:
+        gene_sets_list = ["KEGG_2021_Human", "GO_Biological_Process_2021"]
+
+    try:
+        df_in = pd.read_csv(csv_in)
+        col_gene = None
+        for c in ("names", "gene", "Gene", "symbol", "gene_symbol"):
+            if c in df_in.columns:
+                col_gene = c
+                break
+        if col_gene is None and len(df_in.columns) > 0:
+            col_gene = df_in.columns[0]
+        if col_gene is None:
+            return _sted_safe_return({"status": "error", "error": "driver_genes.csv 中未找到基因名列（期望 names）。"})
+
+        genes_ser = (
+            df_in[col_gene]
+            .dropna()
+            .astype(str)
+            .str.strip()
+        )
+        genes = genes_ser[genes_ser.str.len() > 0].unique().tolist()
+        if len(genes) < 3:
+            return _sted_safe_return({"status": "error", "error": f"有效基因数过少（{len(genes)}），无法进行富集。"})
+
+        enrichment_table: Optional[pd.DataFrame] = None
+        fallback_message = None
+
+        try:
+            import gseapy as gp
+
+            # gseapy.enrichr 仅接受小写 organism（如 human），拒绝 "Human"；空串回退 human
+            _org = str(organism or "").strip().lower()
+            safe_organism = _org if _org else "human"
+
+            enr = gp.enrichr(
+                gene_list=genes,
+                gene_sets=gene_sets_list,
+                organism=safe_organism,
+                outdir=None,
+                no_plot=True,
+            )
+            enrichment_table = getattr(enr, "results", enr) if enr is not None and hasattr(enr, "results") else enr
+            if not isinstance(enrichment_table, pd.DataFrame) or enrichment_table.empty:
+                enrichment_table = None
+                fallback_message = "gseapy.enrichr 返回空结果。"
+        except Exception as ex:
+            logger.warning("sted_ec_pathway_enrichment: gseapy 失败: %s", ex, exc_info=True)
+            fallback_message = f"gseapy 未执行成功: {ex}"
+            enrichment_table = None
+
+        if enrichment_table is None or enrichment_table.empty:
+            pd.DataFrame({"gene": genes[:500]}).to_csv(os.path.join(out_base, f"{base_tag}_input_genes_fallback.csv"), index=False)
+            return _sted_safe_return({
+                "status": "error",
+                "error": str(fallback_message or "富集无结果"),
+                "message": str(fallback_message or "富集无结果"),
+                "n_genes_input": int(len(genes)),
+                "report_data": {
+                    "images": [],
+                    "download_links": [],
+                    "summary": str(fallback_message or "富集失败"),
+                },
+            })
+
+        enrichment_table = enrichment_table.copy()
+        enrichment_table = enrichment_table.replace([np.inf, -np.inf], np.nan)
+        enrichment_table.to_csv(out_csv, index=False)
+
+        pcol = "Adjusted P-value" if "Adjusted P-value" in enrichment_table.columns else "P-value"
+        term_col = "Term" if "Term" in enrichment_table.columns else enrichment_table.columns[0]
+        plot_df = enrichment_table.sort_values(pcol, ascending=True).head(int(top_pathways_plot)).copy()
+        pvals = plot_df[pcol].astype(float)
+        pvals = np.clip(pvals, 1e-300, 1.0)
+        logp = -np.log10(pvals)
+        y_pos = np.arange(len(plot_df))
+
+        fig1, ax1 = plt.subplots(figsize=(9, max(4.5, len(plot_df) * 0.38)))
+        ax1.barh(y_pos, logp, color="steelblue", alpha=0.85)
+        ax1.set_yticks(y_pos)
+        labels = plot_df[term_col].astype(str).str.slice(0, 60)
+        ax1.set_yticklabels(labels, fontsize=9)
+        ax1.set_xlabel("-log10(Adjusted P-value)" if pcol == "Adjusted P-value" else "-log10(P-value)")
+        ax1.set_title("STED-EC pathway enrichment (Enrichr)")
+        ax1.invert_yaxis()
+        fig1.tight_layout()
+        fig1.savefig(bar_png, dpi=150)
+        plt.close(fig1)
+
+        fig2, ax2 = plt.subplots(figsize=(9, max(4.5, len(plot_df) * 0.38)))
+        area = 80.0 + 420.0 * (logp / (float(np.max(logp)) or 1.0))
+        ax2.scatter(logp, y_pos, s=area, c=logp, cmap="viridis", alpha=0.75, edgecolors="k", linewidths=0.3)
+        ax2.set_yticks(y_pos)
+        ax2.set_yticklabels(labels, fontsize=9)
+        ax2.set_xlabel("-log10 adj.P / P")
+        ax2.set_title("Pathway enrichment (bubble view)")
+        ax2.invert_yaxis()
+        fig2.tight_layout()
+        fig2.savefig(bubble_png, dpi=150)
+        plt.close(fig2)
+
+        preview = enrichment_table.head(5).copy()
+        preview = preview.replace([np.inf, -np.inf], np.nan)
+        for _pcol in preview.columns:
+            if pd.api.types.is_categorical_dtype(preview[_pcol]):
+                preview[_pcol] = preview[_pcol].astype(object)
+        preview = preview.fillna("")
+        try:
+            md_table = preview.to_markdown(index=False)
+        except Exception:
+            md_table = "```\n" + preview.to_string(index=False) + "\n```"
+        pathway_enrichment_markdown = (
+            f"**通路富集（Enrichr: {', '.join(gene_sets_list)}）**\n前 5 条：\n\n{md_table}\n"
+        )
+
+        summary_text = (
+            f"已对 {len(genes)} 个输入基因做 Enrichr 富集；"
+            f"显著条目数 {len(enrichment_table)}；结果表见 {os.path.basename(out_csv)}。"
+        )
+
+        gc.collect()
+
+        return _sted_safe_return({
+            "status": "success",
+            "message": summary_text,
+            "enrichment_csv": str(out_csv),
+            "csv_path": str(out_csv),
+            "output_file": str(out_csv),
+            "pathway_enrichment_markdown": pathway_enrichment_markdown,
+            "n_genes_input": int(len(genes)),
+            "n_terms": int(len(enrichment_table)),
+            "gene_sets_used": [str(x) for x in gene_sets_list],
+            "summary": {
+                "text": summary_text,
+                "pathway_enrichment_markdown": pathway_enrichment_markdown,
+                "n_terms": int(len(enrichment_table)),
+            },
+            "report_data": {
+                "images": [
+                    {"title": "通路富集 条形图", "path": str(bar_png)},
+                    {"title": "通路富集 气泡图", "path": str(bubble_png)},
+                ],
+                "download_links": [
+                    {"title": "富集结果 CSV", "path": str(out_csv)},
+                ],
+                "summary": pathway_enrichment_markdown,
+            },
+        })
+    except Exception as e:
+        logger.error("sted_ec_pathway_enrichment 失败: %s", e, exc_info=True)
+        gc.collect()
+        return _sted_safe_return({"status": "error", "error": str(e)})
+
+
+@registry.register(
+    name="sted_ec_expert_report",
+    description="[遗留/手动] STED-EC 专家解读：仅建议在非工作流场景单独调用。标准 SPATIOTEMPORAL/STED 流程的报告由 Orchestrator 在 execute 之后经 BaseAgent._generate_analysis_summary 生成。",
+    category="STED_EC",
+    output_type="json",
+)
+def sted_ec_expert_report(
+    read_only_context: str = "{}",
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    专家解读报告（原子 DAG 节点）。可选启用 MCP：与闲聊一致注入 mcp_web_search / mcp_ncbi_search 工具并多轮调用。
+
+    Args:
+        read_only_context: Executor 从前序 sted_ec_* 步骤组装的 JSON 字符串（只读）。
+        enabled_mcps: 由 Executor 从 step_context 注入，如 ["web_search","authority_db"]。
+
+    Returns:
+        含 expert_report_markdown / report、report_data.references，供 SSE steps_details 与前端「参考文献」面板。
+    """
+    from gibh_agent.agents.reporting.sted_ec_expert_report_prompts import (
+        STED_EC_CHILD_AGENT_SYSTEM_PROMPT,
+        STED_EC_EXPERT_SYSTEM_WITH_MCP,
+        build_sted_ec_child_user_message,
+    )
+    from gibh_agent.core.llm_client import LLMClientFactory
+    from gibh_agent.core.openai_tools import tool_names_to_openai_tools
+
+    try:
+        ctx_raw = (read_only_context or "").strip() or "{}"
+        try:
+            parsed = json.loads(ctx_raw)
+        except json.JSONDecodeError:
+            return {
+                "status": "error",
+                "error": "read_only_context 不是合法 JSON",
+                "message": "专家报告步骤失败：上下文解析错误",
+            }
+        steps = parsed.get("steps") if isinstance(parsed, dict) else None
+        if not steps:
+            return {
+                "status": "error",
+                "error": "缺少前序 STED-EC 步骤上下文，无法生成解读",
+                "message": "专家报告步骤失败：前序步骤结果为空",
+            }
+
+        enabled_mcps = _normalize_enabled_mcps_for_tools(kwargs.get("enabled_mcps"))
+        tool_names: List[str] = []
+        if "web_search" in enabled_mcps:
+            tool_names.append("mcp_web_search")
+        if "authority_db" in enabled_mcps:
+            tool_names.append("mcp_ncbi_search")
+
+        system_prompt = (
+            STED_EC_EXPERT_SYSTEM_WITH_MCP if tool_names else STED_EC_CHILD_AGENT_SYSTEM_PROMPT
+        )
+        user_content = build_sted_ec_child_user_message(ctx_raw)
+
+        client = LLMClientFactory.create_default()
+        messages: List[Dict[str, Any]] = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ]
+
+        tools = tool_names_to_openai_tools(tool_names) if tool_names else []
+        max_rounds = 12
+        content = ""
+
+        if not tools:
+            completion = client.chat(
+                messages=messages,
+                temperature=0.35,
+                max_tokens=8192,
+            )
+            ch = getattr(completion, "choices", None) or []
+            if not ch:
+                return {
+                    "status": "error",
+                    "error": "LLM 返回空 choices",
+                    "message": "专家报告生成失败：模型无输出",
+                }
+            content = (getattr(ch[0].message, "content", None) or "").strip()
+        else:
+            for _round in range(max_rounds):
+                completion = client.chat(
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto",
+                    temperature=0.35,
+                    max_tokens=8192,
+                )
+                ch = getattr(completion, "choices", None) or []
+                if not ch:
+                    return {
+                        "status": "error",
+                        "error": "LLM 返回空 choices",
+                        "message": "专家报告生成失败：模型无输出",
+                    }
+                msg = ch[0].message
+                tcalls = getattr(msg, "tool_calls", None)
+                if tcalls:
+                    messages.append(_assistant_msg_to_openai_dict(msg))
+                    for tc in tcalls:
+                        fn = getattr(tc, "function", None)
+                        name = getattr(fn, "name", None) if fn is not None else None
+                        args_raw = (getattr(fn, "arguments", None) if fn is not None else None) or "{}"
+                        if not name:
+                            continue
+                        try:
+                            args = json.loads(args_raw)
+                        except json.JSONDecodeError:
+                            args = {}
+                        tool_fn = registry.get_tool(name)
+                        if not tool_fn:
+                            payload: Dict[str, Any] = {"status": "error", "error": f"未知工具: {name}"}
+                        else:
+                            payload = tool_fn(**args)
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": getattr(tc, "id", ""),
+                                "content": json.dumps(payload, ensure_ascii=False),
+                            }
+                        )
+                    continue
+                content = (getattr(msg, "content", None) or "").strip()
+                break
+            else:
+                return {
+                    "status": "error",
+                    "error": "工具轮次超限",
+                    "message": "专家报告生成失败：工具调用轮次过多",
+                }
+
+        if not content:
+            return {
+                "status": "error",
+                "error": "LLM 内容为空",
+                "message": "专家报告生成失败：正文为空",
+            }
+        if content.startswith("```"):
+            lines = content.split("\n")
+            if len(lines) >= 2 and lines[0].strip().startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            content = "\n".join(lines).strip()
+
+        report_md, references = _extract_references_from_content(content)
+
+        payload = {
+            "status": "success",
+            "message": "STED-EC 专家解读报告已生成",
+            "summary": {
+                "expert_report_generated": True,
+                "source": "sted_ec_expert_report",
+                "mcp_tools_used": tool_names,
+            },
+            "report": report_md,
+            "expert_report_markdown": report_md,
+            "report_node": "sted_ec_expert_report",
+            "report_data": {
+                "references": references,
+                "report": report_md,
+            },
+        }
+        return _sted_safe_return(payload)
+    except Exception as e:
+        logger.error("sted_ec_expert_report 失败: %s", e, exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": f"专家报告步骤异常: {e}",
+        }

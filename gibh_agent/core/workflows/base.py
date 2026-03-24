@@ -264,6 +264,8 @@ class BaseWorkflow(ABC):
             "workflow_data": {
                 "workflow_name": workflow_name,
                 "name": workflow_name,
+                # 与 WorkflowRegistry 域名一致，供 Orchestrator Reporting / 资产分类等直接使用（避免仅按 tool 列表启发式推断）
+                "domain_name": self.get_name(),
                 "steps": steps
             },
             "file_paths": [file_metadata.get("file_path")] if file_metadata and file_metadata.get("file_path") else []

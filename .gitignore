@@ -157,3 +157,24 @@ The_Tech_Arsenal.md
 chart-demo/
 mermaid-workflows/
 mermaid-workflows.html
+
+# 测试 / 静态检查 / 覆盖率缓存
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.cover
+.hypothesis/
+
+# Windows / 本地杂项
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+~$*
+
+# 允许提交环境变量模板（.env 本身仍被忽略）
+!.env.example

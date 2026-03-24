@@ -16,6 +16,7 @@ template: |
   - Proteomics (Mass Spec)
   - Spatial Omics
   - Imaging
+  - sted_ec_trajectory: STED-EC / single-cell temporal trajectory / optimal transport (moscot) on time-series scRNA (H5AD). Use modality "sted_ec_trajectory" and routing "rna_agent" when the user mentions 单细胞轨迹、STED-EC、最优传输、moscot、发育或分化轨迹、pseudotime.
 
   【User Query】
   {{ user_query }}

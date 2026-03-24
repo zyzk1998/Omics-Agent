@@ -3,11 +3,12 @@ UGC 技能上传与管理员审核 API
 
 路由规范：APIRouter(prefix="/api")，路径不再带 /api，避免嵌套重复。
 - GET    /api/skills: 公开分页查询（正交过滤 main_cat, sub_cat），仅返回 approved；saved_only=True 时返回当前用户收藏
-- POST   /api/skills: 用户上传技能，status 强制 pending
+- POST   /api/skills: 用户上传；普通用户 pending，管理员 approved
 - POST   /api/skills/{skill_id}/bookmark: 收藏技能（防重复）
 - DELETE /api/skills/{skill_id}/bookmark: 取消收藏
 - GET    /api/admin/skills: 管理员拉取待审核列表（严格 role 校验）
-- PUT    /api/admin/skills/{skill_id}/status: 管理员审批
+- PUT    /api/admin/skills/{skill_id}/status: 管理员审批（body: {status}）
+- POST   /api/admin/skills/{skill_id}/review: 管理员审批（body: {action: approve|reject}）
 """
 import logging
 from typing import List, Optional
@@ -45,6 +46,11 @@ class SkillCreate(BaseModel):
 class SkillStatusUpdate(BaseModel):
     """管理员审批请求体。"""
     status: str = Field(..., pattern="^(approved|rejected)$")
+
+
+class SkillReviewAction(BaseModel):
+    """管理员审批（POST 别名）：action → status。"""
+    action: str = Field(..., pattern="^(approve|reject)$")
 
 
 @router.get("/skills")
@@ -128,10 +134,12 @@ def create_skill(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
-    """用户上传技能；status 强制为 pending，author_id 为当前用户。"""
+    """用户上传技能；管理员直接 approved，普通用户 pending。"""
     name = (body.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="技能名称不能为空")
+    is_admin = (current_user.role or "").strip().lower() == "admin"
+    initial_status = "approved" if is_admin else "pending"
     try:
         skill = SkillModel(
             name=name,
@@ -140,13 +148,20 @@ def create_skill(
             sub_category=(body.sub_category or "").strip() or None,
             prompt_template=(body.prompt_template or "").strip() or None,
             author_id=current_user.username,
-            status="pending",
+            status=initial_status,
         )
         db.add(skill)
         db.commit()
         db.refresh(skill)
-        logger.info("UGC 技能提交: id=%s name=%s author=%s", skill.id, skill.name, skill.author_id)
-        return {"skill_id": skill.id, "message": "提交成功，等待管理员审核", "status": "pending"}
+        logger.info(
+            "UGC 技能提交: id=%s name=%s author=%s status=%s",
+            skill.id,
+            skill.name,
+            skill.author_id,
+            initial_status,
+        )
+        msg = "已发布（管理员上传直接通过）" if is_admin else "提交成功，等待管理员审核"
+        return {"skill_id": skill.id, "message": msg, "status": initial_status}
     except Exception as e:
         db.rollback()
         logger.exception("创建技能失败: %s", e)
@@ -227,6 +242,22 @@ def list_pending_skills(
     ]
 
 
+def _apply_skill_review_status(db: Session, skill_id: int, new_status: str, admin_username: str) -> SkillModel:
+    skill = db.query(SkillModel).filter(SkillModel.id == skill_id).first()
+    if not skill:
+        raise HTTPException(status_code=404, detail="技能不存在")
+    try:
+        skill.status = new_status
+        db.commit()
+        db.refresh(skill)
+        logger.info("管理员审批技能: id=%s status=%s by=%s", skill_id, skill.status, admin_username)
+        return skill
+    except Exception as e:
+        db.rollback()
+        logger.exception("更新技能状态失败: %s", e)
+        raise HTTPException(status_code=500, detail="更新失败")
+
+
 @router.put("/admin/skills/{skill_id}/status")
 def update_skill_status(
     skill_id: int,
@@ -235,16 +266,19 @@ def update_skill_status(
     db: Session = Depends(get_db_session),
 ):
     """管理员审批；必须 role == admin。"""
-    skill = db.query(SkillModel).filter(SkillModel.id == skill_id).first()
-    if not skill:
-        raise HTTPException(status_code=404, detail="技能不存在")
-    try:
-        skill.status = body.status.strip().lower()
-        db.commit()
-        db.refresh(skill)
-        logger.info("管理员审批技能: id=%s status=%s by=%s", skill_id, skill.status, current_user.username)
-        return {"skill_id": skill.id, "status": skill.status, "message": "已更新"}
-    except Exception as e:
-        db.rollback()
-        logger.exception("更新技能状态失败: %s", e)
-        raise HTTPException(status_code=500, detail="更新失败")
+    st = body.status.strip().lower()
+    skill = _apply_skill_review_status(db, skill_id, st, current_user.username)
+    return {"skill_id": skill.id, "status": skill.status, "message": "已更新"}
+
+
+@router.post("/admin/skills/{skill_id}/review")
+def review_skill_by_action(
+    skill_id: int,
+    body: SkillReviewAction,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db_session),
+):
+    """管理员审批（POST）：action 为 approve / reject。"""
+    new_status = "approved" if body.action == "approve" else "rejected"
+    skill = _apply_skill_review_status(db, skill_id, new_status, current_user.username)
+    return {"skill_id": skill.id, "status": skill.status, "message": "已更新"}

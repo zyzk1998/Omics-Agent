@@ -485,16 +485,19 @@ File Path: {file_path}
                     except Exception as e:
                         logger.warning(f"⚠️ 文件检查异常: {e}")
                 
-                # Step 2: 使用 SOPPlanner 生成计划
+                # Step 2: 使用 SOPPlanner 生成计划（异步生成器，消费 workflow 事件）
                 if file_metadata:
-                    plan_result = await self.sop_planner.generate_plan(
+                    plan_result = None
+                    async for _ev, _data in self.sop_planner.generate_plan(
                         user_query=query,
                         file_metadata=file_metadata,
-                        category_filter="Metabolomics"
-                    )
+                        category_filter="Metabolomics",
+                    ):
+                        if _ev == "workflow":
+                            plan_result = _data
                     
                     # 检查是否成功
-                    if plan_result.get("type") != "error":
+                    if plan_result and plan_result.get("type") != "error":
                         logger.info("✅ [SOPPlanner] 动态规划成功")
                         
                         # 生成诊断报告（可选）
