@@ -482,7 +482,7 @@ class BaseAgent(ABC):
             
             # 使用 PromptManager 获取诊断模板（按 omics_type 选择领域专用模板）
             try:
-                if (omics_type or "").lower() in ("radiomics", "medical_image", "imaging") or stats.get("_imaging_only"):
+                if (omics_type or "").lower() in ("radiomics", "medical_image", "medical_imaging", "imaging") or stats.get("_imaging_only"):
                     from ..core.prompts.radiomics_prompts import RADIOMICS_DIAGNOSIS_TEMPLATE
                     dimensions = stats.get("dimensions_str", "N/A")
                     spacing = stats.get("spacing_str", "N/A")
@@ -515,7 +515,7 @@ class BaseAgent(ABC):
                 try:
                     if not isinstance(stats_json, str):
                         stats_json = json.dumps(stats_json, ensure_ascii=False)
-                    if (omics_type or "").lower() in ("radiomics", "medical_image", "imaging") or stats.get("_imaging_only"):
+                    if (omics_type or "").lower() in ("radiomics", "medical_image", "medical_imaging", "imaging") or stats.get("_imaging_only"):
                         from ..core.prompts.radiomics_prompts import RADIOMICS_DIAGNOSIS_TEMPLATE
                         dimensions = stats.get("dimensions_str", "N/A")
                         spacing = stats.get("spacing_str", "N/A")
@@ -549,7 +549,7 @@ Use Simplified Chinese for all content."""
             # Step 3: 调用 LLM 生成 Markdown 报告
             # 🔥 CRITICAL FIX: 强制注入统计数据到系统提示，防止 LLM 产生幻觉（按领域区分）
             stats_facts = []
-            if (omics_type or "").lower() in ("radiomics", "medical_image", "imaging") or stats.get("_imaging_only"):
+            if (omics_type or "").lower() in ("radiomics", "medical_image", "medical_imaging", "imaging") or stats.get("_imaging_only"):
                 stats_facts.append(f"影像尺寸: {stats.get('dimensions_str', 'N/A')}；层厚/间距: {stats.get('spacing_str', 'N/A')}；掩膜: {'已提供' if stats.get('mask_present') else '未提供'}。")
             elif omics_type.lower() in ["metabolomics", "metabolomic", "metabonomics"]:
                 n_samples = stats.get("n_samples", 0)

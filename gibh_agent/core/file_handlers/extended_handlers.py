@@ -204,48 +204,61 @@ class RadiomicsHandler(BaseFileHandler):
         return False
 
     def inspect(self, path: Path) -> Dict[str, Any]:
-        # Resolve image + mask: single file -> pair from same dir; directory -> pair from dir
-        if path.is_file():
-            search_dir = path.parent
-            image_path = path
-            mask_path = None
-            if pair_radiomics_files:
-                img_cand, mask_cand = pair_radiomics_files(search_dir)
-                if img_cand is not None:
-                    image_path = img_cand
-                if mask_cand is not None:
-                    mask_path = mask_cand
-        else:
-            image_path = mask_path = None
-            if pair_radiomics_files:
-                image_path, mask_path = pair_radiomics_files(path)
-            if not image_path:
-                return {
-                    "status": "error",
-                    "error": "未在目录中发现影像文件（.nii/.nii.gz/.dcm）",
-                    "file_type": "unknown",
-                    "domain": "Radiomics",
-                }
-        size, spacing, origin, direction = _read_radiomics_header(image_path)
-        abs_image = str(image_path.resolve())
-        abs_mask = str(mask_path.resolve()) if mask_path else None
-        head_md = (
-            f"医学影像（Radiomics）\n- 影像: {image_path.name}\n- 尺寸: {size or 'N/A'}\n- 间距: {spacing or 'N/A'}"
-            + (f"\n- 掩膜: {mask_path.name}" if mask_path else "\n- 掩膜: 无")
-        )
-        return {
-            "status": "success",
-            "file_path": abs_image,
-            "mask_path": abs_mask,
-            "file_type": "medical_image",
-            "domain": "Radiomics",
-            "modality": "Radiomics",
-            "shape": {"size": size, "spacing": spacing, "origin": origin, "direction": direction},
-            "head": {
-                "markdown": head_md,
-                "json": {"domain": "Radiomics", "file_type": "medical_image", "mask_path": abs_mask},
-            },
-        }
+        try:
+            # Resolve image + mask: single file -> pair from same dir; directory -> pair from dir
+            if path.is_file():
+                search_dir = path.parent
+                image_path = path
+                mask_path = None
+                if pair_radiomics_files:
+                    img_cand, mask_cand = pair_radiomics_files(search_dir)
+                    if img_cand is not None:
+                        image_path = img_cand
+                    if mask_cand is not None:
+                        mask_path = mask_cand
+            else:
+                image_path = mask_path = None
+                if pair_radiomics_files:
+                    image_path, mask_path = pair_radiomics_files(path)
+                if not image_path:
+                    return {
+                        "status": "error",
+                        "error": "未在目录中发现影像文件（.nii/.nii.gz/.dcm）",
+                        "file_type": "unknown",
+                        "domain": "Radiomics",
+                    }
+            size, spacing, origin, direction = _read_radiomics_header(image_path)
+            abs_image = str(image_path.resolve())
+            abs_mask = str(mask_path.resolve()) if mask_path else None
+            head_md = (
+                f"医学影像（Radiomics）\n- 影像: {image_path.name}\n- 尺寸: {size or 'N/A'}\n- 间距: {spacing or 'N/A'}"
+                + (f"\n- 掩膜: {mask_path.name}" if mask_path else "\n- 掩膜: 无")
+            )
+            return {
+                "status": "success",
+                "file_path": abs_image,
+                "mask_path": abs_mask,
+                "file_type": "medical_image",
+                "domain": "Radiomics",
+                "modality": "Radiomics",
+                "shape": {"size": size, "spacing": spacing, "origin": origin, "direction": direction},
+                "head": {
+                    "markdown": head_md,
+                    "json": {"domain": "Radiomics", "file_type": "medical_image", "mask_path": abs_mask},
+                },
+            }
+        except Exception as e:
+            logger.warning("RadiomicsHandler inspect 失败，尝试 nibabel/元数据回退: %s", e, exc_info=True)
+            if path.is_file():
+                from ..file_inspector import build_medical_imaging_inspection_result
+
+                return build_medical_imaging_inspection_result(path)
+            return {
+                "status": "error",
+                "error": str(e),
+                "file_type": "unknown",
+                "domain": "Radiomics",
+            }
 
 
 class GenomicsHandler(BaseFileHandler):

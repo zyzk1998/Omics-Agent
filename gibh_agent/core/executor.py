@@ -5,6 +5,7 @@
 使用 ToolRegistry 查找和执行工具。
 支持动态参数智能推荐与注入：按函数签名过滤并做类型转换，防止幻觉参数与 TypeError。
 """
+import asyncio
 import inspect
 import json
 import os
@@ -17,6 +18,12 @@ from datetime import datetime
 
 from .tool_registry import registry
 from .utils import sanitize_for_json
+from .file_inspector import (
+    path_looks_like_medical_imaging,
+    DataAsset,
+    OmicsAssetManager,
+    to_legacy_resolved_dict,
+)
 
 # 隐患 3：类型转换失败时的哨兵，用于丢弃非法推荐参数而非透传导致底层 TypeError
 _COERCE_FAILED = object()
@@ -583,7 +590,7 @@ class WorkflowExecutor:
             group_column = processed_params.get("group_column")
             file_path = processed_params.get("file_path")
             
-            if file_path and os.path.exists(file_path):
+            if file_path and os.path.exists(file_path) and not path_looks_like_medical_imaging(Path(file_path)):
                 try:
                     import pandas as pd
                     # Pre-Flight Check: 读取文件检查列是否存在
@@ -664,6 +671,8 @@ class WorkflowExecutor:
                                 # 不立即失败，让工具自己处理错误（工具会返回友好的错误信息）
                 except Exception as e:
                     logger.warning(f"⚠️ [Executor] Pre-Flight Check 失败: {e}，继续执行")
+            elif file_path and os.path.exists(file_path) and path_looks_like_medical_imaging(Path(file_path)):
+                logger.info("⏭️ [Executor] 医学影像文件跳过 group_column 的 pandas Pre-Flight Check")
         
         # 🔥 CRITICAL FIX: 对于需要 group_column 的工具，强制确保参数存在
         # 这是执行前的最后一道防线，确保参数绝对不会丢失
@@ -728,7 +737,10 @@ class WorkflowExecutor:
             else:
                 if tool_id in tools_requiring_group_column:
                     logger.warning(f"⚠️ [Executor] group_column 参数缺失（但已尝试修复）！可用参数: {list(processed_params.keys())}")
-            result = tool_func(**processed_params)
+            if inspect.iscoroutinefunction(tool_func):
+                result = asyncio.run(tool_func(**processed_params))
+            else:
+                result = tool_func(**processed_params)
             
             # 确保结果是字典格式
             if not isinstance(result, dict):
@@ -929,9 +941,35 @@ class WorkflowExecutor:
         # 🔥 如果文件路径参数缺失，尝试从上下文注入（Radiomics 已有 image_path 则不再注入）
         if file_param_name not in params and step_context:
             current_file_path = step_context.get("current_file_path")
+            if not current_file_path:
+                assets_list = step_context.get("omics_assets") or []
+                ctx_asset = self._get_asset_for_tool(tool_category, assets_list)
+                if ctx_asset:
+                    current_file_path = self._resolve_file_path(ctx_asset.primary_path)
+            if not current_file_path:
+                om = step_context.get("omics_resolved") or {}
+                rf = step_context.get("resolved_input_paths") or []
+                current_file_path = self._infer_default_path_for_tool(
+                    tool_category, om, rf
+                )
             if current_file_path:
                 processed[file_param_name] = current_file_path
                 logger.info(f"🔄 数据流: 自动注入 {file_param_name} = {current_file_path}")
+
+        # Radiomics：radiomics_pair 资产补全 mask_path（占位符解析后仍可能缺 mask）
+        if tool_category == "Radiomics" and step_context:
+            if "mask_path" not in params:
+                assets_list = step_context.get("omics_assets") or []
+                rad_asset = self._get_asset_for_tool("Radiomics", assets_list)
+                if (
+                    rad_asset
+                    and rad_asset.asset_type == "radiomics_pair"
+                    and rad_asset.metadata.get("mask_path")
+                ):
+                    mp = rad_asset.metadata["mask_path"]
+                    if "mask_path" not in processed:
+                        processed["mask_path"] = self._resolve_file_path(str(mp))
+                        logger.info(f"🔄 数据流: 自动注入 mask_path = {processed['mask_path']}")
         
         # 🔥 如果提供了 file_path 但工具需要 adata_path，进行映射
         if tool_category == "scRNA-seq" and "file_path" in params and "adata_path" not in params:
@@ -1192,7 +1230,186 @@ class WorkflowExecutor:
                     logger.info(f"🔄 数据流: 从 sted_ec_data_validation 注入 cell_type_key = {pre['cell_type_key']}")
 
         return processed
+
+    def _get_asset_for_tool(
+        self,
+        tool_category: Optional[str],
+        assets: List[DataAsset],
+    ) -> Optional[DataAsset]:
+        """
+        按工具类别匹配结构化资产（与 OmicsAssetManager 分类一致）。
+        未命中时返回 None，由 _infer_default_path_for_tool 等回退。
+        """
+        if not assets:
+            return None
+        if tool_category == "scRNA-seq":
+            for a in assets:
+                if a.asset_type == "10x_bundle":
+                    return a
+            for a in assets:
+                if a.asset_type == "h5ad_single":
+                    return a
+            return None
+        if tool_category == "Metabolomics":
+            for a in assets:
+                if a.asset_type == "metabolomics_csv":
+                    return a
+            return None
+        if tool_category == "Radiomics":
+            for a in assets:
+                if a.asset_type == "radiomics_pair":
+                    return a
+            for a in assets:
+                if a.asset_type == "radiomics_image":
+                    return a
+            return None
+        return None
+
+    def _inject_paths_from_asset(
+        self,
+        params: Dict[str, Any],
+        tool_category: Optional[str],
+        asset: DataAsset,
+        file_param_name: str,
+    ) -> bool:
+        """
+        从 DataAsset 注入路径参数。已显式提供的键不覆盖。
+        返回是否至少写入了一个路径类参数。
+        """
+        did = False
+        if tool_category == "Radiomics":
+            if asset.asset_type == "radiomics_pair":
+                img = asset.metadata.get("image_path") or asset.primary_path
+                mask = asset.metadata.get("mask_path")
+                if img and "image_path" not in params:
+                    params["image_path"] = self._resolve_file_path(str(img))
+                    did = True
+                if mask and "mask_path" not in params:
+                    params["mask_path"] = self._resolve_file_path(str(mask))
+                    did = True
+            elif asset.asset_type == "radiomics_image":
+                if "image_path" not in params:
+                    params["image_path"] = self._resolve_file_path(asset.primary_path)
+                    did = True
+            return did
+        if tool_category == "scRNA-seq":
+            if file_param_name not in params:
+                params[file_param_name] = self._resolve_file_path(asset.primary_path)
+                return True
+            return False
+        if file_param_name not in params:
+            params[file_param_name] = self._resolve_file_path(asset.primary_path)
+            return True
+        return False
+
+    def _seed_workflow_current_path(
+        self,
+        assets: List[DataAsset],
+        omics_resolved: Dict[str, List[str]],
+        resolved_file_paths: List[str],
+    ) -> Optional[str]:
+        """工作流链种子路径：优先 scRNA 资产（10x 目录 / h5ad），否则沿用桶推断。"""
+        rna_asset = self._get_asset_for_tool("scRNA-seq", assets)
+        if rna_asset:
+            return self._resolve_file_path(rna_asset.primary_path)
+        return self._infer_default_path_for_tool(
+            None, omics_resolved, resolved_file_paths
+        )
     
+    def _infer_default_path_for_tool(
+        self,
+        tool_category: Optional[str],
+        omics_resolved: Dict[str, List[str]],
+        resolved_file_paths: List[str],
+    ) -> Optional[str]:
+        """
+        根据 resolve_omics_paths 结果与工具类别推断单一路径（避免 file_paths[0] 或逗号串误指子文件）。
+        """
+        if not omics_resolved:
+            omics_resolved = {
+                "tables": [],
+                "h5ad": [],
+                "10x_mtx": [],
+                "images": [],
+                "masks": [],
+                "unknown": [],
+            }
+
+        def _pick(bucket: List[str]) -> Optional[str]:
+            if not bucket:
+                return None
+            return self._resolve_file_path(bucket[0])
+
+        tx = omics_resolved.get("10x_mtx") or []
+        ha = omics_resolved.get("h5ad") or []
+        tb = omics_resolved.get("tables") or []
+        im = omics_resolved.get("images") or []
+
+        if tool_category == "scRNA-seq":
+            for b in (tx, ha, tb):
+                p = _pick(b)
+                if p:
+                    return p
+        elif tool_category == "Radiomics":
+            for b in (im, tx, ha, tb):
+                p = _pick(b)
+                if p:
+                    return p
+        elif tool_category is None:
+            # 工作流启动时的通用默认：优先 10x 目录，再 h5ad / 表格 / 影像
+            for b in (tx, ha, tb, im):
+                p = _pick(b)
+                if p:
+                    return p
+        else:
+            for b in (tb, ha, tx, im):
+                p = _pick(b)
+                if p:
+                    return p
+        if resolved_file_paths:
+            return self._resolve_file_path(resolved_file_paths[0])
+        return None
+
+    def _maybe_unwrap_composite_path_params(
+        self,
+        params: Dict[str, Any],
+        tool_category: Optional[str],
+        omics_resolved: Dict[str, List[str]],
+        resolved_file_paths: List[str],
+    ) -> None:
+        """将 adata_path/file_path/image_path 中的逗号/分号拼接串替换为推断出的单路径。"""
+        keys_to_check: List[str] = []
+        if tool_category == "scRNA-seq":
+            keys_to_check = ["adata_path", "file_path"]
+        elif tool_category == "Radiomics":
+            keys_to_check = ["image_path", "mask_path", "file_path"]
+        else:
+            keys_to_check = ["file_path", "adata_path"]
+        inferred = self._infer_default_path_for_tool(
+            tool_category, omics_resolved, resolved_file_paths
+        )
+        if not inferred and tool_category != "Radiomics":
+            return
+        for k in keys_to_check:
+            v = params.get(k)
+            if not isinstance(v, str):
+                continue
+            s = v.strip()
+            if "," not in s and ";" not in s:
+                continue
+            if k == "mask_path":
+                masks = omics_resolved.get("masks") or []
+                rep = self._resolve_file_path(masks[0]) if masks else inferred
+            else:
+                rep = inferred
+            if rep:
+                params[k] = rep
+                logger.info(
+                    "🔄 [Executor] %s 为逗号/分号拼接，已规范为单一路径: %s",
+                    k,
+                    rep,
+                )
+
     def _is_image_file(self, file_path: str) -> bool:
         """
         检查文件路径是否为图片文件
@@ -1276,6 +1493,9 @@ class WorkflowExecutor:
             检测到的分组列名，如果未找到返回 None
         """
         try:
+            if path_looks_like_medical_imaging(Path(file_path)):
+                logger.debug("⏭️ [Executor] 医学影像文件跳过 _detect_group_column_from_file")
+                return None
             import pandas as pd
             
             # 读取文件（采样读取，避免大文件问题）
@@ -1399,7 +1619,7 @@ class WorkflowExecutor:
         
         # 🔥 上下文链：跟踪当前文件路径，用于自动传递给下一个步骤
         # 🔥 CRITICAL REGRESSION FIX: Resolve file paths to absolute paths
-        resolved_file_paths = []
+        resolved_file_paths: List[str] = []
         if file_paths:
             for fp in file_paths:
                 if fp and isinstance(fp, str):
@@ -1407,14 +1627,41 @@ class WorkflowExecutor:
                     resolved_file_paths.append(resolved)
                     if resolved != fp:
                         logger.info(f"🔄 [Executor] 解析输入文件路径: {fp} -> {resolved}")
-        current_file_path = resolved_file_paths[0] if resolved_file_paths else None
+        omics_resolved: Dict[str, List[str]] = {
+            "tables": [],
+            "h5ad": [],
+            "10x_mtx": [],
+            "images": [],
+            "masks": [],
+            "unknown": [],
+        }
+        omics_asset_manager = OmicsAssetManager()
+        assets: List[DataAsset] = []
+        if resolved_file_paths:
+            assets = omics_asset_manager.classify_assets(resolved_file_paths)
+            omics_resolved = to_legacy_resolved_dict(assets)
+            logger.info(
+                "🔄 [Executor] OmicsAssetManager: %s 个资产 | 10x_mtx=%s h5ad=%s tables=%s images=%s",
+                len(assets),
+                bool(omics_resolved.get("10x_mtx")),
+                bool(omics_resolved.get("h5ad")),
+                bool(omics_resolved.get("tables")),
+                bool(omics_resolved.get("images")),
+            )
+        current_file_path = self._seed_workflow_current_path(
+            assets, omics_resolved, resolved_file_paths
+        )
         
         # 🔥 TASK 1 FIX: 检测输入文件类型，如果是10x格式，标记需要跳过cellranger步骤
-        is_10x_input = False
-        if current_file_path:
+        is_10x_input = bool(
+            next((a for a in assets if a.asset_type == "10x_bundle"), None)
+        )
+        if not is_10x_input and current_file_path:
             is_10x_input = self._is_10x_format(current_file_path)
-            if is_10x_input:
-                logger.info(f"✅ [Executor] 检测到输入文件是10x格式，将自动跳过cellranger和convert步骤")
+        if is_10x_input:
+            logger.info(
+                "✅ [Executor] 检测到输入为 10x 捆绑或 10x 目录，将自动跳过 cellranger / 按需处理 convert 步骤"
+            )
         
         # 执行每个步骤
         for i, step in enumerate(steps, 1):
@@ -1516,9 +1763,15 @@ class WorkflowExecutor:
             if tool_category == "scRNA-seq":
                 # RNA 工具使用 adata_path
                 file_param_name = "adata_path"
+            elif tool_category == "Radiomics":
+                file_param_name = "image_path"
             else:
                 # 其他工具（如代谢组学）使用 file_path
                 file_param_name = "file_path"
+
+            self._maybe_unwrap_composite_path_params(
+                params, tool_category, omics_resolved, resolved_file_paths
+            )
             
             # 🔥 CRITICAL FIX: 检查是否有占位符需要处理
             # 占位符（如 <preprocess_data_output>）必须优先于自动注入的 current_file_path
@@ -1531,13 +1784,25 @@ class WorkflowExecutor:
             # 占位符会在 execute_step 内部的 _process_data_flow 中解析
             # 只有在没有占位符且参数缺失时，才自动注入
             if not has_placeholder:
-                # 自动注入文件路径（如果缺失且我们有当前文件路径）
-                if (
-                    file_param_name not in params
-                    and current_file_path
-                ):
-                    params[file_param_name] = current_file_path
-                    logger.info(f"🔄 自动注入 {file_param_name}: {current_file_path}")
+                step_asset = self._get_asset_for_tool(tool_category, assets)
+                injected_from_asset = False
+                if step_asset:
+                    injected_from_asset = self._inject_paths_from_asset(
+                        params, tool_category, step_asset, file_param_name
+                    )
+                    if injected_from_asset:
+                        logger.info(
+                            "🔄 自动注入（OmicsAsset %s）: %s",
+                            step_asset.asset_type,
+                            {k: params[k] for k in params if k in ("adata_path", "file_path", "image_path", "mask_path")},
+                        )
+                if not injected_from_asset:
+                    inject_path = current_file_path or self._infer_default_path_for_tool(
+                        tool_category, omics_resolved, resolved_file_paths
+                    )
+                    if file_param_name not in params and inject_path:
+                        params[file_param_name] = inject_path
+                        logger.info(f"🔄 自动注入 {file_param_name}: {inject_path}")
             else:
                 # 有占位符，记录日志但不自动注入
                 placeholder_keys = [k for k, v in params.items() if isinstance(v, str) and v.startswith("<") and v.endswith(">")]
@@ -1550,6 +1815,9 @@ class WorkflowExecutor:
                 "output_dir": self.output_dir,
                 "workflow_name": workflow_name,
                 "current_file_path": current_file_path,
+                "omics_resolved": omics_resolved,
+                "resolved_input_paths": resolved_file_paths,
+                "omics_assets": assets,
                 "recommended_params": workflow_data.get("recommended_params"),
                 "steps_order": steps_order,
                 "enabled_mcps": getattr(self, "_enabled_mcps", None) or [],
@@ -1566,7 +1834,7 @@ class WorkflowExecutor:
                 specified_group_col = params["group_column"]
                 detected_group_col = self._detect_group_column_from_file(current_file_path)
                 
-                if detected_group_col:
+                if detected_group_col and not path_looks_like_medical_imaging(Path(current_file_path)):
                     # 检查指定的列是否存在
                     try:
                         import pandas as pd

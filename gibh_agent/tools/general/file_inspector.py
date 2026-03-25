@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from ...core.tool_registry import registry
+from ...core.file_inspector import path_looks_like_medical_imaging, build_medical_imaging_inspection_result
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,9 @@ def inspect_file(
                 "status": "error",
                 "error": f"文件不存在: {file_path}"
             }
+
+        if path.is_file() and path_looks_like_medical_imaging(path):
+            return build_medical_imaging_inspection_result(path)
         
         metadata = {
             "status": "success",

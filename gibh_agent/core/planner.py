@@ -567,7 +567,7 @@ class SOPPlanner:
         target_steps: Optional[List[str]] = None,
         is_template: bool = False,  # 🔥 ARCHITECTURAL RESET: Explicit template flag
         target_domain: Optional[str] = None,  # 🔥 快车道硬路由：技能广场传入时已由 Orchestrator 做意图 bypass，此处仅做兼容；workflow 已按 domain_name 物理隔离
-        steps_to_skip: Optional[List[str]] = None,  # 🔥 快车道时由 Orchestrator 传入 _analyze_user_intent 的 skip_steps，否则由内部意图分析得到
+        steps_to_skip: Optional[List[str]] = None,  # Orchestrator 已跑 _analyze_user_intent 时传入 skip_steps；否则在内部意图分析中填充
     ) -> AsyncIterator[Tuple[str, Any]]:
         """
         生成基于 SOP 规则的工作流计划（异步生成器，供 Orchestrator `async for` 消费）。
@@ -584,8 +584,8 @@ class SOPPlanner:
             user_query: 用户查询文本
             file_metadata: FileInspector 返回的文件元数据（可选）
             category_filter: 工具类别过滤器（可选）
-            domain_name: 可选的域名（如果提供，跳过意图分类）
-            target_steps: 可选的目标步骤列表（如果提供，跳过意图分析）
+            domain_name: 若提供则跳过本方法内的 _classify_intent（省 1 次 LLM）；须与 Orchestrator 已算出的域一致
+            target_steps: 若提供则跳过本方法内的 _analyze_user_intent（省 1 次 LLM）；须与 Orchestrator 已算出的步骤一致
             is_template: 是否为模板模式（True=预览，False=执行）
             target_domain: 快车道时由 Orchestrator 传入，workflow 已按 domain 物理阉割，无跨界工具
         """
@@ -601,7 +601,7 @@ class SOPPlanner:
             has_file_metadata = file_metadata is not None
             
             if not domain_name:
-                logger.info("🔍 [SOPPlanner] Step 1: 意图分类（识别域名和模式）...")
+                logger.info("🔍 [SOPPlanner] Step 1: 意图分类（识别域名和模式）…（未传入 domain_name，内部 LLM）")
                 logger.info(f"🔍 [SOPPlanner] file_metadata 存在: {has_file_metadata}")
                 _t_intent = time.time()
                 intent_result = await self._classify_intent(user_query, file_metadata)
@@ -621,7 +621,10 @@ class SOPPlanner:
                 
                 logger.info(f"✅ [SOPPlanner] 意图分类结果: domain={domain_name}, mode={execution_mode}")
             else:
-                logger.info(f"✅ [SOPPlanner] 使用提供的域名: {domain_name}")
+                logger.info(
+                    "✅ [SOPPlanner] 使用外部传入的 domain_name=%s（已跳过 _classify_intent，避免重复 LLM）",
+                    domain_name,
+                )
                 logger.info("⏱️ [性能探针] generate_plan 阶段1(域名确定/快车道跳过意图) 耗时: %.2fs", time.time() - _t_plan_start)
                 # 🔥 CRITICAL: If domain_name provided but no mode, infer from file_metadata
                 if has_file_metadata:
@@ -656,7 +659,7 @@ class SOPPlanner:
             steps_to_skip_list: List[str] = list(steps_to_skip) if steps_to_skip is not None else []
             _t_stage2_start = time.time()
             if target_steps is None:
-                logger.info("🔍 [SOPPlanner] Step 2: 分析用户意图（选择目标步骤）...")
+                logger.info("🔍 [SOPPlanner] Step 2: 分析用户意图（选择目标步骤）…（未传入 target_steps，内部 LLM）")
                 _t_intent2 = time.time()
                 intent_result = None
                 async for evt, data in self._analyze_user_intent(user_query, workflow):
@@ -674,7 +677,10 @@ class SOPPlanner:
                 else:
                     target_steps = intent_result if isinstance(intent_result, list) else []
             else:
-                logger.info(f"✅ [SOPPlanner] 使用提供的目标步骤: {target_steps}")
+                logger.info(
+                    "✅ [SOPPlanner] 使用外部传入的 target_steps=%s（已跳过 _analyze_user_intent，避免重复 LLM）",
+                    target_steps,
+                )
                 logger.info("⏱️ [性能探针] generate_plan 阶段2(目标步骤/快车道跳过) 耗时: %.2fs", time.time() - _t_stage2_start)
             
             # 🔥 CRITICAL FIX: 确保 target_steps 不为空（Plan-First 必须返回完整标准流程）
@@ -1378,7 +1384,7 @@ Classify the intent and return JSON only. Remember:
                 else:
                     logger.info("✅ [SOPPlanner] Visium/Spatial 文件已正确分类为 Spatial")
             # 🔥 Radiomics: medical_image / domain=Radiomics → Radiomics
-            elif file_type == "medical_image" or file_domain == "Radiomics":
+            elif file_type in ("medical_image", "medical_imaging") or file_domain == "Radiomics":
                 if domain_name != "Radiomics":
                     logger.warning(f"⚠️ [SOPPlanner] 检测到医学影像/Radiomics 文件，强制覆盖域名: {domain_name} → Radiomics")
                     domain_name = "Radiomics"
@@ -1544,7 +1550,7 @@ Classify the intent and return JSON only. Remember:
             if file_type == "visium" or file_domain == "Spatial":
                 domain_name = "Spatial"
                 logger.info("✅ [SOPPlanner] Fallback: 检测到 Visium/Spatial 文件，使用 Spatial 域名")
-            elif file_type == "medical_image" or file_domain == "Radiomics":
+            elif file_type in ("medical_image", "medical_imaging") or file_domain == "Radiomics":
                 domain_name = "Radiomics"
                 logger.info("✅ [SOPPlanner] Fallback: 检测到医学影像/Radiomics 文件，使用 Radiomics 域名")
             elif file_type == "anndata" or (file_path and file_path.lower().endswith((".h5ad", ".h5", ".loom"))):

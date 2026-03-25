@@ -51,8 +51,8 @@ class DataDiagnostician:
         # 🔥 CRITICAL: Route by file identity or explicit omics_type so medical_image never gets scRNA template
         _is_radiomics = (
             file_metadata.get("domain") == "Radiomics"
-            or file_metadata.get("file_type") == "medical_image"
-            or (omics_type and str(omics_type).lower() in ["radiomics", "medical_image", "imaging"])
+            or file_metadata.get("file_type") in ("medical_image", "medical_imaging")
+            or (omics_type and str(omics_type).lower() in ["radiomics", "medical_image", "medical_imaging", "imaging"])
         )
         if _is_radiomics:
             return self._analyze_radiomics(file_metadata, dataframe)
@@ -64,7 +64,7 @@ class DataDiagnostician:
             return self._analyze_metabolomics(file_metadata, dataframe)
         elif omics_type.lower() in ["bulkrna", "bulk_rna", "bulk-rna", "rna-seq"]:
             return self._analyze_bulkRNA(file_metadata, dataframe)
-        elif omics_type.lower() in ["radiomics", "medical_image", "imaging"]:
+        elif omics_type.lower() in ["radiomics", "medical_image", "medical_imaging", "imaging"]:
             return self._analyze_radiomics(file_metadata, dataframe)
         else:
             return self._analyze_default(file_metadata, dataframe)

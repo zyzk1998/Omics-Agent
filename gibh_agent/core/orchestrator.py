@@ -7,6 +7,7 @@ Agent 编排器 - 实时流式处理
 集成 QueryRewriter、Clarifier 和 Reflector 实现智能查询处理。
 🔥 PERFORMANCE: 全链路耗时探针 [Profiler]，便于区分 LLM 思考耗时与本地执行耗时。
 """
+import inspect
 import json
 import logging
 import asyncio
@@ -14,11 +15,11 @@ import os
 import re
 import time
 from datetime import datetime
-from typing import Dict, Any, List, Optional, AsyncIterator, Tuple
+from typing import Dict, Any, List, Optional, AsyncIterator, Tuple, Set
 from pathlib import Path
 
 from .agentic import QueryRewriter, Clarifier, Reflector
-from .file_inspector import FileInspector
+from .file_inspector import FileInspector, OmicsAssetManager
 from .llm_client import LLMClient
 from .stream_utils import stream_with_suggestions
 from .workflows import WorkflowRegistry
@@ -135,6 +136,24 @@ class AgentOrchestrator:
         ]
         return any(kw in query_lower for kw in chat_keywords)
 
+    @staticmethod
+    def _is_bepipred3_skill_chat_intent(query: str) -> bool:
+        """
+        技能广场「BepiPred3」等：走 Chat + tools 路径，避免进入代谢组/转录组工作流 DAG。
+        与 tests/test_bepipred3_skill.py 中 TEST_PROMPT 的「系统注入」前缀对齐。
+        """
+        if not query or not str(query).strip():
+            return False
+        q = str(query)
+        ql = q.lower()
+        if "bepipred3" in ql or "bepipred-3" in ql:
+            return True
+        if "[系统注入：用户调用了" in q and "bepipred" in ql:
+            return True
+        if "b细胞表位" in ql and ("预测" in q or "bepipred" in ql):
+            return True
+        return False
+
     async def _classify_global_intent(self, query: str, files: List[Dict[str, str]] = None) -> str:
         """
         🔥 PHASE 1: Classify global intent (Chat vs Task)
@@ -144,6 +163,10 @@ class AgentOrchestrator:
             "task" for bioinformatics analysis tasks
         """
         if AgentOrchestrator._global_chat_keyword_hit(query):
+            return "chat"
+
+        if AgentOrchestrator._is_bepipred3_skill_chat_intent(query):
+            logger.info("🔌 [Orchestrator] BepiPred3 技能意图命中，强制 global intent = chat（挂载 bepipred3_prediction）")
             return "chat"
 
         query_lower = (query or "").lower()
@@ -352,6 +375,52 @@ class AgentOrchestrator:
             except Exception as e:
                 logger.warning("⚠️ [Orchestrator] 工作流模板加载失败: %s", e)
             # 🔥 强制阻断：匹配到复用指令后无论成功与否都 return，绝不继续走 _classify_global_intent
+            state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+            yield self._format_sse("state_snapshot", state_snapshot)
+            return
+
+        # 🔥 技能快车道：[Skill_Route: tool_id] 硬拦截，绕开全局意图分类与 SOPPlanner
+        skill_match = re.search(r"\[Skill_Route:\s*([a-zA-Z0-9_]+)\]", _query_str)
+        if skill_match:
+            tool_name_sk = skill_match.group(1).strip()
+            logger.info("🚀 [Orchestrator] 触发技能快车道: %s", tool_name_sk)
+            unique_paths: List[str] = []
+            seen_paths: Set[str] = set()
+            for _f in files:
+                if isinstance(_f, dict):
+                    _p = _f.get("path") or _f.get("file_path")
+                else:
+                    _p = str(_f) if _f is not None else ""
+                _p = (_p or "").strip()
+                if _p and _p not in seen_paths:
+                    seen_paths.add(_p)
+                    unique_paths.append(_p)
+            llm_client = self._get_llm_client()
+            from gibh_agent.agents.skill_agent import SkillAgent
+
+            def _skill_format_sse(event_type: str, data: Dict[str, Any]) -> str:
+                return self._emit_sse(state_snapshot, event_type, data)
+
+            skill_agent = SkillAgent(llm_client=llm_client, format_sse=_skill_format_sse)
+            try:
+                async for _sse_chunk in skill_agent.execute_skill(
+                    tool_name_sk,
+                    _query_str,
+                    unique_paths,
+                    model_name=model_name,
+                ):
+                    yield _sse_chunk
+                    await asyncio.sleep(0.01)
+            except Exception as e:
+                logger.exception("❌ [Orchestrator] 技能快车道失败: %s", e)
+                yield self._emit_sse(
+                    state_snapshot,
+                    "message",
+                    {"content": f"**技能快车道失败**：{e}"},
+                )
+            yield self._emit_sse(state_snapshot, "status", {"content": "回答完成", "state": "completed"})
+            await asyncio.sleep(0.01)
+            yield self._emit_sse(state_snapshot, "done", {"status": "success"})
             state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
             yield self._format_sse("state_snapshot", state_snapshot)
             return
@@ -1304,8 +1373,11 @@ class AgentOrchestrator:
                             intent_analysis = _payload
                     if isinstance(intent_analysis, dict):
                         target_steps = intent_analysis.get("target_steps") or []
+                        # 与快车道一致：跳过步骤须传入 generate_plan，避免 Planner 内重复跑 _analyze_user_intent 却仍丢失 skip
+                        steps_to_skip_fast = intent_analysis.get("skip_steps")
                     else:
                         target_steps = intent_analysis if isinstance(intent_analysis, list) else []
+                        steps_to_skip_fast = None
                     if not target_steps and intent_result.get("target_steps"):
                         intent_steps = [s for s in intent_result["target_steps"] if s in workflow.steps_dag]
                         if intent_steps:
@@ -1564,38 +1636,81 @@ class AgentOrchestrator:
                         if p.exists():
                             resolved_paths.append(p)
                     if len(resolved_paths) > 1:
-                        try:
-                            common = Path(os.path.commonpath([str(p) for p in resolved_paths]))
-                            if common.is_dir() and str(self.upload_dir) in str(common):
-                                # Radiomics/medical imaging: all files are .nii.gz/.nii/.dcm in same dir →
-                                # inspect one file (image preferred over mask), not the directory.
-                                radiomics_ext = (".nii.gz", ".nii", ".dcm")
-                                all_radiomics = all(
-                                    p.is_file() and p.name.lower().endswith(radiomics_ext)
-                                    for p in resolved_paths
-                                )
-                                if all_radiomics:
-                                    # Prefer image file (no "mask"/"label" in name) for inspection
-                                    candidates = [
-                                        p for p in resolved_paths
-                                        if "mask" not in p.name.lower() and "label" not in p.name.lower()
-                                    ]
-                                    path_for_inspect = str(candidates[0] if candidates else resolved_paths[0])
-                                    logger.info(
-                                        "✅ [Orchestrator] 多文件上传（影像组）：按单文件体检 path=%s",
-                                        path_for_inspect,
-                                    )
-                                else:
+                        # 去重（保序），交给 OmicsAssetManager 分类后按资产优先级选单一体检路径
+                        unique_paths: List[str] = []
+                        _seen = set()
+                        for rp in resolved_paths:
+                            s = str(rp)
+                            if s not in _seen:
+                                _seen.add(s)
+                                unique_paths.append(s)
+
+                        asset_mgr = OmicsAssetManager()
+                        assets = asset_mgr.classify_assets(unique_paths)
+
+                        chosen_raw: Optional[str] = None
+                        chosen_reason = "fallback"
+                        for a in assets:
+                            if a.asset_type == "10x_bundle":
+                                chosen_raw = a.primary_path
+                                chosen_reason = "10x_bundle"
+                                break
+                        if not chosen_raw:
+                            for a in assets:
+                                if a.asset_type == "radiomics_pair":
+                                    chosen_raw = a.primary_path
+                                    chosen_reason = "radiomics_pair"
+                                    break
+                        if not chosen_raw:
+                            for a in assets:
+                                if a.asset_type in ("metabolomics_csv", "h5ad_single"):
+                                    chosen_raw = a.primary_path
+                                    chosen_reason = a.asset_type
+                                    break
+                        if not chosen_raw:
+                            for a in assets:
+                                if a.asset_type == "radiomics_image":
+                                    chosen_raw = a.primary_path
+                                    chosen_reason = "radiomics_image"
+                                    break
+                        if not chosen_raw and unique_paths:
+                            chosen_raw = unique_paths[0]
+                            chosen_reason = "unique_paths[0]"
+
+                        if chosen_raw:
+                            p_ins = Path(chosen_raw)
+                            if not p_ins.is_absolute():
+                                p_ins = (self.upload_dir / p_ins).resolve()
+                            else:
+                                p_ins = p_ins.resolve()
+                            if p_ins.exists():
+                                try:
                                     from .file_handlers.structure_normalizer import normalize_session_directory
-                                    normalize_session_directory(common)  # BEFORE inspect: extract spatial/, ensure .h5
-                                    path_for_inspect = str(common)
-                                    logger.info(
-                                        "✅ [Orchestrator] 多文件上传：按会话目录体检 (len=%s, dir=%s)",
-                                        len(resolved_paths),
-                                        path_for_inspect,
+                                    if p_ins.is_dir():
+                                        normalize_session_directory(p_ins)
+                                except Exception as nz_e:
+                                    logger.debug(
+                                        "normalize_session_directory (multi-file asset=%s) skip: %s",
+                                        chosen_reason,
+                                        nz_e,
                                     )
-                        except (ValueError, OSError) as e:
-                            logger.debug("Common path / normalizer skip: %s", e)
+                                path_for_inspect = str(p_ins)
+                                logger.info(
+                                    "✅ [Orchestrator] 多文件上传：OmicsAssetManager(%s) 体检 path=%s",
+                                    chosen_reason,
+                                    path_for_inspect,
+                                )
+                            else:
+                                logger.warning(
+                                    "⚠️ [Orchestrator] 多文件体检路径不存在，回退 unique_paths[0]: %s",
+                                    chosen_raw,
+                                )
+                                fb = Path(unique_paths[0])
+                                if not fb.is_absolute():
+                                    fb = (self.upload_dir / fb).resolve()
+                                else:
+                                    fb = fb.resolve()
+                                path_for_inspect = str(fb)
                 
                 # Step 2: Inspect（有文件时必做，快车道与老路均不可跳过）
                 file_metadata = None
@@ -2363,6 +2478,14 @@ class AgentOrchestrator:
             "query_alphafold_db（AlphaFold 结构链接）。"
             "当用户询问基因注释、蛋白质数据库、通路或结构预测时，必须先调用对应工具，再依据返回内容用中文作答。"
         )
+        if AgentOrchestrator._is_bepipred3_skill_chat_intent(query):
+            chat_system += (
+                "\n\n【BepiPred3 / B 细胞表位】你必须调用工具 **bepipred3_prediction** 完成预测，禁止编造结果链接。"
+                "参数：sequence_or_path = 用户给出的完整 FASTA 文本或文件路径；"
+                "用户要求「前 20% / 高置信度 top 20%」时 top_epitope_percentage_cutoff=\"top_20\"；"
+                "用户明确「不使用顺序平滑」时 use_sequential_smoothing=false。"
+                "工具返回后，用中文简要说明并在正文中写出 html_url、csv_url 等字段供用户查看。"
+            )
         if "web_search" in enabled_mcps:
             # 置于 system 最末尾，压制推理模型「无法联网」拒答
             chat_system += (
@@ -2396,6 +2519,8 @@ class AgentOrchestrator:
             tool_names.append("mcp_web_search")
         if "authority_db" in enabled_mcps:
             tool_names.append("mcp_ncbi_search")
+        if AgentOrchestrator._is_bepipred3_skill_chat_intent(query):
+            tool_names.append("bepipred3_prediction")
         tools = tool_names_to_openai_tools(tool_names)
 
         _llm_first_byte = None
@@ -2414,17 +2539,35 @@ class AgentOrchestrator:
             return
 
         completion = None
+        _bepi_chat = AgentOrchestrator._is_bepipred3_skill_chat_intent(query)
+        _first_max_tokens = 4096 if _bepi_chat else 1000
+        _tool_choice: Any = "auto"
+        if _bepi_chat and tools:
+            # 技能广场 BepiPred3：强制首轮调用工具，避免推理模型空答后落入 Task/Chroma 路径
+            _tool_choice = {"type": "function", "function": {"name": "bepipred3_prediction"}}
         try:
             completion = await llm_client.achat(
                 messages,
                 tools=tools,
-                tool_choice="auto",
-                temperature=0.7,
-                max_tokens=1000,
+                tool_choice=_tool_choice,
+                temperature=0.2 if _bepi_chat else 0.7,
+                max_tokens=_first_max_tokens,
                 model=model_name,
             )
         except Exception as e:
             logger.warning("⚠️ [Orchestrator] 带 tools 的 achat 失败，回退无工具流式: %s", e, exc_info=True)
+            if _bepi_chat and _tool_choice != "auto":
+                try:
+                    completion = await llm_client.achat(
+                        messages,
+                        tools=tools,
+                        tool_choice="auto",
+                        temperature=0.2,
+                        max_tokens=_first_max_tokens,
+                        model=model_name,
+                    )
+                except Exception as e2:
+                    logger.warning("⚠️ [Orchestrator] BepiPred3 回退 auto 仍失败: %s", e2, exc_info=True)
 
         if completion and getattr(completion.choices[0].message, "tool_calls", None):
             msg = completion.choices[0].message
@@ -2456,6 +2599,13 @@ class AgentOrchestrator:
                         {"content": f"[正在调用公开数据库工具: {name}]", "state": "running"},
                     )
                     await asyncio.sleep(0.01)
+                elif name == "bepipred3_prediction":
+                    yield self._emit_sse(
+                        state_snapshot,
+                        "status",
+                        {"content": "[正在执行步骤: BepiPred3 B细胞表位预测...]", "state": "running"},
+                    )
+                    await asyncio.sleep(0.01)
                 try:
                     args = json.loads(args_raw)
                 except json.JSONDecodeError:
@@ -2463,6 +2613,8 @@ class AgentOrchestrator:
                 tool_fn = registry.get_tool(name)
                 if not tool_fn:
                     result_payload: Dict[str, Any] = {"status": "error", "error": f"未知工具: {name}"}
+                elif inspect.iscoroutinefunction(tool_fn):
+                    result_payload = await tool_fn(**args)
                 else:
                     result_payload = tool_fn(**args)
                 messages.append(

@@ -66,6 +66,7 @@ def _import_atomic_omics_tools():
         "transcriptomics_tools",
         "epigenomics_tools",
         "proteomics_tools",
+        "protein_tools",
         "metabolomics_tools",
         "radiomics_tools",
     ]
@@ -87,7 +88,13 @@ except Exception as e:
 
 # Step 2 (Additive only): Explicitly ensure modality packages and flat modules are loaded.
 # Genomics, Epigenomics, Proteomics, Spatial, Radiomics. Do not remove existing imports above.
-for _mod in ["genomics_tools", "epigenomics_tools", "proteomics_tools", "radiomics_tools"]:
+for _mod in [
+    "genomics_tools",
+    "epigenomics_tools",
+    "proteomics_tools",
+    "protein_tools",
+    "radiomics_tools",
+]:
     try:
         importlib.import_module(f".{_mod}", package=__name__)
     except ImportError:

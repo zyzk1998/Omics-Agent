@@ -211,7 +211,21 @@ PLACEHOLDER_PROMPT = "【系统提示】该技能正在建设中，敬请期待.
 
 # 生物医药大类技能矩阵 (UI 占位)
 BIOMEDICINE_SKILLS = [
-    {"name": "BepiPred3", "sub_category": "预测与建模", "description": "基于蛋白语言模型的 B 细胞表位预测工具，可高效识别蛋白序列中的潜在线性与构象表位。"},
+    {
+        "name": "BepiPred3",
+        "sub_category": "预测与建模",
+        "description": "基于蛋白语言模型的 B 细胞表位预测工具，可高效识别蛋白序列中的潜在线性与构象表位。",
+        "prompt_template": """[Skill_Route: bepipred3_prediction]
+请帮我调用 BepiPred-3.0 模型进行 B 细胞线性与构象表位预测。
+
+**【参数配置】**
+- 表位百分比阈值 (top_epitope_percentage_cutoff): `top_20` (高置信度，前20%)
+- 顺序平滑 (use_sequential_smoothing): `False` (不使用)
+
+**【序列数据】**
+>7lj4_B
+RSTTLLALLALVLLYVSGALVFRALEQPHEQQAQRELGEVREKFLRAHPCVSDQELGLLIKEVADALGGGADPETQSTSHSAWDLGSAFFFSGTIITTIGYGNVALRTDAGRLFCIFYALVGIPLFGDILLAGVGDRLGSSLRHGIGHIEAIFLKWHVPPELVRVLSAEMLFLLIGCLLFVLTPTFVFCYMEDWSKLEAIYFVIVTLTTVGFGDYVAGADPRQDSPAYQPLVWFWILLGLPAYFASVLTTIGNWLRVVS""",
+    },
     {"name": "Evo2", "sub_category": "预测与建模", "description": "生物学基础模型，能够整合长基因组序列的信息，同时保持对单核苷酸变化的敏感性。"},
     {"name": "ESM3", "sub_category": "预测与建模", "description": "模拟蛋白质进化，多模态生成新型蛋白。"},
     {"name": "AlphaFold2", "sub_category": "预测与建模", "description": "根据蛋白质的氨基酸序列预测其三维结构。"},

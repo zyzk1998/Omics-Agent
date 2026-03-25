@@ -36,7 +36,7 @@ class ToolRetriever:
     
     def __init__(
         self,
-        persist_directory: str = "./data/chroma_tools",
+        persist_directory: Optional[str] = None,
         embedding_model: str = "nomic-embed-text",
         ollama_base_url: Optional[str] = None
     ):
@@ -53,7 +53,8 @@ class ToolRetriever:
                 "❌ 缺少必要的依赖。请安装: pip install langchain-chroma langchain-ollama"
             )
         
-        self.persist_directory = Path(persist_directory)
+        _pd = persist_directory or os.getenv("CHROMA_TOOLS_PERSIST_DIR", "./data/chroma_tools")
+        self.persist_directory = Path(_pd)
         self.persist_directory.mkdir(parents=True, exist_ok=True)
         
         # 初始化 Embeddings

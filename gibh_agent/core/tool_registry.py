@@ -163,9 +163,8 @@ class ToolRegistry:
                 category=category
             )
             
-            # 注册工具
+            # 注册工具元数据（可执行对象见下方 wrapper，保证经 Pydantic 校验）
             self._tools[name] = metadata
-            self._executables[name] = func
             
             # 🔥 TASK 3: 注册常用别名（支持不同的命名约定）
             # 例如：preprocess_data 也可以作为 metabolomics_preprocess_data 使用
@@ -179,27 +178,37 @@ class ToolRegistry:
             func._tool_name = name
             func._tool_metadata = metadata
             
+            if inspect.iscoroutinefunction(func):
+                @wraps(func)
+                async def async_wrapper(*args, **kwargs):
+                    """异步工具：参数校验后 await 原始协程。"""
+                    schema = metadata.args_schema
+                    try:
+                        bound_args = sig.bind(*args, **kwargs)
+                        bound_args.apply_defaults()
+                        validated_args = schema(**bound_args.arguments)
+                        return await func(**validated_args.model_dump())
+                    except Exception as e:
+                        logger.error(f"❌ 工具 '{name}' 执行失败: {e}", exc_info=True)
+                        raise
+                
+                self._executables[name] = async_wrapper
+                return async_wrapper
+            
             @wraps(func)
             def wrapper(*args, **kwargs):
-                """包装函数，添加参数验证"""
-                # 获取参数 schema
+                """同步工具：添加参数验证"""
                 schema = metadata.args_schema
-                
-                # 验证参数
                 try:
-                    # 将位置参数转换为关键字参数
                     bound_args = sig.bind(*args, **kwargs)
                     bound_args.apply_defaults()
-                    
-                    # 创建验证实例
                     validated_args = schema(**bound_args.arguments)
-                    
-                    # 调用原始函数
                     return func(**validated_args.model_dump())
                 except Exception as e:
                     logger.error(f"❌ 工具 '{name}' 执行失败: {e}", exc_info=True)
                     raise
             
+            self._executables[name] = wrapper
             return wrapper
         
         return decorator

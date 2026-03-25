@@ -1,0 +1,138 @@
+/* 入口样式：实际规则在 main.css */
+@import url("./main.css");
+
+/* 执行记录（ProcessLog）卡片质感：与 main.css Science One 段一致，提高优先级防被覆盖 */
+.process-log-zone .process-log-container {
+    margin: 12px 0 !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 8px !important;
+    background: #f9fafb !important;
+    overflow: hidden !important;
+}
+
+.process-log-zone .process-header {
+    padding: 10px 14px !important;
+    background: #f3f4f6 !important;
+    border-bottom: 1px solid #e5e7eb !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    cursor: pointer !important;
+    user-select: none !important;
+}
+
+.process-log-zone .process-header:hover {
+    background: #e9ecef !important;
+}
+
+.process-log-zone .process-header .icon {
+    font-size: 12px !important;
+    color: #6b7280 !important;
+    transition: transform 0.2s !important;
+}
+
+.process-log-zone .process-header.collapsed .icon {
+    transform: rotate(-90deg) !important;
+}
+
+.process-log-zone .process-steps {
+    padding: 12px !important;
+    max-height: 300px !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    min-width: 0 !important;
+    background: #f9fafb !important;
+}
+
+.process-log-zone .process-steps.collapsed {
+    display: none !important;
+}
+
+/* ========== 右侧工作台：双 Tab（极简科研风） ========== */
+.workspace-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    border-bottom: 1px solid #e5e7eb;
+    background: #fafafa;
+}
+
+.tab-btn {
+    margin: 0;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #6b7280;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.tab-btn:hover {
+    color: #374151;
+    background: #f3f4f6;
+}
+
+.tab-btn.active {
+    color: var(--primary-color, #4f46e5);
+    border-bottom-color: var(--primary-color, #4f46e5);
+    background: #fff;
+}
+
+.tab-content-container {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+}
+
+.tab-pane {
+    display: none;
+    padding: 12px 14px;
+    color: #374151;
+    font-size: 14px;
+    line-height: 1.55;
+}
+
+.tab-pane.active {
+    display: block;
+}
+
+/* ========== PPT 大纲极简卡片 ========== */
+.ppt-slide-card {
+    margin-bottom: 12px;
+    padding: 12px 14px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    box-sizing: border-box;
+}
+
+.ppt-slide-title {
+    margin: 0 0 8px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f2937;
+    line-height: 1.4;
+}
+
+.ppt-slide-bullets {
+    margin: 0;
+    padding-left: 1.25rem;
+    color: #4b5563;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.ppt-slide-bullets li {
+    margin-bottom: 4px;
+}
+
+.ppt-slide-bullets li:last-child {
+    margin-bottom: 0;
+}

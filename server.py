@@ -150,7 +150,7 @@ except Exception as e:
 from gibh_agent.core.deps import get_current_owner_id, get_current_admin_user
 from gibh_agent.db.connection import get_db_session, engine, is_available, Base
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, case, or_
 from sqlalchemy.exc import DataError, OperationalError
 
 # 注册 ORM 模型以便 create_all 建表
@@ -302,7 +302,17 @@ def list_skills_public(
             q = q.filter(SkillModel.sub_category == sc)
         total = q.count()
     offset = (page - 1) * size
-    rows = q.order_by(SkillModel.created_at.desc()).offset(offset).limit(size).all()
+    _pt = SkillModel.prompt_template
+    _fast_lane_first = case(
+        (or_(_pt.contains("[Skill_Route:"), _pt.contains("[Omics_Route:")), 0),
+        else_=1,
+    )
+    rows = (
+        q.order_by(_fast_lane_first.asc(), SkillModel.created_at.desc())
+        .offset(offset)
+        .limit(size)
+        .all()
+    )
     saved_ids = set()
     if owner_id and UserSavedSkill is not None:
         saved_rows = db.query(UserSavedSkill.skill_id).filter(UserSavedSkill.owner_id == owner_id).all()

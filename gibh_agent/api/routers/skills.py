@@ -15,6 +15,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
+from sqlalchemy import case, or_
 from sqlalchemy.orm import Session
 
 from gibh_agent.core.deps import get_current_user, get_current_admin_user, get_current_owner_id
@@ -102,7 +103,18 @@ def list_skills_public(
         q = _query()
         total = q.count()
     offset = (page - 1) * size
-    rows = q.order_by(SkillModel.created_at.desc()).offset(offset).limit(size).all()
+    # 快车道暗号置顶：全局顺序优先于分页，故在 ORDER BY 中体现（等价于全量按暗号+时间排序后 slice）
+    _pt = SkillModel.prompt_template
+    _fast_lane_first = case(
+        (or_(_pt.contains("[Skill_Route:"), _pt.contains("[Omics_Route:")), 0),
+        else_=1,
+    )
+    rows = (
+        q.order_by(_fast_lane_first.asc(), SkillModel.created_at.desc())
+        .offset(offset)
+        .limit(size)
+        .all()
+    )
     saved_ids: set = set()
     if owner_id:
         saved_rows = (

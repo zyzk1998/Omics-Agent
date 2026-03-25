@@ -19,117 +19,14 @@ from typing import Dict, Optional, Any, List, Tuple, Set, Union
 from abc import ABC, abstractmethod
 import numpy as np
 
+from .path_resolvers import resolve_omics_paths
+from .asset_manager import (
+    DataAsset,
+    OmicsAssetManager,
+    to_legacy_resolved_dict,
+)
+
 logger = logging.getLogger(__name__)
-
-
-# ============================================
-# Universal File Resolution Bus (全局文件解析总线)
-# ============================================
-
-def resolve_omics_paths(raw_path_input: Union[str, List[str]]) -> Dict[str, List[str]]:
-    """
-    多文件解析总线（智能路由）：前端只发纯净文件数组，后端统一做路径标准化与组学分类。
-
-    入参：raw_path_input 可为逗号/分号拼接字符串（兼容旧版）或路径列表（新版前端数组）。
-    返回结构固定，下游 orchestrator/executor 无感对接。
-
-    Returns:
-        {
-            "tables": [],   # .csv, .tsv, .xlsx, .txt, .tsv.gz
-            "h5ad": [],     # .h5ad, .h5
-            "10x_mtx": [],  # 若 matrix.mtx + (barcodes|features|genes) 凑齐则公共父目录（单元素）
-            "images": [],   # 医学影像且非 mask 命名
-            "masks": [],    # 文件名含 mask/roi/seg/label 且不含 image/img/mri/ct
-            "unknown": []   # 未识别或 10x 凑不齐
-        }
-    """
-    # ---------- 1. 入参标准化 ----------
-    paths: List[str] = []
-    if isinstance(raw_path_input, str):
-        paths = [p.strip() for p in raw_path_input.replace(";", ",").split(",") if p.strip()]
-    elif isinstance(raw_path_input, list):
-        paths = [str(p).strip() for p in raw_path_input if str(p).strip()]
-    else:
-        return {
-            "tables": [], "h5ad": [], "10x_mtx": [], "images": [], "masks": [], "unknown": [],
-        }
-
-    resolved_paths: List[Path] = []
-    for p in paths:
-        try:
-            path_obj = Path(p)
-            resolved_paths.append(path_obj.resolve() if path_obj.exists() else path_obj)
-        except Exception:
-            resolved_paths.append(Path(p))
-
-    # ---------- 2. 策略隔离分类 ----------
-    out: Dict[str, List[str]] = {
-        "tables": [],
-        "h5ad": [],
-        "10x_mtx": [],
-        "images": [],
-        "masks": [],
-        "unknown": [],
-    }
-    tenx_candidates: List[str] = []
-
-    RADIOMICS_SUFFIXES = (".nii", ".nii.gz", ".dcm", ".tiff", ".tif", ".nrrd")
-    MASK_KEYWORDS = ("mask", "roi", "seg", "label")
-    IMAGE_KEYWORDS = ("image", "img", "mri", "ct")
-
-    for path_obj in resolved_paths:
-        p_str = str(path_obj)
-        name_lower = path_obj.name.lower()
-        suffix_lower = path_obj.suffix.lower()
-        if path_obj.suffix.lower() == ".gz" and len(path_obj.suffixes) >= 2:
-            suffix_lower = "".join(path_obj.suffixes[-2:]).lower()
-
-        # Tables：.csv, .tsv, .xlsx, .txt, .tsv.gz
-        if suffix_lower in (".csv", ".tsv", ".xlsx", ".txt") or name_lower.endswith(".tsv.gz"):
-            out["tables"].append(p_str)
-            continue
-        # H5AD：.h5ad, .h5
-        if suffix_lower in (".h5ad", ".h5"):
-            out["h5ad"].append(p_str)
-            continue
-        # 10x Genomics：文件名含 matrix.mtx, barcodes, features, genes -> 暂存
-        if "matrix.mtx" in name_lower or "barcodes" in name_lower or "features" in name_lower or "genes" in name_lower:
-            tenx_candidates.append(p_str)
-            continue
-        # Radiomics：后缀含 .nii, .dcm, .tiff, .nrrd；关键隔离 mask vs image
-        is_radiomics = (
-            suffix_lower in RADIOMICS_SUFFIXES
-            or ".nii" in name_lower
-            or name_lower.endswith(".nii.gz")
-            or name_lower.endswith(".nrrd")
-        )
-        if is_radiomics:
-            if any(kw in name_lower for kw in MASK_KEYWORDS) and not any(k in name_lower for k in IMAGE_KEYWORDS):
-                out["masks"].append(p_str)
-            else:
-                out["images"].append(p_str)
-            continue
-        # 未匹配
-        out["unknown"].append(p_str)
-
-    # ---------- 3. 10x 目录智能聚合 ----------
-    if tenx_candidates:
-        has_matrix = any("matrix.mtx" in Path(s).name.lower() for s in tenx_candidates)
-        has_barcodes_or_features = any(
-            "barcodes" in Path(s).name.lower() or "features" in Path(s).name.lower() or "genes" in Path(s).name.lower()
-            for s in tenx_candidates
-        )
-        if has_matrix and has_barcodes_or_features:
-            try:
-                dirs = [os.path.dirname(s) for s in tenx_candidates]
-                common = os.path.commonpath(dirs) if len(dirs) > 1 else dirs[0]
-                out["10x_mtx"] = [common]
-            except (ValueError, OSError):
-                out["10x_mtx"] = [os.path.dirname(tenx_candidates[0])] if tenx_candidates else []
-        else:
-            out["unknown"].extend(tenx_candidates)
-
-    return out
 
 
 def parse_multiple_files(file_paths_string: str) -> Dict[str, List[str]]:
@@ -219,6 +116,85 @@ def parse_multiple_files(file_paths_string: str) -> Dict[str, List[str]]:
         out["unknown"].append(p)
 
     return out
+
+
+def path_looks_like_medical_imaging(path: Path) -> bool:
+    """
+    基于文件名识别影像组学常见后缀（不读取文件内容）。
+    正确处理 .nii.gz（Path.suffix 仅为 .gz 的情况）。
+    """
+    if not path.is_file():
+        return False
+    name = path.name.lower()
+    if name.endswith(".nii.gz"):
+        return True
+    if name.endswith(".nii"):
+        return True
+    if name.endswith(".dcm"):
+        return True
+    return False
+
+
+def build_medical_imaging_inspection_result(path: Path) -> Dict[str, Any]:
+    """
+    影像文件体检：优先 nibabel 读取维度；ImportError 或其它失败时仅返回大小等元数据。
+    绝不使用 pandas / scanpy。
+    """
+    resolved = path.resolve()
+    file_size = resolved.stat().st_size if resolved.is_file() else 0
+    shape_list: Optional[List[int]] = None
+    try:
+        import nibabel as nib  # type: ignore
+    except ImportError:
+        nib = None  # type: ignore
+    if nib is not None:
+        try:
+            img = nib.load(str(resolved))
+            shape_list = [int(x) for x in img.shape]
+        except Exception as e:
+            logger.debug("nibabel 读取影像失败（仍将返回基础元数据）: %s", e)
+            shape_list = None
+
+    abs_image = str(resolved)
+    mask_path_resolved: Optional[str] = None
+    try:
+        from .file_handlers.structure_normalizer import pair_radiomics_files
+        if pair_radiomics_files is not None:
+            img_cand, mask_cand = pair_radiomics_files(resolved.parent)
+            if img_cand is not None:
+                abs_image = str(Path(img_cand).resolve())
+            if mask_cand is not None:
+                mask_path_resolved = str(Path(mask_cand).resolve())
+    except Exception as e:
+        logger.debug("pair_radiomics_files 跳过: %s", e)
+
+    if shape_list is not None:
+        message = f"影像文件校验通过，空间维度: {shape_list}"
+    else:
+        message = (
+            "影像文件校验通过（未安装 nibabel 或无法解析体数据维度，已返回文件名与大小）"
+        )
+
+    shape_info: Dict[str, Any] = {
+        "spatial_shape": shape_list,
+        "file_size_bytes": int(file_size),
+    }
+
+    return {
+        "status": "success",
+        "success": True,
+        "file_path": abs_image,
+        "mask_path": mask_path_resolved,
+        "file_type": "medical_imaging",
+        "domain": "Radiomics",
+        "modality": "Radiomics",
+        "message": message,
+        "shape": shape_info,
+        "head": {
+            "markdown": f"医学影像\n- 文件: {resolved.name}\n- {message}",
+            "json": {"file_type": "medical_imaging", "shape": shape_info},
+        },
+    }
 
 
 # ============================================
@@ -1211,6 +1187,8 @@ class TabularHandler(BaseFileHandler):
         """检查是否为支持的表格文件"""
         if not path.is_file():
             return False
+        if path_looks_like_medical_imaging(path):
+            return False
         return path.suffix.lower() in self.SUPPORTED_EXTENSIONS
     
     def _count_csv_lines(self, file_path: Path, separator: str = ',') -> Optional[int]:
@@ -1228,6 +1206,8 @@ class TabularHandler(BaseFileHandler):
     
     def inspect(self, path: Path) -> Dict[str, Any]:
         """检查表格文件"""
+        if path_looks_like_medical_imaging(path):
+            return build_medical_imaging_inspection_result(path)
         try:
             import pandas as pd
             
@@ -1504,6 +1484,14 @@ class FileInspector:
         
         # Step 2: 转换为 Path 对象
         path = Path(actual_path)
+
+        # Step 2b: 医学影像（.nii / .nii.gz / .dcm）严禁走表格类 pandas 逻辑，优先旁路体检
+        if path.is_file() and path_looks_like_medical_imaging(path):
+            result = build_medical_imaging_inspection_result(path)
+            if result.get("status") == "success":
+                result["file_path"] = str(path.resolve())
+                result["success"] = True
+            return result
         
         # Step 3: 遍历所有检查器，找到第一个可以处理的
         for handler in self.handlers:

@@ -13,7 +13,7 @@
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
         <!-- 代码高亮样式 -->
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
-        <link rel="stylesheet" href="/css/main.css">
+        <link rel="stylesheet" href="/css/style.css">
         
         <script>
             // #region agent log (已禁用调试请求)
@@ -203,7 +203,7 @@
                 <div class="chat-input-panel">
                     <div id="filePreviewArea" class="file-chips-area"></div>
                     <div class="input-area">
-                        <textarea id="userInput" class="main-input" placeholder="打算深入探究的内容、希望了解的问题，都可以发给我~" rows="1" oninput="autoResize(this); checkInput();" onkeydown="handleEnter(event)"></textarea>
+                        <textarea id="userInput" class="main-input chat-input" placeholder="打算深入探究的内容、希望了解的问题，都可以发给我~" rows="1" oninput="autoResize(this); checkInput();" onkeydown="handleEnter(event)"></textarea>
                     </div>
                     <div class="toolbar input-toolbar">
                         <div class="toolbar-left">
@@ -1694,10 +1694,26 @@
             }
             function addAssetAsAttachment(filePath, fileName) {
                 if (!filePath) return;
+                var norm = String(filePath).replace(/\/+$/, '') || String(filePath);
+                if (uploadedFiles.some(function(f) {
+                    var fp = (f.path || f.file_path || '');
+                    return (String(fp).replace(/\/+$/, '') || fp) === norm;
+                })) {
+                    console.warn('文件已存在于当前上下文中，跳过添加:', fileName || filePath);
+                    if (typeof showToast === 'function') showToast('该文件已在待发送列表中');
+                    return;
+                }
                 var row = ensureAssetTagsRow();
                 if (!row) return;
-                var existing = row.querySelector('.asset-tag[data-filepath="' + (filePath.replace(/"/g, '&quot;') || '') + '"]');
-                if (existing) return;
+                var tags = row.querySelectorAll('.asset-tag');
+                for (var ti = 0; ti < tags.length; ti++) {
+                    var dp = tags[ti].dataset.filepath || '';
+                    if ((String(dp).replace(/\/+$/, '') || dp) === norm) {
+                        console.warn('文件已展示在资产标签栏，跳过重复添加:', fileName || filePath);
+                        if (typeof showToast === 'function') showToast('该文件已在待发送列表中');
+                        return;
+                    }
+                }
                 var tag = document.createElement('div');
                 tag.className = 'asset-tag';
                 tag.dataset.filepath = filePath;
@@ -1714,12 +1730,8 @@
                     checkInput();
                 };
                 row.appendChild(tag);
-                // 🔥 数据资产选择：追加到 uploadedFiles，不覆盖（多文件场景不吞文件）
-                var already = uploadedFiles.some(function(f) { return (f.path || f.file_path) === filePath; });
-                if (!already) {
-                    uploadedFiles.push({ path: filePath, file_path: filePath, name: fileName || filePath, file_name: fileName || filePath });
-                    if (typeof renderFilePreviewArea === 'function') renderFilePreviewArea();
-                }
+                uploadedFiles.push({ path: filePath, file_path: filePath, name: fileName || filePath, file_name: fileName || filePath });
+                if (typeof renderFilePreviewArea === 'function') renderFilePreviewArea();
                 checkInput();
             }
             // Task2: 真·时光机：仅恢复历史，绝不触发 sendMessage
@@ -1803,12 +1815,13 @@
                     })
                     .catch(function(e) { console.warn('[loadSessionAndRestore]', e); });
             }
-            // 🔥 全局消息清洗：仅用于前端展示，将系统注入指令替换为友好提示（不修改发给后端的 Payload）
+            // 🔥 全局消息清洗：仅用于前端展示（不修改发给后端的 Payload）
             function sanitizeSystemInjections(text) {
                 if (typeof text !== 'string') return text || '';
                 var s = text;
                 s = s.replace(/\[系统注入：用户请求复用工作流模板\s*：\s*\d+\s*\]/g, '🔄 **系统提示：** 已成功复用工作流模板。');
-                s = s.replace(/\[系统注入：用户选择了历史资产文件\s*：[\s\S]*?\]/g, '📁 **系统提示：** 已挂载历史数据资产。');
+                // 已不再前端注入「历史资产」块；历史快照里若存在则整段剥除，避免气泡里重复路径（文件由附件区展示）
+                s = s.replace(/\[系统注入：用户选择了历史资产文件\s*：[\s\S]*?\]\s*(\n*用户需求：\s*)?/g, '');
                 return s;
             }
             // 🔥 历史快照：清洗 <<<SUGGESTIONS>>> / <<>> 等标签，避免暴露在气泡中
@@ -2904,9 +2917,18 @@
                 
                 // pendingFiles 已在脚本开始处声明，这里不需要再检查
                 
-                // 将新文件添加到 pendingFiles 数组
+                // 将新文件添加到 pendingFiles 数组（同名同大小同修改时间视为重复，避免重复 chip）
                 for (let i = 0; i < files.length; i++) {
-                    pendingFiles.push(files[i]);
+                    const cur = files[i];
+                    const dup = pendingFiles.some(function(p) {
+                        return p.name === cur.name && p.size === cur.size && p.lastModified === cur.lastModified;
+                    });
+                    if (dup) {
+                        console.warn('待上传列表中已存在相同文件，跳过:', cur.name);
+                        if (typeof showToast === 'function') showToast('该文件已在待上传列表中');
+                        continue;
+                    }
+                    pendingFiles.push(cur);
                 }
                 
                 // 渲染文件 chips
@@ -3147,8 +3169,21 @@
                     try {
                         newlyUploadedFiles = await uploadPendingFiles();
                             console.log('✅ [sendMessage] 文件上传完成，新上传文件数:', newlyUploadedFiles.length);
-                        // 🔥 多文件修复：必须追加，禁止覆盖（uploadedFiles = ... 会吞掉已有文件）
-                        uploadedFiles.push(...newlyUploadedFiles);
+                        // 🔥 追加已上传列表时按 path 去重，避免重复上传或合并导致 payload 重复
+                        newlyUploadedFiles.forEach(function(nf) {
+                            var p = nf.path || nf.file_path;
+                            var nk = p ? String(p).replace(/\/+$/, '') : '';
+                            var exists = uploadedFiles.some(function(f) {
+                                var fp = f.path || f.file_path;
+                                var fk = fp ? String(fp).replace(/\/+$/, '') : '';
+                                return fk === nk && nk !== '';
+                            });
+                            if (!exists) uploadedFiles.push(nf);
+                            else {
+                                console.warn('已上传列表中已有相同路径，跳过追加:', p);
+                                if (typeof showToast === 'function') showToast('该文件已在待发送列表中');
+                            }
+                        });
                             console.log('📋 [sendMessage] 当前 uploadedFiles 总数:', uploadedFiles.length);
                         // 🔥 输入框上方展示已上传文件卡片（打样一致）
                         renderFilePreviewArea();
@@ -3308,21 +3343,31 @@
 
                 currentAbortController = new AbortController();
 
-                // 任务3：合并左侧栏选择的历史资产（.asset-tag）并注入系统提示；有 hiddenPayload 时不改写发送内容
+                // 合并左侧栏 .asset-tag 到 uploaded_files；不修改用户输入框文案（禁止向 message 注入「系统注入」路径串）
                 var assetTags = document.querySelectorAll('#inputWrapper .asset-tag');
                 if (assetTags && assetTags.length > 0) {
                     var assetFiles = [];
-                    var assetPaths = [];
                     assetTags.forEach(function(t) {
                         var p = t.dataset.filepath;
-                        if (p) { assetFiles.push({ path: p, name: (t.dataset.fileName || p) }); assetPaths.push(p); }
+                        if (p) { assetFiles.push({ path: p, name: (t.dataset.fileName || p) }); }
                     });
                     if (assetFiles.length) {
                         filesToSend = (filesToSend || []).concat(assetFiles);
-                        if (hiddenPayload == null || hiddenPayload === '') {
-                            text = '[系统注入：用户选择了历史资产文件：' + assetPaths.join('; ') + ']\n用户需求：' + (text || '');
-                        }
                     }
+                }
+                // uploaded_files 去重（按 path/file_path 规范化），与资产总线多文件一致
+                if (filesToSend && filesToSend.length > 0) {
+                    var _seenPaths = Object.create(null);
+                    var _deduped = [];
+                    for (var _fi = 0; _fi < filesToSend.length; _fi++) {
+                        var _fx = filesToSend[_fi];
+                        var _pk = String(_fx.path || _fx.file_path || _fx.name || '').trim();
+                        var _nk = _pk ? _pk.replace(/\/+$/, '') : '';
+                        if (!_nk || _seenPaths[_nk]) continue;
+                        _seenPaths[_nk] = true;
+                        _deduped.push(_fx);
+                    }
+                    filesToSend = _deduped;
                 }
                 var finalMessage = (hiddenPayload != null && hiddenPayload !== '') ? hiddenPayload : text;
 
@@ -5188,22 +5233,13 @@
                                         paramValue = input.value;
                                     }
                                     
-                                    // 1. 清洗历史遗留的逗号脏数据
-                                    if (typeof paramValue === 'string' && paramValue.indexOf(',') !== -1 && (paramName.indexOf('path') !== -1 || paramName.indexOf('dir') !== -1)) {
-                                        paramValue = paramValue.split(',')[0].trim();
-                                    }
-                                    
-                                    // 2. 终极占位符替换：只要是占位符，且有新文件，立刻注入真实路径！
-                                    if (typeof paramValue === 'string' && (paramValue === '<user_input>' || paramValue === '<待上传数据>' || paramValue === '<PENDING_UPLOAD>' || paramValue === '')) {
-                                        if (filePaths && filePaths.length > 0) {
-                                            paramValue = filePaths[0];
-                                        }
-                                    }
-                                    
-                                    // 3. 针对 h5ad_path 等特定参数的强制覆盖（防回退）
-                                    if (filePaths && filePaths.length > 0 && (paramName === 'file_path' || paramName === 'adata_path' || paramName === 'data_path' || paramName === 'h5ad_path')) {
-                                        if (!paramValue || (typeof paramValue === 'string' && paramValue.startsWith('<'))) {
-                                            paramValue = filePaths[0];
+                                    // 路径类参数：占位符留空，由后端 OmicsAssetManager + Executor 根据 file_paths 智能注入（禁止前端逗号拼接/抢写）
+                                    var _pathLike = /path|dir|_path$/i.test(paramName);
+                                    if (_pathLike && typeof paramValue === 'string') {
+                                        var _ph = (paramValue === '<user_input>' || paramValue === '<待上传数据>' || paramValue === '<PENDING_UPLOAD>' ||
+                                            (paramValue.length > 0 && paramValue.charAt(0) === '<' && paramValue.charAt(paramValue.length - 1) === '>'));
+                                        if (_ph || paramValue === '') {
+                                            paramValue = '';
                                         }
                                     }
                                     
@@ -5293,19 +5329,8 @@
                                 if (!hasUploaded && !hasAssetTag) document.getElementById('fileInput')?.click();
                                 return;
                             }
-                            // 🔥 路径覆盖：去重后逗号拼接，避免 a.csv,a.csv 等重复
-                            var pathKeys = ['file_path', 'adata_path', 'data_path', 'data_path_2', 'input_path'];
                             var uniquePaths = [...new Set(filePaths.filter(Boolean))];
-                            var pathValue = uniquePaths.length > 0 ? uniquePaths.join(', ') : '';
-                            for (var si = 0; si < updatedSteps.length; si++) {
-                                var sp = updatedSteps[si].params || {};
-                                for (var ki = 0; ki < pathKeys.length; ki++) {
-                                    if (Object.prototype.hasOwnProperty.call(sp, pathKeys[ki]) && pathValue) {
-                                        updatedSteps[si].params[pathKeys[ki]] = pathValue;
-                                    }
-                                }
-                            }
-                            console.log("📁 [executeWorkflowFromForm] 最终文件路径（已去重）:", uniquePaths);
+                            console.log("📁 [executeWorkflowFromForm] 最终文件路径（已去重数组，交由后端注入各步 params）:", uniquePaths);
                             
                             // 🔥 CRITICAL REGRESSION FIX: Construct workflow payload correctly（使用去重后的路径）
                             // 🔥 Multi-instance 支持：为本次执行生成唯一 executionId
@@ -5314,7 +5339,8 @@
                             const workflowPayload = {
                                 workflow_data: {
                                     workflow_name: workflowName,
-                                    steps: updatedSteps
+                                    steps: updatedSteps,
+                                    file_paths: uniquePaths
                                 },
                                 file_paths: uniquePaths,
                                 execution_id: execId
@@ -6574,13 +6600,7 @@
                                 if (typeof sendMessage === 'function') sendMessage(null, '执行工作流', null, null, false, demoFiles);
                                 return;
                             }
-                            var pathKeys = ['h5ad_path', 'file_path', 'adata_path', 'data_path', 'data_path_2', 'input_path'];
-                            data.workflow_data.steps.forEach(function(step) {
-                                var p = step.params || {};
-                                for (var k = 0; k < pathKeys.length; k++) {
-                                    if (Object.prototype.hasOwnProperty.call(p, pathKeys[k])) p[pathKeys[k]] = demoPath;
-                                }
-                            });
+                            data.workflow_data.file_paths = [demoPath];
                             var execId = 'exec-' + Date.now();
                             var workflowPayload = { workflow_data: data.workflow_data, file_paths: [demoPath], execution_id: execId };
                             if (typeof sendMessage === 'function') sendMessage(null, '执行工作流', null, workflowPayload, false, demoFiles);
