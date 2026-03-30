@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 
 LEGACY_BUCKET_KEYS = (
@@ -238,7 +238,196 @@ def _is_table_file(path: Path) -> bool:
 
 
 def _is_h5ad_file(path: Path) -> bool:
-    return _suffix_lower(path) in (".h5ad", ".h5")
+    """仅 AnnData .h5ad；原生 10x HDF5 矩阵 .h5 见 _is_visium_matrix_h5_file / 10x_h5_matrix。"""
+    return _suffix_lower(path) == ".h5ad"
+
+
+def _is_visium_matrix_h5_file(path: Path) -> bool:
+    """10x 官方 Visium / HD 风格 HDF5 矩阵（单文件）。"""
+    if not path.is_file():
+        return False
+    if _suffix_lower(path) != ".h5":
+        return False
+    nl = path.name.lower()
+    return (
+        nl == "filtered_feature_bc_matrix.h5"
+        or nl == "raw_feature_bc_matrix.h5"
+        or nl.endswith("_feature_bc_matrix.h5")
+    )
+
+
+def _is_10x_mtx_directory(path: Path) -> bool:
+    """目录内含 matrix.mtx / matrix.mtx.gz 等，视为 10x 表达矩阵目录（spatial_bundle 矩阵端）。"""
+    if not path.is_dir():
+        return False
+    try:
+        if not path.exists():
+            return False
+        for c in path.iterdir():
+            if not c.is_file():
+                continue
+            n = c.name.lower()
+            if "matrix.mtx" in n:
+                return True
+    except OSError:
+        return False
+    return False
+
+
+_SPATIAL_DIR_MARKERS = (
+    "tissue_positions",
+    "tissue_hires_image",
+    "tissue_lowres_image",
+    "scalefactors",
+)
+
+
+def _is_spatial_image_directory(path: Path) -> bool:
+    """
+    空间成像侧候选：目录名含 spatial，或目录下存在典型 Visium spatial 文件。
+    """
+    if not path.is_dir():
+        return False
+    if "spatial" in path.name.lower():
+        return True
+    try:
+        if not path.exists():
+            return False
+        for c in path.iterdir():
+            if not c.is_file():
+                continue
+            cl = c.name.lower()
+            for mk in _SPATIAL_DIR_MARKERS:
+                if mk in cl:
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _spatial_matrix_compatible(matrix_path: Path, spatial_dir: Path) -> bool:
+    """矩阵与 spatial 目录是否属于同一次上传会话（启发式）。"""
+    if not spatial_dir.is_dir():
+        return False
+    try:
+        m = matrix_path.resolve()
+        s = spatial_dir.resolve()
+    except OSError:
+        m, s = matrix_path, spatial_dir
+    if matrix_path.is_file():
+        mpar = m.parent
+    else:
+        mpar = m
+    spar = s.parent
+    if mpar == spar or spar == mpar:
+        return True
+    if spar.parent == mpar:
+        return True
+    if mpar.parent == spar.parent:
+        return True
+    try:
+        s.relative_to(mpar)
+        return True
+    except ValueError:
+        pass
+    return False
+
+
+def _spatial_pair_score(matrix_path: Path, spatial_dir: Path) -> int:
+    """越小越优（在已通过 compatible 的前提下）。"""
+    try:
+        m = matrix_path.resolve()
+        s = spatial_dir.resolve()
+    except OSError:
+        m, s = matrix_path, spatial_dir
+    if matrix_path.is_file():
+        mpar = m.parent
+    else:
+        mpar = m
+    spar = s.parent
+    if mpar == spar:
+        return 0
+    if spar.parent == mpar:
+        return 1
+    if mpar.parent == spar.parent:
+        return 2
+    try:
+        s.relative_to(mpar)
+        return 3
+    except ValueError:
+        return 10
+
+
+def _spatial_bundle_visium_root(matrix_path: Path, spatial_dir: Path) -> Path:
+    """供体检：SpatialVisiumHandler 需要含 spatial/ 与矩阵的目录根。"""
+    try:
+        m_base = matrix_path.resolve() if matrix_path.is_dir() else matrix_path.parent.resolve()
+        s = spatial_dir.resolve()
+        return Path(os.path.commonpath([str(m_base), str(s)]))
+    except (ValueError, OSError):
+        return matrix_path.parent if matrix_path.is_file() else matrix_path
+
+
+def _try_spatial_bundle(
+    paths: List[Path], assigned: List[bool]
+) -> Optional[Tuple[DataAsset, Set[int]]]:
+    """
+    矩阵（.h5 Visium 或 10x_mtx 目录）+ 空间成像目录 → spatial_bundle。
+    优先级由 classify_assets 中调用顺序保证（早于单文件 h5 / 动态嗅探）。
+    """
+    n = len(paths)
+    matrix_idxs: List[int] = []
+    spatial_idxs: List[int] = []
+    for i in range(n):
+        if assigned[i]:
+            continue
+        p = paths[i]
+        if p.is_file() and _is_visium_matrix_h5_file(p):
+            matrix_idxs.append(i)
+        elif p.is_dir() and _is_10x_mtx_directory(p):
+            matrix_idxs.append(i)
+        elif p.is_dir() and _is_spatial_image_directory(p):
+            spatial_idxs.append(i)
+
+    if not matrix_idxs or not spatial_idxs:
+        return None
+
+    best: Optional[Tuple[int, int, int]] = None  # (score, mi, si)
+    for mi in matrix_idxs:
+        mp = paths[mi]
+        for si in spatial_idxs:
+            sd = paths[si]
+            if not _spatial_matrix_compatible(mp, sd):
+                continue
+            sc = _spatial_pair_score(mp, sd)
+            cand = (sc, mi, si)
+            if best is None or cand < best:
+                best = cand
+
+    if best is None:
+        if len(matrix_idxs) == 1 and len(spatial_idxs) == 1:
+            mi, si = matrix_idxs[0], spatial_idxs[0]
+        else:
+            return None
+    else:
+        _sc, mi, si = best
+
+    mpath = paths[mi]
+    spath = paths[si]
+    m_str = str(mpath.resolve()) if mpath.exists() else str(mpath)
+    s_str = str(spath.resolve()) if spath.exists() else str(spath)
+    vroot = _spatial_bundle_visium_root(mpath, spath)
+    v_str = str(vroot.resolve()) if vroot.exists() else str(vroot)
+    asset = DataAsset(
+        asset_type="spatial_bundle",
+        primary_path=m_str,
+        associated_files=[m_str, s_str],
+        metadata={
+            "spatial_dir": s_str,
+            "visium_root": v_str,
+        },
+    )
+    return asset, {mi, si}
 
 
 PROTEIN_FASTA_SUFFIXES = frozenset({".fasta", ".fa", ".faa", ".ffn"})
@@ -246,6 +435,115 @@ PROTEIN_FASTA_SUFFIXES = frozenset({".fasta", ".fa", ".faa", ".ffn"})
 
 def _is_protein_fasta_file(path: Path) -> bool:
     return _suffix_lower(path) in PROTEIN_FASTA_SUFFIXES
+
+
+# ---------------------------------------------------------------------------
+# 动态嗅探：后缀 → 资产类型（配置化，扩展时只改此字典）
+# 说明：.txt 仍由上方 _is_table_file 优先归为 metabolomics_csv，不在此映射中。
+# ---------------------------------------------------------------------------
+_DYNAMIC_ASSET_SUFFIXES_BY_TYPE: Dict[str, Tuple[str, ...]] = {
+    "protein_structure": (
+        ".pdb",
+        ".cif",
+        ".mmcif",
+        ".ent",
+        ".pdb.gz",
+        ".cif.gz",
+        ".mmcif.gz",
+    ),
+    "document": (
+        ".pdf",
+        ".docx",
+        ".doc",
+        ".pptx",
+        ".ppt",
+        ".odt",
+        ".rtf",
+    ),
+    "plain_text": (
+        ".json",
+        ".jsonl",
+        ".yaml",
+        ".yml",
+        ".md",
+        ".log",
+        ".xml",
+        ".toml",
+        ".ini",
+        ".cfg",
+    ),
+}
+
+
+def _build_suffix_to_asset_type_map() -> Dict[str, str]:
+    m: Dict[str, str] = {}
+    for atype, suffixes in _DYNAMIC_ASSET_SUFFIXES_BY_TYPE.items():
+        for suf in suffixes:
+            m[suf] = atype
+    return m
+
+
+SUFFIX_TO_ASSET_TYPE: Dict[str, str] = _build_suffix_to_asset_type_map()
+
+
+def sniff_asset_type_from_path(path: Path) -> str:
+    """按扩展名嗅探资产类型；无法识别则 generic_unknown（不再使用单一 unknown_file）。"""
+    sl = _suffix_lower(path)
+    if sl in SUFFIX_TO_ASSET_TYPE:
+        return SUFFIX_TO_ASSET_TYPE[sl]
+    return "generic_unknown"
+
+
+# 工作流 DAG 原生资产（用于全局路由：与技能/对话工具区分）
+ROUTING_WORKFLOW_NATIVE_ASSET_TYPES: FrozenSet[str] = frozenset(
+    {
+        "10x_bundle",
+        "spatial_bundle",
+        "10x_h5_matrix",
+        "h5ad_single",
+        "metabolomics_csv",
+        "radiomics_pair",
+        "radiomics_image",
+        "radiomics_mask",
+    }
+)
+
+# 非工作流管线典型资产（易误判进 RNA/影像等 DAG 时，供 orchestrator / 提示词参考）
+ROUTING_NON_WORKFLOW_ASSET_TYPES: FrozenSet[str] = frozenset(
+    {
+        "protein_structure",
+        "protein_fasta",
+        "document",
+        "plain_text",
+        "generic_unknown",
+    }
+)
+
+
+def routing_asset_inventory(assets: List[DataAsset]) -> List[Dict[str, Any]]:
+    """供 LLM / JSON 注入：精确资产类型 + 文件名（不含硬编码业务分支）。"""
+    out: List[Dict[str, Any]] = []
+    for a in assets:
+        out.append(
+            {
+                "asset_type": a.asset_type,
+                "file_name": Path(a.primary_path).name,
+                "primary_path": a.primary_path,
+            }
+        )
+    return out
+
+
+def format_routing_asset_digest(assets: List[DataAsset]) -> str:
+    """人类可读摘要，用于 system/user 提示。"""
+    if not assets:
+        return "(本次路径列表未解析出任何资产)"
+    lines: List[str] = []
+    for a in assets:
+        lines.append(
+            f"- asset_type={a.asset_type} | file={Path(a.primary_path).name!r}"
+        )
+    return "\n".join(lines)
 
 
 def _empty_legacy() -> Dict[str, List[str]]:
@@ -266,6 +564,14 @@ def to_legacy_resolved_dict(assets: List[DataAsset]) -> Dict[str, List[str]]:
         t = a.asset_type
         if t == "10x_bundle":
             out["10x_mtx"].append(a.primary_path)
+        elif t == "spatial_bundle":
+            primary = Path(a.primary_path)
+            if primary.is_file() and _suffix_lower(primary) == ".h5":
+                out["h5ad"].append(a.primary_path)
+            else:
+                out["10x_mtx"].append(a.primary_path)
+        elif t == "10x_h5_matrix":
+            out["h5ad"].append(a.primary_path)
         elif t == "metabolomics_csv":
             out["tables"].append(a.primary_path)
         elif t == "h5ad_single":
@@ -282,7 +588,13 @@ def to_legacy_resolved_dict(assets: List[DataAsset]) -> Dict[str, List[str]]:
             out["images"].append(a.primary_path)
         elif t == "radiomics_mask":
             out["masks"].append(a.primary_path)
-        elif t == "unknown_file":
+        elif t in (
+            "generic_unknown",
+            "unknown_file",
+            "protein_structure",
+            "document",
+            "plain_text",
+        ):
             out["unknown"].append(a.primary_path)
         else:
             out["unknown"].append(a.primary_path)
@@ -316,7 +628,17 @@ class OmicsAssetManager:
             for i in idxs:
                 assigned[i] = True
 
-        # 2) 影像组：在未分配项中配对
+        # 2) Visium / 空间：矩阵 .h5 或 10x_mtx 目录 + spatial 目录 → spatial_bundle（优先于单文件识别）
+        while True:
+            sb = _try_spatial_bundle(paths, assigned)
+            if not sb:
+                break
+            bundle, idxs = sb
+            assets.append(bundle)
+            for i in idxs:
+                assigned[i] = True
+
+        # 3) 影像组学：在未分配项中配对
         pending_rad = [i for i in range(n) if not assigned[i] and _is_radiomics_file(paths[i])]
         if pending_rad:
             rad_assets, rad_consumed = _pair_radiomics(pending_rad, paths)
@@ -324,7 +646,7 @@ class OmicsAssetManager:
             for i in rad_consumed:
                 assigned[i] = True
 
-        # 3) 单文件表格
+        # 4) 单文件表格
         for i in range(n):
             if assigned[i]:
                 continue
@@ -339,7 +661,7 @@ class OmicsAssetManager:
                 )
                 assigned[i] = True
 
-        # 4) h5ad
+        # 5) h5ad（仅 .h5ad）
         for i in range(n):
             if assigned[i]:
                 continue
@@ -354,7 +676,22 @@ class OmicsAssetManager:
                 )
                 assigned[i] = True
 
-        # 5) 蛋白质 FASTA（单文件）
+        # 6) 单独出现的 10x 原生 .h5 矩阵（未与 spatial 成包时）
+        for i in range(n):
+            if assigned[i]:
+                continue
+            if _is_visium_matrix_h5_file(paths[i]):
+                assets.append(
+                    DataAsset(
+                        asset_type="10x_h5_matrix",
+                        primary_path=str(paths[i]),
+                        associated_files=[str(paths[i])],
+                        metadata={},
+                    )
+                )
+                assigned[i] = True
+
+        # 7) 蛋白质 FASTA（单文件）
         for i in range(n):
             if assigned[i]:
                 continue
@@ -369,16 +706,17 @@ class OmicsAssetManager:
                 )
                 assigned[i] = True
 
-        # 6) 未知
+        # 8) 动态嗅探兜底（非组学专用后缀 → protein_structure / document / plain_text / generic_unknown）
         for i in range(n):
             if assigned[i]:
                 continue
+            sniffed = sniff_asset_type_from_path(paths[i])
             assets.append(
                 DataAsset(
-                    asset_type="unknown_file",
+                    asset_type=sniffed,
                     primary_path=str(paths[i]),
                     associated_files=[str(paths[i])],
-                    metadata={},
+                    metadata={"sniff_rule": "suffix_map"},
                 )
             )
             assigned[i] = True
@@ -392,9 +730,11 @@ class OmicsAssetManager:
         priority = {
             "radiomics": ("radiomics_pair", "radiomics_image", "radiomics_mask"),
             "metabolomics": ("metabolomics_csv",),
-            "scrna": ("10x_bundle", "h5ad_single"),
-            "sc_rna": ("10x_bundle", "h5ad_single"),
-            "10x": ("10x_bundle", "h5ad_single"),
+            "spatial": ("spatial_bundle", "10x_bundle", "10x_h5_matrix", "h5ad_single"),
+            "scrna": ("spatial_bundle", "10x_bundle", "10x_h5_matrix", "h5ad_single"),
+            "sc_rna": ("spatial_bundle", "10x_bundle", "10x_h5_matrix", "h5ad_single"),
+            "10x": ("spatial_bundle", "10x_bundle", "10x_h5_matrix", "h5ad_single"),
+            "protein": ("protein_structure", "protein_fasta"),
         }
         pref = priority.get(d, ())
 

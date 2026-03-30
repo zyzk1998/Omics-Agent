@@ -182,3 +182,6 @@ Desktop.ini
 # 本地临时与测试运行时生成（勿提交）
 .tmp_10x/
 tests/_chroma_tools/
+
+# 第三方嵌套 git / 本地 venv（体积大；部署用 scripts/Dockerfile 拉取）
+third_party/

@@ -263,19 +263,77 @@ class WorkflowExecutor:
         return payload
 
     @staticmethod
+    def _unwrap_optional_annotation(annotation: Any) -> Any:
+        """剥离 Optional / Union[..., None]，便于识别 List[float] 等内层类型。"""
+        if annotation is inspect.Parameter.empty:
+            return annotation
+        ann = annotation
+        for _ in range(12):
+            origin = get_origin(ann)
+            args = get_args(ann)
+            if not origin or not args or type(None) not in args:
+                break
+            non_none = [a for a in args if a is not type(None)]
+            if len(non_none) != 1:
+                break
+            ann = non_none[0]
+        return ann
+
+    @staticmethod
+    def _resolve_callable_for_signature(tool_func: Callable) -> Callable:
+        """
+        ToolRegistry 的 wrapper 签名为 (*args, **kwargs)，会导致具名参数无法匹配、类型转换被跳过。
+        优先沿 __wrapped__ 取原始函数以恢复真实注解。
+        """
+        f: Callable = tool_func
+        seen: set[int] = set()
+        for _ in range(8):
+            wid = id(f)
+            if wid in seen:
+                break
+            seen.add(wid)
+            inner = getattr(f, "__wrapped__", None)
+            if inner is None or not callable(inner):
+                break
+            f = inner
+        return f
+
+    @staticmethod
     def _coerce_value(annotation: Any, value: Any) -> Any:
         """根据参数注解将 LLM 输出的值转换为目标类型。转换失败返回 _COERCE_FAILED，由调用方丢弃该参数，避免毒药透传导致底层 TypeError。"""
         if value is None:
             return value
         if annotation is inspect.Parameter.empty:
             return value
-        ann = annotation
         try:
+            ann = WorkflowExecutor._unwrap_optional_annotation(annotation)
             origin = get_origin(ann)
-            if origin is not None:
-                args = get_args(ann)
-                if args and type(None) in args:
-                    ann = next((a for a in args if a is not type(None)), ann)
+            is_list_ann = ann is list or origin is list
+
+            # 前端表单常见：逗号分隔字符串 -> List[float] / List[int] / List[str] / list
+            if isinstance(value, str) and is_list_ann:
+                items = [x.strip() for x in value.split(",") if x.strip()]
+                if not items:
+                    return []
+                elem_args = get_args(ann) if origin is list else ()
+                elem_type = elem_args[0] if elem_args else None
+                if elem_type is str:
+                    return list(items)
+                if elem_type is int:
+                    try:
+                        return [int(float(x)) for x in items]
+                    except (TypeError, ValueError):
+                        return _COERCE_FAILED
+                if elem_type is float:
+                    try:
+                        return [float(x) for x in items]
+                    except (TypeError, ValueError):
+                        return _COERCE_FAILED
+                try:
+                    return [float(x) for x in items]
+                except (TypeError, ValueError):
+                    return list(items)
+
             if ann is float:
                 return float(value) if not isinstance(value, (int, float)) else float(value)
             if ann is int:
@@ -298,7 +356,7 @@ class WorkflowExecutor:
         支持 **kwargs：若函数有 VAR_KEYWORD，则未在具名参数中的键也会保留。
         """
         try:
-            sig = inspect.signature(tool_func)
+            sig = inspect.signature(self._resolve_callable_for_signature(tool_func))
         except Exception as e:
             logger.debug("无法获取工具签名，跳过过滤: %s", e)
             return params
@@ -376,24 +434,20 @@ class WorkflowExecutor:
                 "message": error_msg
             }
         
-        # 🔥 参数映射：根据工具类别映射文件路径参数
         tool_metadata = registry.get_metadata(tool_id)
         tool_category = tool_metadata.category if tool_metadata else None
-        
-        # 确定工具期望的文件路径参数名（Radiomics 使用 image_path/mask_path，不能注入 file_path）
-        if tool_category == "scRNA-seq":
-            # RNA 工具使用 adata_path
-            file_param_name = "adata_path"
-            # 如果提供了 file_path 但没有 adata_path，进行映射
-            if "file_path" in params and file_param_name not in params:
-                params[file_param_name] = params.pop("file_path")
-                logger.info(f"🔄 [Executor] 参数映射: file_path -> {file_param_name} (工具: {tool_id})")
-        elif tool_category == "Radiomics":
-            # 影像组学使用 image_path / mask_path，不注入 file_path
-            file_param_name = "image_path"
-        else:
-            # 其他工具（如代谢组学）使用 file_path
-            file_param_name = "file_path"
+        _valid_early = self._tool_accepted_param_names(tool_id, tool_func)
+        if (
+            "adata_path" in _valid_early
+            and self._param_slot_empty(params, "adata_path")
+            and "file_path" in params
+            and not self._param_slot_empty(params, "file_path")
+        ):
+            params["adata_path"] = params.pop("file_path")
+            logger.info(
+                "🔄 [Executor] 参数映射: file_path -> adata_path（反射, 工具: %s）",
+                tool_id,
+            )
         
         # 验证参数（可选但推荐）
         # 🔥 CRITICAL FIX: 参数验证失败时不应该清空 params，应该保留原始参数
@@ -446,7 +500,13 @@ class WorkflowExecutor:
                 logger.warning(f"⚠️ [Executor] 原始参数中缺少 group_column")
         
         # 处理数据流：替换占位符（传递工具类别与当前步骤，供 STED-EC 等注入上一步输出）
-        processed_params = self._process_data_flow(params, step_context, tool_category=tool_category, current_tool_id=tool_id)
+        processed_params = self._process_data_flow(
+            params,
+            step_context,
+            tool_category=tool_category,
+            current_tool_id=tool_id,
+            current_step_id=step_id,
+        )
         
         # 🔥 CRITICAL DEBUG: 记录处理后的参数
         if tool_id in ["metabolomics_plsda", "differential_analysis", "metabolomics_pathway_enrichment"]:
@@ -892,12 +952,88 @@ class WorkflowExecutor:
             payload["steps"].append(entry)
         return json.dumps(payload, ensure_ascii=False, default=str)
 
+    @staticmethod
+    def _extract_ann_data_path_from_tool_result(res: Any) -> Optional[str]:
+        """从单步工具返回字典中提取 AnnData 磁盘路径（不依赖具体工具名）。"""
+        if not isinstance(res, dict):
+            return None
+        st = res.get("status")
+        if st is not None and st != "success" and st != "skipped":
+            return None
+        for key in ("adata_path", "h5ad_path", "output_h5ad"):
+            v = res.get(key)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+        op = res.get("output_path")
+        if isinstance(op, str) and op.strip().lower().endswith(".h5ad"):
+            return op.strip()
+        of = res.get("output_file")
+        if isinstance(of, str) and of.strip().lower().endswith(".h5ad"):
+            return of.strip()
+        return None
+
+    def _find_prior_step_ann_data_path(
+        self,
+        step_context: Optional[Dict[str, Any]],
+        current_step_id: Optional[str],
+    ) -> Optional[str]:
+        """按 steps_order 向前查找最近一步产出的 .h5ad / adata 路径。"""
+        if not step_context or not current_step_id:
+            return None
+        steps_order = step_context.get("steps_order")
+        if not isinstance(steps_order, list) or current_step_id not in steps_order:
+            return None
+        idx = steps_order.index(current_step_id)
+        for j in range(idx - 1, -1, -1):
+            sid = steps_order[j]
+            res = self.step_results.get(sid)
+            p = self._extract_ann_data_path_from_tool_result(res)
+            if p:
+                try:
+                    return self._resolve_file_path(p)
+                except Exception:
+                    return p
+        return None
+
+    def _backfill_ann_data_path_params(
+        self,
+        processed: Dict[str, Any],
+        step_context: Optional[Dict[str, Any]],
+        tool_category: Optional[str],
+        current_tool_id: Optional[str],
+        current_step_id: Optional[str],
+    ) -> None:
+        """Spatial / scRNA-seq：h5ad_path、adata_path 仍为空时，用前序步骤输出或 resolved_input_paths 兜底。"""
+        if tool_category not in ("Spatial", "scRNA-seq"):
+            return
+        tf = registry.get_tool(current_tool_id) if current_tool_id else None
+        valid = self._tool_accepted_param_names(current_tool_id or "", tf)
+        prior = self._find_prior_step_ann_data_path(step_context, current_step_id)
+        if not prior and step_context:
+            for rp in reversed(step_context.get("resolved_input_paths") or []):
+                if isinstance(rp, str) and rp.strip().lower().endswith(".h5ad"):
+                    try:
+                        prior = self._resolve_file_path(rp.strip())
+                    except Exception:
+                        prior = rp.strip()
+                    break
+        if not prior:
+            return
+        for key in ("h5ad_path", "adata_path"):
+            if key not in valid:
+                continue
+            if not self._param_slot_empty(processed, key):
+                continue
+            processed[key] = prior
+            logger.info("🔄 数据流: 兜底写入 %s = %s（前序 AnnData 输出/输入列表）", key, prior)
+
     def _process_data_flow(
         self,
         params: Dict[str, Any],
         step_context: Optional[Dict[str, Any]] = None,
         tool_category: Optional[str] = None,
         current_tool_id: Optional[str] = None,
+        current_step_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         处理数据流：替换占位符（如 <step1_output>）和自动注入文件路径
@@ -907,6 +1043,7 @@ class WorkflowExecutor:
             step_context: 步骤上下文（包含 current_file_path）
             tool_category: 工具类别（用于确定文件路径参数名）
             current_tool_id: 当前步骤的 tool_id（用于 STED-EC 等从预处理步骤注入 time_key/cell_type_key）
+            current_step_id: 当前步骤 step_id（供前序 h5ad 链兜底）
 
         Returns:
             处理后的参数
@@ -930,35 +1067,58 @@ class WorkflowExecutor:
             if key == "group_column":
                 logger.debug(f"✅ [数据流处理] 已复制 group_column: {value}")
         
-        # 🔥 根据工具类别确定文件路径参数名（Radiomics 不注入 file_path）
-        if tool_category == "scRNA-seq":
-            file_param_name = "adata_path"
-        elif tool_category == "Radiomics":
-            file_param_name = "image_path"
-        else:
-            file_param_name = "file_path"
-        
-        # 🔥 如果文件路径参数缺失，尝试从上下文注入（Radiomics 已有 image_path 则不再注入）
-        if file_param_name not in params and step_context:
+        # 🔥 反射：仅当签名中的路径形参在 processed 中仍全部为空时，按优先级注入单一主路径
+        current_file_path: Optional[str] = None
+        if step_context:
             current_file_path = step_context.get("current_file_path")
             if not current_file_path:
                 assets_list = step_context.get("omics_assets") or []
                 ctx_asset = self._get_asset_for_tool(tool_category, assets_list)
                 if ctx_asset:
-                    current_file_path = self._resolve_file_path(ctx_asset.primary_path)
+                    current_file_path = self._resolve_file_path(
+                        ctx_asset.primary_path
+                    )
             if not current_file_path:
                 om = step_context.get("omics_resolved") or {}
                 rf = step_context.get("resolved_input_paths") or []
                 current_file_path = self._infer_default_path_for_tool(
                     tool_category, om, rf
                 )
-            if current_file_path:
-                processed[file_param_name] = current_file_path
-                logger.info(f"🔄 数据流: 自动注入 {file_param_name} = {current_file_path}")
+        tf_ctx = (
+            registry.get_tool(current_tool_id)
+            if current_tool_id
+            else None
+        )
+        # 任一步骤参数里仍有 <...> 占位符时，禁止提前注入路径：否则 adata_path 会被填成
+        # current_file_path（甚至上传目录），而 spatial_clustering_comparison 等工具使用
+        # 「adata_path or h5ad_path」，会优先走错路径，占位符解析出的 h5ad_path 永远不生效。
+        has_placeholder_in_params = any(
+            isinstance(v, str) and v.startswith("<") and v.endswith(">")
+            for v in params.values()
+        )
+        if (
+            current_file_path
+            and current_tool_id
+            and tf_ctx
+            and not has_placeholder_in_params
+        ):
+            valid_ctx = self._tool_accepted_param_names(current_tool_id, tf_ctx)
+            path_keys_in_sig = valid_ctx & self._INJECTABLE_PATH_PARAM_KEYS
+            has_any_path = any(
+                not self._param_slot_empty(processed, k) for k in path_keys_in_sig
+            )
+            if not has_any_path and path_keys_in_sig:
+                if self._inject_fallback_path_by_signature(
+                    processed, current_tool_id, tf_ctx, current_file_path
+                ):
+                    logger.info(
+                        "🔄 数据流: 反射兜底注入路径 = %s", current_file_path
+                    )
 
-        # Radiomics：radiomics_pair 资产补全 mask_path（占位符解析后仍可能缺 mask）
-        if tool_category == "Radiomics" and step_context:
-            if "mask_path" not in params:
+        # Radiomics：radiomics_pair 资产补全 mask_path（仅当签名接受 mask_path 且槽位仍空）
+        if tool_category == "Radiomics" and step_context and current_tool_id and tf_ctx:
+            _vr = self._tool_accepted_param_names(current_tool_id, tf_ctx)
+            if "mask_path" in _vr and self._param_slot_empty(processed, "mask_path"):
                 assets_list = step_context.get("omics_assets") or []
                 rad_asset = self._get_asset_for_tool("Radiomics", assets_list)
                 if (
@@ -967,14 +1127,21 @@ class WorkflowExecutor:
                     and rad_asset.metadata.get("mask_path")
                 ):
                     mp = rad_asset.metadata["mask_path"]
-                    if "mask_path" not in processed:
-                        processed["mask_path"] = self._resolve_file_path(str(mp))
-                        logger.info(f"🔄 数据流: 自动注入 mask_path = {processed['mask_path']}")
-        
-        # 🔥 如果提供了 file_path 但工具需要 adata_path，进行映射
-        if tool_category == "scRNA-seq" and "file_path" in params and "adata_path" not in params:
-            processed["adata_path"] = params.pop("file_path")
-            logger.info(f"🔄 数据流: 参数映射 file_path -> adata_path")
+                    processed["mask_path"] = self._resolve_file_path(str(mp))
+                    logger.info(
+                        "🔄 数据流: 自动注入 mask_path = %s", processed["mask_path"]
+                    )
+
+        if current_tool_id and tf_ctx:
+            _vm = self._tool_accepted_param_names(current_tool_id, tf_ctx)
+            if (
+                "adata_path" in _vm
+                and self._param_slot_empty(processed, "adata_path")
+                and "file_path" in processed
+                and not self._param_slot_empty(processed, "file_path")
+            ):
+                processed["adata_path"] = processed.pop("file_path")
+                logger.info("🔄 数据流: 参数映射 file_path -> adata_path（反射）")
         
         # 现在处理占位符（可能会覆盖已复制的值）
         for key, value in params.items():
@@ -1229,6 +1396,14 @@ class WorkflowExecutor:
                     processed["cell_type_key"] = pre["cell_type_key"]
                     logger.info(f"🔄 数据流: 从 sted_ec_data_validation 注入 cell_type_key = {pre['cell_type_key']}")
 
+        self._backfill_ann_data_path_params(
+            processed,
+            step_context,
+            tool_category,
+            current_tool_id,
+            current_step_id,
+        )
+
         return processed
 
     def _get_asset_for_tool(
@@ -1242,9 +1417,15 @@ class WorkflowExecutor:
         """
         if not assets:
             return None
-        if tool_category == "scRNA-seq":
+        if tool_category in ("scRNA-seq", "Spatial"):
+            for a in assets:
+                if a.asset_type == "spatial_bundle":
+                    return a
             for a in assets:
                 if a.asset_type == "10x_bundle":
+                    return a
+            for a in assets:
+                if a.asset_type == "10x_h5_matrix":
                     return a
             for a in assets:
                 if a.asset_type == "h5ad_single":
@@ -1265,41 +1446,268 @@ class WorkflowExecutor:
             return None
         return None
 
-    def _inject_paths_from_asset(
+    # 反射适配器：可注入的路径形参名（与具体 tool_id 无关）
+    _INJECTABLE_PATH_PARAM_KEYS = frozenset({
+        "file_path",
+        "adata_path",
+        "data_path",
+        "image_path",
+        "mask_path",
+        "matrix_dir",
+        "sequence_or_path",
+    })
+    _FALLBACK_PATH_PARAM_PRIORITY = (
+        "adata_path",
+        "matrix_dir",
+        "file_path",
+        "data_path",
+        "image_path",
+        "mask_path",
+        "sequence_or_path",
+    )
+
+    @staticmethod
+    def _param_slot_empty(params: Dict[str, Any], key: str) -> bool:
+        if key not in params:
+            return True
+        v = params[key]
+        if v is None:
+            return True
+        if isinstance(v, str) and not v.strip():
+            return True
+        return False
+
+    def _tool_accepted_param_names(
+        self, tool_id: str, tool_func: Optional[Callable]
+    ) -> frozenset[str]:
+        """
+        底层算子真实形参名（跳过 self/cls、*args、**kwargs）。
+        registry 包装器签名为 *args/**kwargs，须 unwrap 到原始函数。
+        """
+        if tool_func is not None:
+            try:
+                target = inspect.unwrap(tool_func)
+                sig = inspect.signature(target)
+                names: List[str] = []
+                for name, p in sig.parameters.items():
+                    if name in ("self", "cls"):
+                        continue
+                    if p.kind in (
+                        inspect.Parameter.VAR_POSITIONAL,
+                        inspect.Parameter.VAR_KEYWORD,
+                    ):
+                        continue
+                    names.append(name)
+                if names:
+                    return frozenset(names)
+            except (ValueError, TypeError, AttributeError) as e:
+                logger.debug(
+                    "签名反射失败 tool_id=%s，回退 schema: %s", tool_id, e
+                )
+        meta = registry.get_metadata(tool_id)
+        if meta is not None and getattr(meta, "args_schema", None) is not None:
+            try:
+                return frozenset(meta.args_schema.model_fields.keys())
+            except Exception as e:
+                logger.debug("从 args_schema 取参名失败 tool_id=%s: %s", tool_id, e)
+        return frozenset()
+
+    def _maybe_upgrade_radiomics_pair_data_path(
         self,
         params: Dict[str, Any],
-        tool_category: Optional[str],
-        asset: DataAsset,
-        file_param_name: str,
+        valid: frozenset[str],
+        img_resolved: str,
+        mask_resolved: Optional[str],
     ) -> bool:
         """
-        从 DataAsset 注入路径参数。已显式提供的键不覆盖。
-        返回是否至少写入了一个路径类参数。
+        LLM 仅写入单一路径到 data_path 时，若与配对资产中的原图一致且存在 mask，则升级为逗号拼接。
+        不依赖 tool_id，仅依赖 radiomics_pair 语义与签名是否包含 data_path。
         """
-        did = False
-        if tool_category == "Radiomics":
-            if asset.asset_type == "radiomics_pair":
-                img = asset.metadata.get("image_path") or asset.primary_path
-                mask = asset.metadata.get("mask_path")
-                if img and "image_path" not in params:
-                    params["image_path"] = self._resolve_file_path(str(img))
-                    did = True
-                if mask and "mask_path" not in params:
-                    params["mask_path"] = self._resolve_file_path(str(mask))
-                    did = True
-            elif asset.asset_type == "radiomics_image":
-                if "image_path" not in params:
-                    params["image_path"] = self._resolve_file_path(asset.primary_path)
-                    did = True
-            return did
-        if tool_category == "scRNA-seq":
-            if file_param_name not in params:
-                params[file_param_name] = self._resolve_file_path(asset.primary_path)
-                return True
+        if "data_path" not in valid or not mask_resolved:
             return False
-        if file_param_name not in params:
-            params[file_param_name] = self._resolve_file_path(asset.primary_path)
+        if self._param_slot_empty(params, "data_path"):
+            return False
+        raw = params.get("data_path")
+        if not isinstance(raw, str):
+            return False
+        parts = [p.strip() for p in raw.replace(";", ",").split(",") if p.strip()]
+        if len(parts) != 1:
+            return False
+        try:
+            one = self._resolve_file_path(parts[0])
+        except Exception:
+            one = parts[0]
+        if one == img_resolved:
+            params["data_path"] = f"{img_resolved},{mask_resolved}"
             return True
+        return False
+
+    def _inject_paths_from_asset_reflective(
+        self,
+        params: Dict[str, Any],
+        asset: DataAsset,
+        tool_id: str,
+        tool_func: Optional[Callable],
+    ) -> bool:
+        """
+        基于 DataAsset 类型 + 工具签名的路径注入（开闭原则：无 tool_id 分支表）。
+        仅在对应形参槽为空时写入；显式非空值不覆盖。
+        """
+        valid = self._tool_accepted_param_names(tool_id, tool_func)
+        if not valid:
+            return False
+        did = False
+        at = asset.asset_type
+
+        if at == "radiomics_pair":
+            img = str(asset.metadata.get("image_path") or asset.primary_path)
+            mask = asset.metadata.get("mask_path")
+            mask_s = str(mask) if mask else None
+            try:
+                img_r = self._resolve_file_path(img)
+            except Exception:
+                img_r = img
+            mask_r: Optional[str] = None
+            if mask_s:
+                try:
+                    mask_r = self._resolve_file_path(mask_s)
+                except Exception:
+                    mask_r = mask_s
+            if "data_path" in valid:
+                if self._param_slot_empty(params, "data_path"):
+                    params["data_path"] = (
+                        f"{img_r},{mask_r}" if mask_r else img_r
+                    )
+                    did = True
+                elif self._maybe_upgrade_radiomics_pair_data_path(
+                    params, valid, img_r, mask_r
+                ):
+                    did = True
+            if "image_path" in valid and self._param_slot_empty(
+                params, "image_path"
+            ):
+                params["image_path"] = img_r
+                did = True
+            if (
+                "mask_path" in valid
+                and self._param_slot_empty(params, "mask_path")
+                and mask_r
+            ):
+                params["mask_path"] = mask_r
+                did = True
+            return did
+
+        if at == "radiomics_image":
+            try:
+                p = self._resolve_file_path(asset.primary_path)
+            except Exception:
+                p = asset.primary_path
+            for key in ("image_path", "data_path", "file_path"):
+                if key in valid and self._param_slot_empty(params, key):
+                    params[key] = p
+                    return True
+            return did
+
+        if at == "10x_bundle":
+            try:
+                p = self._resolve_file_path(asset.primary_path)
+            except Exception:
+                p = asset.primary_path
+            for key in ("adata_path", "matrix_dir", "data_path", "file_path"):
+                if key in valid and self._param_slot_empty(params, key):
+                    params[key] = p
+                    return True
+            return did
+
+        if at == "spatial_bundle":
+            root = asset.metadata.get("visium_root") or asset.primary_path
+            try:
+                p = self._resolve_file_path(str(root))
+            except Exception:
+                p = str(root)
+            for key in ("adata_path", "matrix_dir", "data_path", "file_path"):
+                if key in valid and self._param_slot_empty(params, key):
+                    params[key] = p
+                    return True
+            return did
+
+        if at == "h5ad_single":
+            try:
+                p = self._resolve_file_path(asset.primary_path)
+            except Exception:
+                p = asset.primary_path
+            for key in ("adata_path", "data_path", "file_path"):
+                if key in valid and self._param_slot_empty(params, key):
+                    params[key] = p
+                    return True
+            return did
+
+        if at == "10x_h5_matrix":
+            try:
+                p = self._resolve_file_path(asset.primary_path)
+            except Exception:
+                p = asset.primary_path
+            for key in ("adata_path", "data_path", "file_path"):
+                if key in valid and self._param_slot_empty(params, key):
+                    params[key] = p
+                    return True
+            return did
+
+        if at in ("metabolomics_csv", "protein_fasta"):
+            try:
+                p = self._resolve_file_path(asset.primary_path)
+            except Exception:
+                p = asset.primary_path
+            for key in ("file_path", "data_path", "sequence_or_path"):
+                if key in valid and self._param_slot_empty(params, key):
+                    params[key] = p
+                    return True
+            return did
+
+        if at in (
+            "generic_unknown",
+            "unknown_file",
+            "protein_structure",
+            "document",
+            "plain_text",
+        ):
+            try:
+                p = self._resolve_file_path(asset.primary_path)
+            except Exception:
+                p = asset.primary_path
+            for key in (
+                "file_path",
+                "data_path",
+                "adata_path",
+                "image_path",
+                "sequence_or_path",
+            ):
+                if key in valid and self._param_slot_empty(params, key):
+                    params[key] = p
+                    return True
+            return did
+
+        return did
+
+    def _inject_fallback_path_by_signature(
+        self,
+        params: Dict[str, Any],
+        tool_id: str,
+        tool_func: Optional[Callable],
+        inject_path: str,
+    ) -> bool:
+        """无匹配 DataAsset 或资产未写入任何形参时，按签名优先级注入单一主路径。"""
+        if not inject_path:
+            return False
+        valid = self._tool_accepted_param_names(tool_id, tool_func)
+        try:
+            resolved = self._resolve_file_path(str(inject_path))
+        except Exception:
+            resolved = str(inject_path)
+        for key in self._FALLBACK_PATH_PARAM_PRIORITY:
+            if key in valid and self._param_slot_empty(params, key):
+                params[key] = resolved
+                return True
         return False
 
     def _seed_workflow_current_path(
@@ -1755,19 +2163,10 @@ class WorkflowExecutor:
             logger.info(f"📌 步骤 {i}/{len(steps)}: {step_name} ({step_id})")
             logger.info(f"{'=' * 80}")
             
-            # 🔥 智能参数映射：根据工具类型自动映射文件路径参数
+            # 🔥 智能参数映射：工具类别用于资产选取与逗号串展开，路径注入走反射适配器
             tool_metadata = registry.get_metadata(tool_id)
             tool_category = tool_metadata.category if tool_metadata else None
-            
-            # 确定工具期望的文件路径参数名
-            if tool_category == "scRNA-seq":
-                # RNA 工具使用 adata_path
-                file_param_name = "adata_path"
-            elif tool_category == "Radiomics":
-                file_param_name = "image_path"
-            else:
-                # 其他工具（如代谢组学）使用 file_path
-                file_param_name = "file_path"
+            tool_func_exec = registry.get_tool(tool_id)
 
             self._maybe_unwrap_composite_path_params(
                 params, tool_category, omics_resolved, resolved_file_paths
@@ -1786,23 +2185,25 @@ class WorkflowExecutor:
             if not has_placeholder:
                 step_asset = self._get_asset_for_tool(tool_category, assets)
                 injected_from_asset = False
-                if step_asset:
-                    injected_from_asset = self._inject_paths_from_asset(
-                        params, tool_category, step_asset, file_param_name
+                if step_asset and tool_func_exec:
+                    injected_from_asset = self._inject_paths_from_asset_reflective(
+                        params, step_asset, tool_id, tool_func_exec
                     )
                     if injected_from_asset:
+                        _pk = self._INJECTABLE_PATH_PARAM_KEYS
                         logger.info(
-                            "🔄 自动注入（OmicsAsset %s）: %s",
+                            "🔄 反射注入（OmicsAsset %s）: %s",
                             step_asset.asset_type,
-                            {k: params[k] for k in params if k in ("adata_path", "file_path", "image_path", "mask_path")},
+                            {k: params[k] for k in params if k in _pk},
                         )
-                if not injected_from_asset:
+                if not injected_from_asset and tool_func_exec:
                     inject_path = current_file_path or self._infer_default_path_for_tool(
                         tool_category, omics_resolved, resolved_file_paths
                     )
-                    if file_param_name not in params and inject_path:
-                        params[file_param_name] = inject_path
-                        logger.info(f"🔄 自动注入 {file_param_name}: {inject_path}")
+                    if inject_path and self._inject_fallback_path_by_signature(
+                        params, tool_id, tool_func_exec, inject_path
+                    ):
+                        logger.info("🔄 反射兜底注入路径: %s", inject_path)
             else:
                 # 有占位符，记录日志但不自动注入
                 placeholder_keys = [k for k, v in params.items() if isinstance(v, str) and v.startswith("<") and v.endswith(">")]
@@ -1823,10 +2224,17 @@ class WorkflowExecutor:
                 "enabled_mcps": getattr(self, "_enabled_mcps", None) or [],
             }
             
-            # 🔥 参数映射：如果工具期望 adata_path 但提供了 file_path，进行映射
-            if file_param_name == "adata_path" and "file_path" in params and file_param_name not in params:
-                params[file_param_name] = params.pop("file_path")
-                logger.info(f"🔄 参数映射: file_path -> {file_param_name}")
+            # 🔥 参数映射：签名需要 adata_path 且槽位空时，将 file_path 迁入（常见于单细胞工具）
+            if tool_func_exec:
+                _valid = self._tool_accepted_param_names(tool_id, tool_func_exec)
+                if (
+                    "adata_path" in _valid
+                    and self._param_slot_empty(params, "adata_path")
+                    and "file_path" in params
+                    and not self._param_slot_empty(params, "file_path")
+                ):
+                    params["adata_path"] = params.pop("file_path")
+                    logger.info("🔄 参数映射: file_path -> adata_path（反射）")
             
             # 🔥 修复：自动检测并替换 group_column 参数
             # 如果工具需要 group_column，但指定的列不存在，尝试自动检测
@@ -1872,26 +2280,37 @@ class WorkflowExecutor:
                 tool_metadata = registry.get_metadata(tool_id)
                 tool_category = tool_metadata.category if tool_metadata else None
                 
-                # 🔥 TASK 3 FIX: 对于 scRNA-seq 工具，所有产生 output_h5ad 的步骤都更新 current_file_path
-                if tool_category == "scRNA-seq":
-                    # scRNA-seq 工具优先使用 output_h5ad
-                    next_file_path = (
-                        result_data.get("output_h5ad") or
-                        result_data.get("output_file") or
-                        result_data.get("output_path") or
-                        result_data.get("file_path")
-                    )
-                    
+                # scRNA-seq / Spatial：任一步产出 AnnData 磁盘路径则更新链式 current_file_path
+                if tool_category in ("scRNA-seq", "Spatial"):
+                    next_file_path = self._extract_ann_data_path_from_tool_result(result_data)
+                    if not next_file_path:
+                        next_file_path = (
+                            result_data.get("output_file") or
+                            result_data.get("output_path") or
+                            result_data.get("file_path")
+                        )
                     if next_file_path:
-                        # 解析路径（确保是绝对路径）
-                        resolved_path = self._resolve_file_path(next_file_path)
+                        try:
+                            resolved_path = self._resolve_file_path(str(next_file_path))
+                        except Exception:
+                            resolved_path = str(next_file_path)
                         current_file_path = resolved_path
                         if os.path.exists(resolved_path):
-                            logger.info(f"✅ [Executor] 更新当前文件路径（来自 {tool_id}）: {current_file_path}")
+                            logger.info(
+                                "✅ [Executor] 更新当前文件路径（%s）: %s",
+                                tool_category,
+                                current_file_path,
+                            )
                         else:
-                            logger.warning(f"⚠️ [Executor] 输出路径不存在，但会使用: {resolved_path} (文件可能稍后创建)")
+                            logger.warning(
+                                "⚠️ [Executor] 输出路径不存在，但会使用: %s",
+                                resolved_path,
+                            )
                     else:
-                        logger.debug(f"🔍 [Executor] 步骤 {tool_id} 未返回 output_h5ad，保持当前文件路径")
+                        logger.debug(
+                            "🔍 [Executor] 步骤 %s 未返回 AnnData 路径，保持当前文件路径",
+                            tool_id,
+                        )
                 else:
                     # 其他工具（如代谢组学）只在 preprocess_data 步骤更新
                     if tool_id == "preprocess_data" or "preprocess" in tool_id.lower():

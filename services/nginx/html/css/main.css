@@ -784,7 +784,7 @@
             .full-history-item .item-action-btn { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; cursor: pointer; padding: 4px 8px; font-size: 13px; color: #6b7280; border-radius: 6px; }
             .full-history-item .item-action-btn:hover { background: #e5e7eb; color: #374151; }
             .item-action-icon { flex-shrink: 0; vertical-align: middle; }
-            /* ================= 文件管理页（上下排版 + 磐石渐变 Banner） ================= */
+            /* ================= 文件管理页（上下排版 + 顶部渐变 Banner） ================= */
             #file-management-pane {
                 display: flex;
                 flex-direction: column;
@@ -853,6 +853,8 @@
                 padding: 20px;
             }
             #workspace-pane:has(#active-workspace-content .unified-report-container) #workspace-placeholder { display: none; }
+            /* 技能快车道：万能渲染挂载于 #skill-tool-workspace-root，与组学 .unified-report-container 并列，也需隐藏占位文案 */
+            #workspace-pane:has(#skill-tool-workspace-root .skill-workspace-panel) #workspace-placeholder { display: none !important; }
             #workspace-placeholder.hidden { display: none !important; }
             #workspace-placeholder {
                 color: #6b7280;
@@ -1919,7 +1921,7 @@
             }
             .toolbar-left { display: flex; align-items: center; gap: 8px; }
             .toolbar-right { display: flex; align-items: center; gap: 8px; }
-            /* 幽灵工具栏按钮（无边框、透明背景，对标 ScienceOne） */
+            /* 幽灵工具栏按钮（无边框、透明背景） */
             .ghost-btn {
                 background: transparent;
                 border: none;

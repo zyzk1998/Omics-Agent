@@ -206,25 +206,53 @@ CORE_OMICS_SKILLS = [
     },
 ]
 
-# 统一的占位符 Prompt（生物医药 UI 占位技能使用）
-PLACEHOLDER_PROMPT = "【系统提示】该技能正在建设中，敬请期待..."
+# ---------------------------------------------------------------------------
+# 技能 prompt_template 编写规范（须与「底层算子融合智能体系统标准方法论」§4.1 一致）
+# 1. 首行：[Skill_Route: tool_name]（与 @registry.register(name=...) 逐字一致）。
+# 2. 开场白：第一人称专业助手（「您好」），一句话说清科学用途与输出形态。
+# 3. 参数区：Markdown 列表，写明字段与生物学/化学含义；避免内部实现口吻。
+# 4. 数据区：明确「上传附件 / 内联正文」路径；禁用 MVP、演示、试跑、占位、待扩展等研发用语。
+# 5. 文末可保留「（助手侧：…）」供 LLM 将路径/内联写入工具参数（换行转义等）。
+# ---------------------------------------------------------------------------
+# 未单独配置 prompt_template 的技能使用的通用引导文案（专业、可执行导向）
+PLACEHOLDER_PROMPT = (
+    "您好。我希望使用本项分析能力完成具体的科研或数据处理任务。"
+    "请说明您的研究目标、数据类型与物种背景；我将据此给出可执行的分析建议与参数说明。"
+)
 
-# 生物医药大类技能矩阵 (UI 占位)
+# 生物医药大类技能矩阵（含已落地工具链的完整模板 + 通用引导项）
 BIOMEDICINE_SKILLS = [
     {
         "name": "BepiPred3",
         "sub_category": "预测与建模",
         "description": "基于蛋白语言模型的 B 细胞表位预测工具，可高效识别蛋白序列中的潜在线性与构象表位。",
         "prompt_template": """[Skill_Route: bepipred3_prediction]
-请帮我调用 BepiPred-3.0 模型进行 B 细胞线性与构象表位预测。
+您好。我将使用 **BepiPred-3.0** 对给定蛋白序列进行 **B 细胞线性表位与构象表位**预测，输出残基水平的免疫原性相关评分，供疫苗设计或抗体开发中的表位筛选参考。
 
-**【参数配置】**
-- 表位百分比阈值 (top_epitope_percentage_cutoff): `top_20` (高置信度，前20%)
-- 顺序平滑 (use_sequential_smoothing): `False` (不使用)
+**分析偏好**
+- 优先报告**排序靠前且置信度较高**的表位集合（约前 **20%** 残基）；
+- **关闭顺序平滑**（不进行沿序列的平滑后处理），以保留原始模型分辨力。
 
-**【序列数据】**
+**输入数据（FASTA；可替换为您的靶蛋白）**
 >7lj4_B
 RSTTLLALLALVLLYVSGALVFRALEQPHEQQAQRELGEVREKFLRAHPCVSDQELGLLIKEVADALGGGADPETQSTSHSAWDLGSAFFFSGTIITTIGYGNVALRTDAGRLFCIFYALVGIPLFGDILLAGVGDRLGSSLRHGIGHIEAIFLKWHVPPELVRVLSAEMLFLLIGCLLFVLTPTFVFCYMEDWSKLEAIYFVIVTLTTVGFGDYVAGADPRQDSPAYQPLVWFWILLGLPAYFASVLTTIGNWLRVVS""",
+    },
+    {
+        "name": "DNA序列续写生成",
+        "sub_category": "预测与建模",
+        "description": (
+            "基于外部 DNA 续写接口：输入提示 DNA 文本，续写 num_tokens 长度；"
+            "可调 temperature / top_k / top_p。建议提示序列≤500 nt，可选分类学前缀 D__…;S__… 再接序列。"
+        ),
+        "prompt_template": """[Skill_Route: dna_sequence_generate]
+您好。我需要在下列 DNA 提示序列之后**续写约 100 nt**，采样具有一定多样性（中等随机性），并希望在结果中附带各步采样概率信息。
+
+**参数与生物学含义**
+- **提示序列长度**：建议不超过约 500 nt，以降低上下文截断风险并稳定生成质量。
+- **分类学前缀（可选）**：若需约束演化或基因组语境，可在 ATGC 主序列前增加标准分类学描述前缀（如 `D__…;S__…` 形式，按您所用模型文档为准）。
+
+**续写起点序列（请按需替换为您的实验或设计片段）**
+GAATAGGAACAGCTCCGGTCTACAGCTCCCAGCGTGAGCGACGCAGAAGACGGTGATTTCTGCATTTCCATCTGAGGTACCGGGTTCATCTCACTAGGGAGTGCCAGACAGTGGGCGCAGGCCAGTGTGTGTGCGCACCGTGCGCGAGCCGAAGCAGGGCGAGGCATTGCCTCACCTGGGAAGCGCAAGGGGTCAGGGAGTTCCCTTTCCGAGTCAAAGAAAGGGGTGATGGACGCACCTGGAAAATCGGGTCACTCCCACCCGAATATTGCGCTTTTCAGACCGGCTTAAGAAACGGCGCACCACGAGACTATATCCCACACCTGGCTCAGAGGGTCCTACGCCCACGGAATC""",
     },
     {"name": "Evo2", "sub_category": "预测与建模", "description": "生物学基础模型，能够整合长基因组序列的信息，同时保持对单核苷酸变化的敏感性。"},
     {"name": "ESM3", "sub_category": "预测与建模", "description": "模拟蛋白质进化，多模态生成新型蛋白。"},
@@ -236,7 +264,31 @@ RSTTLLALLALVLLYVSGALVFRALEQPHEQQAQRELGEVREKFLRAHPCVSDQELGLLIKEVADALGGGADPETQSTSH
     {"name": "ESMFold", "sub_category": "预测与建模", "description": "根据蛋白质的氨基酸序列预测其三维结构，预测速度快，适合快速分析蛋白质。"},
     {"name": "DiffDock", "sub_category": "预测与建模", "description": "预测分子与蛋白质相互作用的 3D 结构。"},
     {"name": "ProtGPT2", "sub_category": "预测与建模", "description": "能够理解蛋白质语言，可用于从头设计和构建蛋白质。"},
-    {"name": "RNAFold", "sub_category": "预测与建模", "description": "基于最小自由能原理，预测 RNA 分子的二级结构。"},
+    {
+        "name": "RNAFold",
+        "sub_category": "预测与建模",
+        "description": "基于最小自由能原理，预测 RNA 分子的二级结构。",
+        "prompt_template": """[Skill_Route: rnafold_analysis]
+您好。我需要对单条 RNA 序列进行**最小自由能二级结构预测**（点括号表示），热力学条件先按**接近生理体温**计算。若管线支持，请一并输出**碱基配对概率**（便于后续绘制配对概率弧图或点图）。
+
+**参数与生物学含义**
+- **temperature_celsius**：折叠热力学温度（°C），生理相关分析常用 37 °C；高温变性或体外实验可另行指定。
+- **use_temperature_control**：是否启用温度依赖的能量参数（与 ViennaRNA 系模型一致时建议为 true）。
+- **include_pairing_probabilities**：是否计算并返回分区函数意义上的配对概率串（用于碱基对置信度可视化）。
+
+**数据提交方式**
+1. **上传文件**：提供标准 FASTA（含 `>` 标题行与序列行），扩展名如 `.fa` / `.fasta`。
+2. **内联序列**：在正文中直接给出 FASTA 文本；未上传附件时由助手将全文写入 `fasta_content`（换行在参数中须为 `\\n`）。
+
+**参考序列（可整段替换为您的靶序列；字母集 A/U/G/C）**
+>query_rna
+GGGGAUAGGUUCAACCUCCUU
+
+若需**高温折叠**（例如约 55 °C）并**强制返回配对概率**，请在消息中明确写出温度与「需要配对概率」。
+
+（助手侧：未上传文件时将上述 FASTA 写入 `fasta_content`，换行用 \\n；已上传时仅用附件列表中的路径写入 `file_path`。默认 temperature_celsius=37、use_temperature_control=true、include_pairing_probabilities=false；用户明确要求配对概率时置 include_pairing_probabilities=true。）
+""",
+    },
     {"name": "RFdiffusion", "sub_category": "预测与建模", "description": "用于蛋白质结合剂设计的蛋白质骨架生成模型。"},
     {"name": "BioGPT", "sub_category": "文本处理", "description": "可用于生物医学命名实体识别、关系提取、文本摘要、对话生成等任务。"},
     {"name": "BioGraph", "sub_category": "数据可视化", "description": "专为基因表达数据和生物信息分析设计的可视化工具，可用于生成基因表达热图、PCA降维图等。"},
@@ -244,31 +296,153 @@ RSTTLLALLALVLLYVSGALVFRALEQPHEQQAQRELGEVREKFLRAHPCVSDQELGLLIKEVADALGGGADPETQSTSH
         "name": "基因蛋白信息查询器",
         "sub_category": "信息检索",
         "description": "根据基因名查询并返回其在不同物种中的蛋白质注释、序列、亚细胞定位等详细信息。",
-        "prompt_template": "帮我查询 TP53 基因的详细信息，包括它的全称、染色体位置以及主要生物学功能。",
+        "prompt_template": "您好。请协助检索基因 **TP53** 的权威注释信息，包括官方全称、染色体定位及已知主要生物学功能。",
     },
     {"name": "蛋白质资料提取工具", "sub_category": "信息检索", "description": "基于蛋白质ID快速获取其功能注释、亚细胞定位、组织表达及疾病关联信息。"},
     {"name": "蛋白同源结构评估器", "sub_category": "数据分析", "description": "集成 BLAST 序列比对与结构相似性分析，用于精准判定蛋白质同源关系与三维结构差异。"},
     {"name": "蛋白质结构渲染工具", "sub_category": "数据可视化", "description": "支持从PDB格式导入并可视化蛋白质三维结构。"},
     {"name": "RNA二级结构可视化工具", "sub_category": "数据可视化", "description": "基于RNA碱基序列生成其对应的二级结构图示。"},
-    {"name": "残基互作分析器", "sub_category": "数据分析", "description": "基于PyMOL分析PDB文件中的残基互作关系，支持复合物结构解析。"},
+    {
+        "name": "残基互作分析器",
+        "sub_category": "数据分析",
+        "description": "基于PyMOL分析PDB文件中的残基互作关系，支持复合物结构解析。",
+        "prompt_template": """[Skill_Route: pymol_analysis]
+您好。我将为您调用 **PyMOL 结构分析管线**，在已解析的蛋白质三维坐标基础上完成结构载入、基础展示及**残基–残基相互作用分析**相关的前处理与可视化输出。
+
+**科学用途**
+- 对实验解析或计算预测得到的 **PDB / mmCIF** 坐标进行规范化读入与质量检查；
+- 支持单链、复合物等场景下的结构展示，并按非共价接触、氢键、盐桥等常见判据（以服务端实现为准）梳理残基间相互作用，辅助结合位点与界面分析。
+
+**参数与生物学含义**
+- **`file_path`**：当前会话中上传的结构文件在服务器上的**真实绝对路径**（由附件解析产生，**禁止**由模型臆造路径）。适用扩展名包括但不限于 `.pdb`、`.cif`、`.mmcif`。
+- **`pdb_content`**：未上传文件时，将**完整 PDB 格式文本**内联至工具参数；用于短肽、片段或离线导出坐标的快速提交（换行在参数中须为 `\\n`）。
+
+**数据提交方式**
+1. **推荐**：将 `.pdb` / `.cif` / `.mmcif` 作为附件上传，并在消息中说明关注链 ID、配体残基名或界面区域。
+2. **备选**：在对话中粘贴经实验或数据库导出的 **PDB 全文**。若您本次尚无附件，可暂用下列**14 个丙氨酸残基组成的 α-螺旋演示坐标**（约 70 个重原子，**cartoon / sticks 均清晰可见**，仅用于格式与渲染目测；**非实验结构**，有自研结构时请**整段替换**为您的坐标正文）：
+
+```pdb
+HEADER    DEMO POLY-ALANINE
+TITLE     14-RESIDUE ALPHA-HELIX FRAGMENT (SYNTHETIC, FOR RENDER DEMO)
+ATOM      1  N   ALA A   1       1.430  -0.480  -0.750  1.00  0.00            N
+ATOM      2  CA  ALA A   1       2.300   0.000   0.000  1.00  0.00            C
+ATOM      3  C   ALA A   1       2.853   0.054   0.396  1.00  0.00            C
+ATOM      4  O   ALA A   1       3.530   0.120   0.880  1.00  0.00            O
+ATOM      5  CB  ALA A   1       2.830   0.770  -0.890  1.00  0.00            C
+ATOM      6  N   ALA A   2      -1.269   1.785   0.750  1.00  0.00            N
+ATOM      7  CA  ALA A   2      -0.399   2.265   1.500  1.00  0.00            C
+ATOM      8  C   ALA A   2       0.154   2.319   1.896  1.00  0.00            C
+ATOM      9  O   ALA A   2       0.831   2.385   2.380  1.00  0.00            O
+ATOM     10  CB  ALA A   2       0.131   3.035   0.610  1.00  0.00            C
+ATOM     11  N   ALA A   3      -3.031  -1.267   2.250  1.00  0.00            N
+ATOM     12  CA  ALA A   3      -2.161  -0.787   3.000  1.00  0.00            C
+ATOM     13  C   ALA A   3      -1.608  -0.733   3.396  1.00  0.00            C
+ATOM     14  O   ALA A   3      -0.931  -0.667   3.880  1.00  0.00            O
+ATOM     15  CB  ALA A   3      -1.631  -0.017   2.110  1.00  0.00            C
+ATOM     16  N   ALA A   4       0.280  -2.472   3.750  1.00  0.00            N
+ATOM     17  CA  ALA A   4       1.150  -1.992   4.500  1.00  0.00            C
+ATOM     18  C   ALA A   4       1.704  -1.938   4.896  1.00  0.00            C
+ATOM     19  O   ALA A   4       2.380  -1.872   5.380  1.00  0.00            O
+ATOM     20  CB  ALA A   4       1.680  -1.222   3.610  1.00  0.00            C
+ATOM     21  N   ALA A   5       0.892   0.998   5.250  1.00  0.00            N
+ATOM     22  CA  ALA A   5       1.762   1.478   6.000  1.00  0.00            C
+ATOM     23  C   ALA A   5       2.315   1.532   6.396  1.00  0.00            C
+ATOM     24  O   ALA A   5       2.992   1.598   6.880  1.00  0.00            O
+ATOM     25  CB  ALA A   5       2.292   2.248   5.110  1.00  0.00            C
+ATOM     26  N   ALA A   6      -2.632   0.998   6.750  1.00  0.00            N
+ATOM     27  CA  ALA A   6      -1.762   1.478   7.500  1.00  0.00            C
+ATOM     28  C   ALA A   6      -1.208   1.532   7.896  1.00  0.00            C
+ATOM     29  O   ALA A   6      -0.532   1.598   8.380  1.00  0.00            O
+ATOM     30  CB  ALA A   6      -1.232   2.248   6.610  1.00  0.00            C
+ATOM     31  N   ALA A   7      -2.020  -2.472   8.250  1.00  0.00            N
+ATOM     32  CA  ALA A   7      -1.150  -1.992   9.000  1.00  0.00            C
+ATOM     33  C   ALA A   7      -0.596  -1.938   9.396  1.00  0.00            C
+ATOM     34  O   ALA A   7       0.080  -1.872   9.880  1.00  0.00            O
+ATOM     35  CB  ALA A   7      -0.620  -1.222   8.110  1.00  0.00            C
+ATOM     36  N   ALA A   8       1.291  -1.267   9.750  1.00  0.00            N
+ATOM     37  CA  ALA A   8       2.161  -0.787  10.500  1.00  0.00            C
+ATOM     38  C   ALA A   8       2.715  -0.733  10.896  1.00  0.00            C
+ATOM     39  O   ALA A   8       3.391  -0.667  11.380  1.00  0.00            O
+ATOM     40  CB  ALA A   8       2.691  -0.017   9.610  1.00  0.00            C
+ATOM     41  N   ALA A   9      -0.471   1.785  11.250  1.00  0.00            N
+ATOM     42  CA  ALA A   9       0.399   2.265  12.000  1.00  0.00            C
+ATOM     43  C   ALA A   9       0.953   2.319  12.396  1.00  0.00            C
+ATOM     44  O   ALA A   9       1.629   2.385  12.880  1.00  0.00            O
+ATOM     45  CB  ALA A   9       0.929   3.035  11.110  1.00  0.00            C
+ATOM     46  N   ALA A  10      -3.170  -0.480  12.750  1.00  0.00            N
+ATOM     47  CA  ALA A  10      -2.300   0.000  13.500  1.00  0.00            C
+ATOM     48  C   ALA A  10      -1.746   0.054  13.896  1.00  0.00            C
+ATOM     49  O   ALA A  10      -1.070   0.120  14.380  1.00  0.00            O
+ATOM     50  CB  ALA A  10      -1.770   0.770  12.610  1.00  0.00            C
+ATOM     51  N   ALA A  11      -0.471  -2.745  14.250  1.00  0.00            N
+ATOM     52  CA  ALA A  11       0.399  -2.265  15.000  1.00  0.00            C
+ATOM     53  C   ALA A  11       0.953  -2.211  15.396  1.00  0.00            C
+ATOM     54  O   ALA A  11       1.629  -2.145  15.880  1.00  0.00            O
+ATOM     55  CB  ALA A  11       0.929  -1.495  14.110  1.00  0.00            C
+ATOM     56  N   ALA A  12       1.291   0.307  15.750  1.00  0.00            N
+ATOM     57  CA  ALA A  12       2.161   0.787  16.500  1.00  0.00            C
+ATOM     58  C   ALA A  12       2.715   0.841  16.896  1.00  0.00            C
+ATOM     59  O   ALA A  12       3.391   0.907  17.380  1.00  0.00            O
+ATOM     60  CB  ALA A  12       2.691   1.557  15.610  1.00  0.00            C
+ATOM     61  N   ALA A  13      -2.020   1.512  17.250  1.00  0.00            N
+ATOM     62  CA  ALA A  13      -1.150   1.992  18.000  1.00  0.00            C
+ATOM     63  C   ALA A  13      -0.597   2.046  18.396  1.00  0.00            C
+ATOM     64  O   ALA A  13       0.080   2.112  18.880  1.00  0.00            O
+ATOM     65  CB  ALA A  13      -0.620   2.762  17.110  1.00  0.00            C
+ATOM     66  N   ALA A  14      -2.632  -1.958  18.750  1.00  0.00            N
+ATOM     67  CA  ALA A  14      -1.762  -1.478  19.500  1.00  0.00            C
+ATOM     68  C   ALA A  14      -1.208  -1.424  19.896  1.00  0.00            C
+ATOM     69  O   ALA A  14      -0.532  -1.358  20.380  1.00  0.00            O
+ATOM     70  CB  ALA A  14      -1.232  -0.708  18.610  1.00  0.00            C
+TER
+END
+```
+
+（助手侧：未上传文件时将用户给出的 PDB 全文写入 `pdb_content`，换行用 \\n；已上传时仅用附件列表中的路径写入 `file_path`，路径须来自当前对话。）
+""",
+    },
     {"name": "抗体人源化", "sub_category": "预测与建模", "description": "使用对天然抗体库（Sapiens）或 CDR 移植的深度学习来实现抗体人源化。"},
     {"name": "分析细菌生长曲线", "sub_category": "数据分析", "description": "基于OD600数据拟合细菌生长曲线，提供参数分析、倍增时间和延迟期等结果。"},
     {
         "name": "UniProt数据库查询",
         "sub_category": "信息检索",
         "description": "包含蛋白质序列、功能信息和研究论文索引的蛋白质数据库查询。",
-        "prompt_template": "请帮我检索 UniProt 数据库中关于 EGFR 蛋白的功能注释和亚细胞定位信息。",
+        "prompt_template": "您好。请在 UniProt 数据库中检索 **EGFR** 蛋白条目的功能注释、亚细胞定位及关键结构域信息。",
     },
     {"name": "PubMed数据库查询", "sub_category": "信息检索", "description": "生物医学文献信息检索系统。"},
     {"name": "GWAS catalog 数据库查询", "sub_category": "信息检索", "description": "遗传学研究的重要资源，收录了许多基因组关联数据。"},
     {"name": "dbSNP 数据库查询", "sub_category": "信息检索", "description": "单核苷酸多态性（SNP）数据库，快速检索SNP信息。"},
     {"name": "CRISPR-Cas9 基因编辑工具", "sub_category": "预测与建模", "description": "模拟 CRISPR-Cas9 基因组编辑流程，包含向导RNA验证、目标位点识别等。"},
-    {"name": "合成可行性分析工具", "sub_category": "数据分析", "description": "对输入的候选分子 SDF 文件逐一分子计算合成可行性分数（SA Score）。"},
+    {
+        "name": "合成可行性分析工具",
+        "sub_category": "数据分析",
+        "description": "对输入的候选分子 SMILES 文本计算 RDKit 合成可行性分数（SA Score）。",
+        "prompt_template": """[Skill_Route: sascore_analysis]
+您好。我需要进行小分子**合成可行性（SA Score，Synthetic Accessibility Score）**评估：该指标基于分子图复杂度启发式打分，**数值越低通常表示合成路线越可行**（具体阈值需结合化学类型与文献经验解读）。
+
+**参数与生物学/化学含义**
+- **`smiles_text`**：单条 **SMILES** 字符串，描述待评估化合物的价键与拓扑（不含盐离子时可写主结构）。
+- **`file_path`**：上传的 `.smi` / `.txt` 等文本文件路径（首行或指定行为 SMILES），由会话附件解析得到。
+
+**数据提交方式**
+1. 在消息正文中直接给出 **一行 SMILES**。
+2. 或上传含 SMILES 的文本附件（第一行为分子线型式）。
+
+**参考分子（可选用其一作为基准对比，或替换为您的候选化合物）**
+- 乙酰水杨酸（阿司匹林）：`CC(=O)Oc1ccccc1C(=O)O`
+- 咖啡因：`CN1C=NC2=C1C(=O)N(C(=O)N2C)C`
+- 乙醇：`CCO`
+- 苯乙酸：`O=C(O)Cc1ccccc1`
+- 二甲亚砜：`CS(=O)C`
+
+（助手侧：未上传文件时将用户给出的单行 SMILES 写入 `smiles_text`；已上传时仅用附件列表中的路径写入 `file_path`。）
+""",
+    },
     {"name": "ADMET性质预测工具", "sub_category": "预测与建模", "description": "预测一组化合物的 ADMET 药代动力学属性，包括溶解性、吸收、代谢、毒性等。"},
     {"name": "LigandMPNN", "sub_category": "预测与建模", "description": "深度学习驱动的蛋白质序列设计模型，能够显式考虑小分子、核酸等非蛋白质环境的作用。"},
 ]
 
-# 自动补全通用字段（已配置 prompt_template 的条目保留，其余用占位文案）
+# 自动补全通用字段（已配置 prompt_template 的条目保留，其余使用 PLACEHOLDER_PROMPT）
 for skill in BIOMEDICINE_SKILLS:
     skill["main_category"] = "生物医药"
     if "prompt_template" not in skill:
@@ -283,7 +457,7 @@ ADDITIONAL_BIOMED_SKILLS = [
         "name": "AlphaFold数据库查询",
         "sub_category": "信息检索",
         "description": "查询 AlphaFold 数据库并可选下载结构文件。",
-        "prompt_template": "帮我查询 UniProt ID 为 P04637 (p53) 的蛋白在 AlphaFold 数据库中的 3D 结构预测信息。",
+        "prompt_template": "您好。请查询 UniProt 登录号 **P04637**（p53）在 AlphaFold 结构数据库中的三维预测模型条目、置信度分区及下载方式。",
     },
     {"name": "GEO 数据库查询", "sub_category": "信息检索", "description": "快速检索基因表达数据的重要数据库。"},
     {"name": "ClinVar 数据库查询", "sub_category": "信息检索", "description": "快速检索遗传变异的临床相关信息。"},
@@ -292,7 +466,7 @@ ADDITIONAL_BIOMED_SKILLS = [
         "name": "Reactome 数据库查询",
         "sub_category": "信息检索",
         "description": "经过手动筛选和同行评审的生物分子通路知识数据库。",
-        "prompt_template": "帮我查询细胞凋亡 (Apoptosis) 相关的 Reactome 通路信息。",
+        "prompt_template": "您好。请检索 Reactome 知识库中与**细胞凋亡（Apoptosis）**相关的通路层级、关键分子事件及文献引用入口。",
     },
     {"name": "InterPro 数据库查询", "sub_category": "信息检索", "description": "整合了多个蛋白质家族、结构域和功能位点的数据库系统。"},
     {"name": "获取mRNA序列工具", "sub_category": "信息检索", "description": "根据目标疾病靶点基因名称检索 mRNA 序列，并返回 FASTA 文件。"},
@@ -302,7 +476,41 @@ ADDITIONAL_BIOMED_SKILLS = [
     {"name": "蛋白酶动力学分析工具", "sub_category": "数据分析", "description": "基于荧光读数拟合 Michaelis-Menten 模型分析蛋白酶动力学数据。"},
     {"name": "酶动力学分析工具", "sub_category": "数据分析", "description": "执行酶动力学实验分析，模拟并拟合酶在不同底物浓度下的反应速率。"},
     {"name": "RNA二级结构分析工具", "sub_category": "数据分析", "description": "分析 RNA 的二级结构特征，包括碱基配对、茎区、环区数量与大小。"},
-    {"name": "基因集富集分析工具", "sub_category": "数据分析", "description": "对基因列表执行基因集富集分析。"},
+    {
+        "name": "基因集富集分析工具",
+        "sub_category": "数据分析",
+        "description": "对基因列表执行基因集富集分析。",
+        "prompt_template": """[Skill_Route: gseapy_analysis]
+您好。我将为您启动 **基因集富集分析（GSEApy）** 数据接收与预处理：系统将对您提交的基因列表及可选排序统计量进行格式校验，并作为后续富集检验（如 Over-Representation Analysis 等）的标准输入。
+
+**科学用途**
+- 接收来自差异表达、加权基因共表达或其他排序分析得到的**基因标识符列表**；
+- 可选携带**排序变量**（如 log2 倍数变化、检验统计量等），用于先验排序或加权基因集检验流程。
+
+**列定义与生物学含义**
+- **第一列（gene）**：基因符号或与您所用基因集数据库一致的 ID 类型（如人类蛋白编码基因官方符号）；需与 MSigDB 等选用集合的命名体系匹配。
+- **第二列（score）**：与差异方向或显著性一致的**数值型排序量**；若当前仅有基因列表而无统计量，请按工具文档选用二元指示列或经批准的缺省数值策略（具体以工具参数模式为准）。
+
+**数据提交方式**
+1. **上传 CSV**：表头为 `gene,score`（可扩展列名，以工具契约为准），UTF-8 编码，逗号分隔。
+2. **内联表格**：在消息中直接粘贴与下列结构一致的文本（未上传附件时由助手写入 `table_content`，换行在参数中须为 `\\n`）。
+
+**结构与类型说明用参考表（请将基因与数值替换为您的实验结果）**
+```csv
+gene,score
+TP53,1.2
+MYC,-0.8
+EGFR,0.5
+KRAS,0.3
+BRCA1,1.0
+STAT3,0.9
+```
+
+请在消息中补充**物种**、**ID 类型**（如 Homo sapiens / gene symbol），以便与基因集数据库正确映射。
+
+（助手侧：未上传文件时将上表全文写入 `table_content`，换行用 \\n；已上传时仅用附件列表中的路径写入 `file_path`。）
+""",
+    },
     {"name": "免疫细胞分离与纯化", "sub_category": "临床应用", "description": "模拟免疫细胞的分离与纯化流程。"},
     {"name": "估计细胞周期各阶段持续时间", "sub_category": "数据分析", "description": "基于双核苷脉冲标记的流式细胞术数据，估算细胞周期各阶段时长。"},
     {"name": "查询GSEA支持的数据库工具", "sub_category": "信息检索", "description": "返回 gene set enrichment analysis 支持的数据库名称列表。"},
@@ -312,7 +520,7 @@ for skill in ADDITIONAL_BIOMED_SKILLS:
     if "prompt_template" not in skill:
         skill["prompt_template"] = PLACEHOLDER_PROMPT
 
-# 化学大类技能 (UI 占位，可后续扩充；先有基础列表，再追加海量资产)
+# 化学大类技能列表（默认 prompt 使用 PLACEHOLDER_PROMPT，可按工具落地情况逐项替换为完整模板）
 CHEMISTRY_SKILLS = []
 
 ADDITIONAL_CHEMISTRY_SKILLS = [

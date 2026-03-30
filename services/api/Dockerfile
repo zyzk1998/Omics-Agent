@@ -45,10 +45,23 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip && \
     pip install -r requirements.txt
 
+# BepiPred-3.0 独立 venv（必须放在 /opt，避免 compose 挂载 .:/app 覆盖 /app 下 .venv）
+# 默认 CPU 版 torch；GPU 构建示例：--build-arg BEPIPRED_TORCH_INDEX=https://download.pytorch.org/whl/cu121
+ARG BEPIPRED_TORCH_INDEX=https://download.pytorch.org/whl/cpu
+COPY third_party/BepiPred-3.0/requirements.txt /opt/bepipred3/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m venv /opt/bepipred3-venv && \
+    /opt/bepipred3-venv/bin/pip install --upgrade pip && \
+    /opt/bepipred3-venv/bin/pip install torch torchvision --index-url "${BEPIPRED_TORCH_INDEX}" && \
+    /opt/bepipred3-venv/bin/pip install -r /opt/bepipred3/requirements.txt
+
+ENV BEPIPRED3_PYTHON=/opt/bepipred3-venv/bin/python
+
 # 最后复制项目代码（代码变化时只需要重新构建这一层）
 # 使用 .dockerignore 排除大文件，只复制必要的代码
 COPY gibh_agent/ /app/gibh_agent/
 COPY server.py /app/
+COPY scripts/docker_api_entrypoint.sh /entrypoint.sh
 
 # 🔒 安全：创建非 root 用户（带 home 目录）
 # 注意：UID 1000 应该与主机用户匹配，以便挂载目录有正确的权限
@@ -57,25 +70,10 @@ RUN groupadd -r appuser && \
 
 # 创建必要的目录并设置权限
 RUN mkdir -p /app/uploads /app/results /app/data /home/appuser/.cache /home/appuser/.config && \
-    chown -R appuser:appuser /app /home/appuser
+    chown -R appuser:appuser /app /home/appuser /opt/bepipred3-venv
 
-# 🔧 修复：创建一个启动脚本，在运行时修复挂载目录的权限
-# 注意：这个脚本需要以 root 运行来修复权限，然后使用 gosu 切换到 appuser
-RUN echo '#!/bin/sh\n\
-set -e\n\
-# 修复挂载目录的权限（如果挂载的目录权限不正确）\n\
-if [ -d /app/uploads ]; then\n\
-    chown -R appuser:appuser /app/uploads 2>/dev/null || true\n\
-fi\n\
-if [ -d /app/results ]; then\n\
-    chown -R appuser:appuser /app/results 2>/dev/null || true\n\
-fi\n\
-if [ -d /app/data ]; then\n\
-    chown -R appuser:appuser /app/data 2>/dev/null || true\n\
-fi\n\
-# 切换到 appuser 并执行原始命令\n\
-exec gosu appuser "$@"' > /entrypoint.sh && \
-    chmod +x /entrypoint.sh
+# 入口脚本：权限修复 +（可选）运行时补齐 BepiPred venv
+RUN chmod +x /entrypoint.sh
 
 # 设置环境变量（解决 Numba 和 Matplotlib 权限问题）
 ENV NUMBA_CACHE_DIR=/home/appuser/.cache/numba

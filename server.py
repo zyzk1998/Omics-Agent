@@ -2031,8 +2031,11 @@ async def upload_file(
         
         # Universal Ingestion: unpack archives (zip/tar.gz) and get effective root
         effective_root = None
+        replaced_archive_paths: List[Path] = []
         try:
-            unpacked, effective_root = universal_unpack(Path(user_dir), remove_archive=False)
+            unpacked, effective_root, replaced_archive_paths = universal_unpack(
+                Path(user_dir), remove_archive=False
+            )
             if unpacked and effective_root is not None:
                 # Visium 分体上传：.h5 在 user_dir，spatial 在 effective_root；复制 .h5 进 effective_root 以便识别为 Spatial
                 effective_path = Path(effective_root)
@@ -2066,7 +2069,7 @@ async def upload_file(
                             logger.warning("⚠️ Spatial 目录规范化失败: %s", e)
                     inner_paths = paths_for_response(modality, payload, UPLOAD_DIR)
                     if inner_paths:
-                        # 🔥 多文件修复：用解压后的路径列表覆盖，但必须包含解压目录本身（避免只返回子路径丢失根目录）
+                        # 🔥 合并而非覆盖：保留同批上传的独立文件（如 Visium 的 .h5），再追加嗅探/解压得到的路径
                         unpack_entries = []
                         for p in inner_paths:
                             try:
@@ -2081,20 +2084,35 @@ async def upload_file(
                                 "metadata": None,
                                 "is_10x": False,
                             })
-                        uploaded_results = unpack_entries
-                        # 确保解压目录路径在返回列表中（空间组学等依赖目录路径）
+                        merged = list(uploaded_results)
+                        seen_norm = {
+                            _ensure_absolute_upload_path(r.get("file_path") or "").rstrip("/")
+                            for r in merged
+                            if r.get("file_path")
+                        }
+                        for ent in unpack_entries:
+                            rawp = ent.get("file_path") or ""
+                            ap = _ensure_absolute_upload_path(rawp).rstrip("/") if rawp else ""
+                            if ap and ap not in seen_norm:
+                                seen_norm.add(ap)
+                                merged.append(ent)
                         effective_path = Path(effective_root)
-                        abs_eff = str(effective_path.resolve())
-                        if not any((r.get("file_path") or "").rstrip("/") == abs_eff.rstrip("/") for r in uploaded_results):
-                            uploaded_results.append({
+                        abs_eff = str(effective_path.resolve()).rstrip("/")
+                        if abs_eff and abs_eff not in seen_norm:
+                            merged.append({
                                 "file_id": effective_path.name,
                                 "file_name": effective_path.name,
-                                "file_path": abs_eff,
+                                "file_path": str(effective_path.resolve()),
                                 "file_size": 0,
                                 "metadata": None,
                                 "is_10x": False,
                             })
-                        logger.info("✅ [UniversalIngestion] 路径已重写为解压内容: %s", [str(p.relative_to(UPLOAD_DIR)) for p in inner_paths])
+                            seen_norm.add(abs_eff)
+                        uploaded_results = merged
+                        logger.info(
+                            "✅ [UniversalIngestion] 已合并解压/嗅探路径与原始上传项，共 %s 条",
+                            len(uploaded_results),
+                        )
                 elif modality == "unknown" and effective_root is not None:
                     # 🔥 多文件修复：解压目录追加到列表，不覆盖（保留已上传的 .h5 等，避免多文件变单文件）
                     effective_path = Path(effective_root)
@@ -2115,6 +2133,55 @@ async def upload_file(
                     logger.info("✅ [UniversalIngestion] 已追加解压目录到返回列表（供下游使用）: %s", rel)
         except Exception as e:
             logger.warning("⚠️ Universal unpack / Modality Sniffer 失败（不影响上传）: %s", e)
+
+        # 若已解压但列表里尚未包含解压目录（例如 modality 已识别而 paths_for_response 为空），补一条以免后续剔除归档后无有效路径
+        if replaced_archive_paths and effective_root is not None:
+            eff_p = Path(effective_root).resolve()
+            abs_eff = str(eff_p)
+
+            def _upload_results_contain_path(rows: List[Dict[str, Any]], target_abs: str) -> bool:
+                for r in rows:
+                    fp = r.get("file_path") or ""
+                    if not fp:
+                        continue
+                    try:
+                        if str(Path(_ensure_absolute_upload_path(fp)).resolve()) == target_abs:
+                            return True
+                    except Exception:
+                        continue
+                return False
+
+            if not _upload_results_contain_path(uploaded_results, abs_eff):
+                uploaded_results.append({
+                    "file_id": eff_p.name,
+                    "file_name": eff_p.name,
+                    "file_path": abs_eff,
+                    "file_size": 0,
+                    "metadata": None,
+                    "is_10x": False,
+                })
+                logger.info("✅ [UniversalIngestion] 已补充解压目录到上传结果（paths_for_response 未返回子路径时）: %s", abs_eff)
+
+        # 归档替换：成功解压后从返回列表剔除原始压缩包路径，避免前端/上下文出现「幽灵资产」
+        if replaced_archive_paths:
+            rep_norm = {str(p.resolve()) for p in replaced_archive_paths}
+
+            def _upload_row_resolved(row: Dict[str, Any]) -> str:
+                fp = row.get("file_path") or ""
+                if not fp:
+                    return ""
+                try:
+                    return str(Path(_ensure_absolute_upload_path(fp)).resolve())
+                except Exception:
+                    return str(Path(_ensure_absolute_upload_path(fp)))
+
+            before_n = len(uploaded_results)
+            uploaded_results = [r for r in uploaded_results if _upload_row_resolved(r) not in rep_norm]
+            if len(uploaded_results) != before_n:
+                logger.info(
+                    "✅ [UniversalIngestion] 已从上传结果剔除已解压归档 %s 条（幽灵资产）",
+                    before_n - len(uploaded_results),
+                )
         
         # SpatialStructureNormalizer: reorganize loose spatial.tar.gz + .h5 into Visium layout (spatial/ + matrix)
         try:

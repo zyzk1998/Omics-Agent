@@ -138,7 +138,7 @@ def normalize_session_directory(
     session_dir: Path,
     remove_archive: bool = False,
     max_nested: int = 1,
-) -> Tuple[bool, Optional[Path]]:
+) -> Tuple[bool, Optional[Path], List[Path]]:
     """
     Universal unpack: find archives in session_dir, extract, flatten, and optionally recurse.
 
@@ -149,22 +149,27 @@ def normalize_session_directory(
     4. Optionally remove the original archive.
 
     Returns:
-        (changed, effective_root): changed=True if any extraction was done;
+        (changed, effective_root, replaced_archives): changed=True if any extraction was done;
         effective_root = path to the directory that contains the actual data (session_dir
         or session_dir/extracted_content/<stem>), or None if nothing was unpacked.
+        replaced_archives = resolved paths of archive files that were successfully unpacked
+        (caller should drop these from file_paths / UI so the archive is not a "ghost asset").
     """
     if not session_dir.is_dir():
-        return (False, None)
+        return (False, None, [])
     session_dir = session_dir.resolve()
     archives = [p for p in session_dir.iterdir() if p.is_file() and _is_archive(p)]
     if not archives:
-        return (False, None)
+        return (False, None, [])
+
+    replaced_archives: List[Path] = []
 
     # Use first archive (e.g. single zip upload)
     archive_path = archives[0]
     effective_root = _unpack_one(archive_path, session_dir, remove_archive)
     if not effective_root:
-        return (False, None)
+        return (False, None, [])
+    replaced_archives.append(archive_path.resolve())
 
     # Optional: handle nested archives inside effective_root (one level)
     if max_nested > 0:
@@ -172,7 +177,8 @@ def normalize_session_directory(
         if nested:
             sub_root = _unpack_one(nested[0], effective_root, remove_archive=False)
             if sub_root:
+                replaced_archives.append(nested[0].resolve())
                 effective_root = sub_root
 
     logger.info("UniversalNormalizer: unpacked %s -> %s", archive_path.name, effective_root)
-    return (True, effective_root)
+    return (True, effective_root, replaced_archives)

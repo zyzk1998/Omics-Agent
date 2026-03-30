@@ -1303,20 +1303,25 @@ File Uploaded: {has_file} ({'True' if has_file else 'False'})
 **File Metadata (if available):**
 {json.dumps(file_metadata, ensure_ascii=False, indent=2) if file_metadata else "No file metadata available"}
 
+**Upload asset sniffing summary (path-based, must respect):**
+{(file_metadata or {}).get("routing_asset_digest") if isinstance(file_metadata, dict) else "N/A"}
+
 **CRITICAL ROUTING RULES (User Intent + File Format):**
 1. **Visium/Spatial files** (file_type="visium" or domain="Spatial") MUST route to "Spatial" domain.
 2. **Medical imaging / Radiomics files** (file_type="medical_image" or domain="Radiomics" or extension .nii/.nii.gz/.dcm) MUST route to "Radiomics" domain.
 3. **FASTQ files** (file_type="fastq" or extension=".fastq"/".fq") MUST route to "RNA" domain, regardless of query.
 4. **H5AD/10x files** (file_type="h5ad" or "10x_mtx"): If visium/Spatial → "Spatial". Else if user asks spatiotemporal dynamics / 时空动力学 → "SPATIOTEMPORAL_DYNAMICS". Else if trajectory / moscot / optimal transport (without B-channel wording) → "STED_EC". Else → "RNA".
 5. **CSV/Tabular files** (file_type="tabular" or extension=".csv") MUST route to "Metabolomics" domain, unless user explicitly mentions RNA.
-6. **User Query Keywords:**
+6. **Upload asset sniffing (authoritative extension labels in metadata):** If `routing_asset_types` or `routing_asset_inventory` lists **protein_structure** (e.g. .pdb/.cif) or **protein_fasta**, you MUST **NOT** choose "RNA", "Spatial", "Radiomics", "STED_EC", or "SPATIOTEMPORAL_DYNAMICS" unless the user query **explicitly** names that modality (e.g. "单细胞", "空间转录组", "影像组学"). Prefer **Metabolomics** only as a last-resort placeholder when forced to pick among the six domains and no other rule applies; the global router may already have sent such sessions to Chat for skill tools (PyMOL, etc.).
+7. **document** / **plain_text** / **generic_unknown** assets: Do **not** assume scRNA-seq or radiomics; follow user wording. If the query is vague and assets are only these types, prefer **Metabolomics** only when the user clearly wants table-like analysis; otherwise prefer the least specific domain consistent with the query.
+8. **User Query Keywords:**
    - If query contains Spatial keywords (visium, spatial, slice, spot, moran): Prefer "Spatial" domain
    - If query contains Radiomics keywords (CT scan, MRI, radiomics, texture, nifti, dicom): Prefer "Radiomics" domain
    - If query contains RNA keywords ({', '.join(rna_keywords[:5])}): Prefer "RNA" domain
    - If query contains Metabolomics keywords ({', '.join(metabolomics_keywords[:3])}): Prefer "Metabolomics" domain
    - If query contains spatiotemporal dynamics / 时空动力学 keywords: Prefer "SPATIOTEMPORAL_DYNAMICS" over STED_EC and RNA when file is h5ad
    - If query contains trajectory / moscot / optimal transport: Prefer "STED_EC" when file is h5ad (unless B-channel wording above wins)
-7. **Priority Order:** File format (visium→Spatial, medical_image→Radiomics) > User query keywords > LLM inference
+9. **Priority Order:** File format (visium→Spatial, medical_image→Radiomics) > **routing_asset_types / routing_asset_inventory** > User query keywords > LLM inference
 
 **Task:**
 Classify the intent and return JSON only. Remember:

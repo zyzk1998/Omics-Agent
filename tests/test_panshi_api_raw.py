@@ -1,5 +1,5 @@
 """
-磐石 BepiPred3 API 纯净探针：脱离智能体，直接 POST 并打印原始 JSON。
+BepiPred3 远程 API 纯净探针：脱离智能体，直接 POST 并打印原始 JSON。
 运行: python tests/test_panshi_api_raw.py
 """
 import json
@@ -16,7 +16,7 @@ payload = {
 }
 
 if __name__ == "__main__":
-    print("🚀 正在向磐石 API 发送请求，请耐心等待...")
+    print("🚀 正在向远程预测 API 发送请求，请耐心等待...")
     try:
         response = requests.post(API_URL, json=payload, timeout=300)
         print(f"✅ HTTP 状态码: {response.status_code}")

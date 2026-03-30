@@ -4,6 +4,7 @@
 支持从 .tar.gz / .tgz 中解压并加载 10x 数据。
 """
 import os
+import inspect
 import logging
 import tarfile
 import zipfile
@@ -12,6 +13,18 @@ from pathlib import Path
 from typing import Optional, Tuple, Any
 
 logger = logging.getLogger(__name__)
+
+
+def _read_10x_mtx_compat(sc: Any, data_path_str: str, **kwargs: Any) -> Any:
+    """
+    scanpy 版本差异：新版 read_10x_mtx 可能已移除 compressed 等形参。
+    仅传入当前版本函数签名支持的关键字，避免 unexpected keyword。
+    """
+    fn = sc.read_10x_mtx
+    sig = inspect.signature(fn)
+    allowed = set(sig.parameters.keys())
+    filtered = {k: v for k, v in kwargs.items() if k in allowed}
+    return fn(data_path_str, **filtered)
 
 
 def _find_10x_root(root_path: Path) -> Optional[Path]:
@@ -165,13 +178,14 @@ def read_10x_data(
     is_compressed = any(f.endswith('.gz') for f in dir_contents if 'matrix.mtx' in f)
     logger.info(f"📦 检测到10x文件格式: {'压缩' if is_compressed else '未压缩'}")
     
-    # 策略1: 使用 scanpy 的标准方法，根据文件格式设置 compressed 参数
+    # 策略1: 使用 scanpy 的标准方法，根据文件格式设置 compressed 参数（兼容无 compressed 的新版 API）
     try:
-        adata = sc.read_10x_mtx(
+        adata = _read_10x_mtx_compat(
+            sc,
             str(data_path),
             var_names=var_names,
             cache=cache,
-            compressed=is_compressed
+            compressed=is_compressed,
         )
         adata.var_names_make_unique()
         logger.info(f"✅ 成功使用 sc.read_10x_mtx (compressed={is_compressed}): {adata.n_obs} cells, {adata.n_vars} genes")
@@ -182,11 +196,12 @@ def read_10x_data(
     
     # 策略2: 尝试相反的压缩设置
     try:
-        adata = sc.read_10x_mtx(
+        adata = _read_10x_mtx_compat(
+            sc,
             str(data_path),
             var_names=var_names,
             cache=cache,
-            compressed=not is_compressed
+            compressed=not is_compressed,
         )
         adata.var_names_make_unique()
         logger.info(f"✅ 成功使用相反的压缩设置 (compressed={not is_compressed}): {adata.n_obs} cells, {adata.n_vars} genes")
@@ -197,10 +212,11 @@ def read_10x_data(
     
     # 策略3: 尝试不使用 var_names 参数
     try:
-        adata = sc.read_10x_mtx(
+        adata = _read_10x_mtx_compat(
+            sc,
             str(data_path),
             cache=cache,
-            compressed=is_compressed
+            compressed=is_compressed,
         )
         adata.var_names_make_unique()
         logger.info(f"✅ 成功不使用 var_names (compressed={is_compressed}): {adata.n_obs} cells, {adata.n_vars} genes")

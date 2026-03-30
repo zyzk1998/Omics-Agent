@@ -142,7 +142,7 @@
                 </div>
             </div>
 
-            <!-- 文件管理页（上下排版 + 磐石渐变 Banner） -->
+            <!-- 文件管理页（上下排版 + 顶部渐变 Banner） -->
             <div id="file-management-pane" style="display: none; flex: 1;">
                 <div class="file-mgr-banner file-management-banner">
                     <h1 class="file-management-title">文件管理</h1>
@@ -1074,6 +1074,229 @@
                 var el = document.getElementById('workspace-task-title');
                 if (el) el.textContent = title || '分析报告';
             }
+            function _skillWsEscapeHtml(text) {
+                if (text == null) return '';
+                var div = document.createElement('div');
+                div.textContent = String(text);
+                return div.innerHTML;
+            }
+            function skillPickUrl(result, key) {
+                if (!result || typeof result !== 'object') return '';
+                var v = result[key];
+                if (typeof v === 'string' && v.trim()) return v.trim();
+                var d = result.data;
+                if (d && typeof d === 'object' && !Array.isArray(d) && typeof d[key] === 'string' && d[key].trim())
+                    return d[key].trim();
+                return '';
+            }
+            function skillWorkspaceSafeHref(url) {
+                var u = String(url || '').trim();
+                if (!u) return '';
+                if (/^https?:\/\//i.test(u) || u.startsWith('/') || u.startsWith('./')) return u;
+                return '';
+            }
+            /** 同源下将 /uploads/... 转为绝对 URL，避免部分反代/子路径下 img 加载空白 */
+            function skillWorkspaceAbsoluteMediaUrl(url) {
+                var h = skillWorkspaceSafeHref(url);
+                if (!h || h.startsWith('//')) return h;
+                if (h.startsWith('/') && typeof window !== 'undefined' && window.location && window.location.origin) {
+                    return window.location.origin + h;
+                }
+                return h;
+            }
+            /** 工具结果单元格：嵌套对象/数组一律 JSON，禁止 [object Object] */
+            function skillFormatDataValue(v) {
+                if (v === null || v === undefined) return '—';
+                if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+                if (typeof v === 'string') return v.length > 8000 ? v.slice(0, 8000) + '…' : v;
+                try {
+                    return JSON.stringify(v, null, 2);
+                } catch (e) {
+                    return '[不可序列化] ' + (e && e.message ? String(e.message) : String(e));
+                }
+            }
+            function isSkillToolResultRenderable(tr) {
+                return tr && typeof tr === 'object' && !Array.isArray(tr) && tr.status === 'success';
+            }
+            /**
+             * 技能快车道 · 多模态万能渲染（仅写入 #skill-tool-workspace-root，与组学 .unified-report-container 隔离）
+             * 优先级：markdown → html/pdf iframe → 图片 → data 看板；底部 CSV/ZIP/打印
+             */
+            function renderSkillToolWorkspace(toolName, toolResult) {
+                if (!isSkillToolResultRenderable(toolResult)) return;
+                var wp = document.getElementById('workspace-pane');
+                var btnExpand = document.getElementById('btn-expand-workspace');
+                if (wp) {
+                    wp.classList.add('workspace-active');
+                    if (btnExpand) btnExpand.textContent = '收起工作台';
+                }
+                if (typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
+                var ph = document.getElementById('workspace-placeholder');
+                if (ph) ph.style.display = 'none';
+                var workspaceRoot = document.getElementById('active-workspace-content');
+                if (!workspaceRoot) return;
+
+                var skillRoot = document.getElementById('skill-tool-workspace-root');
+                if (!skillRoot) {
+                    skillRoot = document.createElement('div');
+                    skillRoot.id = 'skill-tool-workspace-root';
+                    skillRoot.className = 'skill-workspace-root';
+                    workspaceRoot.insertBefore(skillRoot, workspaceRoot.firstChild);
+                }
+
+                function pick(key) { return skillPickUrl(toolResult, key); }
+                var csvUrl = pick('csv_url');
+                var zipUrl = pick('zip_url');
+
+                function linkBtn(label, url) {
+                    if (!url) return '';
+                    var href = skillWorkspaceSafeHref(url);
+                    if (!href) return '';
+                    return '<a class="skill-ws-btn skill-mm-footer__btn" href="' + _skillWsEscapeHtml(href) + '" target="_blank" rel="noopener noreferrer">' + _skillWsEscapeHtml(label) + '</a>';
+                }
+                var footerActions = '';
+                footerActions += linkBtn('下载 CSV', csvUrl);
+                footerActions += linkBtn('下载 ZIP', zipUrl);
+                footerActions += '<button type="button" class="skill-ws-btn skill-ws-btn--ghost skill-mm-footer__btn" id="skill-ws-print-btn">打印报告</button>';
+
+                var parts = [];
+
+                var mdRaw = toolResult.markdown;
+                if (typeof mdRaw === 'string' && mdRaw.trim()) {
+                    var mdHtml = '';
+                    try {
+                        mdHtml = (typeof safeMarkedParse === 'function') ? safeMarkedParse(mdRaw) : ((typeof marked !== 'undefined' && marked.parse) ? marked.parse(String(mdRaw)) : _skillWsEscapeHtml(mdRaw));
+                    } catch (e) {
+                        mdHtml = '<p class="skill-ws-empty">' + _skillWsEscapeHtml(String(e && e.message ? e.message : e)) + '</p>';
+                    }
+                    parts.push('<div class="skill-mm-block skill-mm-markdown markdown-body">' + mdHtml + '</div>');
+                }
+
+                var htmlUrl = pick('html_url');
+                var pdfUrl = pick('pdf_url');
+                var frameSrc = '';
+                if (htmlUrl) frameSrc = skillWorkspaceSafeHref(htmlUrl);
+                else if (pdfUrl) frameSrc = skillWorkspaceSafeHref(pdfUrl);
+                if (frameSrc) {
+                    var frameTitle = htmlUrl ? '交互式 HTML 报告' : 'PDF 文档';
+                    parts.push(
+                        '<div class="skill-mm-block skill-mm-iframe-wrap">' +
+                        '<iframe class="skill-mm-iframe" title="' + _skillWsEscapeHtml(frameTitle) + '" src="' + _skillWsEscapeHtml(frameSrc) + '" sandbox="allow-scripts allow-same-origin allow-popups allow-downloads allow-forms"></iframe>' +
+                        '</div>'
+                    );
+                }
+
+                var imgUrls = [];
+                var singleImg = pick('image_url');
+                if (singleImg) imgUrls.push(singleImg);
+                var ius = toolResult.image_urls;
+                if (Array.isArray(ius)) {
+                    ius.forEach(function(u) {
+                        if (typeof u === 'string' && u.trim()) imgUrls.push(u.trim());
+                    });
+                }
+                var seenImg = {};
+                var imgUnique = [];
+                imgUrls.forEach(function(u) {
+                    var h = skillWorkspaceAbsoluteMediaUrl(u);
+                    if (h && !seenImg[h]) { seenImg[h] = 1; imgUnique.push(h); }
+                });
+                if (imgUnique.length > 0) {
+                    var imgsHtml = imgUnique.map(function(src, idx) {
+                        return (
+                            '<div class="skill-mm-figure-wrap" data-skill-zoom-root="1">' +
+                            '<div class="skill-mm-zoombar" role="toolbar" aria-label="图片缩放">' +
+                            '<button type="button" class="skill-mm-zoombtn" data-zoom="in" title="放大" aria-label="放大"><i class="bi bi-zoom-in"></i></button>' +
+                            '<button type="button" class="skill-mm-zoombtn" data-zoom="out" title="缩小" aria-label="缩小"><i class="bi bi-zoom-out"></i></button>' +
+                            '<button type="button" class="skill-mm-zoombtn skill-mm-zoombtn--reset" data-zoom="reset" title="重置缩放" aria-label="重置缩放"><span class="skill-mm-zoompct">100%</span></button>' +
+                            '</div>' +
+                            '<div class="skill-mm-img-viewport">' +
+                            '<figure class="skill-mm-figure">' +
+                            '<img class="skill-mm-img" data-src-fallback="' + _skillWsEscapeHtml(src) + '" src="' + _skillWsEscapeHtml(src) + '" alt="结果图 ' + (idx + 1) + '" loading="lazy" />' +
+                            '<p class="skill-mm-img-error" style="display:none;color:#b91c1c;font-size:13px;">图片加载失败，请在新标签页打开：<a href="' + _skillWsEscapeHtml(src) + '" target="_blank" rel="noopener">原始链接</a></p>' +
+                            '</figure></div></div>'
+                        );
+                    }).join('');
+                    parts.push('<div class="skill-mm-block skill-mm-gallery">' + imgsHtml + '</div>');
+                } else if (toolName && String(toolName).indexOf('pymol') !== -1) {
+                    parts.push('<div class="skill-mm-block skill-ws-empty" style="padding:16px;">未返回可展示的 <code>image_url</code>（或链接无效）。请确认 PySkills Worker 已成功渲染并写入 <code>/uploads/results/pyskills/</code>，且网关将 <code>/uploads/</code> 暴露到与页面同源。</div>');
+                }
+
+                var dataBlock = toolResult.data;
+                var gridSkip = {
+                    status: 1, message: 1, markdown: 1, data: 1,
+                    html_url: 1, csv_url: 1, zip_url: 1, json_url: 1, pdf_url: 1,
+                    image_url: 1, image_urls: 1
+                };
+                if (dataBlock && typeof dataBlock === 'object' && !Array.isArray(dataBlock) && Object.keys(dataBlock).length > 0) {
+                    var cardsHtml = '';
+                    Object.keys(dataBlock).forEach(function(k) {
+                        if (gridSkip[k]) return;
+                        var val = dataBlock[k];
+                        var display = _skillWsEscapeHtml(skillFormatDataValue(val));
+                        cardsHtml += '<div class="skill-mm-metric"><span class="skill-mm-metric__label">' + _skillWsEscapeHtml(k) + '</span><span class="skill-mm-metric__value">' + display + '</span></div>';
+                    });
+                    if (cardsHtml) {
+                        parts.push('<div class="skill-mm-block"><div class="skill-mm-data-grid">' + cardsHtml + '</div></div>');
+                    }
+                }
+
+                if (parts.length === 0) {
+                    parts.push('<p class="skill-ws-empty skill-mm-block">本次结果未包含 markdown、可嵌入文档、图片或 data 指标字段；可使用底部链接下载制品（如有）。</p>');
+                }
+
+                var msg = toolResult.message && String(toolResult.message).trim();
+                var sub = msg ? '<p class="skill-ws-subtitle">' + _skillWsEscapeHtml(msg) + '</p>' : '';
+                var title = toolName ? ('技能报告 · ' + _skillWsEscapeHtml(String(toolName))) : '技能报告';
+
+                skillRoot.innerHTML =
+                    '<section class="skill-workspace-panel skill-mm-engine" aria-label="技能工具结果">' +
+                    '<header class="skill-ws-header"><h4 class="skill-ws-title">' + title + '</h4>' + sub + '</header>' +
+                    '<div class="skill-ws-body skill-mm-body">' + parts.join('') + '</div>' +
+                    '<footer class="skill-mm-footer">' +
+                    '<div class="skill-mm-divider" role="separator"></div>' +
+                    '<div class="skill-mm-footer-actions">' + footerActions + '</div>' +
+                    '</footer>' +
+                    '</section>';
+
+                skillRoot.querySelectorAll('.skill-mm-img').forEach(function (img) {
+                    img.addEventListener('error', function () {
+                        img.style.display = 'none';
+                        var err = img.nextElementSibling;
+                        if (err && err.classList && err.classList.contains('skill-mm-img-error')) err.style.display = 'block';
+                    });
+                });
+
+                skillRoot.querySelectorAll('[data-skill-zoom-root]').forEach(function (wrap) {
+                    var vp = wrap.querySelector('.skill-mm-img-viewport');
+                    var img = wrap.querySelector('.skill-mm-img');
+                    var pctEl = wrap.querySelector('.skill-mm-zoompct');
+                    if (!vp || !img) return;
+                    var scale = 1;
+                    function applyScale() {
+                        img.style.transform = 'scale(' + scale + ')';
+                        img.style.transformOrigin = 'center center';
+                        if (pctEl) pctEl.textContent = Math.round(scale * 100) + '%';
+                    }
+                    wrap.querySelectorAll('.skill-mm-zoombtn').forEach(function (btn) {
+                        btn.addEventListener('click', function () {
+                            var z = btn.getAttribute('data-zoom');
+                            if (z === 'in') scale = Math.min(3, Math.round((scale + 0.2) * 100) / 100);
+                            else if (z === 'out') scale = Math.max(0.4, Math.round((scale - 0.2) * 100) / 100);
+                            else scale = 1;
+                            applyScale();
+                        });
+                    });
+                    applyScale();
+                });
+
+                var printBtn = skillRoot.querySelector('#skill-ws-print-btn');
+                if (printBtn) {
+                    printBtn.addEventListener('click', function() { window.print(); });
+                }
+            }
+            window.renderSkillToolWorkspace = renderSkillToolWorkspace;
+
             function clearChatAndReset() {
                 if (typeof switchToChatView === 'function') switchToChatView();
                 if (currentAbortController) {
@@ -1115,6 +1338,8 @@
                 if (wp) wp.classList.remove('workspace-active');
                 if (titleEl) titleEl.textContent = '新会话';
                 if (workspaceContent) workspaceContent.innerHTML = '';
+                var wsPhReset = document.getElementById('workspace-placeholder');
+                if (wsPhReset) wsPhReset.style.display = '';
                 chatHistory = [];
                 currentSessionId = null;  // Phase 5: 新建会话时清空
                 setActiveSessionInSidebar(null);
@@ -2315,12 +2540,24 @@
             // 🔥 时光机：根据 process_log 还原执行记录，与直播 addProcessStep 的 CSS/图标 100% 一致
             function renderProcessLogToLogZone(logZone, processLog) {
                 if (!logZone || !processLog || !Array.isArray(processLog) || processLog.length === 0) return;
+                var filtered = processLog.filter(function(entry) {
+                    var c = (entry && entry.content != null) ? String(entry.content) : '';
+                    return c.trim() === '' || c.indexOf('[AgenticLog] ') !== 0;
+                });
+                var skipped = processLog.length - filtered.length;
+                if (skipped > 0) {
+                    filtered.push({
+                        content: '技能执行：已省略 ' + skipped + ' 条内部步骤日志（[AgenticLog]），避免刷屏',
+                        state: 'completed'
+                    });
+                }
+                if (filtered.length === 0) return;
                 var container = document.createElement('div');
                 container.className = 'process-log-container';
-                container.innerHTML = '<div class="process-header" onclick="this.classList.toggle(\'collapsed\'); this.nextElementSibling.classList.toggle(\'collapsed\');"><span>⚡ 执行记录 (' + processLog.length + ')</span><span class="look-right-hint">  <span class="arrow-bounce">➔</span></span><span class="icon">▼</span></div><div class="process-steps checklist-container"></div>';
+                container.innerHTML = '<div class="process-header" onclick="this.classList.toggle(\'collapsed\'); this.nextElementSibling.classList.toggle(\'collapsed\');"><span>⚡ 执行记录 (' + filtered.length + ')</span><span class="look-right-hint">  <span class="arrow-bounce">➔</span></span><span class="icon">▼</span></div><div class="process-steps checklist-container"></div>';
                 var list = container.querySelector('.process-steps');
                 if (!list) return;
-                processLog.forEach(function(entry) {
+                filtered.forEach(function(entry) {
                     var state = (entry.state || 'running') + '';
                     var content = entry.content || '';
                     var stepIconChar = '○', stepIconClass = 'icon-pending';
@@ -2413,6 +2650,11 @@
                         window.workflowCache = window.workflowCache || {};
                         window.workflowCache[histFormId] = { workflowData: snap.workflow, originalQuery: '' };
                     }
+                }
+                if (snap.skill_last_tool && snap.skill_last_tool.tool_result && snap.skill_last_tool.tool_result.status === 'success' && typeof renderSkillToolWorkspace === 'function') {
+                    try {
+                        renderSkillToolWorkspace(snap.skill_last_tool.tool_name, snap.skill_last_tool.tool_result);
+                    } catch (e) { console.warn('[history] skill_last_tool', e); }
                 }
 
                 if (prevZones !== undefined) window.currentMessageZones = prevZones;
@@ -3735,6 +3977,218 @@
                             window.currentMessageZones = null;
                         }
 
+                        /**
+                         * Agentic 终端式思维树：[AgenticLog] JSON 渲染（仅操作 DOM API，delta 用 textContent / createTextNode）
+                         */
+                        function handleAgenticLog(payload) {
+                            if (!payload || typeof payload !== 'object') return;
+                            var action = payload.action;
+                            var stepId = payload.step_id != null ? String(payload.step_id) : '';
+
+                            /** 与灰色执行记录卡片融合：始终挂到当前文档中最后一个 .process-steps（即本轮 SSE 容器） */
+                            function resolveProcessStepsMount() {
+                                var nodes = document.querySelectorAll('.process-steps');
+                                if (!nodes.length) return null;
+                                return nodes[nodes.length - 1];
+                            }
+
+                            function findStepEl() {
+                                if (!stepId) return null;
+                                if (typeof CSS !== 'undefined' && CSS.escape) {
+                                    return document.querySelector('[data-agentic-step-id="' + CSS.escape(stepId) + '"]');
+                                }
+                                return document.querySelector('[data-agentic-step-id="' + stepId.replace(/"/g, '\\"') + '"]');
+                            }
+
+                            function findSubstepEl(stepEl, subId) {
+                                if (!stepEl || subId == null || subId === '') return null;
+                                var sid = String(subId);
+                                if (typeof CSS !== 'undefined' && CSS.escape) {
+                                    return stepEl.querySelector('[data-agentic-substep-id="' + CSS.escape(sid) + '"]');
+                                }
+                                return stepEl.querySelector('[data-agentic-substep-id="' + sid.replace(/"/g, '\\"') + '"]');
+                            }
+
+                            /** 与闲聊区 agent-thought-block 箭头同形：收起向右、展开向下（rotate 90deg） */
+                            function createAgentSubstepChevron() {
+                                var wrap = document.createElement('span');
+                                wrap.className = 'agent-substep__chevron';
+                                wrap.setAttribute('aria-hidden', 'true');
+                                wrap.innerHTML =
+                                    '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 18l6-6-6-6"/></svg>';
+                                return wrap;
+                            }
+
+                            function bindAgentSubstepToggle(head, body, chevronWrap, defaultCollapsed) {
+                                head.style.cursor = 'pointer';
+                                head.style.userSelect = 'none';
+                                body.style.marginTop = '4px';
+                                function applyOpen(open) {
+                                    if (open) {
+                                        body.style.display = 'block';
+                                        chevronWrap.style.transform = 'rotate(90deg)';
+                                    } else {
+                                        body.style.display = 'none';
+                                        chevronWrap.style.transform = 'rotate(0deg)';
+                                    }
+                                }
+                                applyOpen(!defaultCollapsed);
+                                head.addEventListener('click', function () {
+                                    var isHidden = body.style.display === 'none';
+                                    applyOpen(isHidden);
+                                });
+                            }
+
+                            if (action === 'step_start') {
+                                var mount = resolveProcessStepsMount();
+                                if (!mount) {
+                                    console.warn('[AgenticLog] 无 .process-steps 挂载点，跳过 step_start');
+                                    return;
+                                }
+                                var stepEl = document.createElement('div');
+                                stepEl.className = 'agent-step';
+                                stepEl.setAttribute('data-expanded', 'true');
+                                if (stepId) stepEl.setAttribute('data-agentic-step-id', stepId);
+                                var row = document.createElement('div');
+                                row.className = 'agent-step__row';
+                                var rowLeft = document.createElement('div');
+                                rowLeft.className = 'agent-step__row-left';
+                                var glyph = document.createElement('span');
+                                glyph.className = 'agent-step__glyph agent-step__glyph--pulse';
+                                glyph.textContent = '\u25cf';
+                                var label = document.createElement('span');
+                                label.className = 'agent-step__label';
+                                var titleText = payload.content != null ? String(payload.content) : '';
+                                label.textContent = titleText;
+                                rowLeft.appendChild(glyph);
+                                rowLeft.appendChild(label);
+                                var parentToggle = document.createElement('span');
+                                parentToggle.className = 'agent-step__toggle-parent icon';
+                                parentToggle.textContent = '\u25bc';
+                                parentToggle.setAttribute('role', 'button');
+                                parentToggle.setAttribute('aria-label', '\u6298\u53e0\u5b50\u6b65\u9aa4');
+                                function toggleAgentStepExpanded() {
+                                    var cur = stepEl.getAttribute('data-expanded');
+                                    stepEl.setAttribute('data-expanded', cur === 'true' ? 'false' : 'true');
+                                }
+                                rowLeft.addEventListener('click', toggleAgentStepExpanded);
+                                parentToggle.addEventListener('click', function (ev) {
+                                    ev.stopPropagation();
+                                    toggleAgentStepExpanded();
+                                });
+                                row.appendChild(rowLeft);
+                                row.appendChild(parentToggle);
+                                var children = document.createElement('div');
+                                children.className = 'agent-step__children';
+                                stepEl.appendChild(row);
+                                stepEl.appendChild(children);
+                                mount.appendChild(stepEl);
+                                mount.scrollTop = mount.scrollHeight;
+                                return;
+                            }
+
+                            if (action === 'substep_start') {
+                                var stepEl2 = findStepEl();
+                                if (!stepEl2) {
+                                    console.warn('[AgenticLog] substep_start 未找到 step:', stepId);
+                                    return;
+                                }
+                                var ch = stepEl2.querySelector('.agent-step__children');
+                                if (!ch) return;
+                                var sub = document.createElement('div');
+                                sub.className = 'agent-substep';
+                                if (payload.substep_id != null) {
+                                    sub.setAttribute('data-agentic-substep-id', String(payload.substep_id));
+                                }
+                                var kind = payload.kind || '';
+                                var badge = document.createElement('span');
+                                badge.className = 'agent-substep__badge';
+                                if (kind === 'thought') {
+                                    var headT = document.createElement('div');
+                                    headT.className = 'agent-substep__head';
+                                    badge.textContent = '\u601d\u8003\u8fc7\u7a0b';
+                                    var chevT = createAgentSubstepChevron();
+                                    headT.appendChild(chevT);
+                                    headT.appendChild(badge);
+                                    var bodyT = document.createElement('div');
+                                    bodyT.className = 'agent-substep__body agent-stream-text markdown-body agent-substep__thought-stream';
+                                    sub.appendChild(headT);
+                                    sub.appendChild(bodyT);
+                                    bindAgentSubstepToggle(headT, bodyT, chevT, false);
+                                } else if (kind === 'code') {
+                                    var headC = document.createElement('div');
+                                    headC.className = 'agent-substep__head';
+                                    badge.textContent = '\u5de5\u5177\u53c2\u6570';
+                                    var chevC = createAgentSubstepChevron();
+                                    headC.appendChild(chevC);
+                                    headC.appendChild(badge);
+                                    var bodyC = document.createElement('div');
+                                    bodyC.className = 'agent-substep__body';
+                                    var pre = document.createElement('pre');
+                                    pre.className = 'agent-substep__code';
+                                    var codeEl = document.createElement('code');
+                                    codeEl.className = 'language-json';
+                                    var argsObj = payload.tool_args != null ? payload.tool_args : {};
+                                    try {
+                                        codeEl.textContent = JSON.stringify(argsObj, null, 2);
+                                    } catch (e) {
+                                        codeEl.textContent = String(argsObj);
+                                    }
+                                    pre.appendChild(codeEl);
+                                    bodyC.appendChild(pre);
+                                    sub.appendChild(headC);
+                                    sub.appendChild(bodyC);
+                                    bindAgentSubstepToggle(headC, bodyC, chevC, true);
+                                } else {
+                                    badge.textContent = (payload.content != null ? String(payload.content) : '') || 'substep';
+                                    sub.appendChild(badge);
+                                }
+                                ch.appendChild(sub);
+                                ch.scrollTop = ch.scrollHeight;
+                                return;
+                            }
+
+                            if (action === 'substep_delta') {
+                                var stepEl3 = findStepEl();
+                                if (!stepEl3) return;
+                                var subEl = findSubstepEl(stepEl3, payload.substep_id);
+                                if (!subEl) return;
+                                var streamEl = subEl.querySelector('.agent-substep__thought-stream');
+                                if (!streamEl || payload.delta == null) return;
+                                streamEl.appendChild(document.createTextNode(String(payload.delta)));
+                                streamEl.scrollTop = streamEl.scrollHeight;
+                                var mount3 = resolveProcessStepsMount();
+                                if (mount3) mount3.scrollTop = mount3.scrollHeight;
+                                return;
+                            }
+
+                            if (action === 'substep_complete') {
+                                return;
+                            }
+
+                            if (action === 'step_complete') {
+                                var stepEl4 = findStepEl();
+                                if (!stepEl4) return;
+                                var glyph4 = stepEl4.querySelector('.agent-step__glyph');
+                                if (glyph4) {
+                                    glyph4.classList.remove('agent-step__glyph--pulse');
+                                    if (payload.state === 'error') {
+                                        glyph4.classList.remove('agent-step__glyph--success');
+                                        glyph4.classList.add('agent-step__glyph--error');
+                                        glyph4.textContent = '\u2715';
+                                    } else {
+                                        glyph4.classList.remove('agent-step__glyph--error');
+                                        glyph4.classList.add('agent-step__glyph--success');
+                                        glyph4.textContent = '\u2713';
+                                    }
+                                }
+                                if (payload.collapsed === true) {
+                                    stepEl4.setAttribute('data-expanded', 'false');
+                                }
+                                return;
+                            }
+                        }
+
                         // 🔥 核心函数：事件分发器 - 将 SSE 事件分发到 UI 更新函数
                         function handleServerEvent(eventType, data) {
                             console.log(`📡 [SSE Event] ${eventType}:`, data);
@@ -3756,13 +4210,24 @@
                             }
                             // 🔥 根据事件类型分发到对应的 UI 更新函数
                             switch (eventType) {
-                                case 'status':
-                                    updateProcessLog(data.content || '', data.state || 'running');
-                                    // 🔥 TASK 2: 处理 Cell Ranger 等待气泡
+                                case 'status': {
+                                    var contentStr = data.content || '';
+                                    if (contentStr.startsWith('[AgenticLog] ')) {
+                                        try {
+                                            var payloadStr = contentStr.substring(13).trim();
+                                            var agenticPayload = JSON.parse(payloadStr);
+                                            handleAgenticLog(agenticPayload);
+                                        } catch (_e) {
+                                            console.error('AgenticLog 解析失败', _e);
+                                        }
+                                        break;
+                                    }
+                                    updateProcessLog(contentStr, data.state || 'running');
                                     if (data.show_waiting_bubble) {
-                                        showWaitingBubble(data.waiting_message || data.content || "正在处理，请稍候...");
+                                        showWaitingBubble(data.waiting_message || contentStr || '正在处理，请稍候...');
                                     }
                                     break;
+                                }
                                     
                                 case 'thought':
                                     var thoughtText = '';
@@ -3914,6 +4379,12 @@
                                                 break;
                                             }
                                         }
+                                    }
+                                    break;
+
+                                case 'skill_tool_result':
+                                    if (data && data.tool_result != null && typeof data.tool_result === 'object' && !Array.isArray(data.tool_result) && data.tool_result.status === 'success') {
+                                        try { renderSkillToolWorkspace(data.tool_name, data.tool_result); } catch (e) { console.warn('skill_tool_result', e); }
                                     }
                                     break;
 
@@ -5388,13 +5859,17 @@
                                                 workflowData;
                             submitWorkflow(`wf-exec-${workflowId}`, steps.length, JSON.stringify(filePaths));
                         };
-                        
+
                         // 🔥 REQUIREMENT 1: 处理完成事件 - 彻底移除 Thinking spinner；统一计时器：优先用后端下发的 duration
                         function handleDoneEvent(data) {
                             clearInterval(timerInterval);
                             const duration = (data && (data.duration != null || data.total_duration != null))
                                 ? (Number(data.duration ?? data.total_duration)).toFixed(1)
                                 : ((Date.now() - startTime) / 1000).toFixed(1);
+
+                            if (data && data.tool_result != null && typeof data.tool_result === 'object' && !Array.isArray(data.tool_result) && data.tool_result.status === 'success') {
+                                try { renderSkillToolWorkspace(data.tool_name, data.tool_result); } catch (e) { console.warn('renderSkillToolWorkspace', e); }
+                            }
                             
                             // 🔥 TASK 1: CRITICAL - 彻底移除所有 Thinking spinner 和容器
                             // 1. Remove .thinking-container immediately
@@ -7760,7 +8235,7 @@
 
             function renderDataSelector(datasets) {
                 const selectorId = `ds-${Date.now()}`;
-                let html = `<div class="data-selector-container" id="${selectorId}"><div class="data-selector-header"><i class="bi bi-folder2-open"></i> 选择 Galaxy 历史数据</div><div class="data-selector-list">`;
+                let html = `<div class="data-selector-container" id="${selectorId}"><div class="data-selector-header"><i class="bi bi-folder2-open"></i> 选择分析历史数据</div><div class="data-selector-list">`;
                 datasets.forEach(d => { html += `<div class="dataset-item" onclick="toggleCheckbox(this)"><input type="checkbox" class="form-check-input" value="${d.id}" data-name="${d.name}" onclick="event.stopPropagation(); toggleCheckbox(this.parentElement, true)"><div class="dataset-info"><span class="dataset-name">${d.hid}: ${d.name}</span><span class="dataset-meta">${d.ext} | ${d.size}</span></div></div>`; });
                 html += `</div><div class="data-selector-footer"><button class="btn btn-primary btn-sm" onclick="submitDataSelection('${selectorId}')">确认使用 <i class="bi bi-check2"></i></button></div></div>`;
                 appendMessage('ai', html, null, null, true);

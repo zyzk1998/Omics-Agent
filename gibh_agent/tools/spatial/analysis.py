@@ -328,7 +328,9 @@ def spatial_clustering(
         result = {
             "status": "success",
             "output_path": str(out.resolve()),
-            "h5ad_path": str(p.resolve()),
+            # 链式下游必须读「写出后的」h5ad；若只返回输入路径，与 output 不一致时会误导占位符解析
+            "h5ad_path": str(out.resolve()),
+            "adata_path": str(out.resolve()),
             "n_clusters": n_clusters,
             "key_added": key_added,
         }
@@ -359,7 +361,8 @@ def spatial_clustering_comparison(
     多分辨率空间域对比：对已构建空间邻域图的 adata 在 0.3/0.5/0.8 下做 Leiden，
     绘制 1x3 组织切片聚类图。无 H&E 时仅绘制坐标散点，不抛 KeyError。
     """
-    path_in = adata_path or h5ad_path or (kwargs.get("h5ad_path") if kwargs else None)
+    # h5ad_path 优先：避免执行器曾错误注入的 adata_path（如上传目录）覆盖占位符解析结果
+    path_in = h5ad_path or adata_path or (kwargs.get("h5ad_path") if kwargs else None)
     if not path_in:
         return {"status": "error", "error": "请提供 adata_path 或 h5ad_path"}
     # 确保 resolutions 是 float 列表（大模型可能传入 "0.3,0.5,0.8" 字符串）

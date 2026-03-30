@@ -1,0 +1,5 @@
+# GIBH-AGENT-V2 — Cursor 最高优先级指令
+
+在进行任何新功能开发或 Bug 修复前，**必须优先阅读** `docs/ARCHITECTURE_CORE_PRINCIPLES.md`，并遵守 `.cursor/rules/gibh-architecture-constitution.mdc`。
+
+**绝对禁止**破坏已确立的：**多模态资产总线（OmicsAssetManager）**、**执行器反射注入与签名驱动参数（executor 反射适配）**、**重型算子微服务隔离（TaaS / Worker）** 等核心原则。如需例外，须在文档中显式修订并经评审后再改代码。

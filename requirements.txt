@@ -1,3 +1,8 @@
+# --- BepiPred-3.0（技能 bepipred3_prediction）---
+# 与主环境 pandas/numpy 版本冲突，不可在本文件混装 bp3/fair-esm。
+# Docker：见 services/api/Dockerfile 中 /opt/bepipred3-venv；本地：见 scripts/bootstrap_bepipred_venv.sh
+# 运行时通过 BEPIPRED3_PYTHON 指向该解释器（镜像内已默认设置）。
+
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 gunicorn>=21.2.0

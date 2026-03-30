@@ -136,3 +136,495 @@
 .ppt-slide-bullets li:last-child {
     margin-bottom: 0;
 }
+
+/* =========================================
+   Agentic 终端式执行记录 UI
+   ========================================= */
+.agent-step { margin: 8px 0; font-family: "Segoe UI", Roboto, sans-serif; font-size: 13px; }
+.agent-step__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    user-select: none;
+    color: #374151;
+    font-weight: 500;
+    min-width: 0;
+}
+.agent-step__row-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+}
+/* 与「执行记录」卡片头 .process-header .icon 一致：右侧 ▼，折叠时旋为侧向 */
+.agent-step__toggle-parent {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    font-size: 12px;
+    color: #6b7280;
+    cursor: pointer;
+    line-height: 1;
+    transition: transform 0.2s ease;
+}
+.agent-step[data-expanded="false"] .agent-step__toggle-parent {
+    transform: rotate(-90deg);
+}
+.agent-step__glyph { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; font-size: 12px; flex-shrink: 0; }
+/* 微光呼吸动画 (Pulse) */
+@keyframes agentPulse { 0% { opacity: 0.4; transform: scale(0.95); } 50% { opacity: 1; transform: scale(1.05); } 100% { opacity: 0.4; transform: scale(0.95); } }
+.agent-step__glyph--pulse { color: #3b82f6; animation: agentPulse 1.5s ease-in-out infinite; }
+.agent-step__glyph--success { color: #10b981; }
+.agent-step__glyph--error { color: #ef4444; }
+.agent-step__children { margin-left: 20px; padding-left: 12px; border-left: 1px solid #e5e7eb; margin-top: 6px; transition: max-height 0.3s ease, opacity 0.3s ease; overflow: hidden; }
+.agent-step[data-expanded="false"] .agent-step__children { max-height: 0; opacity: 0; margin-top: 0; border: none; }
+.agent-substep { margin-bottom: 6px; color: #6b7280; font-size: 12.5px; line-height: 1.5; }
+.agent-substep__head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+/* 与闲聊模式 .agent-thought-block summary 中箭头一致：默认向右，展开时旋转向下 */
+.agent-substep__chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: #6b7280;
+    transition: transform 0.2s ease;
+    line-height: 0;
+}
+.agent-substep__chevron svg {
+    width: 12px;
+    height: 12px;
+}
+.agent-substep__badge { display: inline-block; padding: 2px 6px; background: #f3f4f6; border-radius: 4px; font-size: 11px; font-weight: 600; color: #4b5563; }
+.agent-substep__code { background: #f8f9fa; padding: 8px; border-radius: 6px; font-family: monospace; font-size: 12px; color: #24292e; overflow-x: auto; border: 1px solid #e5e7eb; white-space: pre-wrap; word-break: break-all; }
+.agent-substep__thought-stream { white-space: pre-wrap; word-break: break-word; }
+
+/* =========================================
+   用户气泡专属防爆装甲 (绝对隔离，不影响 AI)
+   ========================================= */
+/* Flex 行内子项默认可按内容撑开；与 min-width:0 配合才能压在栏宽内 */
+.message-row.user {
+    min-width: 0 !important;
+}
+
+.message-row.user .message-container {
+    min-width: 0 !important;
+    max-width: 85% !important;
+}
+
+/*
+ * main.css 中用户气泡为 display:inline-block，会按「最小内容宽度」扩张，FASTA 一行即可撑到 2000px+。
+ * 改为块级 + 占满容器宽度，再配合换行属性约束在栏内。
+ */
+.message-row.user .bubble {
+    display: block !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    word-wrap: break-word !important;
+    word-break: break-all !important;
+    overflow-wrap: anywhere !important;
+    white-space: pre-wrap !important;
+    overflow-x: hidden !important;
+}
+
+.message-row.user .bubble p {
+    display: inline !important;
+    word-break: break-all !important;
+    margin: 0 !important;
+}
+
+/* 用户把序列贴进 Markdown 代码块时，pre/code 默认 white-space:pre 会禁止换行 */
+.message-row.user .bubble pre,
+.message-row.user .bubble code {
+    white-space: pre-wrap !important;
+    word-break: break-all !important;
+    overflow-wrap: anywhere !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+}
+
+/* ========== 技能快车道 · 右栏万能渲染（与组学 .unified-report-container 隔离） ========== */
+#skill-tool-workspace-root.skill-workspace-root {
+    margin-bottom: 20px;
+}
+.skill-workspace-panel {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: linear-gradient(180deg, #fafbfc 0%, #f4f6f8 100%);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    overflow: hidden;
+}
+.skill-ws-header {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #f8fafc;
+}
+.skill-ws-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: #1e293b;
+    letter-spacing: 0.02em;
+}
+.skill-ws-subtitle {
+    margin: 8px 0 0;
+    font-size: 13px;
+    color: #64748b;
+    line-height: 1.5;
+}
+.skill-ws-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 16px;
+    background: #fff;
+    border-bottom: 1px solid #eef2f7;
+}
+.skill-ws-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #334155;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.skill-ws-btn:hover {
+    background: #f1f5f9;
+    border-color: #94a3b8;
+    color: #0f172a;
+}
+.skill-ws-btn--primary {
+    background: #3b6ea5;
+    border-color: #2f5a8a;
+    color: #fff;
+}
+.skill-ws-btn--primary:hover {
+    background: #325f8f;
+    border-color: #254a73;
+    color: #fff;
+}
+.skill-ws-btn--ghost {
+    border-color: #e2e8f0;
+    background: #f8fafc;
+    color: #475569;
+}
+.skill-ws-body {
+    padding: 0;
+    background: #fff;
+    min-height: 0;
+}
+.skill-ws-iframe-wrap {
+    width: 100%;
+    min-height: 420px;
+    height: min(72vh, 900px);
+    background: #f1f5f9;
+    border-bottom: 1px solid #e5e7eb;
+}
+.skill-ws-iframe {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 420px;
+    border: 0;
+    background: #fff;
+}
+.skill-data-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+    padding: 14px 16px 18px;
+}
+.skill-data-card {
+    border: 1px solid #e8ecf1;
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: #fafbfc;
+}
+.skill-data-card__key {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #64748b;
+    margin-bottom: 4px;
+}
+.skill-data-card__val {
+    display: block;
+    font-size: 14px;
+    color: #0f172a;
+    font-variant-numeric: tabular-nums;
+    word-break: break-word;
+}
+.skill-ws-empty {
+    margin: 0;
+    padding: 16px;
+    font-size: 13px;
+    color: #64748b;
+    line-height: 1.6;
+}
+
+/* ========== 技能多模态万能渲染引擎（skill-mm-*） ========== */
+.skill-mm-engine .skill-mm-body {
+    padding: 0;
+    background: #fff;
+}
+.skill-mm-block {
+    border-bottom: 1px solid #eef2f7;
+}
+.skill-mm-block:last-of-type {
+    border-bottom: none;
+}
+
+/* P4 数据看板：自适应 Grid */
+.skill-mm-data-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+    gap: 12px;
+    padding: 16px;
+    background: #fafbfc;
+}
+.skill-mm-metric {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.skill-mm-metric__label {
+    display: block;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #94a3b8;
+    margin-bottom: 6px;
+}
+.skill-mm-metric__value {
+    display: block;
+    font-size: 18px;
+    font-weight: 600;
+    color: #1e4a7a;
+    font-variant-numeric: tabular-nums;
+    word-break: break-word;
+    white-space: pre-wrap;
+    line-height: 1.35;
+}
+
+/* P2 多媒体：iframe（HTML/PDF） */
+.skill-mm-iframe-wrap {
+    width: 100%;
+    max-width: 100%;
+    padding: 12px 16px 16px;
+    box-sizing: border-box;
+    background: #f8fafc;
+}
+.skill-mm-iframe {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    height: min(65vh, 720px);
+    min-height: 320px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+    background: #fff;
+}
+
+/* P3 静态图 */
+.skill-mm-gallery {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px;
+    background: #fafbfc;
+}
+.skill-mm-figure-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+.skill-mm-zoombar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+.skill-mm-zoombtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    height: 36px;
+    padding: 0 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #fff;
+    color: #334155;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    font-size: 1.05rem;
+    line-height: 1;
+}
+.skill-mm-zoombtn:hover {
+    background: #f8fafc;
+    border-color: #94a3b8;
+    color: #0f172a;
+}
+.skill-mm-zoombtn:active {
+    background: #f1f5f9;
+}
+.skill-mm-zoombtn--reset {
+    min-width: 56px;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    color: #475569;
+}
+.skill-mm-zoompct {
+    pointer-events: none;
+}
+.skill-mm-img-viewport {
+    overflow: auto;
+    max-height: min(65vh, 720px);
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #fafbfc;
+    box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.skill-mm-img-viewport .skill-mm-figure {
+    margin: 0;
+    padding: 12px;
+    max-width: 100%;
+    text-align: center;
+    min-height: 100px;
+}
+.skill-mm-figure {
+    margin: 0;
+    max-width: 100%;
+    text-align: center;
+}
+.skill-mm-img {
+    display: block;
+    max-width: 100%;
+    width: auto;
+    height: auto;
+    max-height: min(65vh, 720px);
+    margin: 0 auto;
+    object-fit: contain;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+    background: #fff;
+}
+.skill-mm-img-viewport .skill-mm-img {
+    max-height: none;
+    transition: transform 0.18s ease;
+}
+
+/* P1 Markdown 排版 */
+.skill-mm-markdown {
+    padding: 16px 18px 20px;
+    font-size: 14px;
+    line-height: 1.65;
+    color: #334155;
+    max-width: 100%;
+    overflow-x: auto;
+}
+.skill-mm-markdown h1,
+.skill-mm-markdown h2,
+.skill-mm-markdown h3 {
+    color: #1e293b;
+    font-weight: 600;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+}
+.skill-mm-markdown h1 { font-size: 1.35em; }
+.skill-mm-markdown h2 { font-size: 1.2em; }
+.skill-mm-markdown h3 { font-size: 1.05em; }
+.skill-mm-markdown p { margin: 0.5em 0; }
+.skill-mm-markdown ul,
+.skill-mm-markdown ol { margin: 0.5em 0; padding-left: 1.35em; }
+.skill-mm-markdown table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0;
+    font-size: 13px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    overflow: hidden;
+}
+.skill-mm-markdown th,
+.skill-mm-markdown td {
+    border: 1px solid #e8ecf1;
+    padding: 8px 10px;
+    text-align: left;
+}
+.skill-mm-markdown th {
+    background: #f1f5f9;
+    font-weight: 600;
+    color: #475569;
+}
+.skill-mm-markdown code {
+    font-size: 0.9em;
+    background: #f1f5f9;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid #e2e8f0;
+}
+.skill-mm-markdown pre {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px;
+    overflow-x: auto;
+    font-size: 13px;
+}
+.skill-mm-markdown pre code {
+    background: none;
+    border: none;
+    padding: 0;
+}
+
+/* 底部分割线与操作区 */
+.skill-mm-footer {
+    background: #fff;
+    padding: 0 0 14px;
+}
+.skill-mm-divider {
+    height: 1px;
+    margin: 0 16px;
+    background: linear-gradient(90deg, transparent, #cbd5e1 12%, #cbd5e1 88%, transparent);
+    border: none;
+}
+.skill-mm-footer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 16px 0;
+    align-items: center;
+}
+.skill-mm-footer__btn {
+    flex: 0 0 auto;
+}

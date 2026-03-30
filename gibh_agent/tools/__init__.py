@@ -67,6 +67,7 @@ def _import_atomic_omics_tools():
         "epigenomics_tools",
         "proteomics_tools",
         "protein_tools",
+        "bio_tools",
         "metabolomics_tools",
         "radiomics_tools",
     ]
@@ -93,6 +94,7 @@ for _mod in [
     "epigenomics_tools",
     "proteomics_tools",
     "protein_tools",
+    "bio_tools",
     "radiomics_tools",
 ]:
     try:

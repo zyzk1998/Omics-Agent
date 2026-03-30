@@ -2,11 +2,16 @@
 通用工具函数
 包含 JSON 序列化辅助函数、绘图路径矫正等。
 """
+from __future__ import annotations
+
+import functools
+import inspect
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Union
+from typing import Any, Callable, TypeVar, Union
 
 import numpy as np
 import pandas as pd
@@ -14,6 +19,37 @@ import math
 import logging
 
 logger = logging.getLogger(__name__)
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def safe_tool_execution(func: F) -> F:
+    """
+    工具适配器装饰器：捕获未处理异常，避免冒泡导致 FastAPI Worker 崩溃。
+    异步工具须为 async def；返回值统一为含 status/message 的字典。
+    """
+
+    if inspect.iscoroutinefunction(func):
+
+        @functools.wraps(func)
+        async def _async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return await func(*args, **kwargs)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("工具 %s 未捕获异常", getattr(func, "__name__", func))
+                return {"status": "error", "message": str(exc)}
+
+        return _async_wrapper  # type: ignore[return-value]
+
+    @functools.wraps(func)
+    def _sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return func(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("工具 %s 未捕获异常", getattr(func, "__name__", func))
+            return {"status": "error", "message": str(exc)}
+
+    return _sync_wrapper  # type: ignore[return-value]
 
 
 def sanitize_for_json(obj):

@@ -46,6 +46,9 @@ services:
     build:
       context: .
       dockerfile: services/api/Dockerfile
+      args:
+        # BepiPred 子进程 venv 的 PyTorch 源：CPU 默认；NVIDIA 主机可改为 cu121/cu124 等
+        BEPIPRED_TORCH_INDEX: ${BEPIPRED_TORCH_INDEX:-https://download.pytorch.org/whl/cpu}
     image: gibh-v2-api:latest
     container_name: gibh_v2_api
     restart: always
@@ -65,6 +68,12 @@ services:
       - UPLOAD_DIR=/app/uploads
       - RESULTS_DIR=/app/results
       - PYTHONPATH=/app
+      # BepiPred-3.0：镜像内 /opt/bepipred3-venv（不受 .:/app 挂载覆盖）；本地可覆盖为 third_party/.../.venv/bin/python
+      - BEPIPRED3_PYTHON=${BEPIPRED3_PYTHON:-/opt/bepipred3-venv/bin/python}
+      # entrypoint 运行时补齐 venv 时与构建使用相同 PyTorch 源（GPU 主机请在 .env 设 cu121/cu124）
+      - BEPIPRED_TORCH_INDEX=${BEPIPRED_TORCH_INDEX:-https://download.pytorch.org/whl/cpu}
+      # 设为 0 可关闭启动时自动 pip 安装 BepiPred venv
+      - BEPIPRED3_ENTRYPOINT_BOOTSTRAP=${BEPIPRED3_ENTRYPOINT_BOOTSTRAP:-1}
       # 🔒 安全：从环境变量读取 API 密钥，不要硬编码
       - SILICONFLOW_API_KEY=${SILICONFLOW_API_KEY}
       - SILICONFLOW_MODEL=${SILICONFLOW_MODEL:-deepseek-ai/DeepSeek-R1}
@@ -87,6 +96,8 @@ services:
       # JWT 不随容器重启失效：从宿主机 .env 或挂载文件读取，不绑定容器
       - SECRET_KEY=${SECRET_KEY:-}
       - SECRET_KEY_FILE=${SECRET_KEY_FILE:-}
+      # PySkills 微服务（ViennaRNA / RDKit 等）；与 worker-pyskills 同网络
+      - PYSKILLS_BASE_URL=${PYSKILLS_BASE_URL:-http://worker-pyskills:8000}
     volumes:
       - .:/app
       - ./data/uploads:/app/uploads
@@ -98,12 +109,29 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      worker-pyskills:
+        condition: service_started
     networks:
       - gibh-network
     # 🔧 修复：使用 entrypoint 脚本修复权限
     entrypoint: ["/entrypoint.sh"]
     # timeout：长流程（时空动力学/Cell Ranger 等）可能超过 300s；过短会导致 worker 被强杀 → SSE 分块不完整(ERR_INCOMPLETE_CHUNKED_ENCODING)
     command: gunicorn server:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8028 --timeout 1200 --graceful-timeout 60
+
+  # =========================================
+  # 2b. 传统生信算法综合微服务（ViennaRNA / PyMOL / RDKit / gseapy）
+  # 主 API 通过 http://worker-pyskills:8000/api/... 访问；uploads 与 api-server 共享同一宿主机目录
+  # =========================================
+  worker-pyskills:
+    build: ./workers/worker-pyskills
+    container_name: worker-pyskills
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./data/uploads:/app/uploads
+    networks:
+      - gibh-network
 
   # =========================================
   # 3. Nginx 反向代理服务器（可选，推荐生产环境）

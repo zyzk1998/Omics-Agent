@@ -1013,7 +1013,7 @@ def sted_ec_pathway_enrichment(
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """
-    磐石能力对齐：复用与 spatial_pathway_enrichment 相同的 gseapy.enrichr + 本地绑图模式（no_plot=True）。
+    与 spatial_pathway_enrichment 能力对齐：复用相同 gseapy.enrichr + 本地绑图模式（no_plot=True）。
 
     Args:
         driver_genes_csv: 第 5 步 driver_genes.csv 的绝对路径（含 scanpy 的 names 列）。

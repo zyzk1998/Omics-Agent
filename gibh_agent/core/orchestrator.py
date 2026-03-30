@@ -20,9 +20,16 @@ from pathlib import Path
 
 from .agentic import QueryRewriter, Clarifier, Reflector
 from .file_inspector import FileInspector, OmicsAssetManager
+from .asset_manager import (
+    ROUTING_NON_WORKFLOW_ASSET_TYPES,
+    ROUTING_WORKFLOW_NATIVE_ASSET_TYPES,
+    format_routing_asset_digest,
+    routing_asset_inventory,
+)
 from .llm_client import LLMClient
 from .stream_utils import stream_with_suggestions
 from .workflows import WorkflowRegistry
+from .file_handlers.universal_normalizer import _is_archive
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +143,195 @@ class AgentOrchestrator:
         ]
         return any(kw in query_lower for kw in chat_keywords)
 
+    def _collect_resolved_upload_paths(
+        self, files: Optional[List[Dict[str, Any]]]
+    ) -> List[str]:
+        """从请求中的 files 提取去重后的绝对路径列表（供资产嗅探与路由上下文）。"""
+        if not files:
+            return []
+        ordered: List[str] = []
+        seen: Set[str] = set()
+        for f in files:
+            if not f:
+                continue
+            if isinstance(f, dict):
+                p = f.get("path") or f.get("file_path") or f.get("name")
+            else:
+                p = str(f)
+            if not p:
+                continue
+            po = Path(p)
+            if not po.is_absolute():
+                po = (self.upload_dir / po).resolve()
+            else:
+                po = po.resolve()
+            s = str(po)
+            if s not in seen:
+                seen.add(s)
+                ordered.append(s)
+        ordered = self._strip_replaced_archive_paths_static(ordered)
+        return self._expand_visium_sibling_matrix_paths(ordered)
+
+    def _expand_visium_sibling_matrix_paths(self, paths: List[str]) -> List[str]:
+        """
+        同批次目录下补充 Visium matrix .h5：避免仅返回解压目录时丢失用户一并上传的 .h5。
+        仅按路径与扩展名启发式处理，不绑定具体工具名。
+        """
+        if not paths:
+            return paths
+        out: List[str] = []
+        seen: Set[str] = set()
+        for raw in paths:
+            if not raw:
+                continue
+            p = Path(raw)
+            if not p.is_absolute():
+                p = (self.upload_dir / p).resolve()
+            else:
+                p = p.resolve()
+            s = str(p)
+            if s not in seen:
+                seen.add(s)
+                out.append(s)
+            scan_roots: List[Path] = []
+            if p.is_dir():
+                scan_roots.append(p.parent)
+                if p.parent.is_dir():
+                    scan_roots.append(p.parent.parent)
+            elif p.is_file() and p.suffix.lower() == ".h5":
+                scan_roots.append(p.parent)
+            for root in scan_roots:
+                if not root.is_dir():
+                    continue
+                try:
+                    for f in root.iterdir():
+                        if not f.is_file():
+                            continue
+                        nl = f.name.lower()
+                        if not nl.endswith(".h5"):
+                            continue
+                        if "feature_bc_matrix" in nl or nl in (
+                            "filtered_feature_bc_matrix.h5",
+                            "raw_feature_bc_matrix.h5",
+                        ):
+                            fs = str(f.resolve())
+                            if fs not in seen:
+                                seen.add(fs)
+                                out.append(fs)
+                except OSError:
+                    continue
+        return out
+
+    @staticmethod
+    def _strip_replaced_archive_paths_static(resolved_absolute: List[str]) -> List[str]:
+        """
+        若同批次路径中已包含 universal unpack 产物目录（session/extracted_content/<stem>），
+        则从列表中移除对应的原始压缩包文件路径，避免「幽灵资产」。
+        """
+        if len(resolved_absolute) < 2:
+            return resolved_absolute
+        dirs_resolved: Set[str] = set()
+        for p in resolved_absolute:
+            if not p:
+                continue
+            try:
+                po = Path(p)
+                if po.is_dir():
+                    dirs_resolved.add(str(po.resolve()))
+            except OSError:
+                continue
+        out: List[str] = []
+        seen: Set[str] = set()
+        for p in resolved_absolute:
+            if not p:
+                continue
+            try:
+                po = Path(p).resolve()
+            except OSError:
+                if p not in seen:
+                    seen.add(p)
+                    out.append(p)
+                continue
+            ps = str(po)
+            if ps in seen:
+                continue
+            if po.is_file() and _is_archive(po):
+                name = po.name
+                stem = name[:-7] if name.lower().endswith(".tar.gz") else po.stem
+                candidate = po.parent / "extracted_content" / stem
+                try:
+                    cand_res = str(candidate.resolve())
+                except OSError:
+                    cand_res = ""
+                if cand_res and cand_res in dirs_resolved:
+                    continue
+                if cand_res and any(d.startswith(cand_res + os.sep) for d in dirs_resolved):
+                    continue
+            seen.add(ps)
+            out.append(ps)
+        return out
+
+    def _sanitize_upload_path_strings(self, paths: List[Optional[str]]) -> List[str]:
+        """保留用户传入的路径写法，仅剔除已被解压目录替代的归档路径。"""
+        raw = list(dict.fromkeys([p for p in paths if p]))
+        if len(raw) < 2:
+            return raw
+        resolved: List[str] = []
+        for p in raw:
+            po = Path(p)
+            if not po.is_absolute():
+                po = (self.upload_dir / po).resolve()
+            else:
+                po = po.resolve()
+            resolved.append(str(po))
+        kept = set(self._strip_replaced_archive_paths_static(resolved))
+        return [orig for orig, r in zip(raw, resolved) if r in kept]
+
+    @staticmethod
+    def _is_vague_analysis_query(query: str) -> bool:
+        q = (query or "").strip().lower()
+        if not q or len(q) < 80:
+            vague_phrases = (
+                "帮我分析",
+                "帮我看看",
+                "分析一下",
+                "分析下",
+                "看看这个",
+                "看下这个",
+                "怎么处理",
+                "怎么办",
+                "帮我处理",
+                "help me analyze",
+                "analyze this",
+                "analyze it",
+                "what is this",
+                "看一下",
+            )
+            if any(vp in q for vp in vague_phrases):
+                return True
+        return False
+
+    def _merge_routing_asset_fields(
+        self,
+        file_metadata: Optional[Dict[str, Any]],
+        files: Optional[List[Dict[str, Any]]],
+    ) -> Optional[Dict[str, Any]]:
+        """将 OmicsAssetManager 嗅探结果并入 file_metadata，供 Planner LLM 读取。"""
+        paths = self._collect_resolved_upload_paths(files)
+        if not paths:
+            return file_metadata
+        assets = OmicsAssetManager().classify_assets(paths)
+        routing = {
+            "routing_asset_inventory": routing_asset_inventory(assets),
+            "routing_asset_types": sorted({a.asset_type for a in assets}),
+            "routing_asset_digest": format_routing_asset_digest(assets),
+        }
+        if file_metadata is None:
+            return {"status": "routing_assets_only", **routing}
+        merged = dict(file_metadata)
+        merged.update(routing)
+        return merged
+
     @staticmethod
     def _is_bepipred3_skill_chat_intent(query: str) -> bool:
         """
@@ -171,9 +367,68 @@ class AgentOrchestrator:
 
         query_lower = (query or "").lower()
 
-        # Quick heuristic: If files are present, it's likely a task
-        if files and len(files) > 0:
+        paths = self._collect_resolved_upload_paths(files)
+        upload_assets = OmicsAssetManager().classify_assets(paths) if paths else []
+        upload_types = {a.asset_type for a in upload_assets}
+        asset_digest = format_routing_asset_digest(upload_assets)
+
+        # 非工作流型资产 + 模糊分析请求 → Chat（技能工具如 PyMOL，避免误进 RNA DAG）
+        if (
+            upload_types
+            and upload_types.issubset(ROUTING_NON_WORKFLOW_ASSET_TYPES)
+            and self._is_vague_analysis_query(query or "")
+        ):
+            logger.info(
+                "🔌 [Orchestrator] 嗅探资产=%s 且查询模糊 → global chat",
+                sorted(upload_types),
+            )
+            return "chat"
+
+        # 纯工作流原生资产（仅组学/表格式）→ 任务模式
+        if upload_types and upload_types.issubset(ROUTING_WORKFLOW_NATIVE_ASSET_TYPES):
             return "task"
+
+        # 混合资产或非原生单资产：交给 LLM，并注入嗅探摘要
+        if upload_types:
+            try:
+                llm_client = self._get_llm_client()
+                if not llm_client:
+                    return "task"
+                sys_msg = """你是生物信息助手的路由器。根据用户话与「已上传文件的精确资产类型」判断：
+- **chat**：适合对话、文献、技能工具链（如 PyMOL 渲染 PDB、文档问答、通用说明），尤其当资产为 protein_structure / protein_fasta / document / plain_text / generic_unknown 且用户未明确要求注册工作流（PCA/差异分析/单细胞流程等）时。
+- **task**：用户明确要求运行多步骤组学工作流，或上传资产仅为 10x/h5ad/代谢组表格/医学影像等工作流原生类型。
+
+只返回 JSON：{"type": "chat"} 或 {"type": "task"}，勿输出其它文字。"""
+                user_block = f"""用户输入: "{query}"
+
+【上传资产嗅探（路径后缀规则，权威）】
+{asset_digest}
+
+请输出 JSON。"""
+                messages = [
+                    {"role": "system", "content": sys_msg},
+                    {"role": "user", "content": user_block},
+                ]
+                completion = await llm_client.achat(
+                    messages, temperature=0.1, max_tokens=80
+                )
+                response = completion.choices[0].message.content.strip()
+                import json as _json
+
+                if "```" in response:
+                    response = response.split("```")[1]
+                    if response.startswith("json"):
+                        response = response[4:]
+                response = response.strip()
+                result = _json.loads(response)
+                intent_type = result.get("type", "chat")
+                return intent_type if intent_type in ("chat", "task") else "chat"
+            except Exception as e:
+                logger.warning(
+                    "⚠️ [Orchestrator] 带资产摘要的全局意图 LLM 失败，回退 task: %s",
+                    e,
+                )
+                return "task"
 
         if self._is_public_api_chat_intent(query or ""):
             logger.info("🔌 [Orchestrator] 公开数据库轻查询命中，强制 global intent = chat（跳过 Task / 工作流）")
@@ -189,7 +444,7 @@ class AgentOrchestrator:
         if any(kw in query_lower for kw in task_keywords):
             return "task"
         
-        # Use LLM for ambiguous cases
+        # Use LLM for ambiguous cases（无上传文件）
         try:
             llm_client = self._get_llm_client()
             if not llm_client:
@@ -420,7 +675,15 @@ class AgentOrchestrator:
                 )
             yield self._emit_sse(state_snapshot, "status", {"content": "回答完成", "state": "completed"})
             await asyncio.sleep(0.01)
-            yield self._emit_sse(state_snapshot, "done", {"status": "success"})
+            done_payload: Dict[str, Any] = {"status": "success"}
+            try:
+                bundle = skill_agent.consume_pending_done_tool()
+                if bundle and bundle.get("tool_result") is not None:
+                    done_payload["tool_name"] = bundle.get("tool_name")
+                    done_payload["tool_result"] = bundle["tool_result"]
+            except Exception:
+                pass
+            yield self._emit_sse(state_snapshot, "done", done_payload)
             state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
             yield self._format_sse("state_snapshot", state_snapshot)
             return
@@ -554,7 +817,7 @@ class AgentOrchestrator:
                     if not _path.is_absolute():
                         _path = (_upload_base / _path).resolve()
                     _abs_paths.append(str(_path))
-                file_paths = _abs_paths
+                file_paths = self._strip_replaced_archive_paths_static(_abs_paths)
                 logger.info(f"📁 [Orchestrator] 文件路径(绝对): {file_paths}")
                 
                 # 🔥 直接执行时也按 workflow 类型更新未分类资产的 modality，使左侧栏数据资产实时归到对应组学
@@ -1351,6 +1614,9 @@ class AgentOrchestrator:
                     else:
                         logger.info(f"ℹ️ [Orchestrator] 没有文件，跳过文件检查")
                     
+                    file_metadata_for_intent = self._merge_routing_asset_fields(
+                        file_metadata_for_intent, files
+                    )
                     # Analyze intent: classify domain and determine target_steps
                     intent_result = await planner._classify_intent(refined_query, file_metadata_for_intent)
                     domain_name = intent_result.get("domain_name")
@@ -1645,6 +1911,9 @@ class AgentOrchestrator:
                                 _seen.add(s)
                                 unique_paths.append(s)
 
+                        unique_paths = self._strip_replaced_archive_paths_static(unique_paths)
+                        unique_paths = self._expand_visium_sibling_matrix_paths(unique_paths)
+
                         asset_mgr = OmicsAssetManager()
                         assets = asset_mgr.classify_assets(unique_paths)
 
@@ -1657,13 +1926,25 @@ class AgentOrchestrator:
                                 break
                         if not chosen_raw:
                             for a in assets:
+                                if a.asset_type == "spatial_bundle":
+                                    chosen_raw = (
+                                        a.metadata.get("visium_root") or a.primary_path
+                                    )
+                                    chosen_reason = "spatial_bundle"
+                                    break
+                        if not chosen_raw:
+                            for a in assets:
                                 if a.asset_type == "radiomics_pair":
                                     chosen_raw = a.primary_path
                                     chosen_reason = "radiomics_pair"
                                     break
                         if not chosen_raw:
                             for a in assets:
-                                if a.asset_type in ("metabolomics_csv", "h5ad_single"):
+                                if a.asset_type in (
+                                    "metabolomics_csv",
+                                    "h5ad_single",
+                                    "10x_h5_matrix",
+                                ):
                                     chosen_raw = a.primary_path
                                     chosen_reason = a.asset_type
                                     break
@@ -2073,6 +2354,7 @@ class AgentOrchestrator:
                     # 🔥 MULTI-FILE: 下发前端时 file_paths 必须为本次请求的全部路径，去重后禁止只取 files[0]
                     all_file_paths = [f.get("path") or f.get("file_path") or f.get("name") for f in files if f]
                     all_file_paths = list(dict.fromkeys([p for p in all_file_paths if p]))
+                    all_file_paths = self._sanitize_upload_path_strings(all_file_paths)
                     if isinstance(workflow_data, dict):
                         workflow_data = dict(workflow_data)
                         workflow_data["recommended_steps"] = recommended_steps
@@ -2108,6 +2390,7 @@ class AgentOrchestrator:
                             if not file_paths and (workflow_data or {}).get("file_paths"):
                                 file_paths = (workflow_data or {}).get("file_paths") or []
                             file_paths = list(dict.fromkeys([p for p in file_paths if p]))
+                            file_paths = self._sanitize_upload_path_strings(file_paths)
                             file_names = list({os.path.basename(str(p)) for p in file_paths if p})
                             _dm = (domain_name or "").strip().lower()
                             # 与前端 FIXED_MODALITY_LABELS 对齐：转录组含 RNA/transcriptomics/single_cell，统一写 rna
@@ -2665,14 +2948,24 @@ class AgentOrchestrator:
         # 🔥 约束一：数据绝对隔离。thought 只进 reasoning，message 只进 text，绝不允许混入
         if event_type == "thought":
             state_snapshot["reasoning"] = (state_snapshot.get("reasoning") or "") + (data.get("content") or "")
+        elif event_type == "skill_tool_result" and data:
+            state_snapshot["skill_last_tool"] = {
+                "tool_name": data.get("tool_name"),
+                "tool_result": data.get("tool_result"),
+            }
         elif event_type == "message":
             state_snapshot["text"] = (state_snapshot.get("text") or "") + (data.get("content") or "")
         elif event_type == "status" and data:
             # 🔥 约束二：process_log 与前端 state 一致（running/completed/error/start 等），保证图标/动画一致
-            state_snapshot.setdefault("process_log", []).append({
-                "content": data.get("content", ""),
-                "state": data.get("state", "running"),
-            })
+            # 技能快车道 [AgenticLog] 细粒度事件不入库：否则快照每条 token 一行，历史还原会出现数千条 JSON
+            _st_content = data.get("content", "")
+            if isinstance(_st_content, str) and _st_content.startswith("[AgenticLog] "):
+                pass
+            else:
+                state_snapshot.setdefault("process_log", []).append({
+                    "content": _st_content,
+                    "state": data.get("state", "running"),
+                })
         elif event_type in ("workflow", "plan") and data:
             state_snapshot["workflow"] = data
         elif event_type == "step" and data:
@@ -2739,6 +3032,11 @@ class AgentOrchestrator:
                     if k != "report_data":
                         report[k] = v
                 state_snapshot["report"] = report
+            if data.get("tool_result") is not None:
+                state_snapshot["skill_last_tool"] = {
+                    "tool_name": data.get("tool_name"),
+                    "tool_result": data.get("tool_result"),
+                }
         elif event_type == "report_data" and data:
             report = state_snapshot.get("report") or {}
             report.setdefault("report_data", {}).update(data)
