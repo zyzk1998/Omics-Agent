@@ -1,11 +1,13 @@
 /**
  * 系统设置弹窗 + MCP 插件中心（iOS 风格开关 + window 挂载）
  */
+/** HPC-Open 与后端约定：enabled_mcps 仍使用 compute_scheduler */
+var HPC_OPEN_MCP_KEY = 'compute_scheduler';
+
 var MCP_PLUGIN_DEFS = [
     { key: 'web_search', label: '全网实时检索' },
     { key: 'authority_db', label: '权威数据库直连' },
     { key: 'private_data_engine', label: '私有化数据引擎' },
-    { key: 'compute_scheduler', label: '计算资源智能调度' },
     { key: 'viz_oneclick', label: '科研成果一键可视化' },
 ];
 
@@ -14,7 +16,7 @@ function ensureMcpSwitchStyles() {
     var st = document.createElement('style');
     st.id = 'settings-mcp-ios-styles';
     st.textContent =
-        '.settings-mcp-section{margin-top:8px;padding-top:16px;border-top:1px solid #e5e7eb;}' +
+        '.settings-mcp-section{margin-top:8px;padding-top:16px;border-top:1px solid var(--input-border,#e5e7eb);}' +
         '.settings-mcp-title{font-size:13px;font-weight:600;color:var(--text-color);opacity:.85;margin:0 0 12px;letter-spacing:.02em;}' +
         '.settings-mcp-list{display:flex;flex-direction:column;gap:14px;}' +
         '.settings-mcp-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:36px;}' +
@@ -95,30 +97,90 @@ function getEnabledMcpsFromStorage() {
     }
 }
 
+/** 聊天输入区 HPC 标识：需 HPC-Open（compute_scheduler）开启且后端 MCP 已连接 */
+function updateHpcContextBadge(optionalStatus) {
+    var badge = document.getElementById('hpc-context-badge');
+    if (!badge) return;
+    var schedOn = getEnabledMcpsFromStorage().indexOf(HPC_OPEN_MCP_KEY) >= 0;
+    if (!schedOn) {
+        badge.classList.add('hidden');
+        return;
+    }
+    function apply(data) {
+        if (data && data.connected) {
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+    if (optionalStatus && typeof optionalStatus.connected === 'boolean') {
+        apply(optionalStatus);
+        return;
+    }
+    fetch('/api/config/mcp/status', {
+        headers: typeof globalThis.getAuthHeaders === 'function' ? globalThis.getAuthHeaders() : {},
+    })
+        .then(function (r) {
+            return r.ok ? r.json() : {};
+        })
+        .then(function (data) {
+            apply(data);
+        })
+        .catch(function () {
+            badge.classList.add('hidden');
+        });
+}
+
+function ensureSettingsMcpUiMounted() {
+    var form = document.querySelector('#settings-modal .settings-form');
+    if (!form) return;
+    var verOk = form.getAttribute('data-mcp-version') === '7';
+    var v2 = form.querySelector('#settings-mcp-root[data-mcp-layout="v2"]');
+    var hasScheduler = document.getElementById('mcp-switch-compute_scheduler');
+    var hasHpcRow = document.getElementById('settings-hpc-mcp-row');
+    if (verOk && v2 && hasScheduler && hasHpcRow) return;
+    form.removeAttribute('data-mcp-version');
+    initSettingsPanelMcpSwitches();
+}
+
 function openSettingsModal() {
     if (typeof window.closeAllPopovers === 'function') {
         window.closeAllPopovers();
     }
     var el = document.getElementById('settings-modal');
     if (!el) return;
+    initSettingsModalBindings();
+    ensureSettingsMcpUiMounted();
     var defaultModel = document.getElementById('setting-default-model');
     if (defaultModel) {
         defaultModel.value = localStorage.getItem('default_model') || 'deepseek-ai/DeepSeek-R1';
     }
     syncMcpSwitchesFromStorage();
+    updateHpcContextBadge();
     el.style.display = 'flex';
     el.setAttribute('aria-hidden', 'false');
 }
 
-function initSettingsPanelMcpSwitches() {
-    var form = document.querySelector('#settings-modal .settings-form');
-    if (!form) return;
-    ensureMcpSwitchStyles();
-    if (form.getAttribute('data-mcp-version') === '3') return;
-    form.querySelectorAll('[data-mcp-row], #settings-mcp-root').forEach(function (n) {
-        n.remove();
+/** 去掉旧版脚本插入的重复 #settings-mcp-root，仅保留 index 中带 data-mcp-layout="v2" 的节点 */
+function cleanupDuplicateMcpRoots(form) {
+    var all = [].slice.call(form.querySelectorAll('#settings-mcp-root'));
+    var v2 = null;
+    for (var i = 0; i < all.length; i++) {
+        if (all[i].getAttribute('data-mcp-layout') === 'v2') {
+            v2 = all[i];
+            break;
+        }
+    }
+    all.forEach(function (el) {
+        if (el !== v2) {
+            el.remove();
+        }
     });
-    form.removeAttribute('data-mcp-init');
+    return v2;
+}
+
+/** 无静态 MCP 区块时的兜底挂载（与 index 中 v2 结构一致） */
+function mountMcpSectionLegacy(form) {
     var localDataRow = null;
     var rows = form.querySelectorAll('.settings-row');
     for (var r = 0; r < rows.length; r++) {
@@ -130,13 +192,34 @@ function initSettingsPanelMcpSwitches() {
     var block = document.createElement('div');
     block.id = 'settings-mcp-root';
     block.className = 'settings-mcp-section';
+    block.setAttribute('data-mcp-layout', 'v2');
     block.innerHTML =
-        '<p class="settings-mcp-title">MCP 插件中心</p><div class="settings-mcp-list" id="settings-mcp-list"></div>';
-    var list = block.querySelector('#settings-mcp-list');
+        '<p class="settings-mcp-title">MCP 插件中心</p>' +
+        '<div id="settings-mcp-list" class="settings-mcp-list">' +
+        '<div class="settings-mcp-row" id="settings-hpc-mcp-row" data-mcp-row="1">' +
+        '<span class="settings-mcp-label" id="mcp-switch-compute_scheduler-lbl">HPC-Open (超算中心)</span>' +
+        '<label class="mcp-ios-wrap" for="mcp-switch-compute_scheduler">' +
+        '<input type="checkbox" class="mcp-ios-input" id="mcp-switch-compute_scheduler" data-mcp-key="compute_scheduler" aria-labelledby="mcp-switch-compute_scheduler-lbl" />' +
+        '<span class="mcp-ios-track"><span class="mcp-ios-thumb"></span></span>' +
+        '</label></div></div>';
+    if (localDataRow && localDataRow.parentNode === form) {
+        form.insertBefore(block, localDataRow);
+    } else {
+        form.appendChild(block);
+    }
+}
+
+function appendPluginMcpRows(list) {
+    var hpcRow = document.getElementById('settings-hpc-mcp-row');
+    if (!list || !hpcRow) return;
+    list.querySelectorAll('[data-mcp-plugin-row="1"]').forEach(function (n) {
+        n.remove();
+    });
     MCP_PLUGIN_DEFS.forEach(function (def) {
         var row = document.createElement('div');
         row.className = 'settings-mcp-row';
         row.setAttribute('data-mcp-row', '1');
+        row.setAttribute('data-mcp-plugin-row', '1');
         var lid = 'mcp-switch-' + def.key;
         row.innerHTML =
             '<span class="settings-mcp-label" id="' +
@@ -164,15 +247,77 @@ function initSettingsPanelMcpSwitches() {
             if (inp.checked) keys.push(def.key);
             writeEnabledMcpKeys(keys);
         });
-        list.appendChild(row);
+        list.insertBefore(row, hpcRow);
     });
-    if (localDataRow && localDataRow.parentNode === form) {
-        form.insertBefore(block, localDataRow);
-    } else {
-        form.appendChild(block);
+}
+
+function bindHpcMcpSwitch() {
+    var hpcRow = document.getElementById('settings-hpc-mcp-row');
+    if (!hpcRow) return;
+    var hpcLid = 'mcp-switch-' + HPC_OPEN_MCP_KEY;
+    var hpcInp = document.getElementById(hpcLid);
+    if (hpcInp && hpcRow.getAttribute('data-hpc-input-bound') !== '1') {
+        hpcRow.setAttribute('data-hpc-input-bound', '1');
+        hpcInp.addEventListener('change', function () {
+            var keys = readEnabledMcpKeys().filter(function (x) {
+                return x !== HPC_OPEN_MCP_KEY;
+            });
+            if (hpcInp.checked) keys.push(HPC_OPEN_MCP_KEY);
+            writeEnabledMcpKeys(keys);
+            updateHpcContextBadge();
+        });
     }
+}
+
+function initSettingsPanelMcpSwitches() {
+    var form = document.querySelector('#settings-modal .settings-form');
+    if (!form) return;
+    ensureMcpSwitchStyles();
+    if (form.getAttribute('data-mcp-version') === '7') return;
+    cleanupDuplicateMcpRoots(form);
+    var list = document.getElementById('settings-mcp-list');
+    var hpcRow = document.getElementById('settings-hpc-mcp-row');
+    if (!list || !hpcRow) {
+        mountMcpSectionLegacy(form);
+        list = document.getElementById('settings-mcp-list');
+        hpcRow = document.getElementById('settings-hpc-mcp-row');
+    }
+    if (!list || !hpcRow) return;
+    appendPluginMcpRows(list);
+    bindHpcMcpSwitch();
     syncMcpSwitchesFromStorage();
-    form.setAttribute('data-mcp-version', '3');
+    form.setAttribute('data-mcp-version', '7');
+}
+
+/** Badge 关闭：隐藏标识，并强制 HPC 开关 OFF + 触发 change 以写 localStorage */
+function disableHpcOpenAndSyncUi() {
+    var badge = document.getElementById('hpc-context-badge');
+    if (badge) badge.classList.add('hidden');
+    var inp = document.getElementById('mcp-switch-compute_scheduler');
+    if (inp && inp.checked) {
+        inp.checked = false;
+        inp.dispatchEvent(new Event('change', { bubbles: true }));
+    } else {
+        var keys = readEnabledMcpKeys().filter(function (x) {
+            return x !== HPC_OPEN_MCP_KEY;
+        });
+        writeEnabledMcpKeys(keys);
+        if (inp) inp.checked = false;
+        updateHpcContextBadge();
+    }
+}
+
+function initHpcContextBadgeCloseButton() {
+    var badge = document.getElementById('hpc-context-badge');
+    if (!badge || badge.getAttribute('data-badge-close-bound') === '1') return;
+    badge.setAttribute('data-badge-close-bound', '1');
+    var btn = badge.querySelector('.badge-close-btn');
+    if (!btn) return;
+    btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        disableHpcOpenAndSyncUi();
+    });
 }
 
 function initSettingsModalBindings() {
@@ -211,10 +356,18 @@ window.openSettingsModal = openSettingsModal;
 window.closeSettingsModal = closeSettingsModal;
 window.getEnabledMcpsFromStorage = getEnabledMcpsFromStorage;
 window.applyDefaultModelFromStorage = applyDefaultModelFromStorage;
+window.updateHpcContextBadge = updateHpcContextBadge;
+window.disableHpcOpenAndSyncUi = disableHpcOpenAndSyncUi;
 
-document.addEventListener('DOMContentLoaded', () => {
+function bootstrapSettingsModalModule() {
     initSettingsModalBindings();
-    if (typeof initSettingsPanelMcpSwitches === 'function') {
-        initSettingsPanelMcpSwitches();
-    }
-});
+    initSettingsPanelMcpSwitches();
+    initHpcContextBadgeCloseButton();
+    updateHpcContextBadge();
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrapSettingsModalModule);
+} else {
+    bootstrapSettingsModalModule();
+}

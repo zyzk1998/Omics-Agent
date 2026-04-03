@@ -1,0 +1,25 @@
+﻿序号,技能广场_主分类,技能广场_技能名称,技能广场_UI子分类标签,技能广场_简介,磐石矩阵_tool_chain_key,磐石矩阵_技能名称,磐石矩阵_子分类,磐石矩阵_技能简介
+1,化学,分子假阳性片段检测工具,药物发现,使用 PAINS filter 检查分子中是否含有可能的导致假阳性的片段。,molecularFalsePositiveFragmentDetectionTool,分子假阳性片段检测工具,化学工具矩阵(chemistryTools),使用 PAINS filter 检查分子中是否含有可能导致假阳性的片段。
+2,化学,DRTtools,数据分析,基于物理时效分布方法的电化学阻抗谱分析工具。,DRTtools,DRTtools,科学工具矩阵(toolNames),基于弛豫时间分布方法的电化学阻抗谱分析工具。
+3,化学,CP2K,量子化学,量子化学与固体物理软件包，主要用于原子模拟的分子动力学模拟。,CP2K,CP2K,科学工具矩阵(toolNames),量子化学与固体物理模拟软件包，主要用于原子级别的分子动力学模拟。
+4,化学,Tanimoto 距离矩阵计算工具,数据处理,基于分子指纹 (Morgan Fingerprint) 计算 Tanimoto 距离矩阵。,molecularTanimotoDistanceMatrixCalculationTool,Tanimoto 距离矩阵计算工具,化学工具矩阵(chemistryTools),基于分子指纹 (Morgan Fingerprint) 计算 Tanimoto 距离矩阵。
+5,化学,分子量计算工具,性质预测,根据 SMILES 表达式计算分子量。,molecularMolWeightCalculationTool,分子量计算工具,化学工具矩阵(chemistryTools),根据 SMILES 表达式计算分子量。
+6,化学,分子BBB评估工具,性质预测,预测分子是否可通过血脑屏障 (BBB)。,molecularBBBAssessmentTool,分子BBB评估工具,化学工具矩阵(chemistryTools),估算分子是否可能穿过血脑屏障 (BBB)。
+7,化学,Brenk filter分子毒性检查工具,药物发现,使用 Brenk filter 检查分子是否含有潜在毒性或不良片段。,molecularBrenkFilterToxicityCheckTool,Brenk filter分子毒性检查工具,化学工具矩阵(chemistryTools),使用 Brenk filter 检查分子是否含有潜在毒性或不良片段。
+8,化学,分子Morgan Fingerprint生成工具,特征提取,生成分子的 Morgan Fingerprint (也叫环状环结构特征码)。,molecularMorganFingerprintGenerationTool,分子Morgan Fingerprint生成工具,化学工具矩阵(chemistryTools),生成分子的 Morgan Fingerprint（局部化学环境编码的比特向量）。
+9,化学,分子Pattern Fingerprint生成工具,特征提取,生成分子的 Pattern Fingerprint。,molecularPatternFingerprintGenerationTool,分子Pattern Fingerprint生成工具,化学工具矩阵(chemistryTools),生成分子的 Pattern Fingerprint。
+10,化学,分子芳香性矫正操作工具,结构处理,对分子进行芳香化修正操作。,molecularAromaticityPerceptionOperationTool,分子芳香性感知操作工具,化学工具矩阵(chemistryTools),对分子进行芳香性感知操作。
+11,化学,分子Kekulization 转换工具,结构处理,给分子进行 Kekulization 转换，将其结构转为交替单双键。,molecularKekulizationConversionTool,分子Kekulization 转换工具,化学工具矩阵(chemistryTools),对分子进行 Kekulization 转换，将芳香键转为交替单/双键。
+12,化学,分子图像生成工具,数据可视化,根据 SMILES 生成分子的图像 (PNG)，并提供 MinIO 文件访问 URL。,molecularImageGenerationTool,分子图像生成工具,化学工具矩阵(chemistryTools),根据 SMILES 生成分子结构图像 (PNG)，上传到 MinIO 并返回文件 URL。
+13,化学,Open Babel,格式转换,支持分子文件的批量转换、分子读写和处理。,openBabel,Open Babel,化学工具矩阵(chemistryTools),支持分子文件格式转换、分子对接和虚拟筛选。
+14,化学,分子相似性评估工具,特征提取,计算两个分子间的 Tanimoto 相似度。,molecularSimilarityAssessmentTool,分子相似性评估工具,化学工具矩阵(chemistryTools),计算两个分子的 Tanimoto 相似度。
+15,化学,化学元素查询,基础查询,查询特定化学元素的各种属性信息。,chemicalElementQueryTool,化学元素查询,化学工具矩阵(chemistryTools),查询指定化学元素的详细信息。
+16,化学,分子官能团识别工具,特征提取,识别分子中的常见官能团 (functional groups)。,molecularFunctionalGroupIdentificationTool,分子官能团识别工具,化学工具矩阵(chemistryTools),识别分子中的常见官能团 (functional groups)。
+17,化学,分子胃肠道吸收能力评估工具,性质预测,预测分子在胃肠道的吸收能力。,molecularGastrointestinalAbsorptionCapacityAssessmentTool,分子胃肠道吸收能力评估工具,化学工具矩阵(chemistryTools),估算分子在胃肠道的吸收能力。
+18,化学,药物相似性评估工具,性质预测,根据 Lipinski Rule of five 检验分子是否具有药物相似性。,drugSimilarityAssessmentTool,药物相似性评估工具,化学工具矩阵(chemistryTools),根据 Lipinski Rule of Five 检查分子是否具有药物相似性。
+19,化学,分子量计算,计算,根据化学式计算分子量和元素组成，可用于辅助化学、生物与生物分析研究。,molWeight,分子量计算,化学工具矩阵(chemistryTools),根据化学式计算分子质量和元素组成，可用于辅助化学、制药与生物分析研究。
+20,化学,LAMMPS,动力学模拟,开源分子动力学模拟软件，常用于模拟液体、固体或混合态的原子集合。,lammps,LAMMPS,化学工具矩阵(chemistryTools),开源的分子动力学模拟软件，常被用于模拟液体、固体或气态的粒子集合
+21,化学,3D分子结构渲染工具,数据可视化,"用于绘制和查看小分子的三维结构，支持 MOL, SDF 格式。",molPreview,3D分子结构渲染工具,化学工具矩阵(chemistryTools),用于渲染通用小分子的三维结构，支持MOL、SDF格式。
+22,化学,分子可视化工具,数据可视化,"基于 RDKit.js, 支持从多种分子数据格式构建并渲染 2D 图像。",rdkitMolecularViewer,分子可视化工具,化学工具矩阵(chemistryTools),基于RDKit.js，支持从多种格式读取分子结构并生成2D图像
+23,化学,分子格式转换工具,格式转换,"基于 RDKit, 实现 SMILES, SDF, Mol, InChI 等化学结构格式之间的相互转换与标准化。",rdkitTransform,分子格式转换工具,化学工具矩阵(chemistryTools),基于RDKit，实现SMILES、SDF、Mol、InChI等化学结构格式的相互转换与标准化。
+24,化学,分子分析工具,特征提取,"基于 RDKit, 实现分子属性计算、子结构匹配与相似性分析等功能。",rdkitAnalysis,分子分析工具,化学工具矩阵(chemistryTools),基于RDKit，实现分子性质计算、子结构匹配与相似性分析等功能。

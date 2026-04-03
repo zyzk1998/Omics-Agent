@@ -6,6 +6,8 @@ Phase 2 - 鉴权与游客资产继承 API
 - POST /merge_guest_data: 已登录用户将 guest_uuid 下资产合并到当前用户（事务内 3 表 UPDATE）
 - INITIAL_ADMINS 冷启动：环境变量逗号分隔 username，注册/登录时若在其中则强制 role=admin
 """
+from __future__ import annotations
+
 import logging
 import os
 from datetime import timedelta
@@ -53,19 +55,33 @@ INITIAL_ADMINS = frozenset(
 
 
 def _sync_admin_role(db: Session, user: User) -> None:
-    """若 username 在 INITIAL_ADMINS 中，强制将 user.role 更新为 admin 并提交。"""
+    """若 username 在 INITIAL_ADMINS 中，强制 admin + 审核通过（可登录）。"""
     if not user or user.username not in INITIAL_ADMINS:
         return
-    if user.role == "admin":
+    changed = False
+    if user.role != "admin":
+        user.role = "admin"
+        changed = True
+    if getattr(user, "approval_status", None) != "approved":
+        user.approval_status = "approved"
+        changed = True
+    if not changed:
         return
     try:
-        user.role = "admin"
         db.commit()
         db.refresh(user)
-        logger.info("INITIAL_ADMINS 冷启动: 已将用户 %s 设为 admin", user.username)
+        logger.info("INITIAL_ADMINS 冷启动: 已将用户 %s 设为 admin 且审核通过", user.username)
     except Exception as e:
         db.rollback()
         logger.warning("sync admin role 失败: %s", e)
+
+
+def _approval_status_of(user: User) -> str | None:
+    v = getattr(user, "approval_status", None)
+    if v is None:
+        return None
+    s = str(v).strip().lower()
+    return s if s else None
 
 
 @router.post("/register")
@@ -89,18 +105,31 @@ def register(body: RegisterBody, db: Session = Depends(get_db_session)):
     existing = db.query(User).filter(User.username == body.username).first()
     if existing:
         raise HTTPException(status_code=400, detail="用户名已存在")
+    approval = "approved" if body.username in INITIAL_ADMINS else "pending"
     user = User(
         username=body.username,
         hashed_password=get_password_hash(plain),
         role="user",
+        approval_status=approval,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
     _sync_admin_role(db, user)
     db.refresh(user)
-    logger.info("用户注册: %s", body.username)
-    return {"username": user.username, "message": "注册成功", "role": user.role}
+    logger.info("用户注册: %s approval=%s", body.username, user.approval_status)
+    if (user.approval_status or "") == "pending":
+        return {
+            "username": user.username,
+            "message": "注册已提交，请等待管理员审核",
+            "approval_status": user.approval_status,
+        }
+    return {
+        "username": user.username,
+        "message": "注册成功（管理员账户已自动通过审核）",
+        "role": user.role,
+        "approval_status": user.approval_status,
+    }
 
 
 @router.post("/login")
@@ -118,6 +147,17 @@ def login(
         )
     _sync_admin_role(db, user)
     db.refresh(user)
+    st = _approval_status_of(user)
+    if st == "pending":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="ACCOUNT_PENDING",
+        )
+    if st == "rejected":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="ACCOUNT_REJECTED",
+        )
     expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     token = create_access_token(data={"sub": user.username}, expires_delta=expires)
     return {

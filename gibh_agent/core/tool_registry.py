@@ -6,7 +6,7 @@
 """
 import inspect
 import logging
-from typing import Dict, Any, Callable, Optional, Type, get_type_hints, get_origin, get_args
+from typing import Dict, Any, Callable, Iterable, Optional, Type, get_type_hints, get_origin, get_args
 from functools import wraps
 from pydantic import BaseModel, create_model, Field
 from pydantic.fields import FieldInfo
@@ -293,6 +293,22 @@ class ToolRegistry:
             是否存在
         """
         return name in self._tools
+
+    def unregister(self, name: str) -> bool:
+        """按名称移除工具（用于 MCP 等动态注册重连前清理）。"""
+        existed = name in self._tools
+        self._tools.pop(name, None)
+        self._executables.pop(name, None)
+        for alias_key, target in list(self._aliases.items()):
+            if target == name:
+                del self._aliases[alias_key]
+        if existed:
+            logger.info("🗑️ 工具已注销: %s", name)
+        return existed
+
+    def unregister_many(self, names: Iterable[str]) -> None:
+        for n in names:
+            self.unregister(n)
 
 
 # 全局单例实例

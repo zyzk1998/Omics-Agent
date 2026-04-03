@@ -6,6 +6,7 @@ Phase 1 - 用户与资产中台：MySQL 连接与 SQLAlchemy 引擎
 - 真实就绪探测与建表由 server.py 启动时智能等待完成。
 """
 import os
+import threading
 from typing import Generator
 
 from sqlalchemy import create_engine
@@ -34,6 +35,9 @@ engine = create_engine(
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+_users_approval_schema_lock = threading.Lock()
+_users_approval_schema_done = False
+
 
 def is_available() -> bool:
     """兼容旧接口；engine/SessionLocal 始终存在，由 server 启动时等待 MySQL 就绪。"""
@@ -41,8 +45,18 @@ def is_available() -> bool:
 
 
 def get_db_session() -> Generator:
+    global _users_approval_schema_done
     db = SessionLocal()
     try:
+        if not _users_approval_schema_done:
+            with _users_approval_schema_lock:
+                if not _users_approval_schema_done:
+                    from gibh_agent.db.user_approval_schema import (
+                        ensure_users_approval_columns,
+                    )
+
+                    ensure_users_approval_columns(engine)
+                    _users_approval_schema_done = True
         yield db
     finally:
         db.close()

@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
 # 启用 BuildKit 以支持 RUN --mount=type=cache（pip 缓存加速重建）
+# HPC MCP 由独立服务 mcp-gateway（Python 3.11 + 官方 mcp SDK）承载；本镜像保持 3.9 稳定栈
 FROM python:3.9-slim
 
 WORKDIR /app

@@ -1003,8 +1003,8 @@ class WorkflowExecutor:
         current_tool_id: Optional[str],
         current_step_id: Optional[str],
     ) -> None:
-        """Spatial / scRNA-seq：h5ad_path、adata_path 仍为空时，用前序步骤输出或 resolved_input_paths 兜底。"""
-        if tool_category not in ("Spatial", "scRNA-seq"):
+        """Spatial / scRNA-seq / STED_EC：h5ad_path、adata_path 仍为空时，用前序步骤输出或 resolved_input_paths 兜底。"""
+        if tool_category not in ("Spatial", "scRNA-seq", "STED_EC"):
             return
         tf = registry.get_tool(current_tool_id) if current_tool_id else None
         valid = self._tool_accepted_param_names(current_tool_id or "", tf)
@@ -1149,6 +1149,48 @@ class WorkflowExecutor:
                 # 占位符，尝试从上下文或步骤结果中获取
                 placeholder = value[1:-1]  # 移除 < >
                 
+                # STED-EC / 模板第一步：h5ad_path 常用 <user_input>，非步骤 ID，须从本次上传路径注入
+                if placeholder in ("user_input", "USER_INPUT", "PENDING_UPLOAD", "待上传数据"):
+                    if key in (
+                        "h5ad_path",
+                        "adata_path",
+                        "file_path",
+                        "trajectory_data_path",
+                        "data_path",
+                    ):
+                        prior = None
+                        if step_context:
+                            prior = step_context.get("current_file_path")
+                            if not prior:
+                                for rp in reversed(
+                                    step_context.get("resolved_input_paths") or []
+                                ):
+                                    if not isinstance(rp, str) or not rp.strip():
+                                        continue
+                                    s = rp.strip()
+                                    if s.lower().endswith(".h5ad"):
+                                        try:
+                                            prior = self._resolve_file_path(s)
+                                        except Exception:
+                                            prior = s
+                                        break
+                            if not prior and step_context.get("resolved_input_paths"):
+                                rp0 = step_context["resolved_input_paths"][0]
+                                if isinstance(rp0, str) and rp0.strip():
+                                    try:
+                                        prior = self._resolve_file_path(rp0.strip())
+                                    except Exception:
+                                        prior = rp0.strip()
+                        if prior:
+                            processed[key] = prior
+                            logger.info(
+                                "🔄 数据流: %s = <%s> -> %s（用户上传/执行上下文）",
+                                key,
+                                placeholder,
+                                prior,
+                            )
+                            continue
+
                 # 🔥 CRITICAL FIX: 特殊处理 preprocess_data_output 占位符
                 # 用于 PCA、PLS-DA、差异分析等步骤，需要从 preprocess_data 步骤获取输出文件路径
                 if placeholder == "preprocess_data_output" or "preprocess" in placeholder.lower():

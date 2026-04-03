@@ -12,6 +12,10 @@ RUN conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pk
     conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/bioconda/ && \
     conda config --set show_channel_urls yes
 
+# 使用 libmamba 求解器：避免「Solving environment」在混合 bioconda/forge 大包时卡数十分钟（经典 SAT 求解极慢）
+RUN conda install -y -n base -c conda-forge conda-libmamba-solver && \
+    conda config --set solver libmamba
+
 # 一键安装所有生信依赖和 FastAPI 运行环境（conda-forge / bioconda 解析依赖）
 RUN conda install -y \
     python=3.10 \
@@ -21,6 +25,10 @@ RUN conda install -y \
     gseapy \
     matplotlib \
     numpy \
+    pandas \
+    scikit-learn \
+    simpleitk \
+    pyradiomics \
     fastapi \
     uvicorn \
     pydantic && \
@@ -30,7 +38,7 @@ RUN conda install -y \
 COPY . /app/
 
 # 构建期校验：conda 版 rdkit 可能无 rdkit.Chem.SA_Score 包，由 compat 解析
-RUN python -c "import RNA; import pymol; from rdkit import Chem; import gseapy; from sa_score_compat import load_calculate_score; load_calculate_score(); print('pyskills imports OK')"
+RUN python -c "import RNA; import pymol; from rdkit import Chem; import gseapy; from radiomics import featureextractor; import sklearn; from sa_score_compat import load_calculate_score; load_calculate_score(); print('pyskills imports OK')"
 
 EXPOSE 8000
 

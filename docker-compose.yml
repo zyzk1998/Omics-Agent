@@ -98,6 +98,12 @@ services:
       - SECRET_KEY_FILE=${SECRET_KEY_FILE:-}
       # PySkills 微服务（ViennaRNA / RDKit 等）；与 worker-pyskills 同网络
       - PYSKILLS_BASE_URL=${PYSKILLS_BASE_URL:-http://worker-pyskills:8000}
+      # 超算 MCP：仅经 mcp-gateway 转发（主镜像不装官方 mcp）
+      - MCP_GATEWAY_URL=${MCP_GATEWAY_URL:-http://mcp-gateway:8002}
+      # HPC 直连默认调 execute_hpc_command；若远端提供 hpc_mcp_chat 可改为该名
+      - HPC_ORCH_CHAT_TOOL=${HPC_ORCH_CHAT_TOOL:-execute_hpc_command}
+      - HPC_MCP_URL=${HPC_MCP_URL:-http://192.168.32.31:8001/mcp}
+      - HPC_MCP_TRANSPORT=${HPC_MCP_TRANSPORT:-streamableHttp}
     volumes:
       - .:/app
       - ./data/uploads:/app/uploads
@@ -111,12 +117,33 @@ services:
         condition: service_started
       worker-pyskills:
         condition: service_started
+      mcp-gateway:
+        condition: service_started
     networks:
       - gibh-network
     # 🔧 修复：使用 entrypoint 脚本修复权限
     entrypoint: ["/entrypoint.sh"]
     # timeout：长流程（时空动力学/Cell Ranger 等）可能超过 300s；过短会导致 worker 被强杀 → SSE 分块不完整(ERR_INCOMPLETE_CHUNKED_ENCODING)
     command: gunicorn server:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8028 --timeout 1200 --graceful-timeout 60
+
+  # =========================================
+  # 2a. 超算 MCP 网关（Python 3.11 + 官方 mcp SDK；主 API 经 HTTP 调用）
+  # =========================================
+  mcp-gateway:
+    build:
+      context: .
+      dockerfile: services/mcp-gateway/Dockerfile
+    image: gibh-v2-mcp-gateway:latest
+    container_name: gibh_v2_mcp_gateway
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai
+      - HPC_MCP_URL=${HPC_MCP_URL:-http://192.168.32.31:8001/mcp}
+      - HPC_MCP_TRANSPORT=${HPC_MCP_TRANSPORT:-streamableHttp}
+    ports:
+      - "8002:8002"
+    networks:
+      - gibh-network
 
   # =========================================
   # 2b. 传统生信算法综合微服务（ViennaRNA / PyMOL / RDKit / gseapy）
@@ -179,12 +206,16 @@ services:
       - HOME=/home/appuser
       - NUMBA_DISABLE_JIT_CACHING=1
       - NUMBA_DEBUG_CACHE=1
+      - MCP_GATEWAY_URL=${MCP_GATEWAY_URL:-http://mcp-gateway:8002}
     volumes:
       - .:/app
       - ./data/uploads:/app/uploads
       - ./data/results:/app/results
       - ./data:/app/data
       - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      mcp-gateway:
+        condition: service_started
     # 🔧 修复：在容器启动时修复挂载目录的权限
     entrypoint: |
       sh -c "

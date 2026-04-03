@@ -42,5 +42,5 @@ echo "==> 可选：删除 10x PBMC 1k 演示数据（约 10GB+，需手动取消
 #   "${TD}/pbmc_1k_v3_output" "${TD}/pbmc_1k_v3_filtered.h5ad"
 
 echo "完成。剩余大块一般是 sted-ec.h5ad 与 refdata-gex-*。"
-echo "提示：工作流测试输出在 data/results/run_*，可用 ./scripts/cleanup_data_results.sh 按次数清理。"
+echo "提示：工作流测试输出在 data/results/run_*，可用 ./scripts/清理后台结果数据.sh（或 ./scripts/cleanup_data_results.sh）按次数清理。"
 du -sh "${ROOT}/results_full" "${TD}" 2>/dev/null || true

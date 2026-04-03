@@ -1819,6 +1819,25 @@ Classify the intent and return JSON only. Remember:
                 elif params.get(param_name) in ["<待上传数据>", "<PENDING_UPLOAD>", ""]:
                     # 如果没有文件路径但参数是占位符，记录警告
                     logger.warning(f"⚠️ [SOPPlanner] 步骤 {step_id} 的参数 {param_name} 仍然是占位符，但 file_metadata 存在")
+
+            # STED-EC / 时空动力学：第一步 h5ad_path 使用 <user_input>，须与 file_metadata.file_path 对齐（勿动 <load_data> 等步骤引用）
+            if "h5ad_path" in params and file_path:
+                old_h5 = params.get("h5ad_path", "")
+                if old_h5 in (
+                    "<user_input>",
+                    "<USER_INPUT>",
+                    "<待上传数据>",
+                    "<PENDING_UPLOAD>",
+                    "",
+                ):
+                    params["h5ad_path"] = file_path
+                    if old_h5 and old_h5 != file_path:
+                        logger.info(
+                            "✅ [SOPPlanner] 填充 h5ad_path: %s -> %s (%s)",
+                            old_h5,
+                            file_path,
+                            step_id,
+                        )
             
             # 🔥 CRITICAL FIX: 强制填充 group_column（对于需要分组列的步骤）
             if step_id in ["metabolomics_plsda", "differential_analysis", "metabolomics_pathway_enrichment"]:

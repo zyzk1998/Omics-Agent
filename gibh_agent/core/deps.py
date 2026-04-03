@@ -3,8 +3,9 @@ Phase 2 - FastAPI 鉴权依赖注入
 
 get_current_user: 从 Bearer JWT 解码 username，查 User 表，无效或不存在则 401。
 get_current_owner_id: Phase 4 身份解析，支持 JWT 或 X-Guest-UUID，返回 owner_id 字符串。
+get_optional_owner_id: 同上但不抛错；无有效 Bearer 且无 X-Guest-UUID 时返回 None（橱窗公开读）。
 """
-from typing import Generator
+from typing import Generator, Optional
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
@@ -44,6 +45,24 @@ def get_current_owner_id(request: Request) -> str:
     )
 
 
+def get_optional_owner_id(request: Request) -> Optional[str]:
+    """解析 JWT 或 X-Guest-UUID；皆无或无效时返回 None，不抛 401。"""
+    auth = request.headers.get("Authorization")
+    if auth and auth.startswith("Bearer "):
+        token = auth[7:].strip()
+        if token and token.lower() != "null":
+            try:
+                payload = decode_access_token(token)
+                if payload and payload.get("sub"):
+                    return str(payload["sub"]).strip()
+            except Exception:
+                pass
+    guest = request.headers.get("X-Guest-UUID")
+    if guest and guest.strip():
+        return guest.strip()
+    return None
+
+
 def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db_session),
@@ -72,6 +91,23 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户不存在",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    # 与登录一致：NULL/空/approved 放行；pending/rejected 禁止持 Token 访问
+    raw = getattr(user, "approval_status", None)
+    if raw is None:
+        return user
+    st = str(raw).strip().lower()
+    if st in ("", "approved"):
+        return user
+    if st == "pending":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="ACCOUNT_PENDING",
+        )
+    if st == "rejected":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="ACCOUNT_REJECTED",
         )
     return user
 

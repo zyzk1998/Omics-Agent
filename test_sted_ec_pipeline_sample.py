@@ -239,4 +239,36 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="STED-EC 白盒集成测试；可用 --generate-mini-only 仅恢复演示用 mini h5ad。"
+    )
+    parser.add_argument(
+        "--generate-mini-only",
+        action="store_true",
+        help="仅从大文件 sted-ec.h5ad 切片生成 test_data/mini_sted_ec.h5ad（与前端「样本分析」路径一致），不跑四步流程",
+    )
+    args = parser.parse_args()
+    if args.generate_mini_only:
+        _ensure_writable_output_dir()
+        out = ensure_mini_h5ad()
+        # 前端演示固定 /app/test_data/mini_sted_ec.h5ad → 仓库 test_data/；若因在 test_data_run 生成则同步回去
+        demo_target = os.path.join(_FINAL_OUTPUT_DIR, "mini_sted_ec.h5ad")
+        if os.path.abspath(out) != os.path.abspath(demo_target) and os.path.isfile(out):
+            import shutil
+
+            try:
+                os.makedirs(_FINAL_OUTPUT_DIR, exist_ok=True)
+                shutil.copy2(out, demo_target)
+                logger.info("✅ 已同步到演示目录: %s", demo_target)
+            except OSError as e:
+                logger.warning(
+                    "⚠️ 无法写入演示目录 %s: %s（容器内请保证 test_data 可写，或手动拷贝 mini）",
+                    demo_target,
+                    e,
+                )
+        final_msg = demo_target if os.path.isfile(demo_target) else out
+        logger.info("✅ mini 已就绪（生成或已存在）: %s", final_msg)
+        sys.exit(0)
     main()

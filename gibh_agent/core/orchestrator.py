@@ -2745,7 +2745,11 @@ class AgentOrchestrator:
         enabled_mcps: List[str],
     ) -> AsyncIterator[str]:
         """聊天模式：可选 OpenAI tools（如 mcp_web_search），再流式输出最终回复。"""
-        from gibh_agent.core.openai_tools import tool_names_to_openai_tools
+        from gibh_agent.core.openai_tools import (
+            apply_hpc_mcp_tool_policy,
+            hpc_chat_system_suffix,
+            tool_names_to_openai_tools,
+        )
         from gibh_agent.core.tool_registry import registry
         from .stream_utils import stream_from_llm_chunks
 
@@ -2781,6 +2785,7 @@ class AgentOrchestrator:
                 "\n\n【NCBI 权威检索】你已启用 'mcp_ncbi_search'：可对 PubMed 文献与 NCBI Gene 做精准检索。"
                 "用户问文献、PMID、基因符号、基因功能时，应调用该工具（database 可选 pubmed / gene / auto），再结合返回摘要中文作答。"
             )
+        chat_system += hpc_chat_system_suffix(enabled_mcps)
 
         user_content = query
         files_hint = self._build_current_files_hint(files)
@@ -2804,6 +2809,7 @@ class AgentOrchestrator:
             tool_names.append("mcp_ncbi_search")
         if AgentOrchestrator._is_bepipred3_skill_chat_intent(query):
             tool_names.append("bepipred3_prediction")
+        tool_names = apply_hpc_mcp_tool_policy(tool_names, enabled_mcps)
         tools = tool_names_to_openai_tools(tool_names)
 
         _llm_first_byte = None
@@ -2889,17 +2895,40 @@ class AgentOrchestrator:
                         {"content": "[正在执行步骤: BepiPred3 B细胞表位预测...]", "state": "running"},
                     )
                     await asyncio.sleep(0.01)
+                elif name and name.startswith("hpc_mcp_"):
+                    yield self._emit_sse(
+                        state_snapshot,
+                        "status",
+                        {"content": "[正在执行步骤: 超算 MCP 远程调用...]", "state": "running"},
+                    )
+                    await asyncio.sleep(0.01)
                 try:
                     args = json.loads(args_raw)
                 except json.JSONDecodeError:
                     args = {}
                 tool_fn = registry.get_tool(name)
-                if not tool_fn:
-                    result_payload: Dict[str, Any] = {"status": "error", "error": f"未知工具: {name}"}
-                elif inspect.iscoroutinefunction(tool_fn):
-                    result_payload = await tool_fn(**args)
+                if name and name.startswith("hpc_mcp_") and "compute_scheduler" not in enabled_mcps:
+                    result_payload = {
+                        "status": "error",
+                        "message": "HPC Error: 未授权使用超算工具，请提示用户开启「计算资源智能调度」。",
+                    }
+                elif not tool_fn:
+                    result_payload = {"status": "error", "error": f"未知工具: {name}"}
                 else:
-                    result_payload = tool_fn(**args)
+                    try:
+                        if inspect.iscoroutinefunction(tool_fn):
+                            result_payload = await tool_fn(**args)
+                        else:
+                            result_payload = tool_fn(**args)
+                    except Exception as tool_exc:  # noqa: BLE001
+                        logger.exception("⚠️ [Orchestrator] 聊天模式工具执行异常: %s", name)
+                        if name and name.startswith("hpc_mcp_"):
+                            result_payload = {
+                                "status": "error",
+                                "message": f"HPC Error: execution failed, please inform the user. ({tool_exc})",
+                            }
+                        else:
+                            result_payload = {"status": "error", "message": str(tool_exc)}
                 messages.append(
                     {
                         "role": "tool",

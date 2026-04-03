@@ -22,6 +22,9 @@ class User(Base):
     username = Column(String(255), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
     role = Column(String(64), nullable=False, default="user")
+    # 注册审核：pending | approved | rejected；老库迁移前可为 NULL，登录侧视 NULL 为已通过
+    approval_status = Column(String(32), nullable=True, default="pending")
+    email = Column(String(512), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 

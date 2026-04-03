@@ -23,6 +23,46 @@ from ..core.utils import sanitize_for_json
 
 logger = logging.getLogger(__name__)
 
+# 时间列嗅探白名单（顺序有意义）：先 day（官方 sted-ec），再 time（肾/肺演示集等）。
+# 列名不在此列表时，必须在数据校验 / 工作流表单中显式传入 time_key。
+# 逗号分隔额外列名：环境变量 STED_EC_EXTRA_TIME_KEYS，例如 "Phase,dpt_pseudotime"
+STED_EC_VALID_TIME_KEYS: Tuple[str, ...] = (
+    "day",
+    "time",
+    "timepoint",
+    "time_point",
+    "age",
+    "age_days",
+    "development_stage",
+    "developmental_stage",
+    "embryonic_period",
+    "library_time",
+    "capture_time",
+    "sample_time",
+)
+
+STED_EC_VALID_CELL_TYPE_KEYS: Tuple[str, ...] = (
+    "cell_type",
+    "celltype",
+    "annotation",
+    "clusters",
+    "louvain",
+    "leiden",
+    "label",
+    "level1_group",
+    "level3_celltypes",
+    "level2_organORlineages",
+    "new_level3_celltypes",
+)
+
+
+def _sted_ec_time_keys_ordered() -> Tuple[str, ...]:
+    extra = os.environ.get("STED_EC_EXTRA_TIME_KEYS", "").strip()
+    if not extra:
+        return STED_EC_VALID_TIME_KEYS
+    more = tuple(x.strip() for x in extra.split(",") if x.strip())
+    return STED_EC_VALID_TIME_KEYS + more
+
 
 def _normalize_enabled_mcps_for_tools(raw: Any) -> List[str]:
     if raw is None:
@@ -125,6 +165,198 @@ def _sted_safe_return(payload: Dict[str, Any]) -> Dict[str, Any]:
         logger.error("_sted_safe_return sanitize 失败: %s", e, exc_info=True)
         return {"status": "error", "error": str(e)}
 
+
+def _robust_sanitize_and_preprocess(adata: Any, time_key: str, *, logger_label: str = "sted_ec") -> None:
+    """
+    防弹清洗：X 中 NaN/Inf → 0（稀疏/稠密均处理 .data 或整块矩阵）；
+    若 X.max()>50 视为 Raw Counts，则 normalize_total + log1p 后再 nan_to_num；
+    时间列 time_key：pd.to_numeric(coerce) + Inf 清掉 + NaN 用列中位数填充；
+    其余 obs 数值列做有限化（与官方 sted-ec.h5ad 兼容：log 矩阵不触发归一化）。
+    """
+    import numpy as np
+    import pandas as pd
+    import scanpy as sc
+    from scipy.sparse import issparse
+
+    X = adata.X
+    if issparse(X):
+        X = X.copy()
+        if X.nnz > 0:
+            fixed = np.nan_to_num(np.asarray(X.data, dtype=np.float64), nan=0.0, posinf=0.0, neginf=0.0)
+            X.data = fixed.astype(X.data.dtype, copy=False)
+        adata.X = X
+    else:
+        adata.X = np.nan_to_num(np.asarray(X, dtype=np.float64), nan=0.0, posinf=0.0, neginf=0.0)
+
+    try:
+        X2 = adata.X
+        if issparse(X2):
+            x_max = float(np.max(X2.data)) if X2.nnz else 0.0
+        else:
+            x_max = float(np.max(np.asarray(X2))) if np.size(X2) else 0.0
+        if x_max > 50:
+            logger.info("[%s] X_max=%.3f > 50，执行 normalize_total + log1p", logger_label, x_max)
+            sc.pp.normalize_total(adata, target_sum=1e4)
+            sc.pp.log1p(adata)
+            X3 = adata.X
+            if issparse(X3) and X3.nnz > 0:
+                X3 = X3.copy()
+                fixed = np.nan_to_num(np.asarray(X3.data, dtype=np.float64), nan=0.0, posinf=0.0, neginf=0.0)
+                X3.data = fixed.astype(X3.data.dtype, copy=False)
+                adata.X = X3
+            elif not issparse(X3):
+                adata.X = np.nan_to_num(np.asarray(X3, dtype=np.float64), nan=0.0, posinf=0.0, neginf=0.0)
+    except Exception as ex:
+        logger.warning("[%s] 智能归一化分支异常（已跳过）: %s", logger_label, ex)
+
+    if time_key and time_key in adata.obs.columns:
+        try:
+            tk = adata.obs[time_key]
+            vals = pd.to_numeric(tk, errors="coerce").replace([np.inf, -np.inf], np.nan)
+            med = float(np.nanmedian(vals.to_numpy(dtype=np.float64)))
+            if not np.isfinite(med):
+                med = 0.0
+            adata.obs[time_key] = vals.fillna(med)
+        except Exception as tk_ex:
+            logger.warning("[%s] 时间列 %s 清洗失败（已跳过该步）: %s", logger_label, time_key, tk_ex)
+
+    for col in list(adata.obs.columns):
+        if col == time_key:
+            continue
+        s = adata.obs[col]
+        try:
+            if isinstance(s.dtype, pd.CategoricalDtype) or pd.api.types.is_categorical_dtype(s):
+                continue
+            if pd.api.types.is_bool_dtype(s):
+                continue
+            if pd.api.types.is_numeric_dtype(s):
+                vals = pd.to_numeric(s, errors="coerce").replace([np.inf, -np.inf], np.nan)
+                med = float(np.nanmedian(vals.to_numpy(dtype=np.float64)))
+                if not np.isfinite(med):
+                    med = 0.0
+                adata.obs[col] = vals.fillna(med)
+                continue
+            if s.dtype == object:
+                num = pd.to_numeric(s, errors="coerce")
+                if num.notna().sum() < max(3, len(s) // 20):
+                    continue
+                vals = num.replace([np.inf, -np.inf], np.nan)
+                med = float(np.nanmedian(vals.to_numpy(dtype=np.float64)))
+                if not np.isfinite(med):
+                    med = 0.0
+                adata.obs[col] = vals.fillna(med)
+        except Exception as col_ex:
+            logger.debug("[%s] obs 列 %s 清洗跳过: %s", logger_label, col, col_ex)
+
+
+def _sted_obsm_all_finite(adata: Any, key: str) -> bool:
+    import numpy as np
+
+    if key not in adata.obsm:
+        return False
+    v = np.asarray(adata.obsm[key])
+    if v.size == 0:
+        return False
+    return bool(np.all(np.isfinite(v)))
+
+
+def _nan_to_num_obsm(adata: Any, key: str) -> None:
+    import numpy as np
+
+    if key not in adata.obsm:
+        return
+    v = np.asarray(adata.obsm[key], dtype=np.float64)
+    adata.obsm[key] = np.nan_to_num(v, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def _sted_ec_safe_recompute_embedding(adata: Any, logger_label: str) -> None:
+    """在已清洗 X 的前提下重算 PCA → neighbors → UMAP，并对 obsm 再 nan_to_num。"""
+    import numpy as np
+    import scanpy as sc
+
+    n_comps = min(50, adata.n_obs - 1, adata.n_vars - 1)
+    if n_comps < 2:
+        raise ValueError("细胞或基因数过少，无法计算 PCA/UMAP")
+    sc.tl.pca(adata, n_comps=n_comps, svd_solver="arpack")
+    _nan_to_num_obsm(adata, "X_pca")
+    sc.pp.neighbors(adata, use_rep="X_pca", n_neighbors=15, n_pcs=min(50, adata.obsm["X_pca"].shape[1]))
+    sc.tl.umap(adata)
+    _nan_to_num_obsm(adata, "X_umap")
+    u = np.asarray(adata.obsm["X_umap"], dtype=np.float64)
+    if not np.all(np.isfinite(u)):
+        adata.obsm["X_umap"] = np.nan_to_num(u, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+_STED_PLOT_PLACEHOLDER_MSG = (
+    "Visualization Failed due to data distribution issues, but pipeline continues."
+)
+
+
+def _write_sted_plot_placeholder(path: str, message: str = _STED_PLOT_PLACEHOLDER_MSG) -> None:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.text(0.5, 0.5, message, ha="center", va="center", fontsize=11, wrap=True)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+    fig.savefig(path, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+def _sanitize_obs_color_column(adata: Any, col: Optional[str]) -> None:
+    """绘图 color 用数值列时，保证无 Inf/NaN（category 列跳过）。"""
+    if not col or col not in adata.obs.columns:
+        return
+    import numpy as np
+    import pandas as pd
+
+    s = adata.obs[col]
+    if isinstance(s.dtype, pd.CategoricalDtype) or pd.api.types.is_categorical_dtype(s):
+        return
+    if not pd.api.types.is_numeric_dtype(s) and s.dtype != object:
+        return
+    vals = pd.to_numeric(s, errors="coerce").replace([np.inf, -np.inf], np.nan)
+    med = float(np.nanmedian(vals.to_numpy(dtype=np.float64)))
+    if not np.isfinite(med):
+        med = 0.0
+    adata.obs[col] = vals.fillna(med)
+
+
+def _safe_sted_pl_umap(
+    adata: Any,
+    color: Optional[str],
+    title: str,
+    path_out: str,
+    images_list: List[Dict[str, str]],
+    list_title: str,
+    logger_label: str,
+) -> bool:
+    import matplotlib.pyplot as plt
+    import scanpy as sc
+
+    try:
+        sc.pl.umap(adata, color=color, show=False, title=title)
+        plt.savefig(path_out, bbox_inches="tight", dpi=300)
+        plt.close()
+        images_list.append({"title": list_title, "path": path_out})
+        return True
+    except Exception as e:
+        logger.error("%s: sc.pl.umap 失败 color=%s err=%s", logger_label, color, e, exc_info=True)
+        try:
+            plt.close()
+        except Exception:
+            pass
+        try:
+            _write_sted_plot_placeholder(path_out, _STED_PLOT_PLACEHOLDER_MSG)
+            images_list.append({"title": list_title + " (placeholder)", "path": path_out})
+        except Exception as pe:
+            logger.error("%s: 占位图写入失败: %s", logger_label, pe, exc_info=True)
+        return False
+
+
 # STED-EC 依赖说明：请使用 moscot>=0.3.5 + ott-jax>=0.4.6（与 pandas>=2、jax 0.4.x 兼容）；旧版 ott-jax 0.3.x 会触发 register_dataclass 错误
 
 
@@ -185,8 +417,8 @@ def sted_ec_data_validation(
         adata = sc.read_h5ad(final_path)
         actual_time_key = time_key
         actual_cell_type_key = cell_type_key
-        valid_time_keys = ["development_stage", "day", "time", "age", "timepoint"]
-        valid_cell_type_keys = ["cell_type", "celltype", "annotation", "clusters", "louvain", "leiden", "label"]
+        valid_time_keys = _sted_ec_time_keys_ordered()
+        valid_cell_type_keys = STED_EC_VALID_CELL_TYPE_KEYS
         if actual_time_key not in adata.obs.columns:
             found = False
             for k in valid_time_keys:
@@ -197,8 +429,8 @@ def sted_ec_data_validation(
                     break
             if not found:
                 raise ValueError(
-                    "数据校验失败：找不到时间序列列。请确保数据包含 "
-                    f"{valid_time_keys} 中的任意一列，或通过参数明确指定。"
+                    "数据校验失败：找不到时间序列列。请确保 obs 含下列任一时间相关列，或在参数中显式指定 time_key："
+                    f"{list(STED_EC_VALID_TIME_KEYS)}；也可设置环境变量 STED_EC_EXTRA_TIME_KEYS 追加列名（逗号分隔）。"
                 )
         if actual_cell_type_key not in adata.obs.columns:
             for k in valid_cell_type_keys:
@@ -392,9 +624,9 @@ def sted_ec_preprocess(
         actual_time_key = time_key
         actual_cell_type_key = cell_type_key
 
-        # 2. 严格生物学白名单：绝不可将 batch/condition/sample 当作时间序列
-        valid_time_keys = ["development_stage", "day", "time", "age", "timepoint"]
-        valid_cell_type_keys = ["cell_type", "celltype", "annotation", "clusters", "louvain", "leiden"]
+        # 2. 严格生物学白名单：绝不可将 batch/condition 当作时间序列（sample 亦不在白名单）
+        valid_time_keys = _sted_ec_time_keys_ordered()
+        valid_cell_type_keys = STED_EC_VALID_CELL_TYPE_KEYS
 
         if actual_time_key not in adata.obs.columns:
             found = False
@@ -406,8 +638,8 @@ def sted_ec_preprocess(
                     break
             if not found:
                 raise ValueError(
-                    "数据校验失败：找不到时间序列列。请确保数据包含 "
-                    f"{valid_time_keys} 中的任意一列，或通过参数明确指定。绝不可使用 batch 或 condition 作为时间！"
+                    "数据校验失败：找不到时间序列列。请确保 obs 含白名单列或在参数中显式指定 time_key："
+                    f"{list(STED_EC_VALID_TIME_KEYS)}；可设置 STED_EC_EXTRA_TIME_KEYS 追加。绝不可使用 batch 或 condition 作为时间！"
                 )
 
         if actual_cell_type_key not in adata.obs.columns:
@@ -503,6 +735,9 @@ def sted_ec_moscot_trajectory(
         if time_key not in adata.obs.columns:
             return {"status": "error", "error": f"obs 中缺少时间列: {time_key}"}
 
+        # 在 moscot / 任何 OT 计算前强制清洗 X 与时间列，避免 NaN/Inf 导致 Sinkhorn 发散
+        _robust_sanitize_and_preprocess(adata, time_key, logger_label="Moscot")
+
         # 按数值排序时间点，避免字符串排序导致 19 排在 7 前（7.0 -> 7.5 -> ... -> 19.0）
         try:
             times = np.sort(adata.obs[time_key].astype(float).unique())
@@ -514,10 +749,16 @@ def sted_ec_moscot_trajectory(
         out_base = output_dir or os.path.join(os.path.dirname(h5ad_path), "sted_ec_out")
         tmaps_dir = os.path.join(out_base, "tmaps")
         os.makedirs(tmaps_dir, exist_ok=True)
+        result_path = os.path.join(out_base, "adata_with_tmaps.h5ad")
 
         col = adata.obs[time_key]
         use_numeric = np.issubdtype(times.dtype, np.floating) or times.dtype.kind == "f"
         pairs_done = 0
+        moscot_fail_msg = (
+            "Moscot trajectory inference failed due to numerical instability or convergence issues. "
+            "Downstream trajectory-driven analysis may be affected."
+        )
+
         for i in range(len(times) - 1):
             t1, t2 = times[i], times[i + 1]
             logger.info("sted_ec_moscot_trajectory: coupling %s -> %s", t1, t2)
@@ -535,70 +776,93 @@ def sted_ec_moscot_trajectory(
                 logger.warning("时间点 %s 或 %s 无细胞，跳过", t1, t2)
                 continue
 
-            # 联合 PCA 空间（复刻 Treesing runPCA 思路：拼接后 PCA）
-            merged = anndata.concat([adata1, adata2], join="inner")
-            if "highly_variable" not in merged.var.columns:
-                sc.pp.highly_variable_genes(merged, min_mean=0.0125, max_mean=3, min_disp=0.7, n_top_genes=min(2000, merged.n_vars))
-            feats = merged.var_names[merged.var.get("highly_variable", np.ones(merged.n_vars, dtype=bool))].tolist()
-            if len(feats) < 2:
-                feats = merged.var_names[: min(500, merged.n_vars)].tolist()
-            sub = merged[:, feats]
-            sc.pp.scale(sub, max_value=10)
-            sc.tl.pca(sub, n_comps=min(n_pcs, sub.n_obs - 1, sub.n_vars - 1), svd_solver="arpack")
-            merged.obsm["X_pca"] = sub.obsm["X_pca"]
-
-            day_vals = merged.obs[time_key].values
+            merged = None
+            sub = None
+            tp = None
+            cps_adata = None
+            transport = None
             try:
-                merged.obs[time_key] = pd.Categorical(day_vals, categories=np.sort(np.unique(day_vals)))
-            except Exception:
-                merged.obs[time_key] = np.array(day_vals)
+                # 联合 PCA 空间（复刻 Treesing runPCA 思路：拼接后 PCA）
+                merged = anndata.concat([adata1, adata2], join="inner")
+                if "highly_variable" not in merged.var.columns:
+                    sc.pp.highly_variable_genes(
+                        merged, min_mean=0.0125, max_mean=3, min_disp=0.7, n_top_genes=min(2000, merged.n_vars)
+                    )
+                feats = merged.var_names[merged.var.get("highly_variable", np.ones(merged.n_vars, dtype=bool))].tolist()
+                if len(feats) < 2:
+                    feats = merged.var_names[: min(500, merged.n_vars)].tolist()
+                sub = merged[:, feats]
+                sc.pp.scale(sub, max_value=10)
+                sc.tl.pca(sub, n_comps=min(n_pcs, sub.n_obs - 1, sub.n_vars - 1), svd_solver="arpack")
+                merged.obsm["X_pca"] = sub.obsm["X_pca"]
 
-            tp = TemporalProblem(merged).prepare(
-                time_key=time_key,
-                joint_attr="X_pca",
-            ).solve(
-                epsilon=epsilon,
-                tau_a=tau_a,
-                tau_b=tau_b,
-                scale_cost=scale_cost,
-                min_iterations=1,
-                max_iterations=max_iterations,
-            )
-            t1_val, t2_val = str(t1), str(t2)
-            if (t1_val, t2_val) not in tp.solutions:
-                keys = [k for k in tp.solutions.keys() if str(k[0]) == t1_val and str(k[1]) == t2_val]
-                if not keys:
-                    logger.warning("未找到解 (%s, %s)，跳过", t1_val, t2_val)
-                    del merged, sub, tp
-                    gc.collect()
-                    continue
-                key = keys[0]
-            else:
-                key = (t1_val, t2_val)
-            transport = tp.solutions[key].transport_matrix
-            if hasattr(transport, "toarray"):
-                transport = transport.toarray()
-            cps_adata = anndata.AnnData(
-                X=csr_matrix(transport),
-                obs=pd.DataFrame(index=adata1.obs_names),
-                var=pd.DataFrame(index=adata2.obs_names),
-            )
-            out_path = os.path.join(tmaps_dir, f"{tag}_{t1_val}_{t2_val}.h5ad")
-            cps_adata.write(out_path)
-            logger.info("已写入 %s", out_path)
-            pairs_done += 1
-            # 🔥 OOM 防御：释放本时间对的大对象，避免 AnnData 视图/引用滞留
-            del merged, sub, tp, cps_adata, transport
-            gc.collect()
-            _log_memory_mb(f"moscot 时间对 {t1_val}->{t2_val} 完成后")
+                day_vals = merged.obs[time_key].values
+                try:
+                    merged.obs[time_key] = pd.Categorical(day_vals, categories=np.sort(np.unique(day_vals)))
+                except Exception:
+                    merged.obs[time_key] = np.array(day_vals)
+
+                tp = TemporalProblem(merged).prepare(
+                    time_key=time_key,
+                    joint_attr="X_pca",
+                ).solve(
+                    epsilon=epsilon,
+                    tau_a=tau_a,
+                    tau_b=tau_b,
+                    scale_cost=scale_cost,
+                    min_iterations=1,
+                    max_iterations=max_iterations,
+                )
+                t1_val, t2_val = str(t1), str(t2)
+                if (t1_val, t2_val) not in tp.solutions:
+                    keys = [k for k in tp.solutions.keys() if str(k[0]) == t1_val and str(k[1]) == t2_val]
+                    if not keys:
+                        logger.warning("未找到解 (%s, %s)，跳过", t1_val, t2_val)
+                        continue
+                    key = keys[0]
+                else:
+                    key = (t1_val, t2_val)
+                transport = tp.solutions[key].transport_matrix
+                if hasattr(transport, "toarray"):
+                    transport = transport.toarray()
+                cps_adata = anndata.AnnData(
+                    X=csr_matrix(transport),
+                    obs=pd.DataFrame(index=adata1.obs_names),
+                    var=pd.DataFrame(index=adata2.obs_names),
+                )
+                out_path = os.path.join(tmaps_dir, f"{tag}_{t1_val}_{t2_val}.h5ad")
+                cps_adata.write(out_path)
+                logger.info("已写入 %s", out_path)
+                pairs_done += 1
+            except Exception as pair_e:
+                logger.error(
+                    "sted_ec_moscot_trajectory: Moscot 时间对 %s -> %s 失败: %s",
+                    t1,
+                    t2,
+                    pair_e,
+                    exc_info=True,
+                )
+            finally:
+                del merged, sub, tp, cps_adata, transport
+                gc.collect()
+                _log_memory_mb(f"moscot 时间对 {t1}->{t2} 完成后")
 
         adata.uns["sted_ec_tmaps_dir"] = tmaps_dir
         adata.uns["sted_ec_time_key"] = time_key
         if cell_type_key and cell_type_key in adata.obs.columns:
             adata.uns["sted_ec_cell_type_key"] = cell_type_key
-        result_path = os.path.join(out_base, "adata_with_tmaps.h5ad")
-        adata.write(result_path)
-        summary = f"已完成 {pairs_done} 个时间对 OT 求解，transport 矩阵已写入 tmaps；结果 h5ad 已保存。"
+
+        try:
+            adata.write(result_path)
+            logger.info("sted_ec_moscot_trajectory: 已写出清洗后 AnnData %s", result_path)
+        except Exception as w_err:
+            logger.error("sted_ec_moscot_trajectory: 写出 h5ad 失败: %s", w_err, exc_info=True)
+            return {
+                "status": "error",
+                "error": str(w_err),
+                "message": moscot_fail_msg if pairs_done == 0 else f"{moscot_fail_msg} (additionally failed to save h5ad)",
+            }
+
         # 🔥 404 终极修复：StaticFiles 不能下载目录，必须打包为 zip 再返回路径
         tmaps_zip_path = os.path.join(out_base, "tmaps.zip")
         try:
@@ -612,12 +876,31 @@ def sted_ec_moscot_trajectory(
         except Exception as e:
             logger.warning("tmaps 打包 zip 失败，仍返回目录路径: %s", e)
             download_links = [{"title": "tmaps 目录 (transport 矩阵)", "path": tmaps_dir}]
+
+        if pairs_done == 0:
+            summary = (
+                f"{moscot_fail_msg} 已写出清洗后的全量 h5ad 供下游可视化：{result_path}。"
+            )
+            return {
+                "status": "error",
+                "error": moscot_fail_msg,
+                "message": moscot_fail_msg,
+                "h5ad_path": result_path,
+                "tmaps_dir": tmaps_dir,
+                "time_key": time_key,
+                "moscot_pairs_solved": 0,
+                "summary": summary,
+                "report_data": {"images": [], "download_links": download_links, "summary": summary},
+            }
+
+        summary = f"已完成 {pairs_done} 个时间对 OT 求解，transport 矩阵已写入 tmaps；清洗后结果 h5ad 已保存。"
         return {
             "status": "success",
             "message": "moscot 轨迹推断完成，transport 矩阵已写入 tmaps",
             "h5ad_path": result_path,
             "tmaps_dir": tmaps_dir,
             "time_key": time_key,
+            "moscot_pairs_solved": pairs_done,
             "summary": summary,
             "report_data": {"images": [], "download_links": download_links, "summary": summary},
         }
@@ -685,8 +968,7 @@ def sted_ec_plot_trajectory(
         if not cell_type_key or (isinstance(cell_type_key, str) and cell_type_key.strip() == ""):
             cell_type_key = adata.uns.get("sted_ec_cell_type_key")  # 上一步可能已存
         if not cell_type_key or (isinstance(cell_type_key, str) and cell_type_key.strip() == ""):
-            valid_cell_type_keys = ["cell_type", "celltype", "annotation", "clusters", "louvain", "leiden", "label"]
-            for k in valid_cell_type_keys:
+            for k in STED_EC_VALID_CELL_TYPE_KEYS:
                 if k in adata.obs.columns:
                     cell_type_key = k
                     logger.info("sted_ec_plot_trajectory 智能嗅探到细胞类型列: %s", k)
@@ -694,42 +976,58 @@ def sted_ec_plot_trajectory(
         if time_key not in adata.obs.columns:
             return {"status": "error", "error": f"obs 中缺少时间列: {time_key}", "report_data": {"images": [], "download_links": [], "summary": ""}}
 
-        if "X_umap" not in adata.obsm:
-            logger.info("未检测到 X_umap，正在计算 PCA + 邻域 + UMAP")
-            if "X_pca" not in adata.obsm:
-                n_comps = min(50, adata.n_obs - 1, adata.n_vars - 1)
-                if n_comps < 2:
-                    return {"status": "error", "error": "细胞或基因数过少，无法计算 PCA/UMAP", "report_data": {"images": [], "download_links": [], "summary": ""}}
-                sc.tl.pca(adata, n_comps=n_comps, svd_solver="arpack")
-            sc.pp.neighbors(adata, use_rep="X_pca", n_neighbors=15, n_pcs=min(50, adata.obsm["X_pca"].shape[1]))
-            sc.tl.umap(adata)
+        _robust_sanitize_and_preprocess(adata, time_key, logger_label="sted_ec_plot_trajectory")
 
         out_dir = output_dir or os.path.dirname(trajectory_data_path)
         if output_plot_path:
             out_dir = os.path.dirname(output_plot_path)
         img_dir = os.path.join(out_dir, "sted_ec_report_images")
         os.makedirs(img_dir, exist_ok=True)
+        h5ad_out = os.path.join(out_dir, "sted_ec_after_umap.h5ad")
+
+        need_reembed = ("X_umap" not in adata.obsm) or (not _sted_obsm_all_finite(adata, "X_umap"))
+        if need_reembed:
+            logger.info("sted_ec_plot_trajectory: X_umap 缺失或含非有限值，重算 PCA + neighbors + UMAP")
+            try:
+                _sted_ec_safe_recompute_embedding(adata, "sted_ec_plot_trajectory")
+            except Exception as emb_e:
+                logger.error("sted_ec_plot_trajectory: 重算嵌入失败（仍将尝试绘图占位并写出 h5ad）: %s", emb_e, exc_info=True)
+                _nan_to_num_obsm(adata, "X_pca")
+                _nan_to_num_obsm(adata, "X_umap")
+        else:
+            _nan_to_num_obsm(adata, "X_pca")
+            _nan_to_num_obsm(adata, "X_umap")
 
         images_list: List[Dict[str, str]] = []
 
-        # 图表 1：时空分布 UMAP (必定执行) —— 严格使用独立变量 path1
-        sc.pl.umap(adata, color=time_key, show=False, title="Spatiotemporal UMAP (by Time)")
         path1 = os.path.join(img_dir, "umap_time.png")
-        plt.savefig(path1, bbox_inches="tight", dpi=300)
-        plt.close()
-        images_list.append({"title": "Spatiotemporal UMAP", "path": path1})
-        logger.info("Saved Spatiotemporal UMAP: %s", path1)
+        _sanitize_obs_color_column(adata, time_key)
+        _safe_sted_pl_umap(
+            adata,
+            time_key,
+            "Spatiotemporal UMAP (by Time)",
+            path1,
+            images_list,
+            "Spatiotemporal UMAP",
+            "sted_ec_plot_trajectory",
+        )
+        logger.info("sted_ec_plot_trajectory: 时空 UMAP 输出路径 %s", path1)
 
         # 图表 2 & 3：细胞类型相关 (动态执行，有则画，无则跳过) —— 独立使用 path2/path3，避免变量污染
         if cell_type_key and cell_type_key in adata.obs.columns:
             try:
-                # 图表 2：细胞类型 UMAP
-                sc.pl.umap(adata, color=cell_type_key, show=False, title="Cell Type UMAP")
                 path2 = os.path.join(img_dir, "umap_celltype.png")
-                plt.savefig(path2, bbox_inches="tight", dpi=300)
-                plt.close()
-                images_list.append({"title": "Cell Type UMAP", "path": path2})
-                logger.info("Saved Cell Type UMAP: %s", path2)
+                _sanitize_obs_color_column(adata, cell_type_key)
+                _safe_sted_pl_umap(
+                    adata,
+                    cell_type_key,
+                    "Cell Type UMAP",
+                    path2,
+                    images_list,
+                    "Cell Type UMAP",
+                    "sted_ec_plot_trajectory",
+                )
+                logger.info("sted_ec_plot_trajectory: Cell Type UMAP 输出路径 %s", path2)
 
                 # 图表 3：演化堆叠柱状图
                 cross_tab = pd.crosstab(adata.obs[time_key], adata.obs[cell_type_key], normalize="index")
@@ -752,24 +1050,9 @@ def sted_ec_plot_trajectory(
                 ", ".join(obs_cols) if obs_cols else "(空)",
             )
 
-        # ZIP: pack sted_ec_report_images into sted_ec_results.zip under output_dir
-        zip_base = os.path.join(out_dir, "sted_ec_results")
-        zip_path = zip_base + ".zip"
-        if os.path.isfile(zip_path):
-            os.remove(zip_path)
-        shutil.make_archive(zip_base, "zip", out_dir, "sted_ec_report_images")
-        logger.info("Packed report archive: %s", zip_path)
-
-        download_links = [{"title": "📦 Download Full Results (ZIP)", "path": zip_path}]
-        summary = (
-            "已生成时空 UMAP、细胞类型 UMAP、细胞类型演化图；所有图表已打包至 ZIP 供下载。"
-            if images_list
-            else "轨迹图表已生成并打包至 ZIP。"
-        )
-        # DAG 下游：写出含 X_umap / obs 时序列的 h5ad，供轨迹驱动基因挖掘等步骤作为唯一输入
-        h5ad_out = os.path.join(out_dir, "sted_ec_after_umap.h5ad")
+        # DAG 铁律：无论 UMAP 绘图是否成功，优先写出清洗后的 h5ad，供基因挖掘等下游使用
         try:
-            adata.write_h5ad(h5ad_out)
+            adata.write(h5ad_out)
             logger.info("sted_ec_plot_trajectory: 已写出下游用 AnnData %s", h5ad_out)
         except Exception as w_err:
             logger.error("sted_ec_plot_trajectory: 写出 h5ad 失败: %s", w_err, exc_info=True)
@@ -778,13 +1061,42 @@ def sted_ec_plot_trajectory(
             return {
                 "status": "error",
                 "error": f"无法写出下游 h5ad: {w_err}",
-                "report_data": {"images": images_list, "download_links": download_links, "summary": summary},
+                "report_data": {"images": images_list, "download_links": [], "summary": ""},
             }
+
+        zip_base = os.path.join(out_dir, "sted_ec_results")
+        zip_path = zip_base + ".zip"
+        download_links: List[Dict[str, str]] = []
+        try:
+            if os.path.isfile(zip_path):
+                os.remove(zip_path)
+            shutil.make_archive(zip_base, "zip", out_dir, "sted_ec_report_images")
+            logger.info("Packed report archive: %s", zip_path)
+            download_links = [{"title": "📦 Download Full Results (ZIP)", "path": zip_path}]
+        except Exception as zip_e:
+            logger.warning("sted_ec_plot_trajectory: ZIP 打包失败（h5ad 已写出，下游可继续）: %s", zip_e, exc_info=True)
+            download_links = []
+
+        plot_degraded = any("(placeholder)" in str(it.get("title", "")) for it in images_list)
+        summary = (
+            "已生成时空 UMAP、细胞类型 UMAP、细胞类型演化图；所有图表已打包至 ZIP 供下载。"
+            if images_list
+            else "轨迹图表已生成并打包至 ZIP。"
+        )
+        if plot_degraded:
+            summary += " 部分 UMAP 因数据分布异常已降级为占位图，下游 h5ad 仍可用于基因挖掘。"
+        if not download_links:
+            summary += " 报告 ZIP 打包失败，请直接使用 sted_ec_after_umap.h5ad 与单张 PNG。"
+        success_msg = "轨迹多维图表已保存；已输出含 UMAP 的 h5ad 供下游分析"
+        if download_links:
+            success_msg += "并打包 ZIP"
+        if plot_degraded:
+            success_msg += "（部分图表为占位图，详见 report_data.summary）"
         del adata
         gc.collect()
         return {
             "status": "success",
-            "message": "轨迹多维图表已保存并打包；已输出含 UMAP 的 h5ad 供下游分析",
+            "message": success_msg,
             "output_plot_path": path1,
             "h5ad_path": h5ad_out,
             "output_h5ad": h5ad_out,
@@ -1250,7 +1562,11 @@ def sted_ec_expert_report(
         build_sted_ec_child_user_message,
     )
     from gibh_agent.core.llm_client import LLMClientFactory
-    from gibh_agent.core.openai_tools import tool_names_to_openai_tools
+    from gibh_agent.core.openai_tools import (
+        apply_hpc_mcp_tool_policy,
+        hpc_chat_system_suffix,
+        tool_names_to_openai_tools,
+    )
 
     try:
         ctx_raw = (read_only_context or "").strip() or "{}"
@@ -1276,10 +1592,12 @@ def sted_ec_expert_report(
             tool_names.append("mcp_web_search")
         if "authority_db" in enabled_mcps:
             tool_names.append("mcp_ncbi_search")
+        tool_names = apply_hpc_mcp_tool_policy(tool_names, enabled_mcps)
 
         system_prompt = (
             STED_EC_EXPERT_SYSTEM_WITH_MCP if tool_names else STED_EC_CHILD_AGENT_SYSTEM_PROMPT
         )
+        system_prompt += hpc_chat_system_suffix(enabled_mcps)
         user_content = build_sted_ec_child_user_message(ctx_raw)
 
         client = LLMClientFactory.create_default()
@@ -1337,14 +1655,30 @@ def sted_ec_expert_report(
                         except json.JSONDecodeError:
                             args = {}
                         tool_fn = registry.get_tool(name)
-                        if not tool_fn:
-                            payload: Dict[str, Any] = {"status": "error", "error": f"未知工具: {name}"}
-                        elif inspect.iscoroutinefunction(tool_fn):
-                            import asyncio
-
-                            payload = asyncio.run(tool_fn(**args))
+                        if name.startswith("hpc_mcp_") and "compute_scheduler" not in enabled_mcps:
+                            payload = {
+                                "status": "error",
+                                "message": "HPC Error: 未授权使用超算工具，请提示用户开启「计算资源智能调度」。",
+                            }
+                        elif not tool_fn:
+                            payload = {"status": "error", "error": f"未知工具: {name}"}
                         else:
-                            payload = tool_fn(**args)
+                            try:
+                                if inspect.iscoroutinefunction(tool_fn):
+                                    import asyncio
+
+                                    payload = asyncio.run(tool_fn(**args))
+                                else:
+                                    payload = tool_fn(**args)
+                            except Exception as tool_exc:  # noqa: BLE001
+                                logger.exception("sted_ec_expert_report 工具执行异常: %s", name)
+                                if name.startswith("hpc_mcp_"):
+                                    payload = {
+                                        "status": "error",
+                                        "message": f"HPC Error: execution failed, please inform the user. ({tool_exc})",
+                                    }
+                                else:
+                                    payload = {"status": "error", "error": str(tool_exc), "message": str(tool_exc)}
                         messages.append(
                             {
                                 "role": "tool",

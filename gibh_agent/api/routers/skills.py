@@ -6,19 +6,21 @@ UGC 技能上传与管理员审核 API
 - POST   /api/skills: 用户上传；普通用户 pending，管理员 approved
 - POST   /api/skills/{skill_id}/bookmark: 收藏技能（防重复）
 - DELETE /api/skills/{skill_id}/bookmark: 取消收藏
-- GET    /api/admin/skills: 管理员拉取待审核列表（严格 role 校验）
-- PUT    /api/admin/skills/{skill_id}/status: 管理员审批（body: {status}）
-- POST   /api/admin/skills/{skill_id}/review: 管理员审批（body: {action: approve|reject}）
+- 管理员审核技能接口已迁至 gibh_agent.api.routers.admin（与 /api/admin/users/* 同路由挂载）
 """
 import logging
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import case, or_
 from sqlalchemy.orm import Session
 
-from gibh_agent.core.deps import get_current_user, get_current_admin_user, get_current_owner_id
+from gibh_agent.core.deps import (
+    get_current_user,
+    get_current_owner_id,
+    get_optional_owner_id,
+)
 from gibh_agent.db.connection import get_db_session
 from gibh_agent.db.models import User, Skill as SkillModel, UserSavedSkill
 
@@ -44,16 +46,6 @@ class SkillCreate(BaseModel):
     prompt_template: str | None = Field(None, max_length=MAX_PROMPT)
 
 
-class SkillStatusUpdate(BaseModel):
-    """管理员审批请求体。"""
-    status: str = Field(..., pattern="^(approved|rejected)$")
-
-
-class SkillReviewAction(BaseModel):
-    """管理员审批（POST 别名）：action → status。"""
-    action: str = Field(..., pattern="^(approve|reject)$")
-
-
 @router.get("/skills")
 def list_skills_public(
     request: Request,
@@ -64,12 +56,8 @@ def list_skills_public(
     size: int = Query(12, ge=1, le=50, description="每页条数"),
     db: Session = Depends(get_db_session),
 ):
-    """公开分页查询：仅 status=approved。saved_only=True 时需鉴权并只返回当前用户收藏。若当前无技能则自动补种 7 大核心组学后重查。"""
-    owner_id: Optional[str] = None
-    try:
-        owner_id = get_current_owner_id(request)
-    except HTTPException:
-        pass
+    """公开分页查询：仅 status=approved；可无 Token/X-Guest（橱窗）。saved_only=True 时需 owner_id。若当前无技能则自动补种后重查。"""
+    owner_id: Optional[str] = get_optional_owner_id(request)
     if saved_only and not owner_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -224,73 +212,3 @@ def unbookmark_skill(
     if deleted:
         logger.info("用户取消收藏技能: owner=%s skill_id=%s", owner_id, skill_id)
     return {"status": "success", "skill_id": skill_id, "message": "已取消收藏", "saved": False}
-
-
-@router.get("/admin/skills", response_model=List[dict])
-def list_pending_skills(
-    current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db_session),
-):
-    """管理员拉取待审核技能；必须 role == admin。"""
-    rows = (
-        db.query(SkillModel)
-        .filter(SkillModel.status == "pending")
-        .order_by(SkillModel.created_at.desc())
-        .all()
-    )
-    return [
-        {
-            "id": r.id,
-            "name": r.name,
-            "description": r.description,
-            "main_category": r.main_category,
-            "sub_category": r.sub_category,
-            "prompt_template": r.prompt_template,
-            "author_id": r.author_id,
-            "status": r.status,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in rows
-    ]
-
-
-def _apply_skill_review_status(db: Session, skill_id: int, new_status: str, admin_username: str) -> SkillModel:
-    skill = db.query(SkillModel).filter(SkillModel.id == skill_id).first()
-    if not skill:
-        raise HTTPException(status_code=404, detail="技能不存在")
-    try:
-        skill.status = new_status
-        db.commit()
-        db.refresh(skill)
-        logger.info("管理员审批技能: id=%s status=%s by=%s", skill_id, skill.status, admin_username)
-        return skill
-    except Exception as e:
-        db.rollback()
-        logger.exception("更新技能状态失败: %s", e)
-        raise HTTPException(status_code=500, detail="更新失败")
-
-
-@router.put("/admin/skills/{skill_id}/status")
-def update_skill_status(
-    skill_id: int,
-    body: SkillStatusUpdate,
-    current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db_session),
-):
-    """管理员审批；必须 role == admin。"""
-    st = body.status.strip().lower()
-    skill = _apply_skill_review_status(db, skill_id, st, current_user.username)
-    return {"skill_id": skill.id, "status": skill.status, "message": "已更新"}
-
-
-@router.post("/admin/skills/{skill_id}/review")
-def review_skill_by_action(
-    skill_id: int,
-    body: SkillReviewAction,
-    current_user: User = Depends(get_current_admin_user),
-    db: Session = Depends(get_db_session),
-):
-    """管理员审批（POST）：action 为 approve / reject。"""
-    new_status = "approved" if body.action == "approve" else "rejected"
-    skill = _apply_skill_review_status(db, skill_id, new_status, current_user.username)
-    return {"skill_id": skill.id, "status": skill.status, "message": "已更新"}

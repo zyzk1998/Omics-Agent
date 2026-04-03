@@ -5,12 +5,15 @@ GIBH-AGENT-V2 测试服务器
 import os
 import sys
 
+from contextlib import asynccontextmanager
+
 import json
 import logging
 import traceback
 import time
 import asyncio
 import re
+import copy
 import secrets
 from pathlib import Path
 from typing import List, Optional, Set, Dict, Any
@@ -38,9 +41,12 @@ except ImportError:
 from gibh_agent import create_agent
 from gibh_agent.core.file_inspector import FileInspector
 from gibh_agent.core.orchestrator import AgentOrchestrator
+from gibh_agent.core.hpc_orchestrator import stream_hpc_direct_chat
+from gibh_agent.api.routers.chat import should_use_hpc_isolated_route
 from gibh_agent.core.file_handlers.structure_normalizer import normalize_session_directory
 from gibh_agent.core.file_handlers.universal_normalizer import normalize_session_directory as universal_unpack
 from gibh_agent.core.file_handlers.modality_sniffer import detect_dominant_modality, paths_for_response
+from gibh_agent.core.utils import sanitize_for_json
 
 # 配置日志
 logging.basicConfig(
@@ -53,8 +59,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+@asynccontextmanager
+async def _app_lifespan(app: FastAPI):
+    """后台挂载 HPC MCP，失败不影响进程启动。"""
+
+    async def _bootstrap_hpc_mcp():
+        try:
+            from gibh_agent.mcp_client import hpc_mcp_manager
+
+            url = os.getenv("HPC_MCP_URL", "http://192.168.32.31:8001/mcp")
+            transport = os.getenv("HPC_MCP_TRANSPORT", "streamableHttp")
+            await hpc_mcp_manager.connect(url, transport)
+        except Exception as e:
+            logger.warning("⚠️ [HPC-MCP] lifespan 调度连接失败（服务仍启动）: %s", e, exc_info=True)
+
+    asyncio.create_task(_bootstrap_hpc_mcp())
+    yield
+    try:
+        from gibh_agent.mcp_client import hpc_mcp_manager
+
+        await hpc_mcp_manager.shutdown()
+    except Exception as e:
+        logger.debug("[HPC-MCP] shutdown: %s", e)
+
+
 # 创建 FastAPI 应用
-app = FastAPI(title="GIBH-AGENT-V2 Test Server")
+app = FastAPI(title="GIBH-AGENT-V2 Test Server", lifespan=_app_lifespan)
 
 
 @app.exception_handler(Exception)
@@ -130,6 +161,17 @@ try:
 except Exception as e:
     logger.warning("⚠️ Auth 路由注册失败（鉴权功能不可用）: %s", e)
 
+try:
+    from gibh_agent.api.routers import admin as admin_router_module
+
+    app.include_router(admin_router_module.router)
+    logger.info(
+        "✅ Admin 路由已注册: GET /api/admin/skills, PUT/POST .../skills/{id}/status|review, "
+        "GET /api/admin/users/pending, POST .../users/{id}/approve|reject"
+    )
+except Exception as e:
+    logger.warning("⚠️ Admin 路由注册失败（控制台 404）: %s", e)
+
 # Phase 4: 侧栏数据读取（会话/消息/资产）
 try:
     from gibh_agent.api.routers.user_data import router as user_data_router
@@ -142,9 +184,25 @@ except Exception as e:
 try:
     from gibh_agent.api.routers.skills import router as skills_router
     app.include_router(skills_router)
-    logger.info("✅ Skills 路由已注册: POST /api/skills, GET /api/admin/skills, PUT status, POST review")
+    logger.info("✅ Skills 路由已注册: GET/POST /api/skills、bookmark（管理员技能审核在 admin 路由）")
 except Exception as e:
     logger.warning("⚠️ Skills 路由注册失败: %s", e)
+
+try:
+    from gibh_agent.plugin_system.router import router as plugin_system_router
+
+    app.include_router(plugin_system_router)
+    logger.info("✅ PluginSystem 路由已注册: POST /api/plugins/upload")
+except Exception as e:
+    logger.warning("⚠️ PluginSystem 路由注册失败: %s", e)
+
+try:
+    from gibh_agent.api.routers.mcp_config import router as mcp_config_router
+
+    app.include_router(mcp_config_router, prefix="/api/config")
+    logger.info("✅ MCP 配置路由: GET /api/config/mcp/status, POST /api/config/mcp")
+except Exception as e:
+    logger.warning("⚠️ MCP 配置路由注册失败: %s", e)
 
 # Phase 4: 身份解析与 DB 依赖（upload/chat 持久化）
 from gibh_agent.core.deps import get_current_owner_id, get_current_admin_user
@@ -160,12 +218,43 @@ try:
 except Exception:
     SkillModel = None
     UserSavedSkill = None
+try:
+    import gibh_agent.plugin_system.registry  # noqa: F401 — 注册 dynamic_skill_plugins 表
+except Exception:
+    pass
+
+
+def _migrate_users_approval_columns():
+    """
+    幂等：为 users 表补齐 approval_status / email，并将历史 NULL 审核状态标为 approved（老用户可登录）。
+    实现位于 gibh_agent.db.user_approval_schema；启动失败时由 get_db_session 首次请求会重试。
+    """
+    if engine is None:
+        return
+    try:
+        from gibh_agent.db.user_approval_schema import ensure_users_approval_columns
+
+        ensure_users_approval_columns(engine)
+        logger.info("✅ [DB] users 审核字段迁移已执行")
+    except Exception as e:
+        logger.warning(
+            "[DB] users 审核字段迁移在启动阶段失败，将在首次数据库会话时重试: %s",
+            e,
+        )
 
 
 def _run_create_all():
     """执行建表（幂等）。确保 models 已挂到 Base 后再调用 create_all。"""
     import gibh_agent.db.models as _  # noqa: F401 强制注册所有表
+    import gibh_agent.plugin_system.registry as _ps  # noqa: F401 动态插件表
     Base.metadata.create_all(bind=engine)
+    _migrate_users_approval_columns()
+    try:
+        from gibh_agent.plugin_system.registry import migrate_dynamic_skill_plugins_schema
+
+        migrate_dynamic_skill_plugins_schema(engine)
+    except Exception as _m:
+        logger.debug("dynamic_skill_plugins 迁移跳过或失败: %s", _m)
 
 
 # 7 大核心组学技能：CORE_OMICS_SKILLS 字典列表定义在 gibh_agent/db/seed_skills.py，修改 prompt_template 请编辑该文件。此处仅调用 run_seed_core_skills 注入。
@@ -301,7 +390,51 @@ def list_skills_public(
         if sc:
             q = q.filter(SkillModel.sub_category == sc)
         total = q.count()
+
+    dyn_items: list = []
+    D = 0
+    if not saved_only:
+        try:
+            from gibh_agent.plugin_system.registry import (
+                DynamicSkillPlugin,
+                plugin_to_skill_plaza_payload,
+            )
+
+            dyn_rows = (
+                db.query(DynamicSkillPlugin)
+                .filter(DynamicSkillPlugin.status == "approved")
+                .order_by(DynamicSkillPlugin.created_at.desc())
+                .all()
+            )
+            if dyn_rows:
+                dyn_items = [plugin_to_skill_plaza_payload(r) for r in dyn_rows]
+                mc_f = (mc or "").strip().lower()
+                sc_f = (sc or "").strip().lower()
+                if mc_f and mc_f != "动态插件":
+                    dyn_items = []
+                if sc_f:
+                    dyn_items = [
+                        x
+                        for x in dyn_items
+                        if (x.get("sub_category") or "").strip().lower() == sc_f
+                    ]
+                D = len(dyn_items)
+                if D > size:
+                    dyn_items = dyn_items[:size]
+                    D = size
+        except Exception as _e:
+            logger.debug("加载动态插件列表跳过: %s", _e)
+
     offset = (page - 1) * size
+    lim = size
+    if D > 0:
+        if page == 1:
+            offset = 0
+            lim = max(0, size - D)
+        else:
+            offset = max(0, (page - 1) * size - D)
+            lim = size
+
     _pt = SkillModel.prompt_template
     _fast_lane_first = case(
         (or_(_pt.contains("[Skill_Route:"), _pt.contains("[Omics_Route:")), 0),
@@ -310,7 +443,7 @@ def list_skills_public(
     rows = (
         q.order_by(_fast_lane_first.asc(), SkillModel.created_at.desc())
         .offset(offset)
-        .limit(size)
+        .limit(lim)
         .all()
     )
     saved_ids = set()
@@ -331,6 +464,9 @@ def list_skills_public(
         }
         for r in rows
     ]
+    if page == 1 and D > 0:
+        items = dyn_items + items
+    total = total + D
     return {"items": items, "total": total}
 
 
@@ -672,6 +808,10 @@ if _css_dir.is_dir():
     app.mount("/css", StaticFiles(directory=str(_css_dir)), name="css")
 if _js_dir.is_dir():
     app.mount("/js", StaticFiles(directory=str(_js_dir)), name="js")
+# 沉浸式 Demo 等静态剧本（直连 API 端口如 :8028 时与经 nginx 的 /assets/ 路径一致）
+_assets_dir = _html_dir / "assets"
+if _assets_dir.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
 
 
 @app.get("/whotowork.html")
@@ -2264,6 +2404,43 @@ async def upload_file(
                 raise HTTPException(status_code=500, detail="文件上传失败，请稍后重试")
 
 
+def _build_agent_message_content(state_snapshot_for_db: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    G4 时光机：agent 消息 content 同时写入根级镜像字段与完整 state_snapshot，便于查询与历史还原。
+    不改变表结构；入库前经 sanitize_for_json 清洗可序列化类型。
+    """
+    snap: Dict[str, Any] = {}
+    if isinstance(state_snapshot_for_db, dict):
+        snap = copy.deepcopy(state_snapshot_for_db)
+    snap.pop("_start_time", None)
+    tool_calls = snap.get("tool_calls")
+    if not isinstance(tool_calls, list):
+        tool_calls = []
+    if not tool_calls and isinstance(snap.get("skill_last_tool"), dict):
+        st = snap["skill_last_tool"]
+        tool_calls = [
+            {
+                "type": "skill_tool",
+                "name": st.get("tool_name"),
+                "result": st.get("tool_result"),
+            }
+        ]
+    if tool_calls:
+        snap["tool_calls"] = tool_calls
+    def _as_text(v: Any) -> str:
+        if v is None:
+            return ""
+        return v if isinstance(v, str) else str(v)
+
+    return {
+        "text": _as_text(snap.get("text")),
+        "reasoning": _as_text(snap.get("reasoning")),
+        "process_log": list(snap.get("process_log") or []),
+        "tool_calls": tool_calls,
+        "state_snapshot": snap,
+    }
+
+
 @app.post("/api/chat")
 async def chat_endpoint(
     req: ChatRequest,
@@ -2317,8 +2494,10 @@ async def chat_endpoint(
     if not req.user_id:
         req.user_id = owner_id
         logger.debug(f"🔑 [ChatEndpoint] user_id = owner_id: {req.user_id}")
-    
-    if not agent:
+
+    hpc_isolated_sse = bool(req.stream) and should_use_hpc_isolated_route(req.enabled_mcps)
+
+    if not agent and not hpc_isolated_sse:
         error_msg = "智能体未初始化，请检查配置和日志。可能的原因：1) 配置文件路径错误 2) API Key未设置 3) 依赖包缺失"
         logger.error(error_msg)
         logger.error("请检查终端日志中的详细错误信息")
@@ -2424,9 +2603,6 @@ async def chat_endpoint(
                     uploaded_files.append({"name": os.path.basename(p), "path": abs_p})
                     logger.warning("⚠️ [ChatEndpoint] 注入路径不存在，仍加入列表: %s", abs_p)
             
-            # 创建编排器（传递 upload_dir）
-            orchestrator = AgentOrchestrator(agent, upload_dir=str(UPLOAD_DIR))
-            
             # 返回 SSE 流式响应（Phase 4: 首包下发 session_id，流结束后写 agent 消息，不阻塞 SSE）
             async def generate_sse():
                 original_llm_clients = {}
@@ -2435,56 +2611,90 @@ async def chat_endpoint(
                 # Phase 4: 第一个事件下发 session_id，供前端持久化
                 yield f"event: session\ndata: {json.dumps({'session_id': req.session_id}, ensure_ascii=False)}\n\n"
                 try:
-                    # 🔥 动态模型路由：前端 model_name 传入 stream_process，每次请求在调用处传入，避免单例竞态
-                    model_name = (getattr(req, "model_name", None) or "").strip() or "qwen3.5-plus"
-                    if model_name and hasattr(agent, "agents") and agent.agents:
-                        try:
-                            from gibh_agent.core.llm_client import LLMClientFactory
-                            override_llm = LLMClientFactory.create_for_model(model_name)
-                            for name, a in agent.agents.items():
-                                if hasattr(a, "llm_client") and a.llm_client is not None:
-                                    original_llm_clients[name] = a.llm_client
-                                    a.llm_client = override_llm
-                            logger.info(f"🔀 [ChatEndpoint] 已切换模型: {model_name}")
-                        except Exception as swap_err:
-                            logger.warning(f"⚠️ [ChatEndpoint] 模型切换失败，使用默认: {swap_err}")
-                    async for event in orchestrator.stream_process(
-                        query=req.message,
-                        files=uploaded_files,
-                        history=req.history or [],
-                        session_id=req.session_id or "default",
-                        test_dataset_id=req.test_dataset_id,
-                        workflow_data=req.workflow_data,
-                        user_id=req.user_id or "guest",
-                        owner_id=owner_id,
-                        db=db,
-                        model_name=model_name,
-                        target_domain=req.target_domain,
-                        enabled_mcps=req.enabled_mcps or [],
-                    ):
-                        if isinstance(event, str) and "event: state_snapshot" in event:
-                            for line in event.split("\n"):
-                                if line.startswith("data:"):
-                                    raw_line = line[5:].strip()
-                                    try:
-                                        state_snapshot_for_db = json.loads(raw_line)
-                                    except Exception as parse_err:
-                                        logger.error(
-                                            "❌ [Chat] state_snapshot JSON 解析失败，将原始数据备份入库: %s",
-                                            parse_err,
-                                            exc_info=True,
-                                        )
-                                        raw_preview = raw_line[:1000] if len(raw_line) > 1000 else raw_line
-                                        logger.error("❌ [Chat] 原始 data 前 1000 字符: %s", raw_preview)
-                                        raw_backup = raw_line[:50000] if len(raw_line) > 50000 else raw_line
-                                        state_snapshot_for_db = {
-                                            "text": "⚠️ [系统警告] 工作流数据解析失败，原始数据备份:\n" + raw_backup,
-                                            "workflow": None,
-                                            "steps": [],
-                                            "report": None,
-                                        }
-                                    break
-                        yield event
+                    if hpc_isolated_sse:
+                        logger.info("🌀 [ChatEndpoint] HPC 主动隔离路由：跳过 AgentOrchestrator → stream_hpc_direct_chat")
+                        async for event in stream_hpc_direct_chat(
+                            query=req.message or "",
+                            history=req.history or [],
+                            uploaded_files=uploaded_files,
+                            session_id=req.session_id or "default",
+                            user_id=req.user_id or owner_id or "guest",
+                        ):
+                            if isinstance(event, str) and "event: state_snapshot" in event:
+                                for line in event.split("\n"):
+                                    if line.startswith("data:"):
+                                        raw_line = line[5:].strip()
+                                        try:
+                                            state_snapshot_for_db = json.loads(raw_line)
+                                        except Exception as parse_err:
+                                            logger.error(
+                                                "❌ [Chat] state_snapshot JSON 解析失败，将原始数据备份入库: %s",
+                                                parse_err,
+                                                exc_info=True,
+                                            )
+                                            raw_preview = raw_line[:1000] if len(raw_line) > 1000 else raw_line
+                                            logger.error("❌ [Chat] 原始 data 前 1000 字符: %s", raw_preview)
+                                            raw_backup = raw_line[:50000] if len(raw_line) > 50000 else raw_line
+                                            state_snapshot_for_db = {
+                                                "text": "⚠️ [系统警告] 工作流数据解析失败，原始数据备份:\n" + raw_backup,
+                                                "workflow": None,
+                                                "steps": [],
+                                                "report": None,
+                                            }
+                                        break
+                            yield event
+                    else:
+                        # 🔥 动态模型路由：前端 model_name 传入 stream_process，每次请求在调用处传入，避免单例竞态
+                        model_name = (getattr(req, "model_name", None) or "").strip() or "qwen3.5-plus"
+                        if model_name and agent and hasattr(agent, "agents") and agent.agents:
+                            try:
+                                from gibh_agent.core.llm_client import LLMClientFactory
+                                override_llm = LLMClientFactory.create_for_model(model_name)
+                                for name, a in agent.agents.items():
+                                    if hasattr(a, "llm_client") and a.llm_client is not None:
+                                        original_llm_clients[name] = a.llm_client
+                                        a.llm_client = override_llm
+                                logger.info(f"🔀 [ChatEndpoint] 已切换模型: {model_name}")
+                            except Exception as swap_err:
+                                logger.warning(f"⚠️ [ChatEndpoint] 模型切换失败，使用默认: {swap_err}")
+                        orchestrator = AgentOrchestrator(agent, upload_dir=str(UPLOAD_DIR))
+                        async for event in orchestrator.stream_process(
+                            query=req.message,
+                            files=uploaded_files,
+                            history=req.history or [],
+                            session_id=req.session_id or "default",
+                            test_dataset_id=req.test_dataset_id,
+                            workflow_data=req.workflow_data,
+                            user_id=req.user_id or "guest",
+                            owner_id=owner_id,
+                            db=db,
+                            model_name=model_name,
+                            target_domain=req.target_domain,
+                            enabled_mcps=req.enabled_mcps or [],
+                        ):
+                            if isinstance(event, str) and "event: state_snapshot" in event:
+                                for line in event.split("\n"):
+                                    if line.startswith("data:"):
+                                        raw_line = line[5:].strip()
+                                        try:
+                                            state_snapshot_for_db = json.loads(raw_line)
+                                        except Exception as parse_err:
+                                            logger.error(
+                                                "❌ [Chat] state_snapshot JSON 解析失败，将原始数据备份入库: %s",
+                                                parse_err,
+                                                exc_info=True,
+                                            )
+                                            raw_preview = raw_line[:1000] if len(raw_line) > 1000 else raw_line
+                                            logger.error("❌ [Chat] 原始 data 前 1000 字符: %s", raw_preview)
+                                            raw_backup = raw_line[:50000] if len(raw_line) > 50000 else raw_line
+                                            state_snapshot_for_db = {
+                                                "text": "⚠️ [系统警告] 工作流数据解析失败，原始数据备份:\n" + raw_backup,
+                                                "workflow": None,
+                                                "steps": [],
+                                                "report": None,
+                                            }
+                                        break
+                            yield event
                 except Exception as e:
                     logger.error(f"❌ SSE 流式传输错误: {e}", exc_info=True)
                     error_event = f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
@@ -2492,10 +2702,20 @@ async def chat_endpoint(
                 finally:
                     # Phase 4: 流结束后写 agent 消息（有状态切片入库，废弃 content.events）
                     # 🔥 强制快照同步：前端传来的 workflow_data 含真实 enabled/selected，必须原样写入快照
-                    if req.workflow_data and state_snapshot_for_db is not None:
-                        state_snapshot_for_db["workflow"] = req.workflow_data
+                    if req.workflow_data:
+                        if state_snapshot_for_db is None:
+                            state_snapshot_for_db = {
+                                "text": "",
+                                "reasoning": "",
+                                "workflow": req.workflow_data,
+                                "steps": [],
+                                "process_log": [],
+                                "report": None,
+                            }
+                        else:
+                            state_snapshot_for_db["workflow"] = req.workflow_data
                     try:
-                        content = {"state_snapshot": state_snapshot_for_db if state_snapshot_for_db is not None else {"text": "", "workflow": None, "steps": [], "report": None}}
+                        content = sanitize_for_json(_build_agent_message_content(state_snapshot_for_db))
                         msg = MessageModel(session_id=req.session_id, role="agent", content=content)
                         db.add(msg)
                         db.commit()
@@ -2513,7 +2733,7 @@ async def chat_endpoint(
                         logger.error("❌ [Chat] Agent 消息入库失败: %s", persist_err, exc_info=True)
                         db.rollback()
                     # 恢复各 agent 原有 LLM 客户端
-                    if original_llm_clients and hasattr(agent, "agents"):
+                    if original_llm_clients and agent and hasattr(agent, "agents"):
                         for name, a in agent.agents.items():
                             if name in original_llm_clients:
                                 a.llm_client = original_llm_clients[name]

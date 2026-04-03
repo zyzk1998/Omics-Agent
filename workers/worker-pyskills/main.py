@@ -702,3 +702,10 @@ async def run_gseapy(req: ToolRequest):
     except Exception as e:
         logger.exception("run_gseapy")
         raise HTTPException(status_code=500, detail=f"GSEApy 服务异常: {e}") from e
+
+
+from radiomics_api import router as radiomics_router
+from dynamic_runner import router as dynamic_runner_router
+
+app.include_router(radiomics_router)
+app.include_router(dynamic_runner_router)

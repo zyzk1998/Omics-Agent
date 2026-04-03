@@ -29,6 +29,7 @@ paramiko>=3.0.0
 # HTTP 请求库（metabolomics_tool 需要）
 requests>=2.31.0
 httpx>=0.27.0
+# HPC 超算 MCP：官方 mcp SDK 仅在 services/mcp-gateway 镜像安装；主 API 经 HTTP 调用网关
 # MCP：全网搜索（优先 Tavily；零配置 ddgs 回退；可选 Serper/Bing 见 .env.example）
 tavily-python>=0.5.0
 ddgs>=9.0.0
