@@ -2,6 +2,8 @@
 Stream and text parsing utilities for LLM responses.
 - 通用双轨（无模型硬编码）：reasoning_content → thought；content 内 <think>...</think> → 状态机分流，缓冲区防跨 chunk 截断；<<<SUGGESTIONS>>> 解析不变。
 - stream_and_extract_json：Planner 流式升级专用分拣器——thought 与 JSON 正文严格隔离；流结束后先剥 fence，再按平衡括号或首 `{`/末 `}` 暴力切出 JSON，最后 json.loads。
+
+工具执行期面向用户的过程日志（非 LLM token）：使用 gibh_agent.core.tool_stream_log.emit_tool_log，经 Executor/Orchestrator 转为 SSE status；本模块不重复拼装 SSE。
 """
 import json
 import re

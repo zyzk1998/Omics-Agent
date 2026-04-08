@@ -969,9 +969,10 @@ class ChatRequest(BaseModel):
     stream: Optional[bool] = False  # 🔥 SSE 流式传输开关
     session_id: Optional[str] = None  # 🔥 BUG FIX: 添加 session_id 字段
     user_id: Optional[str] = "guest"  # 🔥 BUG FIX: 添加 user_id 字段，默认为 guest
-    model_name: Optional[str] = "qwen3.5-plus"  # 🔥 前端模型切换：默认阿里百炼 Qwen3.5-Plus，qwen 走 DashScope，其余走 SiliconFlow
+    model_name: Optional[str] = "deepseek-ai/DeepSeek-R1"  # 与前端 #modelSelect 一致；无斜杠的 qwen* 走 DashScope，其余走 SiliconFlow
     target_domain: Optional[str] = None  # 🔥 快车道硬路由：技能广场点击时传入 'rna'|'metabolomics'|'radiomics'|'spatial'，跳过意图识别
     enabled_mcps: Optional[List[str]] = None  # 🔌 前端 MCP 开关：如 ["web_search"]，与系统设置联动
+    thinking_mode: Optional[str] = "fast"  # 聊天模式：fast | deep（DeepReAct + 会话挂起续传）
 
 
 # 日志缓冲区（保留用于未来扩展）
@@ -2645,7 +2646,7 @@ async def chat_endpoint(
                             yield event
                     else:
                         # 🔥 动态模型路由：前端 model_name 传入 stream_process，每次请求在调用处传入，避免单例竞态
-                        model_name = (getattr(req, "model_name", None) or "").strip() or "qwen3.5-plus"
+                        model_name = (getattr(req, "model_name", None) or "").strip() or "deepseek-ai/DeepSeek-R1"
                         if model_name and agent and hasattr(agent, "agents") and agent.agents:
                             try:
                                 from gibh_agent.core.llm_client import LLMClientFactory
@@ -2671,6 +2672,7 @@ async def chat_endpoint(
                             model_name=model_name,
                             target_domain=req.target_domain,
                             enabled_mcps=req.enabled_mcps or [],
+                            thinking_mode=req.thinking_mode or "fast",
                         ):
                             if isinstance(event, str) and "event: state_snapshot" in event:
                                 for line in event.split("\n"):

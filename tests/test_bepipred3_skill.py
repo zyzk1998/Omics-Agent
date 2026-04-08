@@ -138,7 +138,7 @@ async def _async_main() -> None:
     try:
         agent = GIBHAgent(str(config_path))
         orch = AgentOrchestrator(agent, upload_dir=str(ROOT / "tests" / "_asset_tmp"))
-        # stream_process 默认 qwen3.5-plus 在硅基流动上常无效；与 settings.yaml / SILICONFLOW_MODEL 对齐
+        # stream_process 默认 deepseek-ai/DeepSeek-R1；与 settings.yaml / SILICONFLOW_MODEL 对齐
         model_name = (
             (os.getenv("BEP_PRED_TEST_MODEL") or "").strip()
             or (os.getenv("SILICONFLOW_MODEL") or "").strip()

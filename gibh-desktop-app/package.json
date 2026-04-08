@@ -1,0 +1,35 @@
+{
+  "name": "gibh-desktop-app",
+  "version": "1.0.0",
+  "description": "GIBH-AGENT-V2 Electron thin-client demo",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.gibh.agent.demo",
+    "productName": "GIBH Agent Demo",
+    "directories": {
+      "output": "dist-out"
+    },
+    "files": [
+      "main.js"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    }
+  }
+}

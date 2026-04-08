@@ -30,12 +30,11 @@ llm:
     # 硅基流动 deepseek API（默认使用）
     # 注意：模型名称格式为 "deepseek-ai/DeepSeek-R1" 或其他支持的模型
     # 可通过环境变量 SILICONFLOW_MODEL 自定义模型名称
-    # 常见模型名称：
+    # 前端 /api/chat 可选 model_name（与硅基流动 id 一致，示例）：
     #   - deepseek-ai/DeepSeek-R1（推荐，支持思考过程流式输出）
-    #   - Pro/deepseek-ai/DeepSeek-V3.2
-    #   - deepseek-ai/DeepSeek-V2.5
-    #   - deepseek-ai/DeepSeek-V3
-    #   - deepseek-ai/deepseek-chat
+    #   - Pro/zai-org/GLM-5
+    #   - Pro/moonshotai/Kimi-K2.5
+    #   - Qwen/Qwen3.5-397B-A17B
     siliconflow:
       base_url: "https://api.siliconflow.cn/v1"
       api_key: "${SILICONFLOW_API_KEY:}"

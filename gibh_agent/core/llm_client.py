@@ -358,7 +358,9 @@ def _resolve_provider_for_model(model_name: str) -> tuple:
         (base_url, api_key, provider_label)
     """
     name = (model_name or "").strip().lower()
-    if "qwen" in name:
+    raw = (model_name or "").strip()
+    # 百炼兼容 id 多为 qwen3.5-plus 等（无 org/model 斜杠）；硅基上的 Qwen/Qwen3.5-... 须走 SiliconFlow
+    if "qwen" in name and "/" not in raw:
         api_key = os.getenv("DASHSCOPE_API_KEY")
         if not api_key or not str(api_key).strip():
             raise ValueError(

@@ -302,7 +302,7 @@ interface ChatRequest {
   stream?: boolean;                   // 默认 false；true 时返回 SSE
   session_id?: string;                // 新建会话时不传，由后端生成并落库
   user_id?: string;                   // 可选，默认由鉴权得到 owner_id
-  model_name?: string;                // 双通道模型路由：如 "qwen3.5-plus"、"deepseek-ai/DeepSeek-R1"、"Pro/zai-org/GLM-5"
+  model_name?: string;                // 双通道模型路由：如 "deepseek-ai/DeepSeek-R1"、"Pro/zai-org/GLM-5"、"Pro/moonshotai/Kimi-K2.5"、"Qwen/Qwen3.5-397B-A17B"（无斜杠的 qwen* 走 DashScope）
 }
 ```
 

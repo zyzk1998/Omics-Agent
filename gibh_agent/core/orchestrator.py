@@ -33,6 +33,9 @@ from .file_handlers.universal_normalizer import _is_archive
 
 logger = logging.getLogger(__name__)
 
+# DeepReAct 挂起态内存缓存（生产可换 Redis）。key 建议使用 owner 作用域，避免跨用户串线。
+_DEEP_REACT_SESSIONS: Dict[str, List[Dict[str, Any]]] = {}
+
 # 聊天模式默认挂载的公开 REST 工具（与 gibh_agent.tools.api_query_tools 注册名一致）
 _CHAT_MODE_PUBLIC_API_TOOLS: Tuple[str, ...] = (
     "query_gene_info",
@@ -562,12 +565,18 @@ class AgentOrchestrator:
         }
         owner_id = kwargs.get("owner_id") or kwargs.get("user_id")
         db = kwargs.get("db")
-        model_name = (kwargs.get("model_name") or "").strip() or "qwen3.5-plus"
+        model_name = (kwargs.get("model_name") or "").strip() or "deepseek-ai/DeepSeek-R1"
+        thinking_mode = str(kwargs.get("thinking_mode") or "fast").strip().lower()
         target_domain = kwargs.get("target_domain")
         if target_domain and isinstance(target_domain, str) and not target_domain.strip():
             target_domain = None  # 防回退：空字符串视为未传，走传统意图识别
         _t_start = time.time()
-        logger.info("[Profiler] stream_process 入口 - 开始处理请求 (model_name=%s, target_domain=%s)", model_name, target_domain)
+        logger.info(
+            "[Profiler] stream_process 入口 - 开始处理请求 (model_name=%s, target_domain=%s, thinking_mode=%s)",
+            model_name,
+            target_domain,
+            thinking_mode,
+        )
 
         enabled_mcps = kwargs.get("enabled_mcps") or []
         if isinstance(enabled_mcps, str):
@@ -721,17 +730,36 @@ class AgentOrchestrator:
                 llm_client = self._get_llm_client()
                 if llm_client:
                     _t_llm_start = time.time()
-                    async for sse_chunk in self._stream_chat_mode(
-                        query=query,
-                        files=files,
-                        history=history,
-                        llm_client=llm_client,
-                        state_snapshot=state_snapshot,
-                        model_name=model_name,
-                        enabled_mcps=enabled_mcps,
-                    ):
-                        yield sse_chunk
+                    _deep_key = f"{(owner_id or kwargs.get('user_id') or 'guest')}::{kwargs.get('session_id') or 'default'}"
+                    if thinking_mode == "deep":
+                        async for sse_chunk in self._stream_deep_react_chat(
+                            query=query,
+                            files=files,
+                            history=history,
+                            llm_client=llm_client,
+                            state_snapshot=state_snapshot,
+                            model_name=model_name,
+                            enabled_mcps=enabled_mcps,
+                            session_key=_deep_key,
+                        ):
+                            yield sse_chunk
+                    else:
+                        async for sse_chunk in self._stream_chat_mode(
+                            query=query,
+                            files=files,
+                            history=history,
+                            llm_client=llm_client,
+                            state_snapshot=state_snapshot,
+                            model_name=model_name,
+                            enabled_mcps=enabled_mcps,
+                        ):
+                            yield sse_chunk
                     logger.info("[Profiler] LLM 思考与生成总耗时: %.2fs", time.time() - _t_llm_start)
+
+                    if state_snapshot.pop("_chat_tail_handled", False):
+                        state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                        yield self._format_sse("state_snapshot", state_snapshot)
+                        return
 
                     yield self._emit_sse(state_snapshot,"status", {
                         "content": "回答完成",
@@ -920,18 +948,45 @@ class AgentOrchestrator:
                 _results_base = os.path.abspath(os.getenv("RESULTS_DIR", "/app/results"))
                 _run_dir = os.path.join(_results_base, f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
                 try:
-                    # 🔥 必须在线程中执行：execute_workflow 为同步重型计算，若在 async 生成器里直接调用会
-                    # 长时间阻塞事件循环，导致 Uvicorn/Gunicorn/反向代理认为连接假死并断开，浏览器报
-                    # net::ERR_INCOMPLETE_CHUNKED_ENCODING（与磁盘空间无关）。
-                    results = await asyncio.to_thread(
-                        lambda: executor.execute_workflow(
+                    # 🔥 必须在线程中执行：execute_workflow 为同步重型计算；同时轮询线程安全队列，
+                    # 将工具内 emit_tool_log → tool_log_sink 的中间态尽快 yield 为 SSE status。
+                    import queue as _thread_queue
+
+                    _log_q: _thread_queue.Queue = _thread_queue.Queue(maxsize=512)
+
+                    def _tool_log_sink(content: str, state: str = "running") -> None:
+                        try:
+                            _log_q.put_nowait({"content": content, "state": state})
+                        except _thread_queue.Full:
+                            logger.warning("工具流式日志队列已满，丢弃一条")
+
+                    def _run_wf():
+                        return executor.execute_workflow(
                             workflow_config,
                             file_paths,
                             _run_dir,
                             self.agent,
                             enabled_mcps=enabled_mcps,
+                            tool_log_sink=_tool_log_sink,
                         )
-                    )
+
+                    _wf_task = asyncio.create_task(asyncio.to_thread(_run_wf))
+                    _poll_interval = 0.05
+                    while not _wf_task.done():
+                        await asyncio.sleep(_poll_interval)
+                        while True:
+                            try:
+                                _line = _log_q.get_nowait()
+                            except _thread_queue.Empty:
+                                break
+                            yield self._emit_sse(state_snapshot, "status", _line)
+                    while True:
+                        try:
+                            _line = _log_q.get_nowait()
+                        except _thread_queue.Empty:
+                            break
+                        yield self._emit_sse(state_snapshot, "status", _line)
+                    results = await _wf_task
                 except SecurityException as e:
                     logger.warning("❌ [Orchestrator] 执行阶段数据完整性校验未通过: %s", e)
                     yield self._emit_sse(state_snapshot,"error", {
@@ -2733,6 +2788,207 @@ class AgentOrchestrator:
             )
         out["tool_calls"] = tool_calls
         return out
+
+    async def _stream_deep_react_chat(
+        self,
+        query: str,
+        files: List[Dict[str, str]],
+        history: List[Dict[str, str]],
+        llm_client: Any,
+        state_snapshot: Dict[str, Any],
+        model_name: str,
+        enabled_mcps: List[str],
+        session_key: str,
+    ) -> AsyncIterator[str]:
+        """DeepReAct：多轮工具 + HITL 挂起；messages 由 _DEEP_REACT_SESSIONS 按 session_key 续传。"""
+        import copy as _copy
+
+        from gibh_agent.core.openai_tools import (
+            apply_hpc_mcp_tool_policy,
+            hpc_chat_system_suffix,
+            tool_names_to_openai_tools,
+        )
+        from gibh_agent.core.react_runner import (
+            ASK_HUMAN_FOR_CLARIFICATION_TOOL_NAME,
+            DeepReActCircuitBreakerError,
+            DeepReActRunner,
+        )
+        from gibh_agent.core.tool_registry import registry
+
+        chat_system = (
+            "你是一个友好的AI助手，帮助用户解答问题。使用中文回答。\n\n"
+            "在回复的**最后**，根据当前分析上下文生成 1～2 个用户可能想问的后续问题，严格按以下格式输出（不要输出到可见正文）：\n"
+            "<<<SUGGESTIONS>>>[\"问题1\", \"问题2\"]<<<END_SUGGESTIONS>>>\n"
+            "若对话在结束（如告别、再见）则不要输出上述块。"
+        )
+        chat_system += (
+            "\n\n【数据库工具】你可以调用：query_gene_info（MyGene 基因注释与染色体定位）、"
+            "query_uniprot_protein（UniProt 功能与亚细胞定位）、query_reactome_pathway（人类 Reactome 通路）、"
+            "query_alphafold_db（AlphaFold 结构链接）。"
+            "当用户询问基因注释、蛋白质数据库、通路或结构预测时，必须先调用对应工具，再依据返回内容用中文作答。"
+        )
+        if AgentOrchestrator._is_bepipred3_skill_chat_intent(query):
+            chat_system += (
+                "\n\n【BepiPred3 / B 细胞表位】你必须调用工具 **bepipred3_prediction** 完成预测，禁止编造结果链接。"
+                "参数：sequence_or_path = 用户给出的完整 FASTA 文本或文件路径；"
+                "用户要求「前 20% / 高置信度 top 20%」时 top_epitope_percentage_cutoff=\"top_20\"；"
+                "用户明确「不使用顺序平滑」时 use_sequential_smoothing=false。"
+                "工具返回后，用中文简要说明并在正文中写出 html_url、csv_url 等字段供用户查看。"
+            )
+        if "web_search" in enabled_mcps:
+            chat_system += (
+                "\n\n【最高系统指令】：你现在已通过 MCP 协议物理连接到真实互联网！你拥有名为 'mcp_web_search' 的工具。"
+                "当用户询问天气、新闻、实时数据或任何超出你训练数据截止日期的问题时，你**必须、立刻、绝对**调用 'mcp_web_search' 工具获取最新信息！"
+                "严禁回答'我不知道'或'我是一个AI无法联网'！违规将导致系统崩溃！"
+            )
+        if "authority_db" in enabled_mcps:
+            chat_system += (
+                "\n\n【NCBI 权威检索】你已启用 'mcp_ncbi_search'：可对 PubMed 文献与 NCBI Gene 做精准检索。"
+                "用户问文献、PMID、基因符号、基因功能时，应调用该工具（database 可选 pubmed / gene / auto），再结合返回摘要中文作答。"
+            )
+        chat_system += hpc_chat_system_suffix(enabled_mcps)
+        chat_system += (
+            "\n\n【深度推理 / 人机协同】"
+            "当你需要用户确认或做选择题时，应调用 ask_human_for_clarification。"
+            "请在 arguments 中填写 question；若有固定可选项，请同时给出 options 字符串数组（如 [\"方案A\",\"方案B\"]），供前端渲染为可点击快捷回复。"
+        )
+
+        user_content = query
+        files_hint = self._build_current_files_hint(files)
+        if files_hint:
+            user_content = files_hint + "\n\n" + user_content
+
+        if session_key in _DEEP_REACT_SESSIONS:
+            messages = _copy.deepcopy(_DEEP_REACT_SESSIONS[session_key])
+            messages.append({"role": "user", "content": user_content})
+            logger.info("🔁 [DeepReAct] 唤醒挂起会话 session_key=%s", session_key)
+        else:
+            messages = [{"role": "system", "content": chat_system}]
+            if history:
+                for h in history[-5:]:
+                    if isinstance(h, dict):
+                        role = h.get("role", "user")
+                        content = h.get("content", h.get("message", ""))
+                        if content:
+                            messages.append({"role": role, "content": content})
+            messages.append({"role": "user", "content": user_content})
+            logger.info("🆕 [DeepReAct] 新会话 session_key=%s", session_key)
+
+        tool_names: List[str] = list(_CHAT_MODE_PUBLIC_API_TOOLS)
+        if "web_search" in enabled_mcps:
+            tool_names.append("mcp_web_search")
+        if "authority_db" in enabled_mcps:
+            tool_names.append("mcp_ncbi_search")
+        if AgentOrchestrator._is_bepipred3_skill_chat_intent(query):
+            tool_names.append("bepipred3_prediction")
+        tool_names = apply_hpc_mcp_tool_policy(tool_names, enabled_mcps)
+        tools = tool_names_to_openai_tools(tool_names)
+
+        _deep_tools: List[Dict[str, Any]] = list(tools)
+        _deep_tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": ASK_HUMAN_FOR_CLARIFICATION_TOOL_NAME,
+                    "description": (
+                        "当需要用户确认、选择或补充信息时调用；系统将暂停并等待用户下一轮输入。"
+                        "若有明确选项，请通过 options 传入字符串数组。"
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "question": {
+                                "type": "string",
+                                "description": "要向用户说明或询问的内容",
+                            },
+                            "options": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "可选的快捷回复选项，供前端渲染为可点击按钮",
+                            },
+                        },
+                    },
+                },
+            }
+        )
+
+        runner = DeepReActRunner(llm_client, registry, max_steps=10)
+        _sse_sentinel = object()
+        _sse_queue: asyncio.Queue = asyncio.Queue()
+        _outcome: Dict[str, Any] = {}
+
+        async def emit_adapter(event_type: str, data: Dict[str, Any]) -> None:
+            await _sse_queue.put(self._emit_sse(state_snapshot, event_type, data))
+
+        async def _deep_runner_job() -> None:
+            try:
+                _outcome["result"] = await runner.run(
+                    messages,
+                    emit_adapter,
+                    tools=_deep_tools,
+                    tool_choice="auto",
+                    model=model_name,
+                    temperature=0.7,
+                    max_tokens=4096,
+                )
+            except DeepReActCircuitBreakerError as exc:
+                _outcome["error"] = exc
+            except Exception as exc:
+                logger.exception("❌ [DeepReAct] Runner 未捕获异常: %s", exc)
+                _outcome["fatal"] = exc
+            finally:
+                await _sse_queue.put(_sse_sentinel)
+
+        _deep_task = asyncio.create_task(_deep_runner_job())
+        try:
+            while True:
+                _item = await _sse_queue.get()
+                if _item is _sse_sentinel:
+                    break
+                yield _item
+                await asyncio.sleep(0.01)
+        finally:
+            await _deep_task
+
+        if _outcome.get("fatal") is not None:
+            _DEEP_REACT_SESSIONS.pop(session_key, None)
+            err = _outcome["fatal"]
+            yield self._emit_sse(
+                state_snapshot,
+                "message",
+                {"content": f"**Deep ReAct 执行异常**：{err}"},
+            )
+            await asyncio.sleep(0.01)
+            yield self._emit_sse(state_snapshot, "done", {"status": "error"})
+            state_snapshot["_chat_tail_handled"] = True
+            return
+
+        if _outcome.get("error") is not None:
+            _DEEP_REACT_SESSIONS.pop(session_key, None)
+            yield self._emit_sse(
+                state_snapshot,
+                "message",
+                {"content": f"**Deep ReAct 已熔断**：{_outcome['error']}"},
+            )
+            await asyncio.sleep(0.01)
+            yield self._emit_sse(state_snapshot, "done", {"status": "error"})
+            state_snapshot["_chat_tail_handled"] = True
+            return
+
+        _res = _outcome.get("result")
+        if _res == "human_input_required":
+            _DEEP_REACT_SESSIONS[session_key] = _copy.deepcopy(messages)
+            state_snapshot["deep_react_messages"] = _copy.deepcopy(messages)
+            state_snapshot["deep_react_pending"] = True
+            state_snapshot["deep_react_session_key"] = session_key
+            yield self._emit_sse(state_snapshot, "done", {"status": "human_input_required"})
+            state_snapshot["_chat_tail_handled"] = True
+            return
+
+        if _res == "complete":
+            _DEEP_REACT_SESSIONS.pop(session_key, None)
+
+        return
 
     async def _stream_chat_mode(
         self,

@@ -139,7 +139,7 @@ def _pick_bepipred_python(bp_root: Path) -> Tuple[Optional[str], str]:
     detail = "; ".join(tried[:10]) if tried else "(无候选)"
     hints: List[str] = []
     if env_py and not _which_python_executable(env_py):
-        hints.append(f"环境变量 BEPIPRED3_PYTHON={env_py} 指向的文件不存在")
+        hints.append(f"环境变量 BEPIPRED3_PYTHON={env_py} 指向的文件不存在或不可执行（该路径未参与探测）")
     if not _opt_py.is_file():
         hints.append("镜像内 /opt/bepipred3-venv 不存在（需重新 docker compose build api-server，或等待首次请求惰性安装）")
     hint_txt = (" " + "；".join(hints)) if hints else ""

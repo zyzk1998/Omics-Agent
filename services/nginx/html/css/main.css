@@ -495,6 +495,7 @@
             }
             .chat-input-panel .toolbar-left { display: flex; align-items: center; gap: 8px; }
             .chat-input-panel .toolbar-right { display: flex; align-items: center; gap: 8px; }
+            .chat-input-panel .toolbar-right .send-btn { margin-left: 0; }
             /* 中/右栏 Header 幽灵按钮（无边框，对标 Kimi） */
             .header-action-btn {
                 background: transparent;
@@ -2011,6 +2012,8 @@
             }
             .toolbar-left { display: flex; align-items: center; gap: 8px; }
             .toolbar-right { display: flex; align-items: center; gap: 8px; }
+            .toolbar-right .send-btn { margin-left: 0; }
+            .input-area .main-input { flex: 1; min-width: 0; }
             /* 幽灵工具栏按钮（无边框、透明背景） */
             .ghost-btn {
                 background: transparent;
@@ -2048,7 +2051,8 @@
                 position: relative;
             }
             .model-select-wrap:hover { background: #f2f3f5; color: #1f2329; }
-            .model-select-wrap select.model-select-native {
+            .model-select-wrap select.model-select-native,
+            .model-select-wrap button.model-select-native {
                 appearance: none;
                 -webkit-appearance: none;
                 -moz-appearance: none;
@@ -2060,6 +2064,11 @@
                 padding: 0 18px 0 0;
                 min-width: 130px;
                 outline: none;
+                font-family: inherit;
+                text-align: left;
+            }
+            .model-select-wrap button.model-select-native {
+                min-width: 108px;
             }
             .model-select-wrap .model-chevron {
                 position: absolute;
@@ -2069,6 +2078,15 @@
                 pointer-events: none;
                 color: #8f959e;
                 font-size: 11px;
+            }
+            /* \u56de\u7b54\u6a21\u5f0f\uff1a\u4e0e\u6a21\u578b\u9009\u62e9\u5668\u540c\u6b3e wrapper\uff0c\u4e0b\u62c9\u4e3a\u9875\u5185\u5df2\u6709 popover-menu */
+            .model-select-wrap > .popover-menu {
+                position: absolute;
+                left: 0;
+                bottom: 100%;
+                margin-bottom: 6px;
+                min-width: 100%;
+                z-index: 10001;
             }
             /* Header 纯图标按钮（中栏/右栏统一样式） */
             .icon-btn {

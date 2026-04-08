@@ -17,6 +17,7 @@ from pathlib import Path
 from datetime import datetime
 
 from .tool_registry import registry
+from .tool_stream_log import tool_log_emitter_scope
 from .utils import sanitize_for_json
 from .file_inspector import (
     path_looks_like_medical_imaging,
@@ -788,7 +789,12 @@ class WorkflowExecutor:
         # 防幻觉 + 类型转换：只保留签名内参数并做类型转换（如 resolution="0.8" -> 0.8）
         processed_params = self._filter_and_coerce_params_to_signature(processed_params, tool_func)
 
-        # 执行工具
+        # 执行工具（可选 ContextVar 流式日志，供工具内 emit_tool_log → SSE）
+        _tl_sink = None
+        if step_context and step_context.get("tool_log_sink") is not None:
+            _tl_sink = step_context.get("tool_log_sink")
+        elif getattr(self, "_tool_log_sink", None) is not None:
+            _tl_sink = self._tool_log_sink
         try:
             # 🔥 CRITICAL DEBUG: 记录所有参数（包括 group_column）
             logger.info(f"🚀 调用工具: {tool_id} with params: {list(processed_params.keys())}")
@@ -797,10 +803,11 @@ class WorkflowExecutor:
             else:
                 if tool_id in tools_requiring_group_column:
                     logger.warning(f"⚠️ [Executor] group_column 参数缺失（但已尝试修复）！可用参数: {list(processed_params.keys())}")
-            if inspect.iscoroutinefunction(tool_func):
-                result = asyncio.run(tool_func(**processed_params))
-            else:
-                result = tool_func(**processed_params)
+            with tool_log_emitter_scope(_tl_sink if callable(_tl_sink) else None):
+                if inspect.iscoroutinefunction(tool_func):
+                    result = asyncio.run(tool_func(**processed_params))
+                else:
+                    result = tool_func(**processed_params)
             
             # 确保结果是字典格式
             if not isinstance(result, dict):
@@ -2023,6 +2030,7 @@ class WorkflowExecutor:
         output_dir: Optional[str] = None,
         agent: Optional[Any] = None,  # 可选的 Agent 实例，用于生成诊断
         enabled_mcps: Optional[List[Any]] = None,
+        tool_log_sink: Optional[Callable[[str, str], None]] = None,
     ) -> Dict[str, Any]:
         """
         执行整个工作流
@@ -2031,6 +2039,7 @@ class WorkflowExecutor:
             workflow_data: 工作流配置（包含 workflow_name 和 steps）
             file_paths: 输入文件路径列表
             output_dir: 输出目录（如果为 None，将自动创建）
+            tool_log_sink: 可选 (content, state) -> None，供工具内 emit_tool_log 透传过程日志；未传则忽略
         
         Returns:
             执行报告（符合前端 analysis_report 格式）
@@ -2062,6 +2071,7 @@ class WorkflowExecutor:
         logger.info(f"📂 输出目录: {self.output_dir}")
 
         self._enabled_mcps: List[Any] = list(enabled_mcps or [])
+        self._tool_log_sink: Optional[Callable[[str, str], None]] = tool_log_sink
         
         # 初始化步骤结果列表
         steps_details = []
@@ -2264,6 +2274,7 @@ class WorkflowExecutor:
                 "recommended_params": workflow_data.get("recommended_params"),
                 "steps_order": steps_order,
                 "enabled_mcps": getattr(self, "_enabled_mcps", None) or [],
+                "tool_log_sink": getattr(self, "_tool_log_sink", None),
             }
             
             # 🔥 参数映射：签名需要 adata_path 且槽位空时，将 file_path 迁入（常见于单细胞工具）
