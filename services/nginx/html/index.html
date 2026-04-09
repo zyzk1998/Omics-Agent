@@ -93,7 +93,6 @@
                         </div>
                         <i class="bi bi-chevron-down ms-auto sidebar-user-chevron" style="font-size:12px;color:#6b7280;"></i>
                     </div>
-                    <div id="admin-console-btn" class="sidebar-item" title="管理员审核技能"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span><span class="sidebar-item-text">管理员控制台</span></div>
                 </div>
             </aside>
 
@@ -103,6 +102,7 @@
                 <div class="popover-item" data-action="client"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg></span>下载客户端</div>
                 <div class="popover-item" data-action="help-whotowork"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></span>帮助文档</div>
                 <div class="popover-item" data-action="help-api"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></span>API 文档</div>
+                <div class="popover-item" id="user-menu-admin-console" data-action="admin-console" style="display: none;" title="管理员审核技能"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg></span>管理员控制台</div>
                 <div class="popover-item" data-action="settings"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span>设置</div>
                 <div class="popover-divider"></div>
                 <div class="popover-item danger" id="btn-logout-action"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></span>退出登录</div>
@@ -192,13 +192,39 @@
                 <button type="button" class="icon-btn icon-btn-text" id="btn-expand-workspace" title="展开/收起工作台">展开工作台</button>
             </div>
         </header>
-        <!-- 空状态容器（无对话时居中展示，发送首条消息后隐藏） -->
+        <!-- 空状态：中央 Hero + 快捷入口；输入框始终在底部 #input-wrapper-bottom -->
         <div id="empty-state-wrapper">
+            <div id="chat-hero-section" class="chat-hero-section">
             <div id="hero-branding" class="hero-branding">
                 <img src="/static/favicon.png?v=4" alt="Omics Agent" class="hero-logo" width="64" height="32" decoding="async">
                 <h1 class="hero-title">Omics Agent</h1>
             </div>
-            <div class="input-wrapper input-center" id="inputWrapper">
+            <p class="hero-tagline">不止聊天，搞定一切</p>
+            <div class="hero-feature-cards" role="navigation" aria-label="快捷入口">
+                <button type="button" class="hero-feature-card" id="hero-card-omics" data-hero-action="skills-omics">
+                    <span class="hero-feature-card-icon" aria-hidden="true"><i class="bi bi-grid-1x2-fill"></i></span>
+                    <span class="hero-feature-card-label">组学分析</span>
+                    <span class="hero-feature-card-hint">技能广场 · 多模态组学</span>
+                </button>
+                <button type="button" class="hero-feature-card" id="hero-card-agent" data-hero-action="focus-chat">
+                    <span class="hero-feature-card-icon" aria-hidden="true"><i class="bi bi-chat-dots-fill"></i></span>
+                    <span class="hero-feature-card-label">通用智能体</span>
+                    <span class="hero-feature-card-hint">开始对话</span>
+                </button>
+                <button type="button" class="hero-feature-card" id="hero-card-bio" data-hero-action="skills-bio">
+                    <span class="hero-feature-card-icon" aria-hidden="true"><i class="bi bi-heart-pulse"></i></span>
+                    <span class="hero-feature-card-label">生物医药技能</span>
+                    <span class="hero-feature-card-hint">技能广场 · 生物医药</span>
+                </button>
+            </div>
+            </div>
+        </div>
+
+        <div class="chat-scroll-area" id="chatBox">
+            <div class="chat-content" id="chatContent"></div>
+        </div>
+        <div id="input-wrapper-bottom">
+            <div class="input-wrapper input-bottom" id="inputWrapper">
                 <div id="stopBtnContainer" style="position: absolute; top: -40px; width: 100%; display: flex; justify-content: center; pointer-events: none;">
                     <button id="stopBtn" class="stop-btn" onclick="stopGeneration()">
                         <i class="bi bi-stop-circle-fill"></i> 停止生成
@@ -225,21 +251,21 @@
                             <label for="fileInput" class="ghost-btn file-upload-label" title="上传文件"><i class="bi bi-paperclip"></i></label>
                             <div class="model-select-wrap" title="模型切换">
                                 <select id="modelSelect" class="ghost-btn model-select-native" title="模型切换" style="appearance: none; outline: none; cursor: pointer;">
-                                    <option value="deepseek-ai/DeepSeek-R1" selected> DeepSeek-R1 (硅基流动)</option>
-                                    <option value="Pro/zai-org/GLM-5"> GLM-5 Pro (硅基流动)</option>
-                                    <option value="Pro/moonshotai/Kimi-K2.5"> Kimi K2.5 (硅基流动)</option>
-                                    <option value="Qwen/Qwen3.5-397B-A17B"> Qwen3.5-397B-A17B (硅基流动)</option>
+                                    <option value="deepseek-ai/DeepSeek-R1" selected> DeepSeek-R1</option>
+                                    <option value="Pro/zai-org/GLM-5"> GLM-5 Pro</option>
+                                    <option value="Pro/moonshotai/Kimi-K2.5"> Kimi K2.5</option>
+                                    <option value="Qwen/Qwen3.5-397B-A17B"> Qwen3.5-397B-A17B</option>
                                 </select>
                                 <span class="model-chevron">▼</span>
                             </div>
                         </div>
                         <div class="toolbar-right">
                             <div class="model-select-wrap" title="回答模式" id="modeSelectorWrapper">
-                                <button type="button" id="modeTrigger" class="ghost-btn model-select-native">快速</button>
+                                <button type="button" id="modeTrigger" class="ghost-btn model-select-native">标准</button>
                                 <span class="model-chevron" aria-hidden="true">▼</span>
                                 <div id="modeDropdown" class="popover-menu" role="listbox" aria-label="回答模式">
-                                    <button type="button" class="popover-item" data-mode="fast" role="option">快速</button>
-                                    <button type="button" class="popover-item" data-mode="deep" role="option">思考</button>
+                                    <button type="button" class="popover-item" data-mode="fast" role="option">标准</button>
+                                    <button type="button" class="popover-item" data-mode="deep" role="option">旗舰</button>
                                 </div>
                             </div>
                             <button id="sendBtn" class="send-btn" onclick="sendMessage()">
@@ -255,11 +281,6 @@
                 </div>
             </div>
         </div>
-
-        <div class="chat-scroll-area" id="chatBox">
-            <div class="chat-content" id="chatContent"></div>
-        </div>
-        <div id="input-wrapper-bottom"></div>
             </main>
 
             <div class="resizer" id="resizer-right"></div>
@@ -336,10 +357,10 @@
                     <div class="settings-row">
                         <label class="settings-label">默认模型</label>
                         <select id="setting-default-model" class="settings-control">
-                            <option value="deepseek-ai/DeepSeek-R1" selected>DeepSeek-R1 (硅基流动)</option>
-                            <option value="Pro/zai-org/GLM-5">GLM-5 Pro (硅基流动)</option>
-                            <option value="Pro/moonshotai/Kimi-K2.5">Kimi K2.5 (硅基流动)</option>
-                            <option value="Qwen/Qwen3.5-397B-A17B">Qwen3.5-397B-A17B (硅基流动)</option>
+                            <option value="deepseek-ai/DeepSeek-R1" selected>DeepSeek-R1</option>
+                            <option value="Pro/zai-org/GLM-5">GLM-5 Pro</option>
+                            <option value="Pro/moonshotai/Kimi-K2.5">Kimi K2.5</option>
+                            <option value="Qwen/Qwen3.5-397B-A17B">Qwen3.5-397B-A17B</option>
                         </select>
                     </div>
                     <div id="settings-mcp-root" class="settings-mcp-section" data-mcp-layout="v2">
@@ -663,10 +684,10 @@
             function getStoredUsername() { return localStorage.getItem('username') || ''; }
             function getStoredRole() { return localStorage.getItem('user_role') || 'user'; }
             function showAdminConsoleIfNeeded() {
-                var btn = document.getElementById('admin-console-btn');
-                if (!btn) return;
-                if (getStoredRole() === 'admin') { btn.classList.add('show'); btn.style.display = 'flex'; }
-                else { btn.classList.remove('show'); btn.style.display = 'none'; }
+                var item = document.getElementById('user-menu-admin-console');
+                if (!item) return;
+                if (getStoredRole() === 'admin') { item.style.display = ''; }
+                else { item.style.display = 'none'; }
             }
             function isLoggedIn() { return !!localStorage.getItem('access_token'); }
 
@@ -1063,7 +1084,7 @@
                         e.stopPropagation();
                         const selectedMode = option.getAttribute('data-mode');
                         window.currentThinkingMode = selectedMode;
-                        trigger.textContent = selectedMode === 'fast' ? '快速' : '思考';
+                        trigger.textContent = selectedMode === 'fast' ? '标准' : '旗舰';
                         dropdown.classList.remove('show');
                     });
                 });
@@ -1399,6 +1420,36 @@
                 skillsCurrentPage = 1;
                 if (typeof fetchSkills === 'function') fetchSkills('', 1);
             }
+            /** 打开技能广场并切换到指定大类 Tab（与 .skills-nav-tab data-main 一致） */
+            function showSkillsSquareMainCategory(mainCat) {
+                hideAllMainPanes();
+                var skillsPane = document.getElementById('skills-square-pane');
+                var wsPane = document.getElementById('workspace-pane');
+                var rzR = document.getElementById('resizer-right');
+                if (skillsPane) skillsPane.style.display = 'flex';
+                if (wsPane) wsPane.style.display = 'none';
+                if (rzR) rzR.style.display = 'none';
+                var navMain = document.getElementById('skillsNavMain');
+                var dm = (mainCat != null && mainCat !== undefined) ? String(mainCat).trim() : '';
+                if (navMain) {
+                    navMain.querySelectorAll('.skills-nav-tab').forEach(function(b) { b.classList.remove('active'); });
+                    var tab = null;
+                    if (dm) {
+                        navMain.querySelectorAll('.skills-nav-tab').forEach(function(b) {
+                            if ((b.getAttribute('data-main') || '') === dm) tab = b;
+                        });
+                    }
+                    if (tab) tab.classList.add('active');
+                    else {
+                        var allBtn = navMain.querySelector('.skills-nav-tab[data-main=""]');
+                        if (allBtn) allBtn.classList.add('active');
+                    }
+                }
+                skillsCurrentMain = dm;
+                skillsCurrentPage = 1;
+                if (typeof fetchSkills === 'function') fetchSkills(dm, 1);
+            }
+            window.showSkillsSquareMainCategory = showSkillsSquareMainCategory;
             function showChatView() {
                 hideAllMainPanes();
                 var chatPane = document.getElementById('chat-pane');
@@ -1836,6 +1887,7 @@
                 var chatContent = document.getElementById('chatContent');
                 var wrapper = document.getElementById('empty-state-wrapper');
                 var iw = document.getElementById('inputWrapper');
+                var bottomSlotReset = document.getElementById('input-wrapper-bottom');
                 var wp = document.getElementById('workspace-pane');
                 var titleEl = document.getElementById('chat-conversation-title');
                 var workspaceContent = document.getElementById('active-workspace-content');
@@ -1847,15 +1899,13 @@
                 window.workflowCache = {};
                 if (wrapper) {
                     wrapper.classList.remove('hidden');
-                    var heroBranding = document.getElementById('hero-branding');
-                    if (heroBranding) heroBranding.classList.remove('hero-fade-out');
-                    if (iw && iw.parentNode !== wrapper) {
-                        var titleEl = wrapper.querySelector('h1.science-title');
-                        var heroEl = wrapper.querySelector('#hero-branding');
-                        wrapper.insertBefore(iw, heroEl ? heroEl.nextElementSibling : (titleEl ? titleEl.nextElementSibling : null));
-                    }
+                    var heroSec = document.getElementById('chat-hero-section');
+                    if (heroSec) heroSec.classList.remove('hero-fade-out');
                 }
-                if (iw) { iw.classList.add('input-center'); iw.classList.remove('input-bottom'); }
+                if (iw && bottomSlotReset && !bottomSlotReset.contains(iw)) {
+                    bottomSlotReset.appendChild(iw);
+                }
+                if (iw) { iw.classList.remove('input-center'); iw.classList.add('input-bottom'); }
                 if (wp) wp.classList.remove('workspace-active');
                 if (titleEl) titleEl.textContent = '新会话';
                 if (workspaceContent) workspaceContent.innerHTML = '';
@@ -3870,6 +3920,28 @@
                         if (typeof fetchSkills === 'function') fetchSkills(skillsCurrentMain, 1);
                     };
                 });
+                (function bindChatHeroFeatureCards() {
+                    var omics = document.getElementById('hero-card-omics');
+                    var agent = document.getElementById('hero-card-agent');
+                    var bio = document.getElementById('hero-card-bio');
+                    if (omics) omics.onclick = function() {
+                        if (typeof showSkillsSquareMainCategory === 'function') showSkillsSquareMainCategory('多模态组学');
+                    };
+                    if (bio) bio.onclick = function() {
+                        if (typeof showSkillsSquareMainCategory === 'function') showSkillsSquareMainCategory('生物医药');
+                    };
+                    if (agent) agent.onclick = function() {
+                        if (typeof showChatView === 'function') showChatView();
+                        setTimeout(function() {
+                            var ta = document.getElementById('userInput');
+                            if (ta) {
+                                ta.focus();
+                                ta.classList.add('chat-input-guide-pulse');
+                                setTimeout(function() { ta.classList.remove('chat-input-guide-pulse'); }, 1400);
+                            }
+                        }, 80);
+                    };
+                })();
                 var histTitle = document.querySelector('.sidebar-history-title');
                 if (histTitle) histTitle.addEventListener('click', function() { showChatView(); }, true);
                 document.querySelectorAll('.sidebar-item.history-item').forEach(function(el) {
@@ -3968,9 +4040,18 @@
                             ev.stopPropagation();
                             closeAllPopovers();
                             if (action === 'profile') alert('个人主页建设中...');
-                            if (action === 'client') alert('客户端开发中...');
+                            if (action === 'client') window.location.href = '/downloads/';
                             if (action === 'help-whotowork') window.open('/whotowork.html', '_blank');
                             if (action === 'help-api') window.open('/api-doc.html', '_blank');
+                            if (action === 'admin-console') {
+                                if (!isLoggedIn()) {
+                                    openAuthModal();
+                                    showToast('请登录后解锁该高级功能', 'warning');
+                                    return;
+                                }
+                                if (getStoredRole() !== 'admin') return;
+                                if (typeof switchToAdminView === 'function') switchToAdminView();
+                            }
                             if (action === 'settings') { if (typeof openSettingsModal === 'function') openSettingsModal(); }
                         };
                     });
@@ -4261,16 +4342,6 @@
                         if (f) _setPendingFile(f);
                     });
                 })();
-                var adminConsoleBtn = document.getElementById('admin-console-btn');
-                if (adminConsoleBtn) adminConsoleBtn.onclick = function(ev) {
-                    if (!isLoggedIn()) {
-                        ev.preventDefault();
-                        openAuthModal();
-                        showToast('请登录后解锁该高级功能', 'warning');
-                        return;
-                    }
-                    switchToAdminView();
-                };
                 function _guestGuardSidebarDetails(detailsId, toastMsg) {
                     var det = document.getElementById(detailsId);
                     if (!det) return;
@@ -8230,13 +8301,13 @@
                 if (typeof window.hydrateToolAssetPreviews === 'function') window.hydrateToolAssetPreviews(row);
                 if (role === 'user') {
                     var wrapper = document.getElementById('empty-state-wrapper');
-                    var heroBranding = document.getElementById('hero-branding');
+                    var heroSec = document.getElementById('chat-hero-section');
                     var iw = document.getElementById('inputWrapper');
                     var bottomSlot = document.getElementById('input-wrapper-bottom');
-                    if (heroBranding) heroBranding.classList.add('hero-fade-out');
+                    if (heroSec) heroSec.classList.add('hero-fade-out');
                     setTimeout(function() {
                         if (wrapper) wrapper.classList.add('hidden');
-                        if (iw && bottomSlot) {
+                        if (iw && bottomSlot && !bottomSlot.contains(iw)) {
                             bottomSlot.appendChild(iw);
                             iw.classList.remove('input-center');
                             iw.classList.add('input-bottom');
@@ -9123,8 +9194,8 @@
                 var inputWrapper = document.getElementById('inputWrapper');
                 var bottomSlot = document.getElementById('input-wrapper-bottom');
                 if (emptyWrapper && !emptyWrapper.classList.contains('hidden')) {
-                    var heroBranding = document.getElementById('hero-branding');
-                    if (heroBranding) heroBranding.classList.add('hero-fade-out');
+                    var heroSecWf = document.getElementById('chat-hero-section');
+                    if (heroSecWf) heroSecWf.classList.add('hero-fade-out');
                     var _w = emptyWrapper; var _i = inputWrapper; var _s = bottomSlot;
                     setTimeout(function() {
                         _w.classList.add('hidden');

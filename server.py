@@ -812,6 +812,14 @@ if _js_dir.is_dir():
 _assets_dir = _html_dir / "assets"
 if _assets_dir.is_dir():
     app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+# 桌面客户端安装包与下载页（直连 :8028 时与经 Nginx 的 /downloads/ 一致）
+_downloads_dir = _html_dir / "downloads"
+if _downloads_dir.is_dir():
+    app.mount(
+        "/downloads",
+        StaticFiles(directory=str(_downloads_dir), html=True),
+        name="downloads",
+    )
 
 
 @app.get("/whotowork.html")

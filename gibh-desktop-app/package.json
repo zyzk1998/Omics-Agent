@@ -1,13 +1,15 @@
 {
   "name": "gibh-desktop-app",
-  "version": "1.0.0",
+  "version": "0.10.0",
   "description": "GIBH-AGENT-V2 Electron thin-client demo",
+  "author": "GIBH Omics Agent",
   "main": "main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "dist:linux": "electron-builder --linux"
   },
   "devDependencies": {
     "electron": "^28.3.3",
@@ -19,17 +21,35 @@
     "directories": {
       "output": "dist-out"
     },
+    "icon": "../services/nginx/html/static/favicon.png",
     "files": [
-      "main.js"
+      "main.js",
+      "package.json"
     ],
+    "artifactName": "GIBH-Agent-Demo-Setup-${version}.${ext}",
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "nsis": {
       "oneClick": true,
-      "perMachine": false
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "GIBH Agent Demo"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Science"
     }
   }
 }

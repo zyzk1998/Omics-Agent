@@ -81,7 +81,6 @@
             #sidebar-pane.sidebar-collapsed .btn-new-session { justify-content: center; padding: 10px; }
             #sidebar-pane.sidebar-collapsed .sidebar-item,
             #sidebar-pane.sidebar-collapsed summary,
-            #sidebar-pane.sidebar-collapsed #admin-console-btn { justify-content: center !important; padding: 10px 0 !important; }
             #sidebar-pane.sidebar-collapsed .sidebar-accordion summary { justify-content: center !important; }
             #sidebar-pane.sidebar-collapsed .sidebar-favorites-section .sidebar-favorites-title,
             #sidebar-pane.sidebar-collapsed .sidebar-favorites-block > .sidebar-item { justify-content: center !important; }
@@ -413,15 +412,6 @@
                 right: 0;
                 transition: position 0.35s ease, top 0.35s ease, transform 0.35s ease, max-width 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), width 0.4s ease;
             }
-            #chat-pane .input-wrapper.input-center {
-                position: absolute;
-                left: 50%;
-                top: 50%;
-                transform: translate(-50%, -50%);
-                max-width: 840px;
-                width: 90%;
-                padding: 0 20px;
-            }
             #input-wrapper-bottom {
                 flex-shrink: 0;
                 padding: 12px 20px;
@@ -431,20 +421,22 @@
             }
             #input-wrapper-bottom .input-wrapper {
                 position: relative;
-                width: 75%;
-                max-width: 600px;
+                width: 100%;
+                max-width: 840px;
                 margin: 0 auto;
                 left: 0;
                 right: 0;
             }
-            #chat-pane .input-wrapper.input-bottom {
+            #chat-pane .input-wrapper.input-bottom,
+            #chat-pane .input-wrapper.input-center {
                 position: relative;
                 left: auto;
                 top: auto;
                 transform: none;
                 width: calc(100% - 48px);
-                max-width: 720px;
-                margin: 0 auto 24px auto;
+                max-width: 840px;
+                margin: 0 auto 20px auto;
+                padding: 0 12px;
             }
             /* 中栏顶部标题栏 */
             #chat-pane-header {
@@ -570,9 +562,6 @@
             }
             .skills-nav-tab:hover { border-color: #94a3b8; color: #0f172a; }
             .skills-nav-tab.active { background: #e0f2fe; border-color: #0ea5e9; color: #0369a1; }
-            #admin-console-btn { display: none; align-items: center; justify-content: center; padding: 10px 16px; margin-top: 8px; color: #6b7280; cursor: pointer; border-radius: 8px; font-size: 13px; }
-            #admin-console-btn:hover { background: #f3f4f6; color: #111827; }
-            #admin-console-btn.show { display: flex; }
             .admin-banner { position: relative; background: #374151; color: #fff; padding: 16px 24px; margin: -40px -40px 20px -40px; border-radius: 0 0 8px 0; }
             .admin-banner h2 { margin-bottom: 0; color: #fff; }
             .admin-console-close-btn { position: absolute; top: 24px; right: 24px; background: transparent; border: none; color: #fff; font-size: 20px; cursor: pointer; opacity: 0.8; transition: opacity 0.2s; }
@@ -870,23 +859,86 @@
                 flex-direction: column;
                 justify-content: center;
                 align-items: center;
-                height: 100%;
+                flex: 1;
                 width: 100%;
                 min-height: 0;
-                padding: 24px 20px;
+                padding: 24px 20px 16px;
                 gap: 0;
             }
             #empty-state-wrapper.hidden { display: none !important; }
-            /* 空状态内输入框必须留在文档流，禁止 absolute 导致与 hero 重叠 */
-            #empty-state-wrapper .input-wrapper,
-            #empty-state-wrapper .input-wrapper.input-center {
-                position: relative !important;
-                left: auto !important;
-                top: auto !important;
-                transform: none !important;
-                width: 90%;
-                max-width: 840px;
+            .chat-hero-section {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                text-align: center;
+                width: 100%;
+                max-width: 920px;
                 margin: 0 auto;
+                transition: opacity 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+            }
+            .chat-hero-section.hero-fade-out {
+                opacity: 0;
+                transform: translateY(-16px);
+                pointer-events: none;
+            }
+            .hero-tagline {
+                font-size: 16px;
+                line-height: 1.5;
+                color: #6b7280;
+                margin: 0 0 28px;
+                font-weight: 400;
+            }
+            .hero-feature-cards {
+                display: flex;
+                flex-direction: row;
+                flex-wrap: wrap;
+                justify-content: center;
+                align-items: stretch;
+                gap: 14px;
+                width: 100%;
+            }
+            .hero-feature-card {
+                flex: 1 1 200px;
+                max-width: 280px;
+                min-width: 160px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                text-align: center;
+                gap: 6px;
+                padding: 18px 16px;
+                border: 1px solid #e5e7eb;
+                border-radius: 16px;
+                background: #fff;
+                box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
+                cursor: pointer;
+                transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+                font: inherit;
+                color: inherit;
+            }
+            .hero-feature-card:hover {
+                border-color: #93c5fd;
+                box-shadow: 0 8px 28px rgba(59, 130, 246, 0.12);
+                transform: translateY(-2px);
+            }
+            .hero-feature-card-icon {
+                font-size: 1.75rem;
+                color: #3b82f6;
+                line-height: 1;
+            }
+            .hero-feature-card-label {
+                font-size: 15px;
+                font-weight: 600;
+                color: #1f2329;
+            }
+            .hero-feature-card-hint {
+                font-size: 12px;
+                color: #9ca3af;
+                line-height: 1.35;
+            }
+            @media (max-width: 640px) {
+                .hero-feature-cards { flex-direction: column; align-items: center; }
+                .hero-feature-card { max-width: 100%; width: 100%; }
             }
             #empty-state-wrapper .science-title {
                 font-size: 32px;
@@ -906,13 +958,7 @@
                 align-items: center;
                 justify-content: center;
                 gap: 16px;
-                margin-bottom: 60px;
-                transition: opacity 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
-            }
-            #hero-branding.hero-branding.hero-fade-out {
-                opacity: 0;
-                transform: translateY(-20px);
-                pointer-events: none;
+                margin-bottom: 16px;
             }
             #hero-branding .hero-logo {
                 height: 40px;
@@ -927,20 +973,8 @@
                 letter-spacing: 0.02em;
                 margin: 0;
             }
-            /* 空状态内输入框：极简悬浮 */
-            #empty-state-wrapper .chat-input-panel {
-                border-radius: 24px;
-                border: 1px solid #ebeef5;
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
-                background: #fff;
-                padding: 16px 24px;
-                width: 100%;
-                max-width: 840px;
-                margin: 0 auto;
-            }
-            /* 无对话时仅显示空状态，隐藏对话列表 */
+            /* 无对话时仅显示空状态，隐藏对话列表；输入框始终在底部栏 */
             #chat-pane:has(#empty-state-wrapper:not(.hidden)) .chat-scroll-area { display: none; }
-            #chat-pane:has(#empty-state-wrapper:not(.hidden)) #input-wrapper-bottom { display: none; }
 
             /* ================= 导航栏 ================= */
             .navbar {
@@ -1880,16 +1914,24 @@
             .asset-tag .remove-tag { cursor: pointer; color: #9ca3af; padding: 0 2px; }
             .asset-tag .remove-tag:hover { color: #ef4444; }
 
-            /* ================= 输入框区域（状态机：居中宽大 / 沉底收窄 + 丝滑过渡） ================= */
+            /* ================= 输入框区域（初始与对话中同宽同底） ================= */
             #inputWrapper {
                 margin: 0 auto;
                 left: 0;
                 right: 0;
                 pointer-events: auto;
-                transition: max-width 0.4s ease, width 0.4s ease, top 0.4s ease, transform 0.4s ease;
+                transition: box-shadow 0.25s ease;
             }
-            #inputWrapper.input-center { width: 90%; max-width: 840px; margin: 0 auto; }
-            #inputWrapper.input-bottom { width: calc(100% - 48px); max-width: 720px; margin: 0 auto 24px auto; }
+            #inputWrapper.input-center,
+            #inputWrapper.input-bottom { width: calc(100% - 48px); max-width: 840px; margin: 0 auto 20px auto; }
+            .main-input.chat-input.chat-input-guide-pulse {
+                animation: chat-input-guide-pulse 1.2s ease-out 1;
+            }
+            @keyframes chat-input-guide-pulse {
+                0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.45); }
+                70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+                100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+            }
             .input-wrapper { position: fixed; bottom: 30px; left: 0; width: 100%; display: flex; justify-content: center; padding: 0 20px; z-index: 100; pointer-events: none; }
             .input-wrapper > .chat-input-panel { pointer-events: auto; }
             .chat-input-panel {

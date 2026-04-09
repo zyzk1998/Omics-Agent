@@ -10,7 +10,8 @@ ENV/
 build/
 develop-eggs/
 dist/
-downloads/
+# 仅忽略仓库根目录 downloads/；Nginx 静态下载页在 services/nginx/html/downloads/
+/downloads/
 eggs/
 .eggs/
 lib/
@@ -188,3 +189,13 @@ third_party/
 
 # Electron 瘦客户端构建产物（electron-builder dist-out）
 gibh-desktop-app/dist-out/
+# 勿将安装包留在 app 根目录提交；应放到 services/nginx/html/downloads/
+gibh-desktop-app/*.exe
+gibh-desktop-app/*.AppImage
+
+# 供网页下载的安装包（由 CI 或手工从 dist-out 复制，勿提交大二进制）
+services/nginx/html/downloads/*.exe
+services/nginx/html/downloads/*.AppImage
+services/nginx/html/downloads/*.blockmap
+services/nginx/html/downloads/*.zip
+services/nginx/html/downloads/*.dmg
