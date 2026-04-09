@@ -21,13 +21,15 @@
     "directories": {
       "output": "dist-out"
     },
-    "icon": "../services/nginx/html/static/favicon.png",
+    "icon": "app-icon.png",
     "files": [
       "main.js",
-      "package.json"
+      "package.json",
+      "app-icon.png"
     ],
     "artifactName": "GIBH-Agent-Demo-Setup-${version}.${ext}",
     "win": {
+      "icon": "app-icon.png",
       "target": [
         {
           "target": "nsis",
@@ -46,6 +48,7 @@
       "shortcutName": "GIBH Agent Demo"
     },
     "linux": {
+      "icon": "app-icon.png",
       "target": [
         "AppImage"
       ],
