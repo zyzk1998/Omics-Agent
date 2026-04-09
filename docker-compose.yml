@@ -169,6 +169,8 @@ services:
     restart: always
     ports:
       - "80:80"
+      # 与本地 python server.py 默认 PORT=8018 对齐；Electron 瘦客户端 gibh-desktop-app/main.js 常用此端口
+      - "8018:80"
       - "443:443"  # 如果需要 HTTPS
     volumes:
       - ./services/nginx/conf.d:/etc/nginx/conf.d:ro

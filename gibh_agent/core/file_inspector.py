@@ -168,6 +168,20 @@ def build_medical_imaging_inspection_result(path: Path) -> Dict[str, Any]:
     except Exception as e:
         logger.debug("pair_radiomics_files 跳过: %s", e)
 
+    # Level-3：同目录配对后做体维度探针；不一致则丢弃 mask（降级为单图），避免下游致命假设
+    if mask_path_resolved and abs_image:
+        from .asset_manager import _probe_radiomics_volume_alignment
+
+        _ok, _reason = _probe_radiomics_volume_alignment(
+            Path(abs_image), Path(mask_path_resolved)
+        )
+        if not _ok:
+            logger.warning(
+                "⚠️ [FileInspector] radiomics mask dropped after probe: %s",
+                _reason,
+            )
+            mask_path_resolved = None
+
     if shape_list is not None:
         message = f"影像文件校验通过，空间维度: {shape_list}"
     else:

@@ -185,3 +185,6 @@ tests/_chroma_tools/
 
 # 第三方嵌套 git / 本地 venv（体积大；部署用 scripts/Dockerfile 拉取）
 third_party/
+
+# Electron 瘦客户端构建产物（electron-builder dist-out）
+gibh-desktop-app/dist-out/
