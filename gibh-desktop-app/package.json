@@ -17,7 +17,7 @@
   },
   "build": {
     "appId": "com.gibh.agent.demo",
-    "productName": "GIBH Agent Demo",
+    "productName": "Omics Agent",
     "directories": {
       "output": "dist-out"
     },
@@ -27,8 +27,8 @@
       "package.json",
       "app-icon.png"
     ],
-    "artifactName": "GIBH-Agent-Demo-Setup-${version}.${ext}",
     "win": {
+      "artifactName": "${productName} Setup ${version}.${ext}",
       "icon": "app-icon.png",
       "target": [
         {
@@ -45,9 +45,10 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "GIBH Agent Demo"
+      "shortcutName": "Omics Agent"
     },
     "linux": {
+      "artifactName": "${productName}-${version}.${ext}",
       "icon": "app-icon.png",
       "target": [
         "AppImage"

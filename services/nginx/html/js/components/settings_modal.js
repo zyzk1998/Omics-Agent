@@ -97,26 +97,104 @@ function getEnabledMcpsFromStorage() {
     }
 }
 
-/** 聊天输入区 HPC 标识：需 HPC-Open（compute_scheduler）开启且后端 MCP 已连接 */
+/**
+ * 通知主 API 按当前配置的 url/transport 重连 MCP 网关（与仅写 localStorage 的开关配合，才会真正建连）。
+ */
+function triggerHpcMcpBackendReconnect() {
+    var headers = typeof globalThis.getAuthHeaders === 'function' ? globalThis.getAuthHeaders() : {};
+    fetch('/api/config/mcp/status', { headers: headers })
+        .then(function (r) {
+            return r.ok ? r.json() : {};
+        })
+        .then(function (st) {
+            var url = st && st.url ? String(st.url).trim() : '';
+            var transport = st && st.transport ? String(st.transport).trim() : 'streamableHttp';
+            if (!url) {
+                console.warn('[MCP] 跳过后端重连：status 未返回 url（请检查登录态与 /api/config/mcp/status）');
+                return { skipped: true };
+            }
+            return fetch('/api/config/mcp', {
+                method: 'POST',
+                headers: Object.assign({}, headers, { 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ url: url, transport: transport }),
+            }).then(function (resp) {
+                if (resp && resp.ok) {
+                    console.log('[MCP] 已通知后端拉起连接', { url: url, transport: transport });
+                } else if (resp) {
+                    console.warn('[MCP] 后端重连请求未成功 HTTP', resp.status);
+                }
+                return resp;
+            });
+        })
+        .then(function () {
+            function refreshBadge() {
+                if (typeof updateHpcContextBadge === 'function') updateHpcContextBadge();
+            }
+            refreshBadge();
+            setTimeout(refreshBadge, 800);
+            setTimeout(refreshBadge, 3500);
+        })
+        .catch(function (e) {
+            console.warn('[MCP] 通知后端重连失败', e);
+            if (typeof updateHpcContextBadge === 'function') updateHpcContextBadge();
+        });
+}
+
+/**
+ * HPC-Open 徽章：仅由本地开关决定是否显示；connected 只影响文案/配色（绿=已连，黄=未连/未知），绝不隐藏。
+ */
 function updateHpcContextBadge(optionalStatus) {
     var badge = document.getElementById('hpc-context-badge');
     if (!badge) return;
     var schedOn = getEnabledMcpsFromStorage().indexOf(HPC_OPEN_MCP_KEY) >= 0;
     if (!schedOn) {
         badge.classList.add('hidden');
+        badge.classList.remove('is-pending', 'is-connected');
+        badge.removeAttribute('title');
         return;
     }
-    function apply(data) {
-        if (data && data.connected) {
-            badge.classList.remove('hidden');
+    badge.classList.remove('hidden');
+    function applyPayload(data) {
+        var textEl = badge.querySelector('.context-badge__text');
+        var payload = data || {};
+        var gw =
+            payload.gateway_status && typeof payload.gateway_status === 'object' ? payload.gateway_status : {};
+        var hasBool = typeof payload.connected === 'boolean';
+        var connected = hasBool && payload.connected === true;
+        var lastErr = '';
+        if (typeof payload.last_error === 'string' && payload.last_error.trim()) {
+            lastErr = payload.last_error.trim();
+        } else if (typeof gw.last_error === 'string' && gw.last_error.trim()) {
+            lastErr = gw.last_error.trim();
+        } else if (typeof gw.gateway_error === 'string' && gw.gateway_error.trim()) {
+            lastErr = gw.gateway_error.trim();
+        }
+        badge.classList.remove('is-pending', 'is-connected');
+        if (connected) {
+            badge.classList.add('is-connected');
+            if (textEl) textEl.textContent = 'HPC-Open 已连接';
+            badge.removeAttribute('title');
         } else {
-            badge.classList.add('hidden');
+            badge.classList.add('is-pending');
+            if (textEl) {
+                if (hasBool) {
+                    textEl.textContent = 'HPC-Open 未连通';
+                } else {
+                    textEl.textContent = 'HPC-Open 连接中';
+                }
+            }
+            if (lastErr) {
+                badge.setAttribute('title', lastErr);
+            } else {
+                badge.removeAttribute('title');
+            }
         }
     }
     if (optionalStatus && typeof optionalStatus.connected === 'boolean') {
-        apply(optionalStatus);
+        applyPayload(optionalStatus);
         return;
     }
+    applyPayload({});
     fetch('/api/config/mcp/status', {
         headers: typeof globalThis.getAuthHeaders === 'function' ? globalThis.getAuthHeaders() : {},
     })
@@ -124,10 +202,10 @@ function updateHpcContextBadge(optionalStatus) {
             return r.ok ? r.json() : {};
         })
         .then(function (data) {
-            apply(data);
+            applyPayload(data || {});
         })
         .catch(function () {
-            badge.classList.add('hidden');
+            applyPayload({});
         });
 }
 
@@ -265,6 +343,9 @@ function bindHpcMcpSwitch() {
             if (hpcInp.checked) keys.push(HPC_OPEN_MCP_KEY);
             writeEnabledMcpKeys(keys);
             updateHpcContextBadge();
+            if (hpcInp.checked) {
+                triggerHpcMcpBackendReconnect();
+            }
         });
     }
 }
@@ -292,7 +373,11 @@ function initSettingsPanelMcpSwitches() {
 /** Badge 关闭：隐藏标识，并强制 HPC 开关 OFF + 触发 change 以写 localStorage */
 function disableHpcOpenAndSyncUi() {
     var badge = document.getElementById('hpc-context-badge');
-    if (badge) badge.classList.add('hidden');
+    if (badge) {
+        badge.classList.add('hidden');
+        badge.classList.remove('is-pending', 'is-connected');
+        badge.removeAttribute('title');
+    }
     var inp = document.getElementById('mcp-switch-compute_scheduler');
     if (inp && inp.checked) {
         inp.checked = false;
@@ -339,7 +424,14 @@ function initSettingsModalBindings() {
     var btnSettingsCancel = document.getElementById('settings-btn-cancel');
     var btnSettingsConfirm = document.getElementById('settings-btn-confirm');
     if (btnSettingsCancel) btnSettingsCancel.onclick = closeSettingsModal;
-    if (btnSettingsConfirm) btnSettingsConfirm.onclick = closeSettingsModal;
+    if (btnSettingsConfirm) {
+        btnSettingsConfirm.onclick = function () {
+            if (readEnabledMcpKeys().indexOf(HPC_OPEN_MCP_KEY) >= 0) {
+                triggerHpcMcpBackendReconnect();
+            }
+            closeSettingsModal();
+        };
+    }
     if (btnClearCache) {
         btnClearCache.onclick = function () {
             if (!confirm('将清除所有本地缓存（不包含登录状态），确定吗？')) return;
@@ -358,12 +450,16 @@ window.getEnabledMcpsFromStorage = getEnabledMcpsFromStorage;
 window.applyDefaultModelFromStorage = applyDefaultModelFromStorage;
 window.updateHpcContextBadge = updateHpcContextBadge;
 window.disableHpcOpenAndSyncUi = disableHpcOpenAndSyncUi;
+window.triggerHpcMcpBackendReconnect = triggerHpcMcpBackendReconnect;
 
 function bootstrapSettingsModalModule() {
     initSettingsModalBindings();
     initSettingsPanelMcpSwitches();
     initHpcContextBadgeCloseButton();
     updateHpcContextBadge();
+    if (readEnabledMcpKeys().indexOf(HPC_OPEN_MCP_KEY) >= 0) {
+        triggerHpcMcpBackendReconnect();
+    }
 }
 
 if (document.readyState === 'loading') {

@@ -151,6 +151,44 @@ class ToolRetriever:
             
             documents.append(Document(page_content=page_content, metadata=metadata))
             metadatas.append(metadata)
+
+        # 附录：超算/工作站 MCP 固定清单（与 docs/hpc_mcp_tools_catalog.json 一致），便于向量库命中 hpc_mcp_*
+        repo_root = Path(__file__).resolve().parents[2]
+        mcp_catalog_path = repo_root / "docs" / "hpc_mcp_tools_catalog.json"
+        if mcp_catalog_path.is_file():
+            try:
+                raw_cat = json.loads(mcp_catalog_path.read_text(encoding="utf-8"))
+            except Exception as e:
+                logger.warning("⚠️ 读取 hpc_mcp_tools_catalog.json 失败，跳过 MCP 向量条目: %s", e)
+                raw_cat = []
+            if isinstance(raw_cat, list):
+                for row in raw_cat:
+                    if not isinstance(row, dict):
+                        continue
+                    oname = (row.get("openai_function_name") or "").strip()
+                    mcp_n = (row.get("mcp_name") or "").strip()
+                    desc = (row.get("description") or "").strip()
+                    if not oname:
+                        continue
+                    page_content = (
+                        f"工具名称: {oname}\n"
+                        f"远端 MCP 名: {mcp_n}\n"
+                        f"类别: HPC MCP\n"
+                        f"描述: {desc}\n"
+                        f"输出类型: json"
+                    ).strip()
+                    metadata = {
+                        "name": oname,
+                        "category": "HPC MCP",
+                        "output_type": "json",
+                        "description": desc,
+                        "args_schema": json.dumps(
+                            {"type": "object", "properties": {}, "x_mcp_tool": mcp_n},
+                            ensure_ascii=False,
+                        ),
+                    }
+                    documents.append(Document(page_content=page_content, metadata=metadata))
+                logger.info("📎 已附加 %s 条 MCP 目录工具供向量检索", len(raw_cat))
         
         # 添加到 ChromaDB
         try:

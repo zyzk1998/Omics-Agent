@@ -1950,13 +1950,27 @@
                 box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
                 border-color: #e5e7eb;
             }
-            /* HPC 上下文标识：嵌在输入面板内 flex 流，不覆盖 textarea / 发送栏 */
-            .chat-input-context-row {
-                display: flex;
-                align-items: center;
-                flex-wrap: wrap;
-                gap: 6px;
-                flex-shrink: 0;
+            /* HPC 标识：输入区底栏内、紧贴模型选择器左侧（回形针 → 徽章 → 模型） */
+            .chat-input-panel .toolbar-left .context-badge.context-badge--by-model {
+                flex-shrink: 1;
+                min-width: 0;
+                max-width: 200px;
+                font-size: 11px;
+                padding: 3px 8px;
+                margin: 0 2px 0 6px;
+            }
+            @media (max-width: 520px) {
+                .chat-input-panel .toolbar-left .context-badge.context-badge--by-model {
+                    max-width: 130px;
+                }
+            }
+            .context-badge.is-connected {
+                background-color: #d1fae5;
+                color: #065f46;
+            }
+            .context-badge.is-connected .badge-close-btn:hover {
+                background: rgba(6, 95, 70, 0.12) !important;
+                background-color: rgba(6, 95, 70, 0.12) !important;
             }
             .context-badge {
                 background-color: #DBEAFE;
@@ -1973,6 +1987,14 @@
             }
             .context-badge.hidden {
                 display: none !important;
+            }
+            .context-badge.is-pending:not(.is-connected) {
+                background-color: #fef3c7;
+                color: #92400e;
+            }
+            .context-badge.is-pending:not(.is-connected) .badge-close-btn:hover {
+                background: rgba(146, 64, 14, 0.12) !important;
+                background-color: rgba(146, 64, 14, 0.12) !important;
             }
             .context-badge__icon {
                 flex-shrink: 0;

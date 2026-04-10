@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-HPC 直连编排：compute_scheduler 开启时由 API 层主动引流，不经 AgentOrchestrator。
+HPC 直连编排（遗留模块）：chat SSE 已不再引用本模块；统一走 AgentOrchestrator + DeepReAct + MCP 动态工具。
+
+保留供运维脚本/单测或手工复现网关 /call 行为时参考。
 
 - 经 MCP Gateway POST /call 调用远端工具。
 - 默认工具名为 execute_hpc_command，arguments 为 {"command": "<用户输入>"}，与 curl POST /call 语义对齐。
@@ -194,6 +196,37 @@ def _merge_state_for_emit(
             )
 
 
+def _gateway_http_error_detail(body: Any, response_text: str) -> str:
+    """
+    从网关 JSON 体提取 FastAPI/Starlette 的 detail。
+    若 detail 为 list（校验错误形态）或 dict，禁止退化成整段 r.text 导致丢失结构化长文案。
+    """
+    if isinstance(body, dict):
+        d = body.get("detail")
+        if isinstance(d, str) and d.strip():
+            return d.strip()
+        if isinstance(d, list):
+            parts: List[str] = []
+            for item in d:
+                if isinstance(item, dict):
+                    loc = item.get("loc")
+                    msg = item.get("msg") or item.get("message")
+                    if loc is not None and msg is not None:
+                        parts.append(f"{loc}: {msg}")
+                    else:
+                        parts.append(json.dumps(item, ensure_ascii=False))
+                else:
+                    parts.append(str(item))
+            if parts:
+                return "; ".join(parts)
+        if d is not None and not isinstance(d, (str, list)):
+            try:
+                return json.dumps(d, ensure_ascii=False)
+            except Exception:
+                return str(d)
+    return (response_text or "").strip() or "(empty gateway response body)"
+
+
 async def _call_gateway_chat(*, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     timeout = httpx.Timeout(connect=10.0, read=300.0, write=60.0, pool=10.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -206,8 +239,7 @@ async def _call_gateway_chat(*, tool_name: str, arguments: Dict[str, Any]) -> Di
         except Exception:  # noqa: BLE001
             body = {"detail": r.text}
         if r.status_code >= 400:
-            detail = body.get("detail") if isinstance(body, dict) else None
-            msg = detail if isinstance(detail, str) else r.text
+            msg = _gateway_http_error_detail(body if isinstance(body, dict) else {}, r.text)
             return {"status": "error", "message": f"网关 HTTP {r.status_code}: {msg}", "content": []}
         if not isinstance(body, dict):
             return {"status": "error", "message": "网关返回非 JSON 对象", "content": []}

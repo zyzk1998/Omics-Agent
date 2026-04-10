@@ -536,7 +536,7 @@ Based on the following data statistics:
 Please generate a data diagnosis and parameter recommendation report in Simplified Chinese (简体中文).
 
 Format:
-### 🔍 数据体检报告
+### 🔍 数据报告
 - **数据规模**: [样本数、代谢物数]
 - **数据特征**: [缺失值率、数据范围等]
 - **数据质量**: [质量评估]

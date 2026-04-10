@@ -17,6 +17,33 @@ HPC_CHAT_SYSTEM_APPEND = (
     "只有当用户**明确要求**查询进度、状态或结果时，你才调用对应的状态/队列查询类工具。"
 )
 
+# 与 docs/hpc_mcp_tools_catalog.json 及网关 tools/list 对齐；帮助模型直接命中 function.name，减少「先想再搜」
+HPC_MCP_TOOL_ROUTING_CHEAT_SHEET = (
+    "\n\n【hpc_mcp_* 工具速查 — 直接选用，勿用 execute 代替已有专用工具】"
+    "以下为当前 OpenAI `tools` 中**实际出现的 function.name**（均以 `hpc_mcp_` 开头）。"
+    "用户话里出现同义说法或英文原名时，应**立即**调用对应工具，无需先在对话中复述整份工具表。\n"
+    "**HPC（超算）** "
+    "探活/连通性 → `hpc_mcp_test_hpc_connection`；"
+    "系统与集群概况、超算状态、资源信息（无具体作业 ID）→ **优先** `hpc_mcp_get_hpc_system_info`；"
+    "作业列表、队列、当前跑哪些任务 → `hpc_mcp_list_jobs`；"
+    "单个作业状态 → `hpc_mcp_get_job_status`（需作业 ID）；"
+    "作业输出/日志 → `hpc_mcp_get_job_output`（需作业 ID）；"
+    "取消作业 → `hpc_mcp_cancel_job`（需作业 ID）；"
+    "提交批处理脚本 → `hpc_mcp_submit_hpc_job`；"
+    "测序 FastQC 类检测提交 → `hpc_mcp_submit_data_conversion_job`；"
+    "上传/下载/列目录/读远程文件 → `hpc_mcp_upload_file_to_hpc`、`hpc_mcp_download_file_from_hpc`、"
+    "`hpc_mcp_list_hpc_directory`、`hpc_mcp_read_hpc_file`；"
+    "sinfo、squeue、pestat、节点占用、自定义 Shell（**仅当**上述专用工具无法覆盖时）→ `hpc_mcp_execute_hpc_command`（参数为完整 Linux 命令字符串）。\n"
+    "**工作站** 名称规律为 `hpc_mcp_*_workstation*` 或 `hpc_mcp_run_*_on_workstation`："
+    "探活 `hpc_mcp_test_workstation_connection`；系统信息 `hpc_mcp_get_workstation_system_info`；"
+    "传文件与目录 `hpc_mcp_upload_file_to_workstation`、`hpc_mcp_download_file_from_workstation`、"
+    "`hpc_mcp_list_workstation_directory`、`hpc_mcp_read_workstation_file`；"
+    "远程命令 `hpc_mcp_execute_workstation_command`；FastQC `hpc_mcp_run_fastqc_on_workstation`；"
+    "通用容器作业 `hpc_mcp_run_container_job_on_workstation`。\n"
+    "**名称映射**：用户若说远端短名（如 `get_hpc_system_info`、`list_jobs`），实际调用须加前缀：`hpc_mcp_get_hpc_system_info`、`hpc_mcp_list_jobs`。\n"
+    "**禁止**：在已有 `list_jobs`/`get_job_status` 等专用工具可满足时，用 `execute_hpc_command` 代替；无作业 ID 时不要编造 ID。"
+)
+
 
 def _enabled_mcp_set(enabled_mcps: Optional[List[str]]) -> set:
     return {str(x).strip() for x in (enabled_mcps or []) if x is not None and str(x).strip()}
@@ -41,7 +68,7 @@ def apply_hpc_mcp_tool_policy(names: List[str], enabled_mcps: Optional[List[str]
 def hpc_chat_system_suffix(enabled_mcps: Optional[List[str]]) -> str:
     if COMPUTE_SCHEDULER_MCP_KEY not in _enabled_mcp_set(enabled_mcps):
         return ""
-    return HPC_CHAT_SYSTEM_APPEND
+    return HPC_CHAT_SYSTEM_APPEND + HPC_MCP_TOOL_ROUTING_CHEAT_SHEET
 
 
 def tool_names_to_openai_tools(names: List[str]) -> List[Dict[str, Any]]:

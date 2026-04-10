@@ -752,6 +752,7 @@ class AgentOrchestrator:
                             state_snapshot=state_snapshot,
                             model_name=model_name,
                             enabled_mcps=enabled_mcps,
+                            schema_cache_key=f"{_deep_key}::hpc_openai",
                         ):
                             yield sse_chunk
                     logger.info("[Profiler] LLM 思考与生成总耗时: %.2fs", time.time() - _t_llm_start)
@@ -2789,6 +2790,46 @@ class AgentOrchestrator:
         out["tool_calls"] = tool_calls
         return out
 
+    async def _merge_openai_tools_with_dynamic_hpc(
+        self,
+        tool_names: List[str],
+        enabled_mcps: List[str],
+        schema_cache_key: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        compute_scheduler 开启时：优先经网关拉取 MCP tools/list 的 inputSchema，转为 OpenAI tools 并合并；
+        失败则回退为 ToolRegistry.metadata（与旧行为一致）。非 HPC 工具仍走 tool_names_to_openai_tools。
+        """
+        from gibh_agent.core.openai_tools import (
+            COMPUTE_SCHEDULER_MCP_KEY,
+            HPC_MCP_TOOL_PREFIX,
+            tool_names_to_openai_tools,
+        )
+        from gibh_agent.mcp_client import hpc_mcp_manager
+
+        enabled_set = {str(x).strip() for x in (enabled_mcps or []) if x is not None and str(x).strip()}
+        non_hpc = [n for n in tool_names if not str(n).startswith(HPC_MCP_TOOL_PREFIX)]
+        merged = tool_names_to_openai_tools(non_hpc)
+        if COMPUTE_SCHEDULER_MCP_KEY not in enabled_set:
+            return merged
+
+        try:
+            dyn, reg_map, _hit = await hpc_mcp_manager.get_cached_openai_tools_for_session(schema_cache_key)
+            for reg, mcp in reg_map.items():
+                hpc_mcp_manager._mcp_name_by_registry.setdefault(reg, mcp)
+            if dyn:
+                return merged + dyn
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "⚠️ [Orchestrator] 动态 HPC schema 注入失败，回退 registry：%s",
+                e,
+                exc_info=True,
+            )
+
+        hpc_only = [n for n in tool_names if str(n).startswith(HPC_MCP_TOOL_PREFIX)]
+        merged.extend(tool_names_to_openai_tools(hpc_only))
+        return merged
+
     async def _stream_deep_react_chat(
         self,
         query: str,
@@ -2806,7 +2847,6 @@ class AgentOrchestrator:
         from gibh_agent.core.openai_tools import (
             apply_hpc_mcp_tool_policy,
             hpc_chat_system_suffix,
-            tool_names_to_openai_tools,
         )
         from gibh_agent.core.react_runner import (
             ASK_HUMAN_FOR_CLARIFICATION_TOOL_NAME,
@@ -2882,7 +2922,10 @@ class AgentOrchestrator:
         if AgentOrchestrator._is_bepipred3_skill_chat_intent(query):
             tool_names.append("bepipred3_prediction")
         tool_names = apply_hpc_mcp_tool_policy(tool_names, enabled_mcps)
-        tools = tool_names_to_openai_tools(tool_names)
+        _schema_ck = f"{session_key}::hpc_openai"
+        tools = await self._merge_openai_tools_with_dynamic_hpc(
+            tool_names, enabled_mcps, _schema_ck
+        )
 
         _deep_tools: List[Dict[str, Any]] = list(tools)
         _deep_tools.append(
@@ -2999,6 +3042,7 @@ class AgentOrchestrator:
         state_snapshot: Dict[str, Any],
         model_name: str,
         enabled_mcps: List[str],
+        schema_cache_key: str = "default::hpc_openai",
     ) -> AsyncIterator[str]:
         """聊天模式：可选 OpenAI tools（如 mcp_web_search），再流式输出最终回复。"""
         from gibh_agent.core.openai_tools import (
@@ -3066,7 +3110,9 @@ class AgentOrchestrator:
         if AgentOrchestrator._is_bepipred3_skill_chat_intent(query):
             tool_names.append("bepipred3_prediction")
         tool_names = apply_hpc_mcp_tool_policy(tool_names, enabled_mcps)
-        tools = tool_names_to_openai_tools(tool_names)
+        tools = await self._merge_openai_tools_with_dynamic_hpc(
+            tool_names, enabled_mcps, schema_cache_key
+        )
 
         _llm_first_byte = None
         _t_llm_start = time.time()

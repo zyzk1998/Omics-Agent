@@ -1,0 +1,112 @@
+[
+  {
+    "mcp_name": "test_hpc_connection",
+    "openai_function_name": "hpc_mcp_test_hpc_connection",
+    "description": "测试 HPC 连接（仅支持 SSH 密钥认证）。"
+  },
+  {
+    "mcp_name": "submit_hpc_job",
+    "openai_function_name": "hpc_mcp_submit_hpc_job",
+    "description": "向 HPC 提交作业脚本。输入必须是完整的作业脚本内容。"
+  },
+  {
+    "mcp_name": "submit_data_conversion_job",
+    "openai_function_name": "hpc_mcp_submit_data_conversion_job",
+    "description": "提交测序数据检测作业（使用 fastqc.sif 容器）。输入必须是用户提供的完整命令字符串，并且需要原样传递，例如 fastqc test.q。"
+  },
+  {
+    "mcp_name": "upload_file_to_hpc",
+    "openai_function_name": "hpc_mcp_upload_file_to_hpc",
+    "description": "上传文件到 HPC。"
+  },
+  {
+    "mcp_name": "download_file_from_hpc",
+    "openai_function_name": "hpc_mcp_download_file_from_hpc",
+    "description": "从 HPC 下载文件。"
+  },
+  {
+    "mcp_name": "list_hpc_directory",
+    "openai_function_name": "hpc_mcp_list_hpc_directory",
+    "description": "列出 HPC 远程目录下的文件和子目录。"
+  },
+  {
+    "mcp_name": "read_hpc_file",
+    "openai_function_name": "hpc_mcp_read_hpc_file",
+    "description": "读取 HPC 远程文本文件内容。"
+  },
+  {
+    "mcp_name": "get_job_status",
+    "openai_function_name": "hpc_mcp_get_job_status",
+    "description": "查询 HPC 作业状态。输入必须是作业 ID。"
+  },
+  {
+    "mcp_name": "cancel_job",
+    "openai_function_name": "hpc_mcp_cancel_job",
+    "description": "取消 HPC 作业。输入必须是作业 ID。"
+  },
+  {
+    "mcp_name": "get_job_output",
+    "openai_function_name": "hpc_mcp_get_job_output",
+    "description": "获取 HPC 作业输出。输入必须是作业 ID。"
+  },
+  {
+    "mcp_name": "list_jobs",
+    "openai_function_name": "hpc_mcp_list_jobs",
+    "description": "列出 HPC 作业。可选输入用户名称，默认使用当前 HPC 用户。"
+  },
+  {
+    "mcp_name": "get_hpc_system_info",
+    "openai_function_name": "hpc_mcp_get_hpc_system_info",
+    "description": "获取 HPC 系统信息。无需参数。"
+  },
+  {
+    "mcp_name": "execute_hpc_command",
+    "openai_function_name": "hpc_mcp_execute_hpc_command",
+    "description": "在 HPC 上执行远程命令。输入为完整的 Linux 命令。"
+  },
+  {
+    "mcp_name": "test_workstation_connection",
+    "openai_function_name": "hpc_mcp_test_workstation_connection",
+    "description": "测试工作站连接（仅支持 SSH 密钥认证）。"
+  },
+  {
+    "mcp_name": "upload_file_to_workstation",
+    "openai_function_name": "hpc_mcp_upload_file_to_workstation",
+    "description": "上传文件到工作站。"
+  },
+  {
+    "mcp_name": "download_file_from_workstation",
+    "openai_function_name": "hpc_mcp_download_file_from_workstation",
+    "description": "从工作站下载文件。"
+  },
+  {
+    "mcp_name": "list_workstation_directory",
+    "openai_function_name": "hpc_mcp_list_workstation_directory",
+    "description": "列出工作站远程目录下的文件和子目录。"
+  },
+  {
+    "mcp_name": "read_workstation_file",
+    "openai_function_name": "hpc_mcp_read_workstation_file",
+    "description": "读取工作站远程文本文件内容。"
+  },
+  {
+    "mcp_name": "execute_workstation_command",
+    "openai_function_name": "hpc_mcp_execute_workstation_command",
+    "description": "在工作站上执行远程命令。输入为完整的 Linux 命令。"
+  },
+  {
+    "mcp_name": "get_workstation_system_info",
+    "openai_function_name": "hpc_mcp_get_workstation_system_info",
+    "description": "获取工作站系统信息。无需参数。"
+  },
+  {
+    "mcp_name": "run_fastqc_on_workstation",
+    "openai_function_name": "hpc_mcp_run_fastqc_on_workstation",
+    "description": "在工作站运行 FastQC 容器进行测序数据检测。输入必须是用户提供的完整命令字符串，并且需要原样传递，例如 fastqc test.q。"
+  },
+  {
+    "mcp_name": "run_container_job_on_workstation",
+    "openai_function_name": "hpc_mcp_run_container_job_on_workstation",
+    "description": "在工作站上使用容器运行作业。"
+  }
+]

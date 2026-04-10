@@ -24,6 +24,14 @@ ASK_HUMAN_FOR_CLARIFICATION_TOOL_NAME = "ask_human_for_clarification"
 EmitCallback = Callable[[str, Dict[str, Any]], Awaitable[None]]
 
 
+def _tool_args_preview(args: Dict[str, Any], max_len: int = 400) -> str:
+    try:
+        s = json.dumps(args, ensure_ascii=False, default=str)
+    except Exception:  # noqa: BLE001
+        s = str(args)
+    return (s[: max_len - 3] + "...") if len(s) > max_len else s
+
+
 class DeepReActCircuitBreakerError(RuntimeError):
     """ReAct 循环超过 max_steps 时抛出，用于强制熔断。"""
 
@@ -150,6 +158,7 @@ class DeepReActRunner:
 
         emit_callback 约定：
         - ``("thought", {"content": str})``：reasoning_content 流式片段
+        - ``("message", {"content": str})``：delta.content 可见正文流式片段（与 fast 模式 SSE 对齐）
         - ``("process_log", {"message": str})``：过程日志（算子执行等）
         - ``("status", {"content": str, "state": str})``：状态（如 human_input_required）
 
@@ -193,6 +202,7 @@ class DeepReActRunner:
                 content = _delta_get(delta, "content")
                 if content:
                     content_parts.append(content)
+                    await emit_callback("message", {"content": content})
 
                 _accumulate_streaming_tool_calls(accumulated, chunk)
 
@@ -266,7 +276,122 @@ class DeepReActRunner:
                 )
                 try:
                     args = json.loads(args_str)
-                    tool_fn = self._registry.get_tool(tool_name)
+                except json.JSONDecodeError:
+                    args = {}
+
+                tool_fn = self._registry.get_tool(tool_name)
+                # 动态 MCP schema 注入场景：工具可能尚未在 Registry 注册，经网关 POST /call 代理执行
+                if tool_fn is None and isinstance(tool_name, str) and tool_name.startswith("hpc_mcp_"):
+                    try:
+                        from gibh_agent.mcp_client import hpc_mcp_manager
+
+                        mcp_remote = hpc_mcp_manager.resolve_registry_tool_to_mcp(tool_name)
+                        if mcp_remote:
+                            logger.info(
+                                "[MCP Execution] DeepReAct dispatch registry=%r → mcp=%r args_preview=%s",
+                                tool_name,
+                                mcp_remote,
+                                _tool_args_preview(args),
+                            )
+                            try:
+                                result = await hpc_mcp_manager._invoke_remote(mcp_remote, args)
+                            except Exception as gw_exc:  # noqa: BLE001
+                                err_line = (
+                                    f"Tool Execution Failed: unexpected exception in _invoke_remote "
+                                    f"({type(gw_exc).__name__}: {gw_exc})."
+                                )
+                                logger.exception(
+                                    "[MCP Execution] DeepReAct registry=%r mcp=%r %s",
+                                    tool_name,
+                                    mcp_remote,
+                                    err_line,
+                                )
+                                await emit_callback(
+                                    "process_log",
+                                    {
+                                        "message": f"❌ {tool_name}（MCP）异常已捕获并喂回模型",
+                                    },
+                                )
+                                messages.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": call_id,
+                                        "content": err_line,
+                                    }
+                                )
+                                continue
+
+                            if not isinstance(result, dict):
+                                err_line = "Tool Execution Failed: MCP gateway returned non-object response."
+                                logger.warning(
+                                    "[MCP Execution] DeepReAct registry=%r mcp=%r invalid_result_type=%s",
+                                    tool_name,
+                                    mcp_remote,
+                                    type(result).__name__,
+                                )
+                                await emit_callback(
+                                    "process_log",
+                                    {"message": f"⚠️ {tool_name}（MCP）响应异常，已喂回模型"},
+                                )
+                                messages.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": call_id,
+                                        "content": err_line,
+                                    }
+                                )
+                                continue
+
+                            payload = json.dumps(result, ensure_ascii=False, default=str)
+                            if result.get("status") == "error":
+                                logger.info(
+                                    "[MCP Execution] DeepReAct done registry=%r mcp=%r status=error message=%s",
+                                    tool_name,
+                                    mcp_remote,
+                                    (result.get("message") or "")[:300],
+                                )
+                                await emit_callback(
+                                    "process_log",
+                                    {
+                                        "message": f"⚠️ {tool_name}（MCP）业务/网关错误，已喂回模型供反思",
+                                    },
+                                )
+                            else:
+                                logger.info(
+                                    "[MCP Execution] DeepReAct done registry=%r mcp=%r status=success",
+                                    tool_name,
+                                    mcp_remote,
+                                )
+                                await emit_callback(
+                                    "process_log",
+                                    {"message": f"✅ {tool_name}（MCP 网关）执行成功"},
+                                )
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": call_id,
+                                    "content": payload,
+                                }
+                            )
+                            continue
+                    except Exception as imp_exc:  # noqa: BLE001
+                        logger.warning("[DeepReAct] HPC MCP 代理分支加载失败: %s", imp_exc)
+
+                if tool_fn is None:
+                    await emit_callback(
+                        "process_log",
+                        {"message": f"❌ 未知算子: {tool_name}"},
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": f"Error: unknown tool {tool_name!r}",
+                        }
+                    )
+                    continue
+
+                try:
                     result = await execute_tool(tool_fn, args)
                     payload = json.dumps(result, ensure_ascii=False, default=str)
                     await emit_callback(

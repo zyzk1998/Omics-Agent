@@ -41,8 +41,7 @@ except ImportError:
 from gibh_agent import create_agent
 from gibh_agent.core.file_inspector import FileInspector
 from gibh_agent.core.orchestrator import AgentOrchestrator
-from gibh_agent.core.hpc_orchestrator import stream_hpc_direct_chat
-from gibh_agent.api.routers.chat import should_use_hpc_isolated_route
+from gibh_agent.api.routers.chat import COMPUTE_SCHEDULER_MCP_KEY, normalize_enabled_mcps
 from gibh_agent.core.file_handlers.structure_normalizer import normalize_session_directory
 from gibh_agent.core.file_handlers.universal_normalizer import normalize_session_directory as universal_unpack
 from gibh_agent.core.file_handlers.modality_sniffer import detect_dominant_modality, paths_for_response
@@ -2504,9 +2503,7 @@ async def chat_endpoint(
         req.user_id = owner_id
         logger.debug(f"🔑 [ChatEndpoint] user_id = owner_id: {req.user_id}")
 
-    hpc_isolated_sse = bool(req.stream) and should_use_hpc_isolated_route(req.enabled_mcps)
-
-    if not agent and not hpc_isolated_sse:
+    if not agent:
         error_msg = "智能体未初始化，请检查配置和日志。可能的原因：1) 配置文件路径错误 2) API Key未设置 3) 依赖包缺失"
         logger.error(error_msg)
         logger.error("请检查终端日志中的详细错误信息")
@@ -2620,91 +2617,65 @@ async def chat_endpoint(
                 # Phase 4: 第一个事件下发 session_id，供前端持久化
                 yield f"event: session\ndata: {json.dumps({'session_id': req.session_id}, ensure_ascii=False)}\n\n"
                 try:
-                    if hpc_isolated_sse:
-                        logger.info("🌀 [ChatEndpoint] HPC 主动隔离路由：跳过 AgentOrchestrator → stream_hpc_direct_chat")
-                        async for event in stream_hpc_direct_chat(
-                            query=req.message or "",
-                            history=req.history or [],
-                            uploaded_files=uploaded_files,
-                            session_id=req.session_id or "default",
-                            user_id=req.user_id or owner_id or "guest",
-                        ):
-                            if isinstance(event, str) and "event: state_snapshot" in event:
-                                for line in event.split("\n"):
-                                    if line.startswith("data:"):
-                                        raw_line = line[5:].strip()
-                                        try:
-                                            state_snapshot_for_db = json.loads(raw_line)
-                                        except Exception as parse_err:
-                                            logger.error(
-                                                "❌ [Chat] state_snapshot JSON 解析失败，将原始数据备份入库: %s",
-                                                parse_err,
-                                                exc_info=True,
-                                            )
-                                            raw_preview = raw_line[:1000] if len(raw_line) > 1000 else raw_line
-                                            logger.error("❌ [Chat] 原始 data 前 1000 字符: %s", raw_preview)
-                                            raw_backup = raw_line[:50000] if len(raw_line) > 50000 else raw_line
-                                            state_snapshot_for_db = {
-                                                "text": "⚠️ [系统警告] 工作流数据解析失败，原始数据备份:\n" + raw_backup,
-                                                "workflow": None,
-                                                "steps": [],
-                                                "report": None,
-                                            }
-                                        break
-                            yield event
-                    else:
-                        # 🔥 动态模型路由：前端 model_name 传入 stream_process，每次请求在调用处传入，避免单例竞态
-                        model_name = (getattr(req, "model_name", None) or "").strip() or "deepseek-ai/DeepSeek-R1"
-                        if model_name and agent and hasattr(agent, "agents") and agent.agents:
-                            try:
-                                from gibh_agent.core.llm_client import LLMClientFactory
-                                override_llm = LLMClientFactory.create_for_model(model_name)
-                                for name, a in agent.agents.items():
-                                    if hasattr(a, "llm_client") and a.llm_client is not None:
-                                        original_llm_clients[name] = a.llm_client
-                                        a.llm_client = override_llm
-                                logger.info(f"🔀 [ChatEndpoint] 已切换模型: {model_name}")
-                            except Exception as swap_err:
-                                logger.warning(f"⚠️ [ChatEndpoint] 模型切换失败，使用默认: {swap_err}")
-                        orchestrator = AgentOrchestrator(agent, upload_dir=str(UPLOAD_DIR))
-                        async for event in orchestrator.stream_process(
-                            query=req.message,
-                            files=uploaded_files,
-                            history=req.history or [],
-                            session_id=req.session_id or "default",
-                            test_dataset_id=req.test_dataset_id,
-                            workflow_data=req.workflow_data,
-                            user_id=req.user_id or "guest",
-                            owner_id=owner_id,
-                            db=db,
-                            model_name=model_name,
-                            target_domain=req.target_domain,
-                            enabled_mcps=req.enabled_mcps or [],
-                            thinking_mode=req.thinking_mode or "fast",
-                        ):
-                            if isinstance(event, str) and "event: state_snapshot" in event:
-                                for line in event.split("\n"):
-                                    if line.startswith("data:"):
-                                        raw_line = line[5:].strip()
-                                        try:
-                                            state_snapshot_for_db = json.loads(raw_line)
-                                        except Exception as parse_err:
-                                            logger.error(
-                                                "❌ [Chat] state_snapshot JSON 解析失败，将原始数据备份入库: %s",
-                                                parse_err,
-                                                exc_info=True,
-                                            )
-                                            raw_preview = raw_line[:1000] if len(raw_line) > 1000 else raw_line
-                                            logger.error("❌ [Chat] 原始 data 前 1000 字符: %s", raw_preview)
-                                            raw_backup = raw_line[:50000] if len(raw_line) > 50000 else raw_line
-                                            state_snapshot_for_db = {
-                                                "text": "⚠️ [系统警告] 工作流数据解析失败，原始数据备份:\n" + raw_backup,
-                                                "workflow": None,
-                                                "steps": [],
-                                                "report": None,
-                                            }
-                                        break
-                            yield event
+                    # 🔥 动态模型路由：前端 model_name 传入 stream_process，每次请求在调用处传入，避免单例竞态
+                    model_name = (getattr(req, "model_name", None) or "").strip() or "deepseek-ai/DeepSeek-R1"
+                    if model_name and agent and hasattr(agent, "agents") and agent.agents:
+                        try:
+                            from gibh_agent.core.llm_client import LLMClientFactory
+                            override_llm = LLMClientFactory.create_for_model(model_name)
+                            for name, a in agent.agents.items():
+                                if hasattr(a, "llm_client") and a.llm_client is not None:
+                                    original_llm_clients[name] = a.llm_client
+                                    a.llm_client = override_llm
+                            logger.info(f"🔀 [ChatEndpoint] 已切换模型: {model_name}")
+                        except Exception as swap_err:
+                            logger.warning(f"⚠️ [ChatEndpoint] 模型切换失败，使用默认: {swap_err}")
+                    _mcps_enabled = set(normalize_enabled_mcps(req.enabled_mcps))
+                    _effective_thinking = (req.thinking_mode or "fast").strip().lower()
+                    if COMPUTE_SCHEDULER_MCP_KEY in _mcps_enabled:
+                        _effective_thinking = "deep"
+                        logger.info(
+                            "🔧 [ChatEndpoint] compute_scheduler 已启用：统一走 AgentOrchestrator + DeepReAct（不再使用 HPC 直连短路）"
+                        )
+                    orchestrator = AgentOrchestrator(agent, upload_dir=str(UPLOAD_DIR))
+                    async for event in orchestrator.stream_process(
+                        query=req.message,
+                        files=uploaded_files,
+                        history=req.history or [],
+                        session_id=req.session_id or "default",
+                        test_dataset_id=req.test_dataset_id,
+                        workflow_data=req.workflow_data,
+                        user_id=req.user_id or "guest",
+                        owner_id=owner_id,
+                        db=db,
+                        model_name=model_name,
+                        target_domain=req.target_domain,
+                        enabled_mcps=req.enabled_mcps or [],
+                        thinking_mode=_effective_thinking,
+                    ):
+                        if isinstance(event, str) and "event: state_snapshot" in event:
+                            for line in event.split("\n"):
+                                if line.startswith("data:"):
+                                    raw_line = line[5:].strip()
+                                    try:
+                                        state_snapshot_for_db = json.loads(raw_line)
+                                    except Exception as parse_err:
+                                        logger.error(
+                                            "❌ [Chat] state_snapshot JSON 解析失败，将原始数据备份入库: %s",
+                                            parse_err,
+                                            exc_info=True,
+                                        )
+                                        raw_preview = raw_line[:1000] if len(raw_line) > 1000 else raw_line
+                                        logger.error("❌ [Chat] 原始 data 前 1000 字符: %s", raw_preview)
+                                        raw_backup = raw_line[:50000] if len(raw_line) > 50000 else raw_line
+                                        state_snapshot_for_db = {
+                                            "text": "⚠️ [系统警告] 工作流数据解析失败，原始数据备份:\n" + raw_backup,
+                                            "workflow": None,
+                                            "steps": [],
+                                            "report": None,
+                                        }
+                                    break
+                        yield event
                 except Exception as e:
                     logger.error(f"❌ SSE 流式传输错误: {e}", exc_info=True)
                     error_event = f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
