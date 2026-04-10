@@ -361,6 +361,7 @@ Copyright © 2025 Omics Agent Team. All Rights Reserved.
 - [重构方案](REFACTORING_PLAN.md) - 详细的重构计划
 - [快速参考](QUICK_REFERENCE.md) - 常用命令和配置
 - [Docker 部署](DOCKER_DEPLOYMENT.md) - Docker 部署详细指南
+- [**超算 MCP 简报**](docs/HPC_MCP_STATUS_BRIEF.md) — `mcp-gateway`、上游 `HPC_MCP_URL`、`GET /tools`、固定工具目录 [`docs/hpc_mcp_tools_catalog.json`](docs/hpc_mcp_tools_catalog.json) 与根目录 [`工具库.md`](工具库.md) 的生成脚本 [`scripts/export_tool_library_md.py`](scripts/export_tool_library_md.py)
 
 ### 前端集成
 - [**lite.html**](services/nginx/html/lite.html) - 瘦前端演示页面，展示如何与后端 API 集成
