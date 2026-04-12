@@ -27,6 +27,7 @@ from .asset_manager import (
     routing_asset_inventory,
 )
 from .llm_client import LLMClient
+from .semantic_router import RouteKind, RouterInput, SemanticRouter
 from .stream_utils import stream_with_suggestions
 from .workflows import WorkflowRegistry
 from .file_handlers.universal_normalizer import _is_archive
@@ -45,6 +46,14 @@ _CHAT_MODE_PUBLIC_API_TOOLS: Tuple[str, ...] = (
 )
 
 
+def _semantic_router_feature_flag() -> bool:
+    """未设置 GIBH_ENABLE_SEMANTIC_ROUTER 时默认开启；显式 0/false/no/off 关闭。"""
+    raw = os.environ.get("GIBH_ENABLE_SEMANTIC_ROUTER")
+    if raw is None:
+        return True
+    return str(raw).strip().lower() not in ("0", "false", "no", "off")
+
+
 class AgentOrchestrator:
     """
     Agent 编排器
@@ -59,7 +68,10 @@ class AgentOrchestrator:
     - Clarifier: 主动澄清（询问缺失信息）
     - Reflector: 自我反思（检查和纠正计划）
     """
-    
+
+    # Phase 2：语义路由接入（默认开，见 _semantic_router_feature_flag）
+    ENABLE_SEMANTIC_ROUTER: bool = _semantic_router_feature_flag()
+
     def __init__(self, agent, upload_dir: str = "/app/uploads"):
         """
         初始化编排器
@@ -174,6 +186,28 @@ class AgentOrchestrator:
                 ordered.append(s)
         ordered = self._strip_replaced_archive_paths_static(ordered)
         return self._expand_visium_sibling_matrix_paths(ordered)
+
+    def _get_semantic_router_file_status(self, files: Optional[List[Any]]) -> Dict[str, Any]:
+        """
+        为 SemanticRouter 聚合文件上下文：与编排器其余路径一致，使用已解析的绝对路径列表。
+        只要 _collect_resolved_upload_paths 非空即视为有文件（含解压目录等有效路径）。
+        """
+        paths = self._collect_resolved_upload_paths(files)
+        types: List[str] = []
+        for p in paths:
+            try:
+                suf = Path(p).suffix.lower()
+            except OSError:
+                continue
+            if suf and suf not in types:
+                types.append(suf)
+        return {
+            "has_files": len(paths) > 0,
+            "path_count": len(paths),
+            "types": types,
+            # 仅传文件名，避免把绝对路径完整送入模型上下文（降低泄露感、控制 token）
+            "file_names": [Path(p).name for p in paths[:16]],
+        }
 
     def _expand_visium_sibling_matrix_paths(self, paths: List[str]) -> List[str]:
         """
@@ -699,6 +733,8 @@ class AgentOrchestrator:
 
         # 🔥 PHASE 1: Layer 0 - Global Intent Routing (Chat vs Task)
         # 闲聊关键词优先于 target_domain 快车道，避免「广州今天天气」等仍进 Task DAG
+        # SemanticRouter 判定 hpc 时强制走 DeepReAct，以稳定承载多轮 MCP 工具调用
+        force_deep_react_for_semantic_hpc = False
         try:
             if AgentOrchestrator._global_chat_keyword_hit(query):
                 intent_type = "chat"
@@ -713,9 +749,90 @@ class AgentOrchestrator:
                 })
                 await asyncio.sleep(0.01)
                 _t_intent_start = time.time()
-                intent_type = await self._classify_global_intent(query, files)
-                logger.info("[Profiler] 全局意图分类完成 - 耗时: %.2fs", time.time() - _t_intent_start)
-                logger.info(f"🔍 [Orchestrator] 全局意图分类: {intent_type}")
+
+                if AgentOrchestrator.ENABLE_SEMANTIC_ROUTER:
+                    llm_for_router = self._get_llm_client()
+                    if llm_for_router:
+                        try:
+                            from gibh_agent.core.openai_tools import COMPUTE_SCHEDULER_MCP_KEY
+
+                            _mcp_set = {str(x).strip() for x in enabled_mcps if x}
+                            router_input = RouterInput(
+                                query=query or "",
+                                file_status=self._get_semantic_router_file_status(files),
+                                mcp_status={
+                                    "compute_scheduler": COMPUTE_SCHEDULER_MCP_KEY in _mcp_set,
+                                },
+                                session_flags={"target_domain": target_domain},
+                            )
+                            semantic_router = SemanticRouter(llm_client=llm_for_router)
+                            router_output = await semantic_router.decide_route(router_input)
+                            logger.info(
+                                "🧠 [Semantic Router] Decision: %s, Confidence: %s, Reason: %s",
+                                router_output.route,
+                                router_output.confidence,
+                                router_output.rationale_short,
+                            )
+                            if router_output.route == RouteKind.clarify:
+                                _msg = (
+                                    router_output.rationale_short
+                                    or "您的需求不够明确，请问您是希望执行生信分析（请上传文件），还是查询超算状态？"
+                                )
+                                yield self._emit_sse(state_snapshot, "message", {"content": _msg})
+                                await asyncio.sleep(0.01)
+                                yield self._emit_sse(state_snapshot, "done", {"status": "success"})
+                                state_snapshot["text"] = self._sanitize_snapshot_text(_msg)
+                                yield self._format_sse("state_snapshot", state_snapshot)
+                                return
+
+                            if router_output.route == RouteKind.hpc:
+                                intent_type = "chat"
+                                force_deep_react_for_semantic_hpc = True
+                            elif router_output.route == RouteKind.task:
+                                intent_type = "task"
+                            elif router_output.route == RouteKind.chat:
+                                intent_type = "chat"
+                            elif router_output.route == RouteKind.skill_fast_lane:
+                                intent_type = "chat"
+                            else:
+                                intent_type = "chat"
+
+                            logger.info(
+                                "[Profiler] 语义路由完成 - 耗时: %.2fs (intent_type=%s, raw_route=%s)",
+                                time.time() - _t_intent_start,
+                                intent_type,
+                                router_output.route,
+                            )
+                            logger.info(
+                                "🔍 [Orchestrator] 全局意图（SemanticRouter）: %s",
+                                intent_type,
+                            )
+                        except Exception as _sem_e:
+                            logger.warning(
+                                "⚠️ [Orchestrator] SemanticRouter 失败，回退 _classify_global_intent: %s",
+                                _sem_e,
+                                exc_info=True,
+                            )
+                            intent_type = await self._classify_global_intent(query, files)
+                            logger.info(
+                                "[Profiler] 全局意图分类完成 - 耗时: %.2fs",
+                                time.time() - _t_intent_start,
+                            )
+                            logger.info(f"🔍 [Orchestrator] 全局意图分类: {intent_type}")
+                    else:
+                        intent_type = await self._classify_global_intent(query, files)
+                        logger.info(
+                            "[Profiler] 全局意图分类完成 - 耗时: %.2fs",
+                            time.time() - _t_intent_start,
+                        )
+                        logger.info(f"🔍 [Orchestrator] 全局意图分类: {intent_type}")
+                else:
+                    intent_type = await self._classify_global_intent(query, files)
+                    logger.info(
+                        "[Profiler] 全局意图分类完成 - 耗时: %.2fs",
+                        time.time() - _t_intent_start,
+                    )
+                    logger.info(f"🔍 [Orchestrator] 全局意图分类: {intent_type}")
             
             if intent_type == "chat":
                 # 🔥 CHAT MODE: Stream LLM response directly, skip all file/planning logic
@@ -731,7 +848,8 @@ class AgentOrchestrator:
                 if llm_client:
                     _t_llm_start = time.time()
                     _deep_key = f"{(owner_id or kwargs.get('user_id') or 'guest')}::{kwargs.get('session_id') or 'default'}"
-                    if thinking_mode == "deep":
+                    _use_deep_react = thinking_mode == "deep" or force_deep_react_for_semantic_hpc
+                    if _use_deep_react:
                         async for sse_chunk in self._stream_deep_react_chat(
                             query=query,
                             files=files,
