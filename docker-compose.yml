@@ -104,6 +104,8 @@ services:
       - HPC_ORCH_CHAT_TOOL=${HPC_ORCH_CHAT_TOOL:-execute_hpc_command}
       - HPC_MCP_URL=${HPC_MCP_URL:-http://192.168.32.31:8001/mcp}
       - HPC_MCP_TRANSPORT=${HPC_MCP_TRANSPORT:-streamableHttp}
+      # Task 产线减负（QueryRewriter 旁路 + 关键词意图命中则跳过意图 LLM）；见 docs/TASK_PRODUCTION_LINE_SLIMMING_ANALYSIS.md
+      - GIBH_LITE_TASK_MODE=${GIBH_LITE_TASK_MODE:-0}
     volumes:
       - .:/app
       - ./data/uploads:/app/uploads

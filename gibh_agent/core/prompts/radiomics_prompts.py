@@ -30,13 +30,14 @@ Below is the **NIfTI metadata** of an uploaded imaging dataset (影像组学 / R
 
 Use the **same structure** as the standard data diagnosis so the frontend can render it:
 
-### 🔍 数据体检报告
+### 🔍 数据报告
 - **数据规模**: [影像尺寸，如 240×240×155 voxels]
 - **数据特征**: [是否各向同性、层厚范围、掩膜是否就绪等]
 - **数据质量**: [是否适合做影像组学特征提取与 Rad-Score]
 
 ### 💡 参数推荐
-Create a **Markdown table** with columns: 参数名 | 默认值 | **推荐值** | 推荐理由
+Create a **Markdown table** with columns: 参数名 | 默认值 | **推荐值** | 推荐理由。
+第一列「参数名」必须与系统消息中的可用参数列表**完全一致**（禁止中文/Title Case/自创 snake_case）；第一列不要用 `**` 或反引号包裹。
 
 Example rows (adjust based on metadata):
 | 参数名 | 默认值 | **推荐值** | 推荐理由 |
@@ -51,5 +52,5 @@ Example rows (adjust based on metadata):
 - Use Markdown formatting.
 - Be specific with numbers (dimensions, spacing) and reasoning.
 - Use Chinese for all user-facing content.
-- At the very end of your response, add 1–2 follow-up questions in a hidden block: <<<SUGGESTIONS>>>["问题1", "问题2"]<<<END_SUGGESTIONS>>>. Omit this block if the reply is a closing (e.g. goodbye).
+- At the very end, add only: <suggest>{"questions": ["问题1", "问题2"]}</suggest> (no extra text outside the tags). Omit if the reply is a closing (e.g. goodbye).
 """

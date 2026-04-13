@@ -101,6 +101,9 @@ manage_services() {
     echo "5) 💣 无缓存彻底重建 (No-Cache Rebuild - 耗时极长) — 仅环境彻底崩溃时使用"
     echo "0) 返回"
     echo ""
+    echo -e "${YELLOW}提示：GIBH_LITE_TASK_MODE 无单独菜单；写入 .env 后改开关须重建 api-server：${NC}"
+    echo -e "  ${CYAN}docker compose up -d --force-recreate api-server${NC}（本脚本「3」仅 restart，不保证刷新 env）"
+    echo ""
     read -p "请选择: " choice
     
     if ! check_docker_permission; then

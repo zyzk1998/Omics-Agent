@@ -55,6 +55,10 @@ class RouterInput(BaseModel):
         default_factory=dict,
         description="会话级标记，如 target_domain、实验上下文等",
     )
+    recent_history: str = Field(
+        default="",
+        description="最近 2～3 轮对话的压缩文本（用户/助手轮替），供路由理解追问与跨轮语境；无则空字符串",
+    )
 
 
 class RouterOutput(BaseModel):
@@ -78,32 +82,38 @@ class RouterOutput(BaseModel):
 # System Prompt：业务红线写死在此，模型必须优先遵守（与代码 Fail-safe 双保险）
 # ---------------------------------------------------------------------------
 SEMANTIC_ROUTER_SYSTEM_PROMPT = """你是 GIBH 智能体的「语义路由」判定器。你只输出一个 JSON 对象，不要 markdown、不要代码围栏、不要多余解释。
+JSON 必须严格包含三个键：
+- "route": 必须是 task、hpc、chat、clarify、skill_fast_lane 之一
+- "confidence": 0.0 到 1.0 的小数
+- "rationale_short": 极短说明原因（<120字）
 
-JSON 必须严格包含三个键，且仅这三个键：
-- "route": 字符串，必须是以下之一：task、hpc、chat、clarify、skill_fast_lane
-- "confidence": 0 到 1 之间的小数，表示你对该分类的确信程度
-- "rationale_short": 一句中文，极短说明为何选该 route（不超过 120 字）
+【最高优先级：反向红线与意图剥离 (Negative Guardrails)】
+!!! 警告：你极易因看到“基因、测序”或遇到“没见过的句式”而误判为 task。必须强制遵守以下规则 !!!
+1. 事实检索与生活常识免疫：如果用户的意图是获取外部知识、天气、新闻、穿衣建议，或查询生物数据库（如 TP53 基因功能）。即使句中包含复杂的专有名词，也绝对属于 Chat 范畴，必须且只能路由到 `chat`！绝对禁止判为 `task`。
+2. Task 的物理边界：`task` 的唯一合法场景是「用户要对自己的数据文件进行加工、跑生信流水线或分析（DAG）」。
 
-判定规则（按优先级思考，冲突时以更保守、更安全的为准）：
-
-1) clarify（缺前提 / 需用户补充）
-   - 若用户意图明显是要「执行」生信/组学/数据分析类任务，但 file_status 表明当前没有可用数据文件（或无路径、无上传），且用户问题不是「纯概念咨询」（例如不是只问「QC 是什么」），则必须选 clarify，让系统向用户索要文件或明确数据位置。
-   - 若信息严重不足、无法区分是执行还是闲聊，也选 clarify。
-
-2) hpc（超算 / 调度）
-   - 仅当 mcp_status 中 compute_scheduler 为 true（或明确开启）时，才允许选 hpc。
-   - 在此前提下，若用户自然语言涉及超算运维、作业状态、队列、节点资源、常见命令语义（如 pestat、squeue、作业 ID、排队原因等），选 hpc。
-
-3) chat
-   - 普通问候、感谢、闲聊，或明显是通用百科/教材级知识且不要求在本系统内执行分析或访问用户数据时，选 chat。
-
-4) task
-   - 用户要跑分析、流程、差异分析、比对、组装等，且 file_status 已表明有匹配类型的文件或数据已就绪时，选 task。
-
+【常规判定规则（优先级递减）】
+1) clarify（缺前提）
+   - 若用户明确要「跑分析管线」，但 file_status 表明无可用数据，且问题不是纯概念咨询，选 clarify。
+2) hpc（超算）
+   - 仅当 mcp_status.compute_scheduler 为 true 时允许。涉及超算运维、作业状态、pestat 等选 hpc。
+3) chat（对话/检索）
+   - 普通问候、生活闲聊/咨询（如“怎么穿衣”）、实时联网检索（天气/新闻），或查询医学百科级知识，选 chat。
+4) task（管线分析）
+   - 用户明确要跑组学分析、流程等，且 file_status 有匹配文件就绪时，选 task。
 5) skill_fast_lane
-   - 仅当用户意图极度明确属于某个已命名的「技能」快捷路径、且不需要 clarify 时选用；否则不要用。
+   - 极度明确属于某个已命名的「技能」快捷路径。
 
-输出前自检：若选了 hpc，务必确认 mcp_status.compute_scheduler 为真；若应 clarify 却选了 task，属于严重错误。
+【上下文感知原则】（若 recent_history 非空则必须结合判断）
+- 若 recent_history 显示刚完成某条生信工作流，且当前 query 是含糊追问（如「进一步做交叉分析」），优先判 task，继续走分析链。
+- 若 recent_history 为闲聊/检索，按 query 本身判 chat 或 clarify。
+
+【强制分类防幻觉样本 (Few-Shot Guardrails)】
+- "广州出门穿什么合适？" -> route: "chat" (生活常识/天气检索)
+- "查询 TP53 基因的功能和染色体位置" -> route: "chat" (调库检索，非数据管线)
+- "你能帮我搜一下关于 CRISPR 的文献吗" -> route: "chat" (文献检索)
+- "帮我对这两个 fastq 文件做差异表达分析" -> route: "task" (针对文件的分析管线)
+- "进一步做跨组学交叉分析" (且 recent_history 刚完成转录组) -> route: "task" (基于有效上下文继续执行)
 """
 
 
@@ -114,6 +124,7 @@ def _serialize_router_context(inp: RouterInput) -> str:
         "file_status": inp.file_status,
         "mcp_status": inp.mcp_status,
         "session_flags": inp.session_flags,
+        "recent_history": (inp.recent_history or "").strip(),
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 

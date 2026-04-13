@@ -1,6 +1,6 @@
 """
 Stream and text parsing utilities for LLM responses.
-- 通用双轨（无模型硬编码）：reasoning_content → thought；content 内 <think>...</think> → 状态机分流，缓冲区防跨 chunk 截断；<<<SUGGESTIONS>>> 解析不变。
+- 通用双轨（无模型硬编码）：reasoning_content → thought；content 内 <think>...</think> → 状态机分流；<suggest> 与 <<<SUGGESTIONS>>> 流式拦截；缓冲区防跨 chunk 截断。
 - stream_and_extract_json：Planner 流式升级专用分拣器——thought 与 JSON 正文严格隔离；流结束后先剥 fence，再按平衡括号或首 `{`/末 `}` 暴力切出 JSON，最后 json.loads。
 
 工具执行期面向用户的过程日志（非 LLM token）：使用 gibh_agent.core.tool_stream_log.emit_tool_log，经 Executor/Orchestrator 转为 SSE status；本模块不重复拼装 SSE。
@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 SUGGEST_START = "<<<SUGGESTIONS>>>"
 SUGGEST_END = "<<<END_SUGGESTIONS>>>"
+# 新版追问：与前端 handleServerEvent('suggest') 对齐；流式由 stream_from_llm_chunks 拦截，不进入 message
+TAG_SUGGEST_OPEN = "<suggest>"
+TAG_SUGGEST_CLOSE = "</suggest>"
 THINK_OPEN = "<think>"
 THINK_CLOSE = "</think>"
 THINK_OPEN_LEN = len(THINK_OPEN)   # 7，用于跨 chunk 截断时保留尾部
@@ -31,32 +34,79 @@ def _delta_get(delta: Any, key: str) -> Optional[str]:
     return str(val) if val is not None else None
 
 
+def parse_suggest_questions_json(inner: str) -> Optional[List[str]]:
+    """解析 <suggest> 与 </suggest> 之间的 JSON，要求根对象含 questions 数组。"""
+    if not inner or not str(inner).strip():
+        return None
+    s = str(inner).strip()
+    try:
+        obj = json.loads(s)
+    except (json.JSONDecodeError, TypeError):
+        balanced = _extract_balanced_json_object(s)
+        if not balanced:
+            return None
+        try:
+            obj = json.loads(balanced)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    if not isinstance(obj, dict):
+        return None
+    qs = obj.get("questions")
+    if not isinstance(qs, list):
+        return None
+    out = [str(q).strip() for q in qs if q is not None and str(q).strip()]
+    return out or None
+
+
 def strip_suggestions_from_text(text: str) -> Tuple[str, Optional[List[str]]]:
     """
     Remove the suggestions block from a full LLM response and return cleaned text + parsed list.
     Use for non-streaming responses (diagnosis, report).
 
     Args:
-        text: Full response string (may contain <<<SUGGESTIONS>>>["Q1","Q2"]<<<END_SUGGESTIONS>>>).
+        text: Full response string (may contain <suggest>{"questions":[...]}</suggest>
+        and/or <<<SUGGESTIONS>>>["Q1","Q2"]<<<END_SUGGESTIONS>>>).
 
     Returns:
         (cleaned_text, suggestions_list or None). If no block found, cleaned_text is text unchanged.
     """
-    if not text or SUGGEST_START not in text or SUGGEST_END not in text:
+    if not text:
         return (text, None)
-    idx_start = text.find(SUGGEST_START)
-    idx_end = text.find(SUGGEST_END) + len(SUGGEST_END)
-    before = text[:idx_start].rstrip()
-    after = text[idx_end:].lstrip()
+    t = text
+    merged: Optional[List[str]] = None
+
+    if TAG_SUGGEST_OPEN in t and TAG_SUGGEST_CLOSE in t:
+        io = t.find(TAG_SUGGEST_OPEN)
+        ic = t.find(TAG_SUGGEST_CLOSE)
+        if io != -1 and ic != -1 and io < ic:
+            ic_full = ic + len(TAG_SUGGEST_CLOSE)
+            inner = t[io + len(TAG_SUGGEST_OPEN) : ic].strip()
+            qs = parse_suggest_questions_json(inner)
+            if qs:
+                merged = list(qs)
+            t = (t[:io] + t[ic_full:]).strip()
+
+    if SUGGEST_START not in t or SUGGEST_END not in t:
+        return (t, merged)
+
+    idx_start = t.find(SUGGEST_START)
+    idx_end = t.find(SUGGEST_END) + len(SUGGEST_END)
+    before = t[:idx_start].rstrip()
+    after = t[idx_end:].lstrip()
     cleaned = (before + "\n\n" + after).strip() if after else before
     try:
-        json_str = text[idx_start + len(SUGGEST_START) : idx_end - len(SUGGEST_END)].strip()
+        json_str = t[idx_start + len(SUGGEST_START) : idx_end - len(SUGGEST_END)].strip()
         suggestions = json.loads(json_str)
         if isinstance(suggestions, list) and suggestions:
-            return (cleaned, suggestions)
+            old = [str(x).strip() for x in suggestions if str(x).strip()]
+            if merged is None:
+                merged = old
+            else:
+                merged = merged + [x for x in old if x not in merged]
+            return (cleaned, merged)
     except (json.JSONDecodeError, TypeError):
         pass
-    return (cleaned, None)
+    return (cleaned, merged)
 
 
 async def stream_from_llm_chunks(
@@ -68,7 +118,8 @@ async def stream_from_llm_chunks(
     1) reasoning_content 有值 → 直接 yield ("thought", ...)
     2) content 用缓冲区 + in_think_tag：<think> 内 → thought，否则 → message；
        通过保留尾部 THINK_OPEN_LEN/THINK_CLOSE_LEN 字符应对跨 chunk 截断（如 <th + ink>）。
-    3) <<<SUGGESTIONS>>> 块：完整块时解析并 yield，前面未消费部分保留在 buffer 中继续走 <think> 状态机。
+    3) <suggest>{"questions":[...]}</suggest>：完整块时 yield ("suggest", {"questions": [...]})，**不**作为 message；跨 chunk 缓冲直至闭合。
+    4) <<<SUGGESTIONS>>> 块：兼容旧格式，完整时 yield ("suggestions", list)。
     """
     content_buffer = ""
     in_think_tag = False
@@ -89,6 +140,18 @@ async def stream_from_llm_chunks(
             content_buffer += content
 
         while True:
+            if TAG_SUGGEST_OPEN in content_buffer and TAG_SUGGEST_CLOSE in content_buffer:
+                io = content_buffer.find(TAG_SUGGEST_OPEN)
+                ic = content_buffer.find(TAG_SUGGEST_CLOSE)
+                if io != -1 and ic != -1 and io < ic:
+                    ic_full = ic + len(TAG_SUGGEST_CLOSE)
+                    inner = content_buffer[io + len(TAG_SUGGEST_OPEN) : ic].strip()
+                    qs = parse_suggest_questions_json(inner)
+                    if qs:
+                        yield ("suggest", {"questions": qs})
+                    content_buffer = content_buffer[:io] + content_buffer[ic_full:]
+                    continue
+
             if SUGGEST_END in content_buffer and SUGGEST_START in content_buffer:
                 idx_start = content_buffer.find(SUGGEST_START)
                 idx_end = content_buffer.find(SUGGEST_END) + len(SUGGEST_END)
@@ -129,6 +192,15 @@ async def stream_from_llm_chunks(
                     content_buffer = content_buffer[idx + THINK_OPEN_LEN:]
                     in_think_tag = True
                     continue
+                if TAG_SUGGEST_OPEN in content_buffer:
+                    io = content_buffer.find(TAG_SUGGEST_OPEN)
+                    ic_rel = content_buffer.find(TAG_SUGGEST_CLOSE, io + len(TAG_SUGGEST_OPEN))
+                    if ic_rel == -1:
+                        msg_part = content_buffer[:io]
+                        if msg_part:
+                            yield ("message", {"content": msg_part})
+                        content_buffer = content_buffer[io:]
+                        break
                 if SUGGEST_START in content_buffer:
                     safe_end = content_buffer.find(SUGGEST_START)
                     to_yield = content_buffer[:safe_end]
@@ -147,7 +219,10 @@ async def stream_from_llm_chunks(
         if in_think_tag:
             yield ("thought", {"content": content_buffer})
         else:
-            remaining = content_buffer.split(SUGGEST_START)[0]
+            remaining = content_buffer
+            if TAG_SUGGEST_OPEN in remaining:
+                remaining = remaining.split(TAG_SUGGEST_OPEN, 1)[0]
+            remaining = remaining.split(SUGGEST_START, 1)[0]
             if remaining:
                 yield ("message", {"content": remaining})
 
@@ -178,6 +253,21 @@ async def stream_with_suggestions(
         stream_buffer += delta_content
 
         while True:
+            if TAG_SUGGEST_OPEN in stream_buffer and TAG_SUGGEST_CLOSE in stream_buffer:
+                io = stream_buffer.find(TAG_SUGGEST_OPEN)
+                ic = stream_buffer.find(TAG_SUGGEST_CLOSE)
+                if io != -1 and ic != -1 and io < ic:
+                    ic_full = ic + len(TAG_SUGGEST_CLOSE)
+                    to_yield = stream_buffer[last_yielded:io]
+                    if to_yield:
+                        yield ("message", {"content": to_yield})
+                    inner = stream_buffer[io + len(TAG_SUGGEST_OPEN) : ic].strip()
+                    qs = parse_suggest_questions_json(inner)
+                    if qs:
+                        yield ("suggest", {"questions": qs})
+                    stream_buffer = stream_buffer[ic_full:]
+                    last_yielded = 0
+                    continue
             if SUGGEST_END in stream_buffer and SUGGEST_START in stream_buffer:
                 idx_start = stream_buffer.find(SUGGEST_START)
                 idx_end = stream_buffer.find(SUGGEST_END) + len(SUGGEST_END)
@@ -196,6 +286,14 @@ async def stream_with_suggestions(
                 stream_buffer = stream_buffer[idx_end:]
                 last_yielded = 0
                 continue
+            if TAG_SUGGEST_OPEN in stream_buffer:
+                io = stream_buffer.find(TAG_SUGGEST_OPEN)
+                if stream_buffer.find(TAG_SUGGEST_CLOSE, io + len(TAG_SUGGEST_OPEN)) == -1:
+                    to_yield = stream_buffer[last_yielded:io]
+                    if to_yield:
+                        yield ("message", {"content": to_yield})
+                    last_yielded = io
+                    break
             if SUGGEST_START in stream_buffer:
                 safe_end = stream_buffer.find(SUGGEST_START)
                 to_yield = stream_buffer[last_yielded:safe_end]
@@ -211,7 +309,10 @@ async def stream_with_suggestions(
 
     # Flush remaining safe content
     if last_yielded < len(stream_buffer):
-        remaining = stream_buffer[last_yielded:].split(SUGGEST_START)[0]
+        remaining = stream_buffer[last_yielded:]
+        if TAG_SUGGEST_OPEN in remaining:
+            remaining = remaining.split(TAG_SUGGEST_OPEN, 1)[0]
+        remaining = remaining.split(SUGGEST_START, 1)[0]
         if remaining:
             yield ("message", {"content": remaining})
 
@@ -221,7 +322,7 @@ async def stream_with_thought_and_suggestions(
 ) -> AsyncIterator[Tuple[str, object]]:
     """
     解析 LLM 流：<think> 内内容作为 event: thought 实时推送，其余作为 message；
-    同时处理 <<<SUGGESTIONS>>> 块。用于 DeepSeek-R1 等 CoT 模型。
+    同时处理 <suggest> 与 <<<SUGGESTIONS>>> 块。用于 DeepSeek-R1 等 CoT 模型。
     """
     buffer = ""
     in_think = False
@@ -263,6 +364,27 @@ async def stream_with_thought_and_suggestions(
                     in_think = True
                     continue
                 else:
+                    if TAG_SUGGEST_OPEN in buffer and TAG_SUGGEST_CLOSE in buffer:
+                        io = buffer.find(TAG_SUGGEST_OPEN)
+                        ic = buffer.find(TAG_SUGGEST_CLOSE)
+                        if io != -1 and ic != -1 and io < ic:
+                            ic_full = ic + len(TAG_SUGGEST_CLOSE)
+                            if buffer[last_message_pos:io]:
+                                yield ("message", {"content": buffer[last_message_pos:io]})
+                            inner = buffer[io + len(TAG_SUGGEST_OPEN) : ic].strip()
+                            qs = parse_suggest_questions_json(inner)
+                            if qs:
+                                yield ("suggest", {"questions": qs})
+                            buffer = buffer[ic_full:]
+                            last_message_pos = 0
+                            continue
+                    if TAG_SUGGEST_OPEN in buffer:
+                        io = buffer.find(TAG_SUGGEST_OPEN)
+                        if buffer.find(TAG_SUGGEST_CLOSE, io + len(TAG_SUGGEST_OPEN)) == -1:
+                            if buffer[last_message_pos:io]:
+                                yield ("message", {"content": buffer[last_message_pos:io]})
+                            last_message_pos = io
+                            break
                     if SUGGEST_END in buffer and SUGGEST_START in buffer:
                         idx_s = buffer.find(SUGGEST_START)
                         idx_e = buffer.find(SUGGEST_END) + len(SUGGEST_END)
@@ -292,7 +414,10 @@ async def stream_with_thought_and_suggestions(
     if in_think and last_thought_pos < len(buffer):
         yield ("thought", {"content": buffer[last_thought_pos:]})
     elif not in_think and last_message_pos < len(buffer):
-        remaining = buffer[last_message_pos:].split(SUGGEST_START)[0]
+        remaining = buffer[last_message_pos:]
+        if TAG_SUGGEST_OPEN in remaining:
+            remaining = remaining.split(TAG_SUGGEST_OPEN, 1)[0]
+        remaining = remaining.split(SUGGEST_START, 1)[0]
         if remaining:
             yield ("message", {"content": remaining})
 

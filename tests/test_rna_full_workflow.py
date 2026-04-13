@@ -81,7 +81,7 @@ async def test_data_diagnosis():
         # 调用数据诊断
         diagnosis = await rna_agent._perform_data_diagnosis(
             file_metadata=file_metadata,
-            user_query="rna分析"
+            omics_type="scRNA",
         )
         
         if diagnosis:

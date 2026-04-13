@@ -6,6 +6,7 @@ from ...core.prompt_manager import PromptManager
 from ...core.utils import sanitize_for_json
 from ...core.tool_retriever import ToolRetriever
 from ...core.planner import SOPPlanner
+from ...core.workflows import WorkflowRegistry
 from ...core.tool_registry import registry
 # 导入新工具函数
 from ...tools.general.file_inspector import inspect_file
@@ -503,9 +504,22 @@ File Path: {file_path}
                         # 生成诊断报告（可选）
                         diagnosis_report = None
                         try:
+                            _wf = WorkflowRegistry().get_workflow("Metabolomics")
+                            _step_ids = None
+                            if plan_result:
+                                _acc = []
+                                for s in (plan_result.get("workflow_data") or {}).get("steps") or []:
+                                    if isinstance(s, dict):
+                                        sid = s.get("step_id") or s.get("id")
+                                        if sid:
+                                            _acc.append(sid)
+                                _step_ids = _acc or None
                             diagnosis_report = await self._perform_data_diagnosis(
                                 file_metadata=file_metadata,
-                                system_instruction=METABO_INSTRUCTION
+                                omics_type="Metabolomics",
+                                system_instruction=METABO_INSTRUCTION,
+                                workflow_for_whitelist=_wf,
+                                target_step_ids_for_whitelist=_step_ids,
                             )
                         except Exception as e:
                             logger.warning(f"⚠️ 诊断报告生成失败: {e}")
@@ -601,11 +615,14 @@ File Path: {file_path}
                     
                     # 调用统一的诊断方法（在 planning 阶段）
                     # 🔥 架构重构：传递领域特定的系统指令
+                    _wf = WorkflowRegistry().get_workflow("Metabolomics")
                     diagnosis_report = await self._perform_data_diagnosis(
                         file_metadata=file_metadata,
                         omics_type="Metabolomics",
                         dataframe=dataframe,
-                        system_instruction=METABO_INSTRUCTION
+                        system_instruction=METABO_INSTRUCTION,
+                        workflow_for_whitelist=_wf,
+                        target_step_ids_for_whitelist=None,
                     )
                     
                     if diagnosis_report:

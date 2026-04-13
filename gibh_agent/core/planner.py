@@ -10,6 +10,7 @@
 """
 import json
 import logging
+import os
 import re
 import time
 from typing import Dict, Any, List, Optional, AsyncIterator, Tuple
@@ -24,6 +25,14 @@ from .spatiotemporal_dynamics_keywords import SPATIOTEMPORAL_DYNAMICS_KEYWORDS
 from .workflows import WorkflowRegistry
 
 logger = logging.getLogger(__name__)
+
+
+def _lite_task_mode_enabled() -> bool:
+    """GIBH_LITE_TASK_MODE：与 orchestrator 一致；未设置或 0/false 为关。"""
+    raw = os.environ.get("GIBH_LITE_TASK_MODE")
+    if raw is None or not str(raw).strip():
+        return False
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
 
 
 def _is_flat_params(d: dict) -> bool:
@@ -574,7 +583,8 @@ class SOPPlanner:
         
         Yields:
             ("workflow", dict) — 成功时为 workflow_config 形态；失败时为 {"type": "error", ...}
-            未来可扩展 ("thought", {...}) 等事件
+            ("thought", {...}) — 意图分析过程（若有）
+            ("status", dict) — 业务里程碑（content/state），供 Orchestrator 转 SSE；严禁工具 stdout
         
         🔥 ARCHITECTURAL RESET: Strict Separation of Execution and Preview
         - If is_template=False: MUST use _fill_parameters, MUST return template_mode=False
@@ -714,6 +724,22 @@ class SOPPlanner:
                 target_steps = list(workflow.steps_dag.keys())
             
             logger.info(f"✅ [SOPPlanner] 目标步骤: {target_steps} (共 {len(target_steps)} 个)")
+
+            # Task 产线可观测性：里程碑-only（不含工具 stdout）
+            yield (
+                "status",
+                {
+                    "content": f"已匹配目标分析步骤: {len(target_steps)} 步...",
+                    "state": "running",
+                },
+            )
+            yield (
+                "status",
+                {
+                    "content": "正在组装多节点有向无环图 (DAG) 并解析依赖...",
+                    "state": "running",
+                },
+            )
             
             # Step 5: Resolve Dependencies (Code) - 使用硬编码 DAG 解析依赖
             logger.info("🔍 [SOPPlanner] Step 3: 解析依赖关系...")
@@ -922,8 +948,22 @@ class SOPPlanner:
         _t_analyze_start = time.time()
         # 获取可用步骤列表
         available_steps = list(workflow.steps_dag.keys())
+
+        if _lite_task_mode_enabled():
+            fb_list = self._fallback_intent_analysis(user_query, available_steps)
+            valid_fb = [s for s in (fb_list or []) if s in available_steps]
+            if valid_fb:
+                logger.info(
+                    "⚡ [LITE MODE] 关键词规则命中，阻断步骤意图 LLM：target_steps=%s",
+                    valid_fb,
+                )
+                return {"target_steps": valid_fb, "skip_steps": []}
+            logger.info(
+                "⚠️ [LITE MODE] 关键词未命中具体步骤，回退至 LLM 用户意图分析",
+            )
+
         domain_knowledge = self._get_domain_knowledge(workflow)
-        
+
         # 构建提示词（含领域步骤说明 + 跳过/仅运行 few-shot）
         system_prompt = """You are an Intent Analyzer for Bioinformatics Workflows.
 

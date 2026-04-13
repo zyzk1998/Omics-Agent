@@ -172,7 +172,11 @@ PERSONA_RULE = """
   - Avoid numbered lists in first messages
   - End with a question to keep conversation flowing
   - Never say "My workflow includes 1, 2, 3..."—just help naturally
-- **Follow-up suggestions**: At the very end of your response, generate 1 or 2 relevant follow-up questions the user might ask next, as a hidden JSON block. Format strictly: <<<SUGGESTIONS>>>["Question 1", "Question 2"]<<<END_SUGGESTIONS>>>. Do not output this block if the conversation is ending (e.g., goodbye).
+- **Follow-up suggestions (互动与追问)**: After your full answer, output exactly **one** block at the very end: 1–2 short follow-up questions the user may ask next. **No extra prose** outside the block. Use **only** this shape (case-sensitive tags):
+<suggest>
+{"questions": ["建议问题1", "建议问题2"]}
+</suggest>
+  Omit the entire `<suggest>...</suggest>` block if the conversation is closing (e.g. goodbye). Legacy `<<<SUGGESTIONS>>>...<<<END_SUGGESTIONS>>>` is still accepted by the server but **do not** use it for new replies.
 """
 
 EXPERT_ROLES = {
@@ -317,7 +321,7 @@ Based on the file inspection results:
 Please output a **Data Diagnosis & Parameter Recommendation** in Simplified Chinese (简体中文).
 
 **Format:**
-### 🔍 数据体检报告
+### 🔍 数据报告
 - **数据规模**: [e.g., 30k cells, 20k genes]
 - **数据特征**: [e.g., Raw counts, high sparsity, normalized, etc.]
 - **数据质量**: [e.g., Good quality, needs filtering, etc.]
@@ -326,6 +330,8 @@ Please output a **Data Diagnosis & Parameter Recommendation** in Simplified Chin
 Create a Markdown table with the following columns:
 | 参数名 | 默认值 | **推荐值** | 推荐理由 |
 | :--- | :--- | :--- | :--- |
+
+**参数名列规则（与前端一键应用一致）**：第一列必须是后续系统消息中给出的「可用参数名」之一，**一字不差**（与表单 `name="param_{步骤下标}_{参数名}"` 中的参数名相同，通常为英文 snake_case）。**禁止**用中文或 Title Case（如 `Min Genes`）代替。第一列不要用 `**` 或反引号包裹。
 
 Example:
 | 参数名 | 默认值 | **推荐值** | 推荐理由 |
@@ -342,7 +348,7 @@ Example:
 - Be specific with numbers and reasoning
 - Focus on data-driven recommendations
 - Use Chinese for all content
-- At the very end of your response, generate 1 or 2 follow-up questions as a hidden block: <<<SUGGESTIONS>>>["Question 1", "Question 2"]<<<END_SUGGESTIONS>>>. Omit this block if the reply is a closing (e.g., goodbye).
+- At the very end, output only: <suggest>{"questions": ["建议问题1", "建议问题2"]}</suggest> (no text after the closing tag). Omit if the reply is a closing (e.g., goodbye).
 """
 
 # RNA 报告模板（单独定义，因为包含动态占位符）
@@ -377,7 +383,7 @@ Please write a **Final Analysis Report** in Simplified Chinese (简体中文).
 - Be concise but informative
 - Focus on biological insights
 - Use Chinese for all content
-- At the very end, add 1 or 2 follow-up questions as a hidden block: <<<SUGGESTIONS>>>["Question 1", "Question 2"]<<<END_SUGGESTIONS>>>. Omit if the report is a closing.
+- At the very end, add only: <suggest>{"questions": ["建议问题1", "建议问题2"]}</suggest>. Omit if the report is a closing.
 """
 
 

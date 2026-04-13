@@ -15,6 +15,7 @@ from ...core.dispatcher import TaskDispatcher
 from ...core.test_data_manager import TestDataManager
 from ...core.tool_retriever import ToolRetriever
 from ...core.planner import RNAPlanner
+from ...core.workflows import WorkflowRegistry
 from ...core.tool_registry import registry
 # 导入新工具函数
 from ...tools.general.file_inspector import inspect_file
@@ -520,10 +521,22 @@ File Path: {file_path}
                     if file_metadata and not is_template:
                         diagnosis_report = None
                         try:
+                            _wf = WorkflowRegistry().get_workflow("RNA")
+                            _step_ids = None
+                            if plan_result:
+                                _acc = []
+                                for s in (plan_result.get("workflow_data") or {}).get("steps") or []:
+                                    if isinstance(s, dict):
+                                        sid = s.get("step_id") or s.get("id")
+                                        if sid:
+                                            _acc.append(sid)
+                                _step_ids = _acc or None
                             diagnosis_report = await self._perform_data_diagnosis(
                                 file_metadata=file_metadata,
                                 omics_type="scRNA",
-                                system_instruction=RNA_INSTRUCTION
+                                system_instruction=RNA_INSTRUCTION,
+                                workflow_for_whitelist=_wf,
+                                target_step_ids_for_whitelist=_step_ids,
                             )
                         except Exception as e:
                             logger.warning(f"⚠️ 诊断报告生成失败: {e}")
@@ -581,11 +594,17 @@ File Path: {file_path}
                     
                     # 调用统一的诊断方法
                     # 🔥 架构重构：传递领域特定的系统指令
+                    _fm = dict(inspection_result) if isinstance(inspection_result, dict) else {}
+                    if input_path and not _fm.get("file_path"):
+                        _fm["file_path"] = input_path
+                    _wf = WorkflowRegistry().get_workflow("RNA")
                     diagnosis_report = await self._perform_data_diagnosis(
-                        file_metadata=inspection_result,
+                        file_metadata=_fm,
                         omics_type="scRNA",
                         dataframe=dataframe,
-                        system_instruction=RNA_INSTRUCTION
+                        system_instruction=RNA_INSTRUCTION,
+                        workflow_for_whitelist=_wf,
+                        target_step_ids_for_whitelist=None,
                     )
                     # 🔥 DEBUG: 打印诊断报告信息
                     if diagnosis_report:

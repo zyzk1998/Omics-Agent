@@ -691,6 +691,63 @@
             // 🔥 关键变量提前声明，避免暂时性死区错误
             let pendingFiles = []; // 🔥 Staging: 待上传的文件（File 对象）
             let chatHistory = []; 
+            /** 将 chatHistory 转为后端 OpenAI 风格 [{role, content}]（兼容旧版 {user, ai} 回合对象） */
+            function buildApiHistoryFromChatHistory(arr, maxMessages) {
+                maxMessages = maxMessages || 8;
+                if (!arr || !arr.length) return [];
+                var out = [];
+                var tail = arr.slice(-maxMessages);
+                for (var i = 0; i < tail.length; i++) {
+                    var t = tail[i];
+                    if (!t || typeof t !== 'object') continue;
+                    if (t.role && (t.content != null || t.message != null)) {
+                        var rl = String(t.role).toLowerCase();
+                        if (rl === 'ai') rl = 'assistant';
+                        var c = String(t.content != null ? t.content : t.message).trim();
+                        if (c) out.push({ role: rl, content: c });
+                        continue;
+                    }
+                    if (t.user != null && String(t.user).trim()) out.push({ role: 'user', content: String(t.user).trim() });
+                    if (t.ai != null && String(t.ai).trim()) out.push({ role: 'assistant', content: String(t.ai).trim() });
+                }
+                return out;
+            }
+            /** SSE 主路径从未写入 chatHistory 时，从 #chatContent 回填最近 1～2 轮，避免点建议时 history: [] */
+            function ensureChatHistoryFromDomIfEmpty() {
+                if (chatHistory && chatHistory.length > 0) return;
+                var root = document.getElementById('chatContent');
+                if (!root) return;
+                var rows = root.querySelectorAll('.message-row');
+                var pendingUser = null;
+                var buf = [];
+                for (var i = 0; i < rows.length; i++) {
+                    var r = rows[i];
+                    if (r.classList.contains('user')) {
+                        var uz = r.querySelector('.text-container, .text-zone, .bubble .markdown-body, .bubble');
+                        if (!uz) uz = r.querySelector('.bubble') || r.querySelector('.message-content');
+                        var ut = uz ? (uz.innerText || '').trim() : '';
+                        if (ut) pendingUser = ut;
+                    } else if (r.classList.contains('ai')) {
+                        var az = r.querySelector('.text-container .markdown-body, .text-container .final-answer, .text-zone.markdown-body, .text-zone, .final-answer');
+                        if (!az) az = r.querySelector('.text-container') || r.querySelector('.bubble') || r.querySelector('.message-content');
+                        var at = az ? (az.innerText || '').trim() : '';
+                        if (at.length < 48 && (at.indexOf('思考中') !== -1 || at.indexOf('spinner') !== -1)) continue;
+                        if (pendingUser && at) {
+                            buf.push({ user: pendingUser, ai: at });
+                            pendingUser = null;
+                        }
+                    }
+                }
+                var take = buf.slice(-2);
+                for (var j = 0; j < take.length; j++) chatHistory.push(take[j]);
+                if (take.length) console.log('📜 [chatHistory] 从 DOM 回填', take.length, '轮');
+            }
+            function appendTurnToChatHistory(userText, assistantText) {
+                chatHistory.push({ user: String(userText || ''), ai: String(assistantText || '') });
+                while (chatHistory.length > 40) chatHistory.shift();
+            }
+            window.ensureChatHistoryFromDomIfEmpty = ensureChatHistoryFromDomIfEmpty;
+            window.appendTurnToChatHistory = appendTurnToChatHistory;
             let uploadedFiles = []; // 已上传的文件（用于聊天请求）
             let isProcessing = false; 
             window.DEMO_STATE = window.DEMO_STATE || 'IDLE';
@@ -3050,6 +3107,9 @@
                 var i = s.indexOf(start);
                 var j = s.indexOf(end);
                 if (i !== -1 && j !== -1 && j > i) s = (s.substring(0, i) + s.substring(j + end.length)).replace(/\n{3,}/g, '\n\n').trim();
+                var a = s.indexOf('<suggest>');
+                var b = s.indexOf('</suggest>');
+                if (a !== -1 && b !== -1 && b > a) s = (s.substring(0, a) + s.substring(b + '</suggest>'.length)).replace(/\n{3,}/g, '\n\n').trim();
                 s = s.replace(/<<>>[\s\S]*?<<>>/g, '').replace(/\n{3,}/g, '\n\n').trim();
                 return s;
             }
@@ -3078,6 +3138,20 @@
                     var ei = cleanText.indexOf(endTag);
                     if (si !== -1 && ei !== -1 && ei > si)
                         cleanText = (cleanText.substring(0, si) + cleanText.substring(ei + endTag.length)).replace(/\n{3,}/g, '\n\n').trim();
+                    var sgOpen = '<suggest>';
+                    var sgClose = '</suggest>';
+                    var sgo = cleanText.indexOf(sgOpen);
+                    var sgc = cleanText.indexOf(sgClose);
+                    if (sgo !== -1 && sgc !== -1 && sgc > sgo) {
+                        var innerS = cleanText.substring(sgo + sgOpen.length, sgc).trim();
+                        try {
+                            var po = JSON.parse(innerS);
+                            if (po && Array.isArray(po.questions) && po.questions.length) {
+                                suggestions = po.questions.map(function (q) { return String(q || '').trim(); }).filter(Boolean);
+                            }
+                        } catch (es) { /* ignore */ }
+                        cleanText = (cleanText.substring(0, sgo) + cleanText.substring(sgc + sgClose.length)).replace(/\n{3,}/g, '\n\n').trim();
+                    }
                     cleanText = cleanText.replace(/\n{3,}/g, '\n\n').trim();
                 } catch (e) { /* ignore */ }
                 return { cleanText: cleanText, suggestions: suggestions };
@@ -5648,9 +5722,11 @@
                 
                 var currentSkillDomain = (typeof window._pendingSkillTargetDomain !== 'undefined' && window._pendingSkillTargetDomain != null) ? window._pendingSkillTargetDomain : null;
                 if (currentSkillDomain) window._pendingSkillTargetDomain = null;
+                if (typeof ensureChatHistoryFromDomIfEmpty === 'function') ensureChatHistoryFromDomIfEmpty();
+                var apiHistoryPayload = typeof buildApiHistoryFromChatHistory === 'function' ? buildApiHistoryFromChatHistory(chatHistory, 8) : (chatHistory || []);
                 const payload = { 
                     message: finalMessage, 
-                    history: chatHistory, 
+                    history: apiHistoryPayload, 
                     selected_tool: selectedTool, 
                     uploaded_files: filesToSend, // 🔥 CRITICAL: 使用 filesToSend（优先级：filesOverride > 全局 uploadedFiles）
                     tool_params: toolParams,
@@ -6413,10 +6489,18 @@
                                     break;
                                     
                                 case 'suggestions':
-                                    // 动态跟进建议：在当前 AI 消息下方渲染垂直芯片，点击即填入并发送（支持数组或 { suggestions: [] }）
+                                    // 动态跟进建议：在当前 AI 消息下方渲染垂直芯片（支持数组或 { suggestions: [] } / { payload: [] }）
                                     {
-                                        var _sug = Array.isArray(data) ? data : (data && data.suggestions);
+                                        var _sug = Array.isArray(data) ? data : (data && (data.suggestions || data.payload));
                                         renderSuggestions(Array.isArray(_sug) ? _sug : []);
+                                    }
+                                    break;
+
+                                case 'suggest':
+                                    // 新版 SSE：{ questions: [...] }，与流式解析 <suggest> 标签对齐
+                                    {
+                                        var _q = data && (data.questions || (data.payload && data.payload.questions));
+                                        renderSuggestions(Array.isArray(_q) ? _q : []);
                                     }
                                     break;
 
@@ -6507,6 +6591,7 @@
                                     if (input) {
                                         input.value = text;
                                         if (typeof checkInput === 'function') checkInput();
+                                        if (typeof ensureChatHistoryFromDomIfEmpty === 'function') ensureChatHistoryFromDomIfEmpty();
                                         if (typeof sendMessage === 'function') sendMessage();
                                     }
                                 });
@@ -6549,6 +6634,7 @@
                                     if (input) {
                                         input.value = text;
                                         if (typeof checkInput === 'function') checkInput();
+                                        if (typeof ensureChatHistoryFromDomIfEmpty === 'function') ensureChatHistoryFromDomIfEmpty();
                                         if (typeof sendMessage === 'function') sendMessage();
                                     }
                                     zone.querySelectorAll('.suggestion-btn').forEach(function (b) { b.disabled = true; b.classList.add('suggestion-btn-used'); });
@@ -8017,6 +8103,7 @@
                         }
                         
                         // 🔥 最终更新：剔除 <<>> 建议标签并渲染推荐追问芯片（实时流结束时的终极拦截）
+                        var cleanTextForHistory = '';
                         if (messageBuffer && aiContentDiv) {
                             var pair;
                             try {
@@ -8025,6 +8112,7 @@
                                 pair = { cleanText: messageBuffer, suggestions: [] };
                             }
                             var cleanText = (pair && pair.cleanText != null) ? pair.cleanText : messageBuffer;
+                            cleanTextForHistory = cleanText;
                             updateChatBubble(cleanText);
                             if (pair && Array.isArray(pair.suggestions) && pair.suggestions.length > 0 && typeof renderSuggestionChipsInCurrentMessage === 'function') {
                                 var msgContent = (window.currentMessageZones && window.currentMessageZones.textZone && window.currentMessageZones.textZone.parentElement)
@@ -8032,6 +8120,12 @@
                                 renderSuggestionChipsInCurrentMessage(pair.suggestions, msgContent);
                             }
                         }
+                        try {
+                            var uTurn = (typeof displayText !== 'undefined' && displayText) ? displayText : text;
+                            var aiTurn = (cleanTextForHistory || '').trim();
+                            if (!aiTurn && aiContentDiv) aiTurn = (aiContentDiv.innerText || '').trim();
+                            if (typeof appendTurnToChatHistory === 'function' && (uTurn || aiTurn)) appendTurnToChatHistory(uTurn || '', aiTurn || '');
+                        } catch (eHist) { console.warn('[chatHistory] SSE 回合写入失败', eHist); }
                         
                         return;
                     }
@@ -10398,7 +10492,7 @@
                 console.log(`✅ [toggleParameterRecommendations] 参数已${useRecommended ? '切换到推荐值' : '切换回默认值'}`);
             };
 
-            // ✨ 一键应用推荐参数：按 key 查找 [name="key"]，判空后赋值并触发 change
+            // ✨ 一键应用：使用后端已解析的 rec.params（Key=表单 param_{i}_{key} 的 key）；不从 Markdown 再拆表
             window.applyRecommendedParams = function(formId, stepsLength) {
                 var rec = window.workflowRecommendations && window.workflowRecommendations[formId];
                 if (!rec || !rec.params || Object.keys(rec.params).length === 0) {
@@ -10415,10 +10509,11 @@
                     if (!rec.params.hasOwnProperty(key)) continue;
                     var val = rec.params[key];
                     var value = (val && typeof val === 'object' && 'value' in val) ? val.value : val;
-                    var element = form.querySelector('[name="' + key + '"]');
+                    var cleanKey = String(key).replace(/^[`\s]+|[`\s]+$/g, '').replace(/^\*+|\*+$/g, '').trim();
+                    var element = form.querySelector('[name="' + cleanKey + '"]');
                     if (!element) {
                         for (var i = 0; i < (stepsLength || 20); i++) {
-                            element = form.querySelector('[name="param_' + i + '_' + key + '"]');
+                            element = form.querySelector('[name="param_' + i + '_' + cleanKey + '"]');
                             if (element) break;
                         }
                     }

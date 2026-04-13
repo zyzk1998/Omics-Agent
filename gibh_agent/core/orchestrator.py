@@ -54,6 +54,14 @@ def _semantic_router_feature_flag() -> bool:
     return str(raw).strip().lower() not in ("0", "false", "no", "off")
 
 
+def _lite_task_mode_enabled() -> bool:
+    """GIBH_LITE_TASK_MODE：Task 产线瘦身（QueryRewriter 旁路等）。未设置或 0/false 为关。"""
+    raw = os.environ.get("GIBH_LITE_TASK_MODE")
+    if raw is None or not str(raw).strip():
+        return False
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
 class AgentOrchestrator:
     """
     Agent 编排器
@@ -151,12 +159,18 @@ class AgentOrchestrator:
 
     @staticmethod
     def _global_chat_keyword_hit(query: str) -> bool:
-        """闲聊/资讯类关键词（无 I/O，供 stream_process 与 _classify_global_intent 共用）。"""
-        query_lower = (query or "").lower()
-        chat_keywords = [
-            "天气", "新闻", "今天", "最新", "搜索", "查一下", "汇率", "介绍", "你好", "是谁",
-        ]
-        return any(kw in query_lower for kw in chat_keywords)
+        """
+        极窄「纯社交礼仪」短路（无 I/O，供 stream_process 与 _classify_global_intent 共用）。
+
+        天气/新闻/检索/生活常识等一律不在这里拦截，交由 SemanticRouter 与下游判定，避免子串误伤或漏网。
+        """
+        q = (query or "").strip()
+        if not q:
+            return False
+        ql = q.lower()
+        # 仅保留纯社交礼仪子串（与需求一致：不含天气/新闻/今天等宽泛词）
+        social_keywords = ("你好", "您好", "再见", "拜拜", "谢谢", "是谁")
+        return any(kw in ql for kw in social_keywords)
 
     def _collect_resolved_upload_paths(
         self, files: Optional[List[Dict[str, Any]]]
@@ -732,13 +746,14 @@ class AgentOrchestrator:
             return
 
         # 🔥 PHASE 1: Layer 0 - Global Intent Routing (Chat vs Task)
-        # 闲聊关键词优先于 target_domain 快车道，避免「广州今天天气」等仍进 Task DAG
+        # 仅极窄社交礼仪关键词优先于 target_domain 快车道；天气/资讯/组学意图由 SemanticRouter 判决
         # SemanticRouter 判定 hpc 时强制走 DeepReAct，以稳定承载多轮 MCP 工具调用
         force_deep_react_for_semantic_hpc = False
+        intent_type = "task"
         try:
             if AgentOrchestrator._global_chat_keyword_hit(query):
                 intent_type = "chat"
-                logger.info("🔌 [Orchestrator] 命中全局闲聊关键词，强制 chat（覆盖 target_domain 快车道）")
+                logger.info("🔌 [Orchestrator] 命中社交礼仪短路，强制 chat（覆盖 target_domain 快车道）")
             elif target_domain:
                 intent_type = "task"
                 logger.info(f"🔍 [Orchestrator] 快车道硬路由: target_domain={target_domain}，跳过全局意图分类")
@@ -764,6 +779,7 @@ class AgentOrchestrator:
                                     "compute_scheduler": COMPUTE_SCHEDULER_MCP_KEY in _mcp_set,
                                 },
                                 session_flags={"target_domain": target_domain},
+                                recent_history=self._format_history_for_semantic_router(history),
                             )
                             semantic_router = SemanticRouter(llm_client=llm_for_router)
                             router_output = await semantic_router.decide_route(router_input)
@@ -833,79 +849,99 @@ class AgentOrchestrator:
                         time.time() - _t_intent_start,
                     )
                     logger.info(f"🔍 [Orchestrator] 全局意图分类: {intent_type}")
-            
-            if intent_type == "chat":
-                # 🔥 CHAT MODE: Stream LLM response directly, skip all file/planning logic
-                logger.info("💬 [Orchestrator] 进入聊天模式，跳过文件检查和规划")
-                yield self._emit_sse(state_snapshot,"status", {
-                    "content": "正在思考...",
-                    "state": "thinking"
-                })
-                await asyncio.sleep(0.01)
-                
-                # Stream LLM response（支持 MCP 全网搜索等 tools）
-                llm_client = self._get_llm_client()
-                if llm_client:
-                    _t_llm_start = time.time()
-                    _deep_key = f"{(owner_id or kwargs.get('user_id') or 'guest')}::{kwargs.get('session_id') or 'default'}"
-                    _use_deep_react = thinking_mode == "deep" or force_deep_react_for_semantic_hpc
-                    if _use_deep_react:
-                        async for sse_chunk in self._stream_deep_react_chat(
-                            query=query,
-                            files=files,
-                            history=history,
-                            llm_client=llm_client,
-                            state_snapshot=state_snapshot,
-                            model_name=model_name,
-                            enabled_mcps=enabled_mcps,
-                            session_key=_deep_key,
-                        ):
-                            yield sse_chunk
-                    else:
-                        async for sse_chunk in self._stream_chat_mode(
-                            query=query,
-                            files=files,
-                            history=history,
-                            llm_client=llm_client,
-                            state_snapshot=state_snapshot,
-                            model_name=model_name,
-                            enabled_mcps=enabled_mcps,
-                            schema_cache_key=f"{_deep_key}::hpc_openai",
-                        ):
-                            yield sse_chunk
-                    logger.info("[Profiler] LLM 思考与生成总耗时: %.2fs", time.time() - _t_llm_start)
 
-                    if state_snapshot.pop("_chat_tail_handled", False):
-                        state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
-                        yield self._format_sse("state_snapshot", state_snapshot)
-                        return
-
-                    yield self._emit_sse(state_snapshot,"status", {
-                        "content": "回答完成",
-                        "state": "completed"
-                    })
-                    await asyncio.sleep(0.01)
-                    yield self._emit_sse(state_snapshot,"done", {"status": "success"})
-                    state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
-                    yield self._format_sse("state_snapshot", state_snapshot)
-                    return
-                else:
-                    # Fallback if LLM not available
-                    yield self._emit_sse(state_snapshot,"message", {
-                        "content": "抱歉，LLM服务暂时不可用。"
-                    })
-                    yield self._emit_sse(state_snapshot,"done", {"status": "success"})
-                    state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
-                    yield self._format_sse("state_snapshot", state_snapshot)
-                    return
-            
-            # 🔥 TASK MODE: Continue with existing logic (file check -> plan -> execute)
-            logger.info("🔬 [Orchestrator] 进入任务模式，继续文件检查和规划流程")
-            
         except Exception as e:
             logger.error(f"❌ [Orchestrator] 全局意图分类失败: {e}", exc_info=True)
-            # Continue with task mode as fallback
-            logger.warning("⚠️ [Orchestrator] 意图分类失败，默认进入任务模式")
+            logger.warning("⚠️ [Orchestrator] 意图分类失败，安全降级进入 chat 模式")
+            intent_type = "chat"
+
+        if intent_type == "chat":
+            # 🔥 CHAT MODE：必须与「意图 try」解耦，否则 MCP/流式任一异常会被误当成「分类失败」并落入 Task 产线
+            logger.info("💬 [Orchestrator] 进入聊天模式，跳过文件检查和规划")
+            yield self._emit_sse(state_snapshot,"status", {
+                "content": "正在思考...",
+                "state": "thinking"
+            })
+            await asyncio.sleep(0.01)
+
+            llm_client = self._get_llm_client()
+            if not llm_client:
+                yield self._emit_sse(state_snapshot,"message", {
+                    "content": "抱歉，LLM服务暂时不可用。"
+                })
+                yield self._emit_sse(state_snapshot,"done", {"status": "success"})
+                state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                yield self._format_sse("state_snapshot", state_snapshot)
+                return
+
+            _t_llm_start = time.time()
+            _deep_key = f"{(owner_id or kwargs.get('user_id') or 'guest')}::{kwargs.get('session_id') or 'default'}"
+            _use_deep_react = thinking_mode == "deep" or force_deep_react_for_semantic_hpc
+            try:
+                if _use_deep_react:
+                    async for sse_chunk in self._stream_deep_react_chat(
+                        query=query,
+                        files=files,
+                        history=history,
+                        llm_client=llm_client,
+                        state_snapshot=state_snapshot,
+                        model_name=model_name,
+                        enabled_mcps=enabled_mcps,
+                        session_key=_deep_key,
+                    ):
+                        yield sse_chunk
+                else:
+                    async for sse_chunk in self._stream_chat_mode(
+                        query=query,
+                        files=files,
+                        history=history,
+                        llm_client=llm_client,
+                        state_snapshot=state_snapshot,
+                        model_name=model_name,
+                        enabled_mcps=enabled_mcps,
+                        schema_cache_key=f"{_deep_key}::hpc_openai",
+                    ):
+                        yield sse_chunk
+            except Exception as chat_exc:
+                logger.error(
+                    "❌ [Orchestrator] 聊天模式执行失败（不再回退 Task，避免新闻/闲聊误触发工作流）: %s",
+                    chat_exc,
+                    exc_info=True,
+                )
+                _friendly = self._chat_stream_failure_user_message(chat_exc)
+                yield self._emit_sse(
+                    state_snapshot,
+                    "error",
+                    {
+                        "error": "chat_stream_failed",
+                        "message": _friendly,
+                    },
+                )
+                await asyncio.sleep(0.01)
+                yield self._emit_sse(state_snapshot, "done", {"status": "error"})
+                state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                yield self._format_sse("state_snapshot", state_snapshot)
+                return
+
+            logger.info("[Profiler] LLM 思考与生成总耗时: %.2fs", time.time() - _t_llm_start)
+
+            if state_snapshot.pop("_chat_tail_handled", False):
+                state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                yield self._format_sse("state_snapshot", state_snapshot)
+                return
+
+            yield self._emit_sse(state_snapshot,"status", {
+                "content": "回答完成",
+                "state": "completed"
+            })
+            await asyncio.sleep(0.01)
+            yield self._emit_sse(state_snapshot,"done", {"status": "success"})
+            state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+            yield self._format_sse("state_snapshot", state_snapshot)
+            return
+
+        # 🔥 TASK MODE: Continue with existing logic (file check -> plan -> execute)
+        logger.info("🔬 [Orchestrator] 进入任务模式，继续文件检查和规划流程")
         
         # 🔥 CRITICAL REGRESSION FIX: Direct Execution Path
         # If the request contains a confirmed workflow_data, EXECUTE it immediately.
@@ -1562,19 +1598,38 @@ class AgentOrchestrator:
                 logger.info(f"✅ [Orchestrator] 处理澄清回复: '{query}' -> 合并查询")
                 # 清除澄清状态
                 self.conversation_state[session_id] = {}
+                yield self._emit_sse(state_snapshot, "status", {
+                    "content": "正在解析组学分析需求...",
+                    "state": "running",
+                })
+                await asyncio.sleep(0.01)
             else:
                 refined_query = query
-                if self.query_rewriter:
+                _lite = _lite_task_mode_enabled()
+                _parse_msg = (
+                    "正在解析组学分析需求（快速模式，已跳过查询重写）..."
+                    if _lite
+                    else "正在解析组学分析需求..."
+                )
+                yield self._emit_sse(state_snapshot, "status", {
+                    "content": _parse_msg,
+                    "state": "running",
+                })
+                await asyncio.sleep(0.01)
+                if _lite or not self.query_rewriter:
+                    if _lite:
+                        logger.info("⚡ [LITE MODE] 跳过 QueryRewriter LLM 调用")
+                    else:
+                        logger.info("ℹ️ [Orchestrator] QueryRewriter 不可用，使用原始查询")
+                else:
                     yield self._emit_sse(state_snapshot,"status", {
                         "content": "正在优化查询语句...",
                         "state": "running"
                     })
                     await asyncio.sleep(0.01)
-                    
+
                     refined_query = await self.query_rewriter.rewrite(query, history)
                     logger.info(f"✅ [Orchestrator] 查询重写: '{query}' -> '{refined_query}'")
-                else:
-                    logger.info("ℹ️ [Orchestrator] QueryRewriter 不可用，使用原始查询")
             
             # 🔥 CRITICAL FIX: Step 3.0: Normalize Files (BEFORE Resume Check)
             # Normalize files to a list of valid file dictionaries
@@ -1907,6 +1962,8 @@ class AgentOrchestrator:
                         ):
                             if _pe == "thought":
                                 yield self._emit_sse(state_snapshot, "thought", _pdata)
+                            elif _pe == "status":
+                                yield self._emit_sse(state_snapshot, "status", _pdata)
                             elif _pe == "workflow":
                                 template_result = _pdata
                         logger.info("[Profiler] 规划(模板)完成 - 耗时: %.2fs", time.time() - _t_plan_start)
@@ -2027,7 +2084,7 @@ class AgentOrchestrator:
                     return
             
                 yield self._emit_sse(state_snapshot,"status", {
-                    "content": f"检测到文件，正在进行数据体检...",
+                    "content": f"检测到文件，正在生成数据报告...",
                     "state": "running"
                 })
                 await asyncio.sleep(0.01)
@@ -2253,11 +2310,13 @@ class AgentOrchestrator:
                                     except Exception as e:
                                         logger.debug(f"无法构建数据预览: {e}")
                                 
-                                    # 调用诊断方法
+                                    # 调用诊断方法（BaseAgent 内按 workflow 模板提取步骤级 Key 白名单并注入致命约束）
                                     diagnosis_message = await agent_instance._perform_data_diagnosis(
                                         file_metadata=file_metadata,
                                         omics_type=omics_type,
-                                        dataframe=dataframe
+                                        dataframe=dataframe,
+                                        workflow_for_whitelist=workflow,
+                                        target_step_ids_for_whitelist=target_steps,
                                     )
                                 
                                     # 从agent的context中获取参数推荐
@@ -2282,17 +2341,22 @@ class AgentOrchestrator:
                         n_samples = file_metadata.get("n_samples") or file_metadata.get("n_obs") or file_metadata.get("shape", {}).get("rows", 0)
                         n_features = file_metadata.get("n_features") or file_metadata.get("n_vars") or file_metadata.get("shape", {}).get("cols", 0)
                     
-                        # 🔥 TASK 2 FIX: 确保诊断报告标题统一（只使用"数据诊断报告"）
-                        # 移除可能存在的重复标题
+                        # 移除可能重复的副标题，统一为「数据报告」
                         if diagnosis_message:
-                            # 移除所有可能的标题变体
-                            diagnosis_message = diagnosis_message.replace("### 📊 数据体检报告", "")
-                            diagnosis_message = diagnosis_message.replace("### 📊 数据诊断报告", "")
-                            diagnosis_message = diagnosis_message.replace("## 📊 数据体检报告", "")
-                            diagnosis_message = diagnosis_message.replace("## 📊 数据诊断报告", "")
-                            # 确保以"数据诊断报告"开头
+                            for _strip in (
+                                "### 📊 数据体检报告",
+                                "### 🔍 数据体检报告",
+                                "### 📊 数据诊断报告",
+                                "### 🔍 数据诊断报告",
+                                "## 📊 数据体检报告",
+                                "## 🔍 数据体检报告",
+                                "## 📊 数据诊断报告",
+                                "### 📊 数据报告",
+                                "## 📊 数据报告",
+                            ):
+                                diagnosis_message = diagnosis_message.replace(_strip, "")
                             if not diagnosis_message.strip().startswith("#"):
-                                diagnosis_message = f"### 📊 数据诊断报告\n\n{diagnosis_message.strip()}"
+                                diagnosis_message = f"### 数据报告\n\n{diagnosis_message.strip()}"
                     
                         payload = {
                             "message": diagnosis_message,
@@ -2383,6 +2447,8 @@ class AgentOrchestrator:
                 ):
                     if _pe == "thought":
                         yield self._emit_sse(state_snapshot, "thought", _pdata)
+                    elif _pe == "status":
+                        yield self._emit_sse(state_snapshot, "status", _pdata)
                     elif _pe == "workflow":
                         result = _pdata
                 logger.info("[Profiler] 规划(执行)完成 - 耗时: %.2fs", time.time() - _t_plan_start)
@@ -2814,6 +2880,7 @@ class AgentOrchestrator:
             return ""
         t = text
         t = re.sub(r"<think>[\s\S]*?<\/think>", "", t, flags=re.IGNORECASE)
+        t = re.sub(r"<suggest>[\s\S]*?</suggest>", "", t, flags=re.IGNORECASE)
         t = re.sub(r"<<>>\[[\s\S]*?\]<<>>", "", t)
         t = re.sub(r"<<>>[\s\S]*?<<>>", "", t)
         return t.strip()
@@ -2868,6 +2935,63 @@ class AgentOrchestrator:
         indices = sorted(head_indices | tail_indices)
         truncated = [history[i] for i in indices]
         return self._sanitize_large_json(truncated)
+
+    @staticmethod
+    def _format_history_for_semantic_router(
+        history: Optional[List[Dict[str, Any]]],
+        max_messages: int = 6,
+        max_chars: int = 3200,
+    ) -> str:
+        """将最近若干条对话压成纯文本，供 SemanticRouter.recent_history 使用（与 RouterInput Schema 对齐）。"""
+        if not history:
+            return ""
+        lines: List[str] = []
+        tail = history[-max_messages:] if len(history) > max_messages else list(history)
+        for item in tail:
+            if not isinstance(item, dict):
+                continue
+            role = (item.get("role") or "").strip().lower()
+            text = item.get("content") or item.get("message") or ""
+            if role in ("user", "assistant", "system") and text:
+                label = {"user": "用户", "assistant": "助手", "system": "系统"}.get(role, role)
+                snippet = str(text).strip().replace("\r\n", "\n")
+                if len(snippet) > 1400:
+                    snippet = snippet[:1400] + "…"
+                lines.append(f"{label}: {snippet}")
+                continue
+            u = (item.get("user") or "").strip()
+            a = (item.get("ai") or "").strip()
+            if u:
+                lines.append(f"用户: {u[:1400]}{'…' if len(u) > 1400 else ''}")
+            if a:
+                lines.append(f"助手: {a[:1400]}{'…' if len(a) > 1400 else ''}")
+        out = "\n".join(lines).strip()
+        if len(out) > max_chars:
+            return out[: max_chars - 1] + "…"
+        return out
+
+    @staticmethod
+    def _chat_stream_failure_user_message(exc: BaseException) -> str:
+        """Chat/MCP 执行失败时对用户的短文案（禁止回落 Task 时配套使用）。"""
+        msg = (str(exc) or "").lower()
+        keys = (
+            "timeout",
+            "timed out",
+            "connection",
+            "connect ",
+            "network",
+            "ssl",
+            "certificate",
+            "502",
+            "503",
+            "504",
+            "refused",
+            "econnreset",
+            "broken pipe",
+        )
+        if any(k in msg for k in keys):
+            return "网络检索失败，请稍后再试。"
+        return "对话生成失败，请稍后再试。若需联网查询，请检查网络或 MCP 配置。"
 
     def _build_current_files_hint(self, files: List[Dict[str, Any]]) -> str:
         """组装当前工作台已挂载文件的状态文案，供注入到 LLM 上下文。无文件时返回空字符串。"""
@@ -2975,8 +3099,11 @@ class AgentOrchestrator:
 
         chat_system = (
             "你是一个友好的AI助手，帮助用户解答问题。使用中文回答。\n\n"
-            "在回复的**最后**，根据当前分析上下文生成 1～2 个用户可能想问的后续问题，严格按以下格式输出（不要输出到可见正文）：\n"
-            "<<<SUGGESTIONS>>>[\"问题1\", \"问题2\"]<<<END_SUGGESTIONS>>>\n"
+            "【互动与追问规范】在完成全部解答后，必须在**最末尾**基于上下文生成 1～2 个用户最可能问的后续短问题。\n"
+            "必须且只能使用以下严格 JSON，并用 `<suggest>` 与 `</suggest>` 标签包裹；**禁止**在标签外附加任何说明文字：\n"
+            "<suggest>\n"
+            '{"questions": ["建议问题1", "建议问题2"]}\n'
+            "</suggest>\n"
             "若对话在结束（如告别、再见）则不要输出上述块。"
         )
         chat_system += (
@@ -3173,8 +3300,11 @@ class AgentOrchestrator:
 
         chat_system = (
             "你是一个友好的AI助手，帮助用户解答问题。使用中文回答。\n\n"
-            "在回复的**最后**，根据当前分析上下文生成 1～2 个用户可能想问的后续问题，严格按以下格式输出（不要输出到可见正文）：\n"
-            "<<<SUGGESTIONS>>>[\"问题1\", \"问题2\"]<<<END_SUGGESTIONS>>>\n"
+            "【互动与追问规范】在完成全部解答后，必须在**最末尾**基于上下文生成 1～2 个用户最可能问的后续短问题。\n"
+            "必须且只能使用以下严格 JSON，并用 `<suggest>` 与 `</suggest>` 标签包裹；**禁止**在标签外附加任何说明文字：\n"
+            "<suggest>\n"
+            '{"questions": ["建议问题1", "建议问题2"]}\n'
+            "</suggest>\n"
             "若对话在结束（如告别、再见）则不要输出上述块。"
         )
         chat_system += (
@@ -3385,14 +3515,11 @@ class AgentOrchestrator:
     ) -> str:
         """
         聚合状态并返回 SSE 字符串。仅做内存赋值，不阻塞。
-        执行阶段全量事件捕获（供历史恢复与工作台渲染）：
-        - message, thought -> text
-        - workflow, plan -> workflow
-        - step -> steps 按 step.id/step_id 查找并覆盖更新，否则追加（防重复）
-        - step_result -> steps 覆盖为 steps_details，并合并 report_data 入 report
-        - diagnosis -> 合并 report_data（诊断报告）入 report
-        - result, done -> 若带 diagnosis 或 report_data 则整体写入 report
-        - report_data -> 合并入 report.report_data
+        执行阶段全量事件捕获（供历史恢复与工作台渲染），须与前端时光机 `createRestoreAIMessageRowWithSnapshot` 四联一致：
+        - thought -> state_snapshot["reasoning"]（绝不写入 text）
+        - message -> state_snapshot["text"]
+        - status -> process_log[]（排除 [AgenticLog] 前缀行）；done 时补 duration 与「完成 (Xs)」并收口遗留 running
+        - workflow, plan -> workflow；step / step_result / diagnosis / report_data / result 见分支实现
         """
         # 🔥 约束一：数据绝对隔离。thought 只进 reasoning，message 只进 text，绝不允许混入
         if event_type == "thought":

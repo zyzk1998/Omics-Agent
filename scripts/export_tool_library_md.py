@@ -77,6 +77,7 @@ def main() -> None:
         "2. **MCP 超算工具 `hpc_mcp_*`**：若在运行时由 `HPCMCPManager.connect()` 从网关同步，会出现在 Registry 列表中；未连接网关时 Registry 条数可能少于线上。",
         "   **固定附录** `docs/hpc_mcp_tools_catalog.json` 列出与网关 `tools/list` 对齐的 22 个远端工具及对应 OpenAI 函数名，供检索与 prompt 对齐。",
         "3. **未纳入 Registry 的虚拟工具**（仅 DeepReAct 编排器拼接）：`ask_human_for_clarification`，见文末附录。",
+        "4. **语义路由 SemanticRouter（V2.1，非 Registry）**：`gibh_agent/core/semantic_router.py` 在编排器 `stream_process` 的 Layer 0 调用 LLM，输出结构化 `route`（`task` / `hpc` / `chat` / `clarify` / `skill_fast_lane`）；**不属于** ToolRegistry，亦不在下文 JSON 数组中。特性开关：`GIBH_ENABLE_SEMANTIC_ROUTER`（默认开，见 `orchestrator.py`）。",
         "",
         f"**Registry 工具总数：** {n_reg}",
         f"**附录 MCP 清单条数（HPC+工作站）：** {n_mcp}",

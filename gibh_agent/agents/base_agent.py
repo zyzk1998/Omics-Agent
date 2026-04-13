@@ -3,13 +3,17 @@
 所有领域智能体都继承此类
 """
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List, AsyncIterator
+from typing import Dict, Any, Optional, List, AsyncIterator, Tuple
 import logging
 from openai import AuthenticationError, APIError
 from ..core.llm_client import LLMClient
 from ..core.prompt_manager import PromptManager, DATA_DIAGNOSIS_PROMPT
 from ..core.data_diagnostician import DataDiagnostician
 from ..core.stream_utils import strip_suggestions_from_text
+from ..core.diagnosis_param_whitelist import (
+    build_diagnosis_whitelist_prompt,
+    collect_param_whitelist_for_diagnosis,
+)
 from .reporting.sted_ec_expert_report_prompts import (
     CRITICAL_INSTRUCTION_STED_EC_FOR_PARENT,
     OUTPUT_STRUCTURE_STED_EC_FOR_PARENT,
@@ -367,12 +371,61 @@ class BaseAgent(ABC):
         
         return "unknown"
     
+    def _format_diagnosis_param_whitelist_prompt(self, names: List[str]) -> str:
+        """注入 LLM 的参数名白名单与硬约束（与前端 name=param_{i}_{key} 的 key 一致）。"""
+        if not names:
+            return (
+                "\n\n【参数推荐】若无法从上下文确定当前 SOP 已暴露的可调参数字段名，"
+                "请勿输出「### 💡 参数推荐」下的 Markdown 表格（禁止捏造参数名）；"
+                "可仅在正文段落中做定性描述。"
+            )
+        shown = ", ".join(names)
+        return f"""
+
+【极其重要的参数推荐规则】
+如果你输出「### 💡 参数推荐」下的 Markdown 表格，表格第一列「参数名」**必须绝对、一字不差地**等于下列某一个字符串（与前端输入框绑定键一致，区分大小写，通常为 snake_case；**禁止**使用中文标题、Title Case 展示名如 Min Genes、或自行改写）：
+{shown}
+
+绝对不要捏造列表中不存在的参数名。不要擅自转换为其它格式。
+若某类参数不在上述列表中，说明前端未开放该字段，**请勿在表格中推荐**；可仅在正文段落中提及。
+表格第一列参数名**禁止**用 Markdown 加粗（**）或反引号（`）包裹，仅写裸参数字符串。
+"""
+
+    def _extract_available_parameters(
+        self,
+        workflow: Any,
+        target_step_ids: Optional[List[str]] = None,
+        file_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[str], str]:
+        """
+        深度基于当前 Workflow 模板（generate_template）提取各步骤对用户开放的可编辑参数 Key，
+        并生成供 LLM 注入的「步骤 + Valid Keys + UI 标签参考」文案。
+
+        Returns:
+            (扁平 Key 列表, 致命约束提示块)。扁平列表供 _extract_parameter_recommendations 白名单过滤。
+        """
+        if workflow is None:
+            return [], self._format_diagnosis_param_whitelist_prompt([])
+        keys, block = build_diagnosis_whitelist_prompt(
+            workflow, target_step_ids, file_metadata
+        )
+        if not keys:
+            fb = collect_param_whitelist_for_diagnosis(
+                workflow, target_step_ids, file_metadata
+            )
+            if fb:
+                return fb, self._format_diagnosis_param_whitelist_prompt(sorted(fb))
+        return keys, block
+
     async def _perform_data_diagnosis(
         self,
         file_metadata: Dict[str, Any],
         omics_type: str,
         dataframe: Optional[Any] = None,
-        system_instruction: Optional[str] = None
+        system_instruction: Optional[str] = None,
+        valid_ui_param_names: Optional[List[str]] = None,
+        workflow_for_whitelist: Any = None,
+        target_step_ids_for_whitelist: Optional[List[str]] = None,
     ) -> Optional[str]:
         """
         执行数据诊断并生成 Markdown 报告
@@ -391,6 +444,9 @@ class BaseAgent(ABC):
             omics_type: 组学类型（"scRNA", "Metabolomics", "BulkRNA", "default"）
             dataframe: 可选的数据预览（DataFrame 或 AnnData）
             system_instruction: 领域特定的系统指令（由各个 Agent 提供）
+            valid_ui_param_names: 前端可调参数名列表（与表单键一致）；若未传且提供 workflow_for_whitelist 则自动收集
+            workflow_for_whitelist: 与 target_step_ids_for_whitelist 配合，从 generate_template 推导白名单
+            target_step_ids_for_whitelist: 当前意图步骤 ID 列表，用于裁剪模板中的参数键
         
         Returns:
             Markdown 格式的诊断报告，如果失败返回 None
@@ -409,6 +465,23 @@ class BaseAgent(ABC):
                     return cached_diagnosis.get("diagnosis_report")
             
             logger.info(f"🔍 [DataDiagnostician] 开始数据诊断 - 组学类型: {omics_type}")
+
+            whitelist_keys: List[str] = []
+            whitelist_prompt_extra = ""
+            if workflow_for_whitelist is not None:
+                whitelist_keys, whitelist_prompt_extra = self._extract_available_parameters(
+                    workflow_for_whitelist,
+                    target_step_ids_for_whitelist,
+                    file_metadata,
+                )
+            elif valid_ui_param_names:
+                whitelist_keys = list(valid_ui_param_names)
+                whitelist_prompt_extra = self._format_diagnosis_param_whitelist_prompt(
+                    sorted(whitelist_keys)
+                )
+            else:
+                whitelist_prompt_extra = self._format_diagnosis_param_whitelist_prompt([])
+            whitelist_set = frozenset(whitelist_keys) if whitelist_keys else frozenset()
             
             # Step 1: 使用 DataDiagnostician 计算统计事实
             diagnosis_result = self.diagnostician.analyze(
@@ -542,7 +615,7 @@ Format:
 - **数据质量**: [质量评估]
 
 ### 💡 参数推荐
-Create a Markdown table with parameter recommendations.
+Create a Markdown table with parameter recommendations; first column must be exact param keys allowed for this workflow (see system rules).
 
 Use Simplified Chinese for all content."""
             
@@ -551,14 +624,14 @@ Use Simplified Chinese for all content."""
             stats_facts = []
             if (omics_type or "").lower() in ("radiomics", "medical_image", "medical_imaging", "imaging") or stats.get("_imaging_only"):
                 stats_facts.append(f"影像尺寸: {stats.get('dimensions_str', 'N/A')}；层厚/间距: {stats.get('spacing_str', 'N/A')}；掩膜: {'已提供' if stats.get('mask_present') else '未提供'}。")
-            elif omics_type.lower() in ["metabolomics", "metabolomic", "metabonomics"]:
+            elif (omics_type or "").lower() in ["metabolomics", "metabolomic", "metabonomics"]:
                 n_samples = stats.get("n_samples", 0)
                 n_metabolites = stats.get("n_metabolites", 0)
                 missing_rate = stats.get("missing_rate", 0)
                 stats_facts.append(f"数据集包含 {n_samples} 个样本和 {n_metabolites} 个代谢物。")
                 if missing_rate > 0:
                     stats_facts.append(f"缺失值率为 {missing_rate:.2f}%。")
-            elif omics_type.lower() in ["scrna", "scrna-seq", "single_cell", "single-cell"]:
+            elif (omics_type or "").lower() in ["scrna", "scrna-seq", "single_cell", "single-cell"]:
                 n_cells = stats.get("n_cells", 0)
                 n_genes = stats.get("n_genes", 0)
                 stats_facts.append(f"数据集包含 {n_cells} 个细胞和 {n_genes} 个基因。")
@@ -569,6 +642,11 @@ Use Simplified Chinese for all content."""
             
             # 构建强制事实字符串
             facts_str = " ".join(stats_facts) if stats_facts else "统计数据已提供在用户提示中。"
+
+            whitelist_prompt_extra = self._format_diagnosis_param_whitelist_prompt(
+                sorted(whitelist_set) if whitelist_set else []
+            )
+            prompt = f"{prompt}{whitelist_prompt_extra}"
             
             # 🔥 CRITICAL DEBUGGING: 检查数据是否缺失，如果缺失则注入调试跟踪
             n_samples_value = stats.get("n_samples", stats.get("n_cells", stats.get("n_rows", 0)))
@@ -597,7 +675,9 @@ Use Simplified Chinese for all content."""
 
 **CRITICAL: 数据事实（必须严格遵循，不得产生幻觉）**
 {facts_str}
-请确保诊断报告中的数字与上述事实完全一致。不要猜测或编造不同的数字。{debug_section}"""
+请确保诊断报告中的数字与上述事实完全一致。不要猜测或编造不同的数字。{debug_section}
+{whitelist_prompt_extra}
+"""
                 logger.debug(f"✅ [DataDiagnostician] Using domain-specific system instruction with facts (length: {len(system_prompt)})")
             else:
                 # 回退到通用指令（向后兼容），但也注入统计数据
@@ -605,7 +685,9 @@ Use Simplified Chinese for all content."""
 
 **CRITICAL: 数据事实（必须严格遵循，不得产生幻觉）**
 {facts_str}
-请确保诊断报告中的数字与上述事实完全一致。不要猜测或编造不同的数字。{debug_section}"""
+请确保诊断报告中的数字与上述事实完全一致。不要猜测或编造不同的数字。{debug_section}
+{whitelist_prompt_extra}
+"""
                 logger.warning(f"⚠️ [DataDiagnostician] No system_instruction provided, using generic prompt with facts")
             
             # 🔥 架构重构：将 system_instruction 前置到用户 prompt（确保上下文隔离）
@@ -664,7 +746,12 @@ Use Simplified Chinese for all content."""
                 
                 # Step 4: 从诊断报告中提取参数推荐
                 # 🔥 TASK 5: 解析诊断报告中的参数推荐表格
-                recommendation = self._extract_parameter_recommendations(response, omics_type, stats)
+                recommendation = self._extract_parameter_recommendations(
+                    response,
+                    omics_type,
+                    stats,
+                    allowed_param_names=whitelist_set if whitelist_set else None,
+                )
                 
                 # Step 5: 保存到上下文（供 UI 和后续步骤使用）
                 self.context["diagnosis_report"] = response
@@ -2184,7 +2271,8 @@ Evaluate and return ONLY the JSON object:"""
         self,
         diagnosis_report: str,
         omics_type: str,
-        stats: Dict[str, Any]
+        stats: Dict[str, Any],
+        allowed_param_names: Optional[Any] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         从诊断报告中提取参数推荐
@@ -2195,6 +2283,7 @@ Evaluate and return ONLY the JSON object:"""
             diagnosis_report: 诊断报告 Markdown 文本
             omics_type: 组学类型
             stats: 统计数据
+            allowed_param_names: 可选；非空时仅保留第一列属于该集合的表格行（与前端表单键一致）
         
         Returns:
             参数推荐字典，格式：
@@ -2243,9 +2332,19 @@ Evaluate and return ONLY the JSON object:"""
                 
                 if len(cells) >= 4:
                     param_name = cells[0].strip()
+                    # 第一列：去掉反引号与加粗，避免一键应用 name 匹配失败
+                    param_name = re.sub(r"^[`\s]+|[`\s]+$", "", param_name)
+                    param_name = re.sub(r"\*\*|\*", "", param_name).strip()
                     default_value = cells[1].strip()
                     recommended_value = cells[2].strip()
                     reason = cells[3].strip()
+
+                    if allowed_param_names and param_name not in allowed_param_names:
+                        logger.debug(
+                            "⚠️ [ParameterRecommendation] 跳过不在白名单内的参数名: %r",
+                            param_name,
+                        )
+                        continue
                     
                     # 清理推荐值（移除 Markdown 加粗标记）
                     recommended_value = re.sub(r'\*\*|\*', '', recommended_value).strip()
