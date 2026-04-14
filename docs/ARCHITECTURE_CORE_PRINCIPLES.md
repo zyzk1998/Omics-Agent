@@ -95,4 +95,17 @@
 
 ---
 
+## 7. 对外演示与架构静态页（可复用）
+
+仓库内提供**单文件 HTML**，便于汇报或离线展示「系统级组件与数据流」，**不替代**本文与代码作为契约来源：
+
+| 文件 | 说明 |
+| :--- | :--- |
+| `docs/animated_architecture.html` | 动态流水线风格：用户 → SemanticRouter → AgentOrchestrator → 算力侧 → 存储，一键演示典型任务流。 |
+| `docs/hpc_agent_architecture.html` | 与白皮书命名对齐的**系统级蓝图**（同一套视觉基调 + Anime.js 分步旁白）；根目录另有 **`hpc_agent_architecture.html`** 副本便于直接打开。 |
+
+**注意**：演示页依赖 CDN 加载 **Anime.js**（`hpc_agent_architecture.html`）；离线环境请将脚本改为本地相对路径。勿在演示 HTML 中写入真实密钥或内网地址。
+
+---
+
 *文档版本：与仓库同步维护；重大架构变更须更新本文并评审。*

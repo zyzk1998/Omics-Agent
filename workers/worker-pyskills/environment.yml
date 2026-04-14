@@ -1,0 +1,23 @@
+# 供 Dockerfile 中 micromamba 安装使用（业务代码 COPY 之前单独复制，便于 BuildKit 缓存依赖层）。
+# 频道以镜像站为准，不在此重复声明 channels，统一由 .condarc 覆盖。
+# 与 `micromamba create -p /opt/conda` 配合：不在此写 name，避免与显式前缀语义冲突。
+#
+# drug-similarity（third_party/drug-similarity/scripts/database_query.py）显式依赖 requests；
+# 与 SKILL.md / find_similar 手工环境对齐，避免仅靠传递依赖导致缺包。
+dependencies:
+  - python=3.10
+  - pip
+  - viennarna
+  - pymol-open-source
+  - rdkit
+  - gseapy
+  - matplotlib
+  - numpy
+  - pandas
+  - scipy
+  - requests
+  - scikit-learn
+  - simpleitk
+  - fastapi
+  - uvicorn
+  - pydantic

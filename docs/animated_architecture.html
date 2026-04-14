@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>生信大模型智能体架构 · 动态演示</title>
+  <style>
+    :root {
+      --bg-deep: #0a0e17;
+      --bg-mid: #121a2b;
+      --grid: rgba(0, 255, 200, 0.06);
+      --cyan: #00e5cc;
+      --cyan-dim: rgba(0, 229, 204, 0.35);
+      --violet: #a78bfa;
+      --amber: #fbbf24;
+      --green: #34d399;
+      --rose: #fb7185;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --packet-user: #38bdf8;
+      --packet-route: #a78bfa;
+      --packet-orch: #fbbf24;
+      --packet-hpc: #f97316;
+      --packet-store: #22d3ee;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: "JetBrains Mono", "SF Mono", "Consolas", "Microsoft YaHei UI", sans-serif;
+      background: var(--bg-deep);
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    .stage {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      min-height: 520px;
+      background:
+        linear-gradient(180deg, #0d1525 0%, var(--bg-deep) 45%, #080c14 100%),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+        linear-gradient(var(--grid) 1px, transparent 1px);
+      background-size: 100% 100%, 32px 32px, 32px 32px;
+    }
+
+    .stage::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 80% 50% at 50% 40%, rgba(0, 229, 204, 0.08), transparent 70%);
+      pointer-events: none;
+    }
+
+    .title-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 14px 24px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid rgba(0, 229, 204, 0.15);
+      background: linear-gradient(180deg, rgba(10, 14, 23, 0.95), transparent);
+      z-index: 20;
+    }
+
+    .title-bar h1 {
+      font-size: clamp(14px, 2vw, 18px);
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      background: linear-gradient(90deg, var(--cyan), var(--violet));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .title-bar .sub {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .canvas {
+      position: absolute;
+      inset: 56px 16px 88px 16px;
+      max-width: 1200px;
+      max-height: 720px;
+      margin: auto;
+      border: 1px solid rgba(0, 229, 204, 0.2);
+      border-radius: 12px;
+      background: rgba(18, 26, 43, 0.6);
+      box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+        0 20px 60px rgba(0, 0, 0, 0.45);
+    }
+
+    /* Nodes */
+    .node {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      text-align: center;
+      z-index: 5;
+      transition: transform 0.3s ease, filter 0.3s ease;
+    }
+
+    .node .icon {
+      width: 72px;
+      height: 72px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+      border: 2px solid rgba(255, 255, 255, 0.12);
+      background: linear-gradient(145deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.95));
+      box-shadow:
+        0 4px 20px rgba(0, 0, 0, 0.4),
+        0 0 24px var(--cyan-dim);
+    }
+
+    .node .label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--cyan);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .node .desc {
+      font-size: 10px;
+      color: var(--muted);
+      max-width: 120px;
+      line-height: 1.35;
+    }
+
+    .node-user { left: 6%; top: 42%; transform: translateY(-50%); }
+    .node-router { left: 50%; top: 10%; transform: translateX(-50%); }
+    .node-orch { left: 50%; top: 46%; transform: translate(-50%, -50%); }
+    .node-hpc { right: 6%; top: 42%; transform: translateY(-50%); }
+    .node-storage { left: 50%; bottom: 6%; transform: translateX(-50%); }
+
+    .node-user .icon { box-shadow: 0 0 20px rgba(56, 189, 248, 0.35); }
+    .node-router .icon { box-shadow: 0 0 20px rgba(167, 139, 250, 0.35); }
+    .node-orch .icon { box-shadow: 0 0 24px rgba(251, 191, 36, 0.4); }
+    .node-hpc .icon { box-shadow: 0 0 20px rgba(249, 115, 22, 0.35); }
+    .node-storage .icon { box-shadow: 0 0 20px rgba(34, 211, 238, 0.35); }
+
+    /* Active states */
+    .node.flash .icon {
+      animation: nodeFlash 0.5s ease-in-out 3;
+    }
+
+    @keyframes nodeFlash {
+      0%, 100% { filter: brightness(1); box-shadow: 0 0 24px var(--cyan-dim); }
+      50% { filter: brightness(1.4); box-shadow: 0 0 40px rgba(167, 139, 250, 0.8); }
+    }
+
+    .node.gear-spin .icon {
+      animation: gearRotate 1.2s linear infinite;
+    }
+
+    @keyframes gearRotate {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .node.pulse .icon {
+      animation: pulseScale 0.6s ease-in-out infinite;
+    }
+
+    @keyframes pulseScale {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.06); }
+    }
+
+    /* HPC screen effect */
+    .hpc-screen {
+      position: absolute;
+      width: 56px;
+      height: 40px;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -120%);
+      border-radius: 4px;
+      background: #0f172a;
+      border: 1px solid rgba(249, 115, 22, 0.5);
+      opacity: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+
+    .node-hpc.compute .hpc-screen {
+      opacity: 1;
+      animation: screenGlow 0.3s ease-in-out infinite alternate;
+    }
+
+    @keyframes screenGlow {
+      from { box-shadow: 0 0 8px rgba(249, 115, 22, 0.5); }
+      to { box-shadow: 0 0 20px rgba(249, 115, 22, 0.9); }
+    }
+
+    .particles {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .particle {
+      position: absolute;
+      width: 3px;
+      height: 3px;
+      background: #fb923c;
+      border-radius: 1px;
+      opacity: 0;
+      animation: rise 0.8s ease-out forwards;
+    }
+
+    @keyframes rise {
+      0% { opacity: 1; transform: translateY(0) scale(1); }
+      100% { opacity: 0; transform: translateY(-28px) scale(0.3); }
+    }
+
+    /* Flying packets layer */
+    .fly-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 15;
+      overflow: visible;
+    }
+
+    .packet {
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      left: 0;
+      top: 0;
+      margin-left: -9px;
+      margin-top: -9px;
+      background: var(--packet-user);
+      box-shadow:
+        0 0 12px currentColor,
+        0 0 24px rgba(255, 255, 255, 0.2);
+      opacity: 0;
+      transition: background 0.35s ease, box-shadow 0.35s ease;
+      z-index: 16;
+    }
+
+    .packet.visible {
+      opacity: 1;
+    }
+
+    .packet.trail::after {
+      content: "";
+      position: absolute;
+      inset: -4px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      animation: trailPulse 0.6s ease-out infinite;
+    }
+
+    @keyframes trailPulse {
+      0% { transform: scale(1); opacity: 0.8; }
+      100% { transform: scale(1.8); opacity: 0; }
+    }
+
+    .check-mark {
+      position: absolute;
+      width: 28px;
+      height: 28px;
+      margin-left: -14px;
+      margin-top: -14px;
+      border-radius: 50%;
+      background: var(--green);
+      color: #022c22;
+      font-size: 16px;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      box-shadow: 0 0 20px rgba(52, 211, 153, 0.8);
+      z-index: 17;
+    }
+
+    .check-mark.visible { opacity: 1; }
+
+    /* Step caption */
+    .caption {
+      position: absolute;
+      left: 50%;
+      bottom: 18%;
+      transform: translateX(-50%);
+      max-width: 90%;
+      padding: 10px 18px;
+      background: rgba(15, 23, 42, 0.92);
+      border: 1px solid rgba(0, 229, 204, 0.35);
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--text);
+      text-align: center;
+      z-index: 18;
+      opacity: 0;
+      transition: opacity 0.35s ease;
+      pointer-events: none;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+
+    .caption.show { opacity: 1; }
+
+    .caption kbd {
+      display: inline-block;
+      padding: 2px 8px;
+      margin: 0 4px;
+      border-radius: 4px;
+      background: rgba(0, 229, 204, 0.15);
+      color: var(--cyan);
+      font-size: 12px;
+    }
+
+    /* Connector hints (subtle lines) */
+    .wires {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .wires svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .wire {
+      fill: none;
+      stroke: rgba(0, 229, 204, 0.12);
+      stroke-width: 2;
+      stroke-dasharray: 8 6;
+    }
+
+    /* Bottom control */
+    .dock {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 16px 24px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 25;
+      background: linear-gradient(0deg, rgba(8, 12, 20, 0.98), transparent);
+    }
+
+    .btn-demo {
+      appearance: none;
+      border: none;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 14px 28px;
+      border-radius: 10px;
+      color: #0f172a;
+      background: linear-gradient(135deg, var(--cyan), #2dd4bf);
+      box-shadow:
+        0 4px 0 #0d9488,
+        0 12px 40px rgba(0, 229, 204, 0.35);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .btn-demo:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow:
+        0 6px 0 #0d9488,
+        0 16px 48px rgba(0, 229, 204, 0.45);
+    }
+
+    .btn-demo:active:not(:disabled) {
+      transform: translateY(1px);
+      box-shadow: 0 2px 0 #0d9488, 0 8px 24px rgba(0, 229, 204, 0.3);
+    }
+
+    .btn-demo:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .legend {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .legend span { margin: 0 8px; white-space: nowrap; }
+
+    /* Pixel worker decoration */
+    .pixel-dude {
+      position: absolute;
+      left: 8%;
+      bottom: 22%;
+      width: 20px;
+      height: 24px;
+      z-index: 2;
+      opacity: 0.85;
+      image-rendering: pixelated;
+    }
+
+    .pixel-dude::before {
+      content: "";
+      display: block;
+      width: 4px;
+      height: 4px;
+      background: #fbbf24;
+      box-shadow:
+        4px 0 0 #fbbf24,
+        8px 0 0 #fbbf24,
+        4px 4px 0 #38bdf8,
+        8px 4px 0 #38bdf8,
+        4px 8px 0 #38bdf8,
+        8px 8px 0 #38bdf8,
+        0 12px 0 #1e293b,
+        4px 12px 0 #1e293b,
+        8px 12px 0 #1e293b,
+        12px 12px 0 #1e293b,
+        4px 16px 0 #1e293b,
+        8px 16px 0 #1e293b,
+        4px 20px 0 #0f172a,
+        8px 20px 0 #0f172a;
+      transform: scale(1.2);
+    }
+
+    @media (max-width: 640px) {
+      .node .icon { width: 56px; height: 56px; font-size: 28px; }
+      .node .desc { display: none; }
+      .canvas { inset: 52px 8px 100px 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <header class="title-bar">
+      <div>
+        <h1>生信大模型智能体 · 架构流水线演示</h1>
+        <p class="sub">五大模块 · 典型任务数据流 · 全屏 F11 更佳</p>
+      </div>
+    </header>
+
+    <div class="canvas" id="canvas">
+      <div class="wires" aria-hidden="true">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path class="wire" d="M12 50 Q 30 25 50 18" />
+          <path class="wire" d="M50 18 Q 50 35 50 46" />
+          <path class="wire" d="M50 46 Q 65 46 88 50" />
+          <path class="wire" d="M50 46 Q 50 78 50 88" />
+          <path class="wire" d="M12 50 Q 30 75 50 88" />
+        </svg>
+      </div>
+
+      <div class="pixel-dude" aria-hidden="true"></div>
+
+      <div class="node node-user" id="node-user" data-key="user">
+        <div class="icon" aria-hidden="true">🧑‍🔬</div>
+        <span class="label">用户端</span>
+        <span class="desc">自然语言 + 数据上传</span>
+      </div>
+
+      <div class="node node-router" id="node-router" data-key="router">
+        <div class="icon">🧠</div>
+        <span class="label">路由大脑</span>
+        <span class="desc">语义路由 · 意图识别</span>
+      </div>
+
+      <div class="node node-orch" id="node-orch" data-key="orch">
+        <div class="icon">⚙️</div>
+        <span class="label">编排工厂</span>
+        <span class="desc">Agent Orchestrator · 任务拆解</span>
+      </div>
+
+      <div class="node node-hpc" id="node-hpc" data-key="hpc">
+        <div class="hpc-screen" id="hpc-screen">
+          <div class="particles" id="particles"></div>
+        </div>
+        <div class="icon">🖥️</div>
+        <span class="label">超算与算子车间</span>
+        <span class="desc">TaaS / Worker · 重型计算</span>
+      </div>
+
+      <div class="node node-storage" id="node-storage" data-key="storage">
+        <div class="icon">💾</div>
+        <span class="label">数据仓库</span>
+        <span class="desc">结果持久化 · 资产总线</span>
+      </div>
+
+      <div class="fly-layer" id="fly-layer"></div>
+      <div class="caption" id="caption" role="status" aria-live="polite"></div>
+    </div>
+
+    <footer class="dock">
+      <button type="button" class="btn-demo" id="btn-demo">▶️ 演示典型场景：跑一个生信分析任务</button>
+      <p class="legend">
+        <span>🧑‍🔬 用户</span>
+        <span>🧠 语义路由</span>
+        <span>⚙️ 编排</span>
+        <span>🖥️ 算子车间</span>
+        <span>💾 存储</span>
+      </p>
+    </footer>
+  </div>
+
+  <script>
+(function () {
+  const canvas = document.getElementById("canvas");
+  const flyLayer = document.getElementById("fly-layer");
+  const caption = document.getElementById("caption");
+  const btn = document.getElementById("btn-demo");
+  const nodes = {
+    user: document.getElementById("node-user"),
+    router: document.getElementById("node-router"),
+    orch: document.getElementById("node-orch"),
+    hpc: document.getElementById("node-hpc"),
+    storage: document.getElementById("node-storage"),
+  };
+  const hpcScreen = document.getElementById("hpc-screen");
+  const particlesHost = document.getElementById("particles");
+
+  function centerOf(el, container) {
+    const cr = el.getBoundingClientRect();
+    const cc = container.getBoundingClientRect();
+    return {
+      x: cr.left - cc.left + cr.width / 2,
+      y: cr.top - cc.top + cr.height / 2,
+    };
+  }
+
+  function wait(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  function setCaption(html, show) {
+    caption.innerHTML = html;
+    caption.classList.toggle("show", !!show);
+  }
+
+  function createPacket(colorVar) {
+    const p = document.createElement("div");
+    p.className = "packet visible trail";
+    p.style.background = colorVar;
+    p.style.color = colorVar;
+    flyLayer.appendChild(p);
+    return p;
+  }
+
+  function removeEl(el) {
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+
+  function animatePacket(el, from, to, durationMs) {
+    el.style.transition = "none";
+    el.style.transform = "translate(" + from.x + "px, " + from.y + "px) scale(0.6)";
+    el.offsetHeight;
+    el.style.transition =
+      "transform " + durationMs + "ms cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease";
+    el.style.transform = "translate(" + to.x + "px, " + to.y + "px) scale(1)";
+    return wait(durationMs);
+  }
+
+  function spawnParticles() {
+    particlesHost.innerHTML = "";
+    for (let i = 0; i < 12; i++) {
+      const d = document.createElement("div");
+      d.className = "particle";
+      d.style.left = 20 + Math.random() * 20 + "px";
+      d.style.bottom = "4px";
+      d.style.animationDelay = Math.random() * 0.3 + "s";
+      particlesHost.appendChild(d);
+    }
+  }
+
+  let particleTimer = null;
+  function startHpcCompute() {
+    nodes.hpc.classList.add("compute");
+    spawnParticles();
+    particleTimer = setInterval(spawnParticles, 400);
+  }
+
+  function stopHpcCompute() {
+    nodes.hpc.classList.remove("compute");
+    if (particleTimer) clearInterval(particleTimer);
+    particleTimer = null;
+    particlesHost.innerHTML = "";
+  }
+
+  let running = false;
+
+  async function runDemo() {
+    if (running) return;
+    running = true;
+    btn.disabled = true;
+    flyLayer.innerHTML = "";
+    setCaption("", false);
+    nodes.router.classList.remove("flash");
+    nodes.orch.classList.remove("gear-spin", "pulse");
+    stopHpcCompute();
+
+    /* Step 1: User → Router */
+    setCaption("Step 1：<kbd>自然语言 + 数据</kbd> 从用户端发往路由大脑", true);
+    const p1 = createPacket("var(--packet-user)");
+    const u = centerOf(nodes.user, canvas);
+    const r = centerOf(nodes.router, canvas);
+    await animatePacket(p1, u, r, 1400);
+    await wait(500);
+
+    /* Step 2: Router flash, packet recolor → Orchestrator */
+    nodes.router.classList.add("flash");
+    setCaption("Step 2：路由大脑闪烁解析 → <kbd>路由为 Task 模式</kbd>，任务包发往编排工厂", true);
+    p1.style.background = "var(--packet-route)";
+    p1.style.color = "var(--packet-route)";
+    const o = centerOf(nodes.orch, canvas);
+    await wait(600);
+    nodes.router.classList.remove("flash");
+    await animatePacket(p1, r, o, 1200);
+    await wait(400);
+    removeEl(p1);
+
+    /* Step 3: Orchestrator gear, 3 packets to HPC */
+    nodes.orch.classList.add("gear-spin", "pulse");
+    setCaption("Step 3：编排工厂 <kbd>齿轮旋转</kbd>，将任务拆成 3 个子任务，依次派往算子车间", true);
+    const h = centerOf(nodes.hpc, canvas);
+    const orchCenter = centerOf(nodes.orch, canvas);
+    for (let i = 0; i < 3; i++) {
+      const sub = createPacket("var(--packet-orch)");
+      const offset = (i - 1) * 14;
+      await animatePacket(
+        sub,
+        { x: orchCenter.x + offset, y: orchCenter.y + 8 },
+        { x: h.x + offset * 1.2, y: h.y },
+        900 + i * 150
+      );
+      removeEl(sub);
+      await wait(200);
+    }
+    nodes.orch.classList.remove("gear-spin", "pulse");
+    await wait(300);
+
+    /* Step 4: HPC compute → storage + check to user */
+    setCaption("Step 4：算子车间 <kbd>火力全开</kbd> 计算 → 结果入库，同时向用户返回完成确认", true);
+    startHpcCompute();
+    await wait(1800);
+
+    const st = centerOf(nodes.storage, canvas);
+    const u2 = centerOf(nodes.user, canvas);
+    const result = createPacket("var(--packet-store)");
+    result.classList.add("visible", "trail");
+
+    const check = document.createElement("div");
+    check.className = "check-mark visible";
+    check.textContent = "✓";
+    check.style.transition = "none";
+    flyLayer.appendChild(check);
+    check.style.transform = "translate(" + h.x + "px, " + h.y + "px) scale(0.5)";
+    check.offsetHeight;
+    check.style.transition =
+      "transform 1.35s cubic-bezier(0.34, 1.2, 0.64, 1), opacity 0.3s ease";
+    check.style.transform = "translate(" + u2.x + "px, " + u2.y + "px) scale(1)";
+
+    await Promise.all([
+      animatePacket(result, h, st, 1100),
+      wait(1350),
+    ]);
+    removeEl(result);
+    stopHpcCompute();
+    await wait(200);
+    removeEl(check);
+
+    setCaption("✅ 典型链路演示完成：用户 → 语义路由 → 编排 → 算子执行 → 存储与反馈", true);
+    await wait(2200);
+    setCaption("", false);
+
+    running = false;
+    btn.disabled = false;
+  }
+
+  btn.addEventListener("click", function () {
+    runDemo().catch(function (e) {
+      console.error(e);
+      running = false;
+      btn.disabled = false;
+    });
+  });
+})();
+  </script>
+</body>
+</html>

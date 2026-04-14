@@ -450,6 +450,148 @@
     background: #fff;
 }
 
+/* HTML 报告：工作台内仅「橱窗预览」，完整交互在新标签页打开，避免右栏无限纵向拉长 */
+.skill-mm-iframe-preview-wrap .skill-mm-iframe {
+    height: 500px;
+    max-height: 500px;
+    min-height: 260px;
+    border-radius: 10px 10px 0 0;
+    border-bottom: 1px solid #e5e7eb;
+}
+.skill-mm-iframe-preview-wrap {
+    padding-bottom: 4px;
+}
+.skill-mm-report-open-btn {
+    display: block;
+    width: 100%;
+    text-align: center;
+    margin-top: 10px;
+    margin-bottom: 6px;
+    font-weight: 500;
+    border-radius: 8px;
+}
+
+.skill-mm-csv-kimi-wrap {
+    padding: 12px 16px 18px;
+    background: #f8fafc;
+    border-radius: 12px;
+}
+.skill-mm-csv-table-heading {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #1e293b;
+    margin-bottom: 10px;
+    letter-spacing: 0.02em;
+}
+.skill-csv-loading,
+.skill-csv-error {
+    font-size: 13px;
+    color: #64748b;
+}
+.skill-csv-error {
+    color: #b91c1c !important;
+}
+/* 表格父容器：横向滚动防撑爆 + 纵向限高（WPS 风表格挂载） */
+.skill-csv-table-scroll.skill-mm-csv-table-mount {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: min(50vh, 520px);
+    margin-top: 15px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+/* 技能 CSV：WPS 经典网格 + 浅蓝表头（与 .custom-kimi-table 同节点双类名） */
+.skill-mm-csv-table-mount .custom-kimi-table.skill-mm-native-csv-table {
+    width: 100%;
+    min-width: 800px;
+    border-collapse: collapse;
+    margin-top: 0;
+    font-size: 13px;
+    line-height: 1.45;
+    color: #333;
+}
+.skill-mm-csv-table-mount .custom-kimi-table.skill-mm-native-csv-table th,
+.skill-mm-csv-table-mount .custom-kimi-table.skill-mm-native-csv-table td {
+    border: 1px solid #cbd5e1;
+    padding: 8px 12px;
+    text-align: center;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.skill-mm-csv-table-mount .custom-kimi-table.skill-mm-native-csv-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background-color: #f0f8ff;
+    font-weight: bold;
+    color: #1e293b;
+}
+.skill-mm-csv-table-mount .custom-kimi-table.skill-mm-native-csv-table tbody tr:nth-child(even) {
+    background: #fafbfc;
+}
+.skill-mm-csv-table-mount .custom-kimi-table.skill-mm-native-csv-table tbody tr:hover {
+    background-color: #f1f5f9;
+}
+.skill-mm-csv-table-mount .custom-kimi-table.skill-mm-native-csv-table td.custom-kimi-td-smiles {
+    text-align: left;
+}
+.custom-kimi-td-smiles {
+    max-width: 280px;
+}
+.kimi-smiles-code {
+    display: block;
+    font-size: 11px;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    padding: 4px 6px;
+    background: #f3f4f6;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* 开发者原始字段：默认折叠，避免 query_smiles / stdout_tail 占据主视觉 */
+.skill-mm-debug-logs-wrap {
+    margin-top: 8px;
+}
+.skill-debug-logs {
+    margin-top: 12px;
+    font-size: 12px;
+    color: #94a3b8;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 8px 10px 10px;
+    background: #fafafa;
+}
+.skill-debug-logs__summary {
+    cursor: pointer;
+    user-select: none;
+    color: #64748b;
+    font-weight: 500;
+    list-style-position: outside;
+}
+.skill-debug-logs__body {
+    margin-top: 10px;
+    max-height: 220px;
+    overflow: auto;
+    padding-top: 4px;
+    border-top: 1px dashed #e2e8f0;
+}
+.skill-mm-data-grid--debug .skill-mm-debug-metric__value {
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #64748b;
+    max-height: 160px;
+    overflow-y: auto;
+}
+
 /* P3 静态图 */
 .skill-mm-gallery {
     display: flex;
@@ -627,5 +769,177 @@
 }
 .skill-mm-footer__btn {
     flex: 0 0 auto;
+}
+
+/* ========== 全局打印：破除 100vh / flex / overflow 白屏；Skills iframe + CSV 聚合 ========== */
+@media print {
+    @page {
+        margin: 1cm;
+        size: auto;
+    }
+
+    /* 1) 覆盖 main.css 中 body * { visibility:hidden }，避免整页空白 */
+    body *,
+    .unified-report-container,
+    .unified-report-container * {
+        visibility: visible !important;
+    }
+
+    /* 2) 解除 #app / body 的视口锁与 flex 窒息 */
+    html,
+    body,
+    #app,
+    .three-pane-row {
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow: visible !important;
+        overflow-x: visible !important;
+        display: block !important;
+        position: static !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        flex: none !important;
+    }
+
+    body {
+        background: #fff !important;
+    }
+
+    /* 3) 隐藏非工作台主面板与遮罩（真实 DOM id，与 .sidebar 等占位类对齐） */
+    #sidebar-pane,
+    #resizer-left,
+    #resizer-right,
+    #skills-square-pane,
+    #history-page-pane,
+    #file-management-pane,
+    #chat-pane,
+    #dropOverlay,
+    #lightbox,
+    #debug-sidebar,
+    .auth-modal-overlay,
+    #skill-upload-modal {
+        display: none !important;
+    }
+
+    /* 4) 工作台：铺满文档流、取消侧栏 flex 下的宽度/溢出限制 */
+    #workspace-pane {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        min-height: 0 !important;
+        height: auto !important;
+        flex: none !important;
+        float: none !important;
+        position: static !important;
+        left: auto !important;
+        top: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+        opacity: 1 !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+
+    #workspace-pane .workspace-scroll {
+        display: block !important;
+        overflow: visible !important;
+        max-height: none !important;
+        flex: none !important;
+        min-height: 0 !important;
+        padding: 10px 14px 20px !important;
+    }
+
+    #workspace-header .workspace-actions {
+        display: none !important;
+    }
+
+    #workspace-placeholder {
+        display: none !important;
+    }
+
+    #active-workspace-content,
+    .skill-workspace-panel,
+    .skill-mm-body,
+    .skill-mm-engine {
+        overflow: visible !important;
+        max-height: none !important;
+    }
+
+    /* 5) Bootstrap 手风琴：打印时全部展开 */
+    #active-workspace-content .accordion-collapse,
+    #active-workspace-content .collapse {
+        display: block !important;
+        height: auto !important;
+        max-height: none !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        overflow: visible !important;
+    }
+
+    #active-workspace-content .accordion-button::after {
+        display: none !important;
+    }
+
+    details {
+        display: block !important;
+    }
+
+    /* 6) iframe：拔高 + 取消内部滚动裁切，便于报告图完整进入分页流 */
+    .skill-mm-iframe-preview-wrap,
+    .skill-mm-iframe-wrap,
+    .skill-mm-iframe-wrap .skill-mm-iframe,
+    iframe.skill-mm-iframe {
+        width: 100% !important;
+        height: 1200px !important;
+        min-height: 800px !important;
+        max-height: none !important;
+        overflow: visible !important;
+        border: none !important;
+        page-break-inside: auto;
+        break-inside: auto;
+    }
+
+    /* 7) CSV 挂载区：横向滚动改为自然平铺 */
+    .skill-mm-csv-table-mount,
+    .skill-csv-table-scroll.skill-mm-csv-table-mount {
+        overflow-x: visible !important;
+        overflow-y: visible !important;
+        max-height: none !important;
+    }
+
+    .skill-mm-native-csv-table {
+        width: 100% !important;
+        min-width: 0 !important;
+        page-break-inside: auto;
+        font-size: 10pt !important;
+    }
+
+    .skill-mm-native-csv-table tr {
+        page-break-inside: avoid;
+        page-break-after: auto;
+    }
+
+    /* 8) 打印时隐藏操作按钮与外链（保留正文与表格） */
+    .skill-mm-footer-actions,
+    .skill-ws-print-btn,
+    .skill-mm-report-open-btn,
+    .btn-outline-primary.skill-mm-report-open-btn {
+        display: none !important;
+    }
+
+    .skill-debug-logs,
+    .skill-debug-logs-wrap {
+        display: none !important;
+    }
+
+    * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
 }
 

@@ -833,6 +833,7 @@
             #workspace-pane.workspace-active {
                 width: 30%;
                 min-width: 267px;
+                max-width: 66vw;
                 opacity: 1;
                 border-left: 1px solid #e5e7eb;
                 overflow: hidden;

@@ -302,6 +302,129 @@ GGGGAUAGGUUCAACCUCCUU
     {"name": "蛋白同源结构评估器", "sub_category": "数据分析", "description": "集成 BLAST 序列比对与结构相似性分析，用于精准判定蛋白质同源关系与三维结构差异。"},
     {"name": "蛋白质结构渲染工具", "sub_category": "数据可视化", "description": "支持从PDB格式导入并可视化蛋白质三维结构。"},
     {"name": "RNA二级结构可视化工具", "sub_category": "数据可视化", "description": "基于RNA碱基序列生成其对应的二级结构图示。"},
+    {"name": "抗体人源化", "sub_category": "预测与建模", "description": "使用对天然抗体库（Sapiens）或 CDR 移植的深度学习来实现抗体人源化。"},
+    {"name": "分析细菌生长曲线", "sub_category": "数据分析", "description": "基于OD600数据拟合细菌生长曲线，提供参数分析、倍增时间和延迟期等结果。"},
+    {
+        "name": "UniProt数据库查询",
+        "sub_category": "信息检索",
+        "description": "包含蛋白质序列、功能信息和研究论文索引的蛋白质数据库查询。",
+        "prompt_template": "您好。请在 UniProt 数据库中检索 **EGFR** 蛋白条目的功能注释、亚细胞定位及关键结构域信息。",
+    },
+    {"name": "PubMed数据库查询", "sub_category": "信息检索", "description": "生物医学文献信息检索系统。"},
+    {"name": "GWAS catalog 数据库查询", "sub_category": "信息检索", "description": "遗传学研究的重要资源，收录了许多基因组关联数据。"},
+    {"name": "dbSNP 数据库查询", "sub_category": "信息检索", "description": "单核苷酸多态性（SNP）数据库，快速检索SNP信息。"},
+    {"name": "CRISPR-Cas9 基因编辑工具", "sub_category": "预测与建模", "description": "模拟 CRISPR-Cas9 基因组编辑流程，包含向导RNA验证、目标位点识别等。"},
+    {"name": "ADMET性质预测工具", "sub_category": "预测与建模", "description": "预测一组化合物的 ADMET 药代动力学属性，包括溶解性、吸收、代谢、毒性等。"},
+    {"name": "LigandMPNN", "sub_category": "预测与建模", "description": "深度学习驱动的蛋白质序列设计模型，能够显式考虑小分子、核酸等非蛋白质环境的作用。"},
+]
+
+# 自动补全通用字段（已配置 prompt_template 的条目保留，其余使用 PLACEHOLDER_PROMPT）
+for skill in BIOMEDICINE_SKILLS:
+    skill["main_category"] = "生物医药"
+    if "prompt_template" not in skill:
+        skill["prompt_template"] = PLACEHOLDER_PROMPT
+
+# 补全遗漏的生物医药技能 (Phase 2)
+ADDITIONAL_BIOMED_SKILLS = [
+    {"name": "ESM-Variants", "sub_category": "预测与建模", "description": "交互式可视化蛋白质序列中的氨基酸变化。"},
+    {"name": "人源性评估", "sub_category": "数据分析", "description": "使用天然抗体库（OASis）中的肽搜索和种系序列同一性来评估抗体的人性。"},
+    {"name": "抗体序列生成", "sub_category": "预测与建模", "description": "对抗体序列进行突变，同时实时监测序列特性。"},
+    {
+        "name": "AlphaFold数据库查询",
+        "sub_category": "信息检索",
+        "description": "查询 AlphaFold 数据库并可选下载结构文件。",
+        "prompt_template": "您好。请查询 UniProt 登录号 **P04637**（p53）在 AlphaFold 结构数据库中的三维预测模型条目、置信度分区及下载方式。",
+    },
+    {"name": "GEO 数据库查询", "sub_category": "信息检索", "description": "快速检索基因表达数据的重要数据库。"},
+    {"name": "ClinVar 数据库查询", "sub_category": "信息检索", "description": "快速检索遗传变异的临床相关信息。"},
+    {"name": "UCSC 基因组浏览器查询", "sub_category": "信息检索", "description": "基因组学研究中的重要工具，快速检索基因组数据。"},
+    {
+        "name": "Reactome 数据库查询",
+        "sub_category": "信息检索",
+        "description": "经过手动筛选和同行评审的生物分子通路知识数据库。",
+        "prompt_template": "您好。请检索 Reactome 知识库中与**细胞凋亡（Apoptosis）**相关的通路层级、关键分子事件及文献引用入口。",
+    },
+    {"name": "InterPro 数据库查询", "sub_category": "信息检索", "description": "整合了多个蛋白质家族、结构域和功能位点的数据库系统。"},
+    {"name": "获取mRNA序列工具", "sub_category": "信息检索", "description": "根据目标疾病靶点基因名称检索 mRNA 序列，并返回 FASTA 文件。"},
+    {"name": "圆二色谱分析工具", "sub_category": "数据分析", "description": "用于分析圆二色性(CD)光谱数据以确定二级结构和热稳定性。"},
+    {"name": "蛋白质序列保守性分析工具", "sub_category": "数据分析", "description": "进行蛋白质多序列比对、系统发育树构建与保守性分析。"},
+    {"name": "ITC结合热力学分析工具", "sub_category": "数据分析", "description": "分析等温滴定量热 (ITC) 数据，返回 Kd、ΔH、ΔS 等热力学参数。"},
+    {"name": "蛋白酶动力学分析工具", "sub_category": "数据分析", "description": "基于荧光读数拟合 Michaelis-Menten 模型分析蛋白酶动力学数据。"},
+    {"name": "酶动力学分析工具", "sub_category": "数据分析", "description": "执行酶动力学实验分析，模拟并拟合酶在不同底物浓度下的反应速率。"},
+    {"name": "RNA二级结构分析工具", "sub_category": "数据分析", "description": "分析 RNA 的二级结构特征，包括碱基配对、茎区、环区数量与大小。"},
+    {
+        "name": "基因集富集分析工具",
+        "sub_category": "数据分析",
+        "description": "对基因列表执行基因集富集分析。",
+        "prompt_template": """[Skill_Route: gseapy_analysis]
+您好。我将为您启动 **基因集富集分析（GSEApy）** 数据接收与预处理：系统将对您提交的基因列表及可选排序统计量进行格式校验，并作为后续富集检验（如 Over-Representation Analysis 等）的标准输入。
+
+**科学用途**
+- 接收来自差异表达、加权基因共表达或其他排序分析得到的**基因标识符列表**；
+- 可选携带**排序变量**（如 log2 倍数变化、检验统计量等），用于先验排序或加权基因集检验流程。
+
+**列定义与生物学含义**
+- **第一列（gene）**：基因符号或与您所用基因集数据库一致的 ID 类型（如人类蛋白编码基因官方符号）；需与 MSigDB 等选用集合的命名体系匹配。
+- **第二列（score）**：与差异方向或显著性一致的**数值型排序量**；若当前仅有基因列表而无统计量，请按工具文档选用二元指示列或经批准的缺省数值策略（具体以工具参数模式为准）。
+
+**数据提交方式**
+1. **上传 CSV**：表头为 `gene,score`（可扩展列名，以工具契约为准），UTF-8 编码，逗号分隔。
+2. **内联表格**：在消息中直接粘贴与下列结构一致的文本（未上传附件时由助手写入 `table_content`，换行在参数中须为 `\\n`）。
+
+**结构与类型说明用参考表（请将基因与数值替换为您的实验结果）**
+```csv
+gene,score
+TP53,1.2
+MYC,-0.8
+EGFR,0.5
+KRAS,0.3
+BRCA1,1.0
+STAT3,0.9
+```
+
+请在消息中补充**物种**、**ID 类型**（如 Homo sapiens / gene symbol），以便与基因集数据库正确映射。
+
+（助手侧：未上传文件时将上表全文写入 `table_content`，换行用 \\n；已上传时仅用附件列表中的路径写入 `file_path`。）
+""",
+    },
+    {"name": "免疫细胞分离与纯化", "sub_category": "临床应用", "description": "模拟免疫细胞的分离与纯化流程。"},
+    {"name": "估计细胞周期各阶段持续时间", "sub_category": "数据分析", "description": "基于双核苷脉冲标记的流式细胞术数据，估算细胞周期各阶段时长。"},
+    {"name": "查询GSEA支持的数据库工具", "sub_category": "信息检索", "description": "返回 gene set enrichment analysis 支持的数据库名称列表。"},
+]
+for skill in ADDITIONAL_BIOMED_SKILLS:
+    skill["main_category"] = "生物医药"
+    if "prompt_template" not in skill:
+        skill["prompt_template"] = PLACEHOLDER_PROMPT
+
+# 化学大类技能列表（默认 prompt 使用 PLACEHOLDER_PROMPT，可按工具落地情况逐项替换为完整模板）
+CHEMISTRY_SKILLS = []
+
+ADDITIONAL_CHEMISTRY_SKILLS = [
+    {
+        "name": "合成可行性分析工具",
+        "sub_category": "数据分析",
+        "description": "对输入的候选分子 SMILES 文本计算 RDKit 合成可行性分数（SA Score）。",
+        "prompt_template": """[Skill_Route: sascore_analysis]
+您好。我需要进行小分子**合成可行性（SA Score，Synthetic Accessibility Score）**评估：该指标基于分子图复杂度启发式打分，**数值越低通常表示合成路线越可行**（具体阈值需结合化学类型与文献经验解读）。
+
+**参数与生物学/化学含义**
+- **`smiles_text`**：单条 **SMILES** 字符串，描述待评估化合物的价键与拓扑（不含盐离子时可写主结构）。
+- **`file_path`**：上传的 `.smi` / `.txt` 等文本文件路径（首行或指定行为 SMILES），由会话附件解析得到。
+
+**数据提交方式**
+1. 在消息正文中直接给出 **一行 SMILES**。
+2. 或上传含 SMILES 的文本附件（第一行为分子线型式）。
+
+**参考分子（可选用其一作为基准对比，或替换为您的候选化合物）**
+- 乙酰水杨酸（阿司匹林）：`CC(=O)Oc1ccccc1C(=O)O`
+- 咖啡因：`CN1C=NC2=C1C(=O)N(C(=O)N2C)C`
+- 乙醇：`CCO`
+- 苯乙酸：`O=C(O)Cc1ccccc1`
+- 二甲亚砜：`CS(=O)C`
+
+（助手侧：未上传文件时将用户给出的单行 SMILES 写入 `smiles_text`；已上传时仅用附件列表中的路径写入 `file_path`。）
+""",
+    },
     {
         "name": "残基互作分析器",
         "sub_category": "数据分析",
@@ -401,129 +524,6 @@ END
 （助手侧：未上传文件时将用户给出的 PDB 全文写入 `pdb_content`，换行用 \\n；已上传时仅用附件列表中的路径写入 `file_path`，路径须来自当前对话。）
 """,
     },
-    {"name": "抗体人源化", "sub_category": "预测与建模", "description": "使用对天然抗体库（Sapiens）或 CDR 移植的深度学习来实现抗体人源化。"},
-    {"name": "分析细菌生长曲线", "sub_category": "数据分析", "description": "基于OD600数据拟合细菌生长曲线，提供参数分析、倍增时间和延迟期等结果。"},
-    {
-        "name": "UniProt数据库查询",
-        "sub_category": "信息检索",
-        "description": "包含蛋白质序列、功能信息和研究论文索引的蛋白质数据库查询。",
-        "prompt_template": "您好。请在 UniProt 数据库中检索 **EGFR** 蛋白条目的功能注释、亚细胞定位及关键结构域信息。",
-    },
-    {"name": "PubMed数据库查询", "sub_category": "信息检索", "description": "生物医学文献信息检索系统。"},
-    {"name": "GWAS catalog 数据库查询", "sub_category": "信息检索", "description": "遗传学研究的重要资源，收录了许多基因组关联数据。"},
-    {"name": "dbSNP 数据库查询", "sub_category": "信息检索", "description": "单核苷酸多态性（SNP）数据库，快速检索SNP信息。"},
-    {"name": "CRISPR-Cas9 基因编辑工具", "sub_category": "预测与建模", "description": "模拟 CRISPR-Cas9 基因组编辑流程，包含向导RNA验证、目标位点识别等。"},
-    {
-        "name": "合成可行性分析工具",
-        "sub_category": "数据分析",
-        "description": "对输入的候选分子 SMILES 文本计算 RDKit 合成可行性分数（SA Score）。",
-        "prompt_template": """[Skill_Route: sascore_analysis]
-您好。我需要进行小分子**合成可行性（SA Score，Synthetic Accessibility Score）**评估：该指标基于分子图复杂度启发式打分，**数值越低通常表示合成路线越可行**（具体阈值需结合化学类型与文献经验解读）。
-
-**参数与生物学/化学含义**
-- **`smiles_text`**：单条 **SMILES** 字符串，描述待评估化合物的价键与拓扑（不含盐离子时可写主结构）。
-- **`file_path`**：上传的 `.smi` / `.txt` 等文本文件路径（首行或指定行为 SMILES），由会话附件解析得到。
-
-**数据提交方式**
-1. 在消息正文中直接给出 **一行 SMILES**。
-2. 或上传含 SMILES 的文本附件（第一行为分子线型式）。
-
-**参考分子（可选用其一作为基准对比，或替换为您的候选化合物）**
-- 乙酰水杨酸（阿司匹林）：`CC(=O)Oc1ccccc1C(=O)O`
-- 咖啡因：`CN1C=NC2=C1C(=O)N(C(=O)N2C)C`
-- 乙醇：`CCO`
-- 苯乙酸：`O=C(O)Cc1ccccc1`
-- 二甲亚砜：`CS(=O)C`
-
-（助手侧：未上传文件时将用户给出的单行 SMILES 写入 `smiles_text`；已上传时仅用附件列表中的路径写入 `file_path`。）
-""",
-    },
-    {"name": "ADMET性质预测工具", "sub_category": "预测与建模", "description": "预测一组化合物的 ADMET 药代动力学属性，包括溶解性、吸收、代谢、毒性等。"},
-    {"name": "LigandMPNN", "sub_category": "预测与建模", "description": "深度学习驱动的蛋白质序列设计模型，能够显式考虑小分子、核酸等非蛋白质环境的作用。"},
-]
-
-# 自动补全通用字段（已配置 prompt_template 的条目保留，其余使用 PLACEHOLDER_PROMPT）
-for skill in BIOMEDICINE_SKILLS:
-    skill["main_category"] = "生物医药"
-    if "prompt_template" not in skill:
-        skill["prompt_template"] = PLACEHOLDER_PROMPT
-
-# 补全遗漏的生物医药技能 (Phase 2)
-ADDITIONAL_BIOMED_SKILLS = [
-    {"name": "ESM-Variants", "sub_category": "预测与建模", "description": "交互式可视化蛋白质序列中的氨基酸变化。"},
-    {"name": "人源性评估", "sub_category": "数据分析", "description": "使用天然抗体库（OASis）中的肽搜索和种系序列同一性来评估抗体的人性。"},
-    {"name": "抗体序列生成", "sub_category": "预测与建模", "description": "对抗体序列进行突变，同时实时监测序列特性。"},
-    {
-        "name": "AlphaFold数据库查询",
-        "sub_category": "信息检索",
-        "description": "查询 AlphaFold 数据库并可选下载结构文件。",
-        "prompt_template": "您好。请查询 UniProt 登录号 **P04637**（p53）在 AlphaFold 结构数据库中的三维预测模型条目、置信度分区及下载方式。",
-    },
-    {"name": "GEO 数据库查询", "sub_category": "信息检索", "description": "快速检索基因表达数据的重要数据库。"},
-    {"name": "ClinVar 数据库查询", "sub_category": "信息检索", "description": "快速检索遗传变异的临床相关信息。"},
-    {"name": "UCSC 基因组浏览器查询", "sub_category": "信息检索", "description": "基因组学研究中的重要工具，快速检索基因组数据。"},
-    {
-        "name": "Reactome 数据库查询",
-        "sub_category": "信息检索",
-        "description": "经过手动筛选和同行评审的生物分子通路知识数据库。",
-        "prompt_template": "您好。请检索 Reactome 知识库中与**细胞凋亡（Apoptosis）**相关的通路层级、关键分子事件及文献引用入口。",
-    },
-    {"name": "InterPro 数据库查询", "sub_category": "信息检索", "description": "整合了多个蛋白质家族、结构域和功能位点的数据库系统。"},
-    {"name": "获取mRNA序列工具", "sub_category": "信息检索", "description": "根据目标疾病靶点基因名称检索 mRNA 序列，并返回 FASTA 文件。"},
-    {"name": "圆二色谱分析工具", "sub_category": "数据分析", "description": "用于分析圆二色性(CD)光谱数据以确定二级结构和热稳定性。"},
-    {"name": "蛋白质序列保守性分析工具", "sub_category": "数据分析", "description": "进行蛋白质多序列比对、系统发育树构建与保守性分析。"},
-    {"name": "ITC结合热力学分析工具", "sub_category": "数据分析", "description": "分析等温滴定量热 (ITC) 数据，返回 Kd、ΔH、ΔS 等热力学参数。"},
-    {"name": "蛋白酶动力学分析工具", "sub_category": "数据分析", "description": "基于荧光读数拟合 Michaelis-Menten 模型分析蛋白酶动力学数据。"},
-    {"name": "酶动力学分析工具", "sub_category": "数据分析", "description": "执行酶动力学实验分析，模拟并拟合酶在不同底物浓度下的反应速率。"},
-    {"name": "RNA二级结构分析工具", "sub_category": "数据分析", "description": "分析 RNA 的二级结构特征，包括碱基配对、茎区、环区数量与大小。"},
-    {
-        "name": "基因集富集分析工具",
-        "sub_category": "数据分析",
-        "description": "对基因列表执行基因集富集分析。",
-        "prompt_template": """[Skill_Route: gseapy_analysis]
-您好。我将为您启动 **基因集富集分析（GSEApy）** 数据接收与预处理：系统将对您提交的基因列表及可选排序统计量进行格式校验，并作为后续富集检验（如 Over-Representation Analysis 等）的标准输入。
-
-**科学用途**
-- 接收来自差异表达、加权基因共表达或其他排序分析得到的**基因标识符列表**；
-- 可选携带**排序变量**（如 log2 倍数变化、检验统计量等），用于先验排序或加权基因集检验流程。
-
-**列定义与生物学含义**
-- **第一列（gene）**：基因符号或与您所用基因集数据库一致的 ID 类型（如人类蛋白编码基因官方符号）；需与 MSigDB 等选用集合的命名体系匹配。
-- **第二列（score）**：与差异方向或显著性一致的**数值型排序量**；若当前仅有基因列表而无统计量，请按工具文档选用二元指示列或经批准的缺省数值策略（具体以工具参数模式为准）。
-
-**数据提交方式**
-1. **上传 CSV**：表头为 `gene,score`（可扩展列名，以工具契约为准），UTF-8 编码，逗号分隔。
-2. **内联表格**：在消息中直接粘贴与下列结构一致的文本（未上传附件时由助手写入 `table_content`，换行在参数中须为 `\\n`）。
-
-**结构与类型说明用参考表（请将基因与数值替换为您的实验结果）**
-```csv
-gene,score
-TP53,1.2
-MYC,-0.8
-EGFR,0.5
-KRAS,0.3
-BRCA1,1.0
-STAT3,0.9
-```
-
-请在消息中补充**物种**、**ID 类型**（如 Homo sapiens / gene symbol），以便与基因集数据库正确映射。
-
-（助手侧：未上传文件时将上表全文写入 `table_content`，换行用 \\n；已上传时仅用附件列表中的路径写入 `file_path`。）
-""",
-    },
-    {"name": "免疫细胞分离与纯化", "sub_category": "临床应用", "description": "模拟免疫细胞的分离与纯化流程。"},
-    {"name": "估计细胞周期各阶段持续时间", "sub_category": "数据分析", "description": "基于双核苷脉冲标记的流式细胞术数据，估算细胞周期各阶段时长。"},
-    {"name": "查询GSEA支持的数据库工具", "sub_category": "信息检索", "description": "返回 gene set enrichment analysis 支持的数据库名称列表。"},
-]
-for skill in ADDITIONAL_BIOMED_SKILLS:
-    skill["main_category"] = "生物医药"
-    if "prompt_template" not in skill:
-        skill["prompt_template"] = PLACEHOLDER_PROMPT
-
-# 化学大类技能列表（默认 prompt 使用 PLACEHOLDER_PROMPT，可按工具落地情况逐项替换为完整模板）
-CHEMISTRY_SKILLS = []
-
-ADDITIONAL_CHEMISTRY_SKILLS = [
     {"name": "Open Babel", "sub_category": "数据处理", "description": "支持分子文件格式转换、分子对接和虚拟筛选。"},
     {"name": "分子分析工具", "sub_category": "数据分析", "description": "基于RDKit，实现分子性质计算、子结构匹配与相似性分析等功能。"},
     {"name": "分子格式转换工具", "sub_category": "数据处理", "description": "基于RDKit，实现SMILES、SDF、Mol、InChI等化学结构格式的相互转换与标准化。"},
@@ -531,7 +531,20 @@ ADDITIONAL_CHEMISTRY_SKILLS = [
     {"name": "3D分子结构渲染工具", "sub_category": "数据可视化", "description": "用于渲染通用小分子的三维结构，支持MOL、SDF格式。"},
     {"name": "LAMMPS", "sub_category": "预测与建模", "description": "开源的分子动力学模拟软件，常被用于模拟液体、固体或气态的粒子集合。"},
     {"name": "分子量计算", "sub_category": "数据分析", "description": "根据化学式计算分子质量和元素组成，可用于辅助化学、制药与生物分析研究。"},
-    {"name": "药物相似性评估工具", "sub_category": "预测与建模", "description": "根据 Lipinski Rule of Five 检查分子是否具有药物相似性。"},
+    {
+        "name": "药物相似性评估工具",
+        "sub_category": "预测与建模",
+        "description": (
+            "双模式入口：① Lipinski 五规则成药潜势（MW/logP/HBD/HBA，本地快速）；"
+            "② 基于 PubChem/ChEMBL 等的结构相似性检索与 HTML 报告（需联网、耗时更长）。"
+            "在技能广场点击「使用」后，请在弹窗中选择「Lipinski 类药性快筛」或「高通量结构相似性搜索」。"
+        ),
+        "prompt_template": (
+            "（前端将弹出模式选择；若直接粘贴执行，请任选其一并在首行保留暗号）\n"
+            "[Skill_Route: lipinski_druglikeness]\n"
+            "您好。请对下列 SMILES 执行 Lipinski 五规则类药性快筛。"
+        ),
+    },
     {"name": "分子胃肠道吸收能力评估工具", "sub_category": "预测与建模", "description": "估算分子在胃肠道的吸收能力。"},
     {"name": "分子官能团识别工具", "sub_category": "数据分析", "description": "识别分子中的常见官能团 (functional groups)。"},
     {"name": "化学元素查询", "sub_category": "信息检索", "description": "查询指定化学元素的详细信息。"},
@@ -551,7 +564,8 @@ ADDITIONAL_CHEMISTRY_SKILLS = [
 ]
 for skill in ADDITIONAL_CHEMISTRY_SKILLS:
     skill["main_category"] = "化学"
-    skill["prompt_template"] = PLACEHOLDER_PROMPT
+    if "prompt_template" not in skill:
+        skill["prompt_template"] = PLACEHOLDER_PROMPT
 CHEMISTRY_SKILLS.extend(ADDITIONAL_CHEMISTRY_SKILLS)
 
 

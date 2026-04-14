@@ -101,8 +101,11 @@ JSON 必须严格包含三个键：
    - 普通问候、生活闲聊/咨询（如“怎么穿衣”）、实时联网检索（天气/新闻），或查询医学百科级知识，选 chat。
 4) task（管线分析）
    - 用户明确要跑组学分析、流程等，且 file_status 有匹配文件就绪时，选 task。
-5) skill_fast_lane
-   - 极度明确属于某个已命名的「技能」快捷路径。
+5) skill_fast_lane（技能快车道：无上传文件也可选）
+   - 当用户意图是**已落地的 PySkills 化学/成药技能**（见下），且不是「泛泛了解 Lipinski 概念」式的百科问答时，选 `skill_fast_lane`。
+   - **药物相似性 / 药物筛选 / 类药性 / Lipinski / 五规则 / 口服成药 / 分子相似度 / 结构相似性 / Tanimoto / 类似物发现 / PubChem 检索 / ChEMBL 相似化合物** 等表述，只要语境是「算一算、筛一筛、跑工具」而非纯概念课，一律判为 `skill_fast_lane`。
+   - 此时 `rationale_short` **必须**包含字面片段 **`skill_id=drug_similarity`**（便于编排器与审计识别逻辑技能包）；可另附简短中文，例如：`skill_id=drug_similarity，用户要 Lipinski 快筛` 或 `skill_id=drug_similarity，结构相似性检索`。
+   - 若同时像闲聊（例如仅问「Lipinski 五规则是什么」）且无执行诉求，选 `chat`。
 
 【上下文感知原则】（若 recent_history 非空则必须结合判断）
 - 若 recent_history 显示刚完成某条生信工作流，且当前 query 是含糊追问（如「进一步做交叉分析」），优先判 task，继续走分析链。
@@ -114,6 +117,9 @@ JSON 必须严格包含三个键：
 - "你能帮我搜一下关于 CRISPR 的文献吗" -> route: "chat" (文献检索)
 - "帮我对这两个 fastq 文件做差异表达分析" -> route: "task" (针对文件的分析管线)
 - "进一步做跨组学交叉分析" (且 recent_history 刚完成转录组) -> route: "task" (基于有效上下文继续执行)
+- "帮我对这个 SMILES 做一下 Lipinski 五规则筛查" -> route: "skill_fast_lane", rationale_short 含 skill_id=drug_similarity
+- "在 PubChem 里找和这个分子结构相似的化合物" -> route: "skill_fast_lane", rationale_short 含 skill_id=drug_similarity
+- "Lipinski 五规则是哪五条？"（纯概念） -> route: "chat"
 """
 
 

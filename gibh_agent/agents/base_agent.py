@@ -13,6 +13,7 @@ from ..core.stream_utils import strip_suggestions_from_text
 from ..core.diagnosis_param_whitelist import (
     build_diagnosis_whitelist_prompt,
     collect_param_whitelist_for_diagnosis,
+    humanize_param_key_as_ui_label,
 )
 from .reporting.sted_ec_expert_report_prompts import (
     CRITICAL_INSTRUCTION_STED_EC_FOR_PARENT,
@@ -391,6 +392,88 @@ class BaseAgent(ABC):
 表格第一列参数名**禁止**用 Markdown 加粗（**）或反引号（`）包裹，仅写裸参数字符串。
 """
 
+    def _extract_editable_params(
+        self,
+        workflow: Any,
+        target_step_ids: Optional[List[str]] = None,
+        file_metadata: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        深度遍历工作流模板步骤，收集前端可编辑控件的 **参数 Key** 与 **展示用 Label**
+       （Label 与 `humanize_param_key_as_ui_label` / 前端 `displayName` 规则一致）。
+
+        供诊断白名单、联调核对、以及后续工具链扩展；扁平 Key 集合与
+        `build_diagnosis_whitelist_prompt` / `_extract_available_parameters` 对齐。
+        """
+        rows: List[Dict[str, Any]] = []
+        if workflow is None:
+            return rows
+        tmpl: Optional[Dict[str, Any]] = None
+        try:
+            ts = target_step_ids if target_step_ids else None
+            tmpl = workflow.generate_template(ts, file_metadata)
+        except Exception as e:
+            logger.debug("_extract_editable_params: generate_template 失败: %s", e)
+        steps: List[Any] = []
+        if tmpl and isinstance(tmpl.get("workflow_data"), dict):
+            steps = tmpl["workflow_data"].get("steps") or []
+        if steps:
+            for idx, st in enumerate(steps):
+                if not isinstance(st, dict):
+                    continue
+                sid = st.get("step_id") or st.get("id") or ""
+                sname = st.get("name") or st.get("step_name") or sid or "步骤"
+                params = st.get("params")
+                if not isinstance(params, dict) or not params:
+                    continue
+                for k in params:
+                    if not isinstance(k, str) or not k:
+                        continue
+                    rows.append(
+                        {
+                            "step_index": idx,
+                            "step_id": sid,
+                            "step_name": sname,
+                            "param_key": k,
+                            "label": humanize_param_key_as_ui_label(k),
+                        }
+                    )
+            return rows
+        # 回退：与 diagnosis_param_whitelist 一致，按 DAG + get_step_metadata
+        try:
+            dag = getattr(workflow, "steps_dag", None) or {}
+            if target_step_ids:
+                valid = [s for s in target_step_ids if s in dag]
+                if not valid:
+                    valid = list(dag.keys())
+                resolved = workflow.resolve_dependencies(valid)
+            else:
+                resolved = list(dag.keys())
+        except Exception:
+            resolved = []
+        for idx, step_id in enumerate(resolved):
+            try:
+                meta = workflow.get_step_metadata(step_id)
+            except Exception:
+                meta = {}
+            sname = (meta or {}).get("name", step_id)
+            params = (meta or {}).get("default_params") or {}
+            if not isinstance(params, dict) or not params:
+                continue
+            for k in params:
+                if not isinstance(k, str) or not k:
+                    continue
+                rows.append(
+                    {
+                        "step_index": idx,
+                        "step_id": step_id,
+                        "step_name": sname,
+                        "param_key": k,
+                        "label": humanize_param_key_as_ui_label(k),
+                    }
+                )
+        return rows
+
     def _extract_available_parameters(
         self,
         workflow: Any,
@@ -643,9 +726,11 @@ Use Simplified Chinese for all content."""
             # 构建强制事实字符串
             facts_str = " ".join(stats_facts) if stats_facts else "统计数据已提供在用户提示中。"
 
-            whitelist_prompt_extra = self._format_diagnosis_param_whitelist_prompt(
-                sorted(whitelist_set) if whitelist_set else []
-            )
+            # 已通过 workflow 注入 build_diagnosis_whitelist_prompt 全文时，禁止覆盖为仅扁平 Key，否则会丢失步骤级约束。
+            if workflow_for_whitelist is None and not valid_ui_param_names:
+                whitelist_prompt_extra = self._format_diagnosis_param_whitelist_prompt(
+                    sorted(whitelist_set) if whitelist_set else []
+                )
             prompt = f"{prompt}{whitelist_prompt_extra}"
             
             # 🔥 CRITICAL DEBUGGING: 检查数据是否缺失，如果缺失则注入调试跟踪

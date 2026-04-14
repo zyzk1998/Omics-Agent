@@ -645,6 +645,8 @@ class AgentOrchestrator:
 
         # 🔥 工作流收藏复用：正则拦截「用户请求复用工作流模板」，跳过 LLM 规划，直接下发 DB 中的 config_json 作为 workflow 事件
         _query_str = (query or "").strip()
+        # SemanticRouter 判为 drug_similarity 快车道且无 [Skill_Route] 时，由编排器补全暗号并直出 SkillAgent
+        _semantic_skill_fast_lane_tool: Optional[str] = None
         match = re.search(r"\[系统注入：用户请求复用工作流模板：\s*(\d+)\s*\]", _query_str)
         logger.info("🔍 [Orchestrator] 尝试拦截复用指令: query=%s -> 匹配结果: %s", _query_str[:80] if _query_str else "", match)
         if match and db and owner_id:
@@ -810,6 +812,50 @@ class AgentOrchestrator:
                                 intent_type = "chat"
                             elif router_output.route == RouteKind.skill_fast_lane:
                                 intent_type = "chat"
+                                rsn = (router_output.rationale_short or "").lower()
+                                if (
+                                    "drug_similarity" in rsn
+                                    or "skill_id=drug_similarity" in rsn
+                                ) and not re.search(r"\[Skill_Route:\s*\w+", _query_str, re.I):
+                                    qraw = _query_str or ""
+                                    ql = qraw.lower()
+                                    lip_hints = (
+                                        "lipinski",
+                                        "五规则",
+                                        "类药性",
+                                        "成药潜势",
+                                        "口服小分子",
+                                        "drug-like",
+                                        "rule of five",
+                                        "rule-of-five",
+                                    )
+                                    sim_hints = (
+                                        "结构相似",
+                                        "类似物",
+                                        "pubchem",
+                                        "chembl",
+                                        "相似度",
+                                        "相似性",
+                                        "高通量",
+                                        "tanimoto",
+                                        "聚类",
+                                        "指纹",
+                                        "分子相似",
+                                    )
+                                    has_lip = any(x in qraw or x in ql for x in lip_hints)
+                                    has_sim = any(x in qraw or x in ql for x in sim_hints)
+                                    if has_sim and not has_lip:
+                                        _semantic_skill_fast_lane_tool = "drug_similarity_search"
+                                    elif has_lip and not has_sim:
+                                        _semantic_skill_fast_lane_tool = "lipinski_druglikeness"
+                                    elif has_sim and has_lip:
+                                        _semantic_skill_fast_lane_tool = (
+                                            "drug_similarity_search"
+                                            if ("pubchem" in ql or "chembl" in ql or "结构相似" in qraw or "类似物" in qraw)
+                                            else "lipinski_druglikeness"
+                                        )
+                                    else:
+                                        _semantic_skill_fast_lane_tool = "lipinski_druglikeness"
                             else:
                                 intent_type = "chat"
 
@@ -854,6 +900,61 @@ class AgentOrchestrator:
             logger.error(f"❌ [Orchestrator] 全局意图分类失败: {e}", exc_info=True)
             logger.warning("⚠️ [Orchestrator] 意图分类失败，安全降级进入 chat 模式")
             intent_type = "chat"
+
+        if _semantic_skill_fast_lane_tool:
+            logger.info(
+                "🚀 [Orchestrator] SemanticRouter skill_fast_lane（drug_similarity）→ 补全暗号: %s",
+                _semantic_skill_fast_lane_tool,
+            )
+            augmented_query = f"[Skill_Route: {_semantic_skill_fast_lane_tool}]\n{_query_str}"
+            unique_paths_fl: List[str] = []
+            seen_paths_fl: Set[str] = set()
+            for _f in files:
+                if isinstance(_f, dict):
+                    _p = _f.get("path") or _f.get("file_path")
+                else:
+                    _p = str(_f) if _f is not None else ""
+                _p = (_p or "").strip()
+                if _p and _p not in seen_paths_fl:
+                    seen_paths_fl.add(_p)
+                    unique_paths_fl.append(_p)
+            llm_client_fl = self._get_llm_client()
+            from gibh_agent.agents.skill_agent import SkillAgent
+
+            def _skill_format_sse_fl(event_type: str, data: Dict[str, Any]) -> str:
+                return self._emit_sse(state_snapshot, event_type, data)
+
+            skill_agent_fl = SkillAgent(llm_client=llm_client_fl, format_sse=_skill_format_sse_fl)
+            try:
+                async for _sse_chunk in skill_agent_fl.execute_skill(
+                    _semantic_skill_fast_lane_tool,
+                    augmented_query,
+                    unique_paths_fl,
+                    model_name=model_name,
+                ):
+                    yield _sse_chunk
+                    await asyncio.sleep(0.01)
+            except Exception as e:
+                logger.exception("❌ [Orchestrator] 语义快车道技能执行失败: %s", e)
+                yield self._emit_sse(
+                    state_snapshot,
+                    "message",
+                    {"content": f"**技能快车道失败**：{e}"},
+                )
+            yield self._emit_sse(state_snapshot, "status", {"content": "回答完成", "state": "completed"})
+            await asyncio.sleep(0.01)
+            done_payload_fl: Dict[str, Any] = {"status": "success"}
+            try:
+                bundle_fl = skill_agent_fl.consume_pending_done_tool()
+                if bundle_fl and bundle_fl.get("tool_result") is not None:
+                    done_payload_fl["tool_name"] = bundle_fl.get("tool_name")
+                    done_payload_fl["tool_result"] = bundle_fl["tool_result"]
+            except Exception:
+                pass
+            yield self._emit_sse(state_snapshot, "done", done_payload_fl)
+            state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+            yield self._format_sse("state_snapshot", state_snapshot)
+            return
 
         if intent_type == "chat":
             # 🔥 CHAT MODE：必须与「意图 try」解耦，否则 MCP/流式任一异常会被误当成「分类失败」并落入 Task 产线

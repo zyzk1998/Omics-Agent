@@ -311,37 +311,91 @@
             </div>
         </div>
 
-        <!-- Phase 3: 登录/注册弹窗（Kimi 风格） -->
+        <!-- Phase 3: 身份认证抽屉（分步壳层；MFA/OAuth 演示与后端对齐见 docs/身份认证体系.md） -->
         <div id="auth-modal" class="auth-modal-overlay" style="display: none;" aria-hidden="true">
             <div class="auth-modal-backdrop" id="auth-modal-backdrop"></div>
-            <div class="auth-modal-card">
+            <aside class="auth-shell-drawer" role="dialog" aria-modal="true" aria-labelledby="auth-shell-title-main">
                 <button type="button" class="auth-modal-close" id="auth-modal-close" title="关闭" aria-label="关闭">&times;</button>
-                <div class="auth-modal-tabs">
-                    <button type="button" class="auth-tab active" data-tab="login">登录</button>
-                    <button type="button" class="auth-tab" data-tab="register">注册</button>
-                </div>
-                <div id="auth-modal-panel-login" class="auth-panel">
-                    <form id="auth-form-login" class="auth-form">
-                        <input type="text" id="auth-username-login" class="auth-input" placeholder="用户名" autocomplete="username" required>
-                        <input type="password" id="auth-password-login" class="auth-input" placeholder="密码" autocomplete="current-password" required>
-                        <button type="submit" class="auth-submit-btn">立即登录</button>
-                        <p class="auth-oauth-divider" aria-hidden="true">— 或使用以下方式登录 —</p>
-                        <div class="auth-oauth-row" role="group" aria-label="第三方登录">
-                            <button type="button" class="auth-oauth-btn auth-oauth-wechat" title="微信" aria-label="微信登录" onclick="console.log('第三方登录待接入')"><span class="auth-oauth-inner" aria-hidden="true">微</span></button>
-                            <button type="button" class="auth-oauth-btn auth-oauth-github" title="GitHub" aria-label="GitHub 登录" onclick="console.log('第三方登录待接入')"><i class="bi bi-github" aria-hidden="true"></i></button>
-                            <button type="button" class="auth-oauth-btn auth-oauth-google" title="Google" aria-label="Google 登录" onclick="console.log('第三方登录待接入')"><i class="bi bi-google" aria-hidden="true"></i></button>
+                <div class="auth-shell-body">
+                    <header class="auth-shell-brand">
+                        <p class="auth-shell-kicker">Omics Agent</p>
+                        <h2 id="auth-shell-title-main" class="auth-shell-h2">进入工作区</h2>
+                        <p class="auth-shell-lead">第三方、聚合账号或创建新账号</p>
+                    </header>
+
+                    <section class="auth-shell-step" data-auth-step="gate">
+                        <div class="auth-shell-oauth" role="group" aria-label="第三方账号">
+                            <button type="button" class="auth-shell-iconbtn" id="auth-oauth-wechat" title="微信" aria-label="微信"><span class="auth-shell-iconbtn-mark">微</span></button>
+                            <button type="button" class="auth-shell-iconbtn" id="auth-oauth-github" title="GitHub" aria-label="GitHub"><i class="bi bi-github" aria-hidden="true"></i></button>
+                            <button type="button" class="auth-shell-iconbtn" id="auth-oauth-google" title="Google" aria-label="Google"><i class="bi bi-google" aria-hidden="true"></i></button>
                         </div>
-                    </form>
+                        <div class="auth-shell-or" aria-hidden="true"><span>或</span></div>
+                        <label class="auth-shell-label" for="auth-gate-identifier">账号</label>
+                        <input type="text" id="auth-gate-identifier" class="auth-shell-field" placeholder="请输入用户名 / 邮箱 / 手机号" autocomplete="username" />
+                        <button type="button" class="auth-shell-primary" id="auth-gate-continue">继续</button>
+                        <div class="auth-shell-rowlinks">
+                            <button type="button" class="auth-shell-link" id="auth-link-register">创建账号</button>
+                            <span class="auth-shell-dot">·</span>
+                            <button type="button" class="auth-shell-link" id="auth-link-demo-oauth">演示：OAuth 绑定冲突</button>
+                        </div>
+                    </section>
+
+                    <section class="auth-shell-step" data-auth-step="register" hidden>
+                        <button type="button" class="auth-shell-back" id="auth-back-from-register" aria-label="返回">← 返回</button>
+                        <h3 class="auth-shell-h3">注册向导</h3>
+                        <p class="auth-shell-lead auth-shell-lead--tight">唯一用户名 + 至少一种触达渠道（验证码为 UI 壳，接口未接通）</p>
+                        <form id="auth-form-register" class="auth-shell-stack">
+                            <input type="text" id="auth-username-register" class="auth-shell-field" placeholder="用户名（唯一）" autocomplete="username" required />
+                            <input type="password" id="auth-password-register" class="auth-shell-field" placeholder="设置密码" autocomplete="new-password" required />
+                            <label class="auth-shell-label" for="auth-register-email">邮箱</label>
+                            <div class="auth-shell-inline">
+                                <input type="email" id="auth-register-email" class="auth-shell-field auth-shell-field--grow" placeholder="name@example.com" autocomplete="email" />
+                                <button type="button" class="auth-shell-secondary" id="auth-send-email-code">发送验证码</button>
+                            </div>
+                            <input type="text" id="auth-register-email-code" class="auth-shell-field" placeholder="邮箱验证码" inputmode="numeric" maxlength="8" />
+                            <label class="auth-shell-label" for="auth-register-phone">手机号</label>
+                            <div class="auth-shell-inline">
+                                <input type="tel" id="auth-register-phone" class="auth-shell-field auth-shell-field--grow" placeholder="+86 …" autocomplete="tel" />
+                                <button type="button" class="auth-shell-secondary" id="auth-send-phone-code">发送验证码</button>
+                            </div>
+                            <input type="text" id="auth-register-phone-code" class="auth-shell-field" placeholder="短信验证码" inputmode="numeric" maxlength="8" />
+                            <button type="submit" class="auth-shell-primary">提交注册</button>
+                        </form>
+                    </section>
+
+                    <section class="auth-shell-step" data-auth-step="login" hidden>
+                        <button type="button" class="auth-shell-back" id="auth-back-from-login" aria-label="返回">← 返回</button>
+                        <h3 class="auth-shell-h3">登录</h3>
+                        <p class="auth-shell-label">当前账号</p>
+                        <p class="auth-shell-account" id="auth-shell-account-label">—</p>
+                        <input type="hidden" id="auth-username-login" value="" />
+                        <label class="auth-shell-label" for="auth-shell-login-password">密码</label>
+                        <input type="password" id="auth-shell-login-password" class="auth-shell-field" placeholder="密码" autocomplete="current-password" />
+                        <button type="button" class="auth-shell-primary" id="auth-btn-login-password">登录</button>
+                    </section>
+
+                    <section class="auth-shell-step" data-auth-step="mfa" hidden>
+                        <button type="button" class="auth-shell-back" id="auth-mfa-back" aria-label="返回">← 返回</button>
+                        <h3 class="auth-shell-h3">二次验证</h3>
+                        <p id="auth-shell-mfa-lead" class="auth-shell-lead auth-shell-lead--tight" aria-live="polite"></p>
+                        <input type="text" id="auth-shell-mfa-code" class="auth-shell-field" placeholder="演示验证码：123456" maxlength="6" inputmode="numeric" autocomplete="one-time-code" />
+                        <button type="button" class="auth-shell-primary" id="auth-btn-mfa-confirm">验证并登录</button>
+                    </section>
+
+                    <section class="auth-shell-step" data-auth-step="oauth_challenge" hidden>
+                        <button type="button" class="auth-shell-back" id="auth-oauth-cancel" aria-label="返回">← 返回</button>
+                        <div class="auth-shell-alert" role="alert">
+                            <strong>所有权挑战</strong>
+                            <p>发现该邮箱已被注册。请输入<strong>原账号密码</strong>以完成 GitHub 绑定（演示 UI）。</p>
+                        </div>
+                        <label class="auth-shell-label" for="auth-shell-oauth-password">本地密码</label>
+                        <input type="password" id="auth-shell-oauth-password" class="auth-shell-field" placeholder="原账号密码" autocomplete="current-password" />
+                        <button type="button" class="auth-shell-primary" id="auth-btn-oauth-bind-mock">确认绑定</button>
+                    </section>
+
+                    <p id="auth-modal-error" class="auth-shell-error" style="display: none;" role="status"></p>
                 </div>
-                <div id="auth-modal-panel-register" class="auth-panel" style="display: none;">
-                    <form id="auth-form-register" class="auth-form">
-                        <input type="text" id="auth-username-register" class="auth-input" placeholder="用户名" autocomplete="username" required>
-                        <input type="password" id="auth-password-register" class="auth-input" placeholder="密码" autocomplete="new-password" required>
-                        <button type="submit" class="auth-submit-btn">立即注册</button>
-                    </form>
-                </div>
-                <p id="auth-modal-error" class="auth-error" style="display: none;"></p>
-            </div>
+            </aside>
         </div>
 
         <!-- 系统设置弹窗（与 auth-modal 同级） -->
@@ -482,6 +536,8 @@
         <style>
             .auth-modal-overlay { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; }
             .auth-modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.45); backdrop-filter: blur(6px); }
+            #auth-modal.auth-modal-overlay { align-items: stretch; justify-content: flex-end; }
+            #auth-modal .auth-modal-backdrop { cursor: pointer; }
             .auth-modal-card { position: relative; background: var(--card-bg); color: var(--text-color); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.15); padding: 28px 32px; min-width: 360px; max-width: 90vw; }
             .auth-modal-close { position: absolute; top: 16px; right: 16px; width: 32px; height: 32px; border: none; background: none; font-size: 24px; line-height: 1; color: #6b7280; cursor: pointer; border-radius: 8px; }
             .auth-modal-close:hover { background: var(--sidebar-hover); color: var(--text-color); }
@@ -498,27 +554,77 @@
             .settings-btn-cancel:hover { background: #e5e7eb; }
             .settings-btn-confirm { background: #4d6bfe; color: #fff; border-color: #4d6bfe; }
             .settings-btn-confirm:hover { background: #4338ca; }
-            .auth-modal-tabs { display: flex; gap: 8px; margin-bottom: 24px; }
-            .auth-tab { padding: 10px 20px; border: none; background: #f3f4f6; color: #6b7280; border-radius: 10px; cursor: pointer; font-size: 15px; }
-            .auth-tab:hover { background: #e5e7eb; color: #374151; }
-            .auth-tab.active { background: #111; color: #fff; }
-            .auth-form { display: flex; flex-direction: column; gap: 20px; }
-            .auth-input { width: 100%; padding: 14px 0; border: none; border-bottom: 1px solid #e5e7eb; font-size: 15px; outline: none; box-sizing: border-box; background: transparent; }
-            .auth-input:focus { border-bottom-color: #3b82f6; }
-            .auth-input::placeholder { color: #9ca3af; }
-            .auth-submit-btn { width: 100%; padding: 14px; border: none; border-radius: 12px; background: #111; color: #fff; font-size: 15px; font-weight: 500; cursor: pointer; margin-top: 8px; }
-            .auth-submit-btn:hover { background: #333; }
-            .auth-submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-            .auth-oauth-divider { margin: 4px 0 0 0; text-align: center; font-size: 12px; color: #9ca3af; font-weight: 400; letter-spacing: 0.02em; }
-            .auth-oauth-row { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 4px; padding: 4px 0 2px; }
-            .auth-oauth-btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid #e5e7eb; background: #fafafa; color: #374151; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: background 0.2s, border-color 0.2s, transform 0.15s; }
-            .auth-oauth-btn:hover { background: #f3f4f6; border-color: #d1d5db; transform: translateY(-1px); }
-            .auth-oauth-btn .bi { font-size: 1.25rem; line-height: 1; }
-            .auth-oauth-inner { font-size: 14px; font-weight: 600; color: #07c160; }
-            .auth-oauth-wechat:hover { border-color: rgba(7, 193, 96, 0.35); }
-            .auth-oauth-github:hover { color: #24292f; }
-            .auth-oauth-google:hover { color: #4285f4; }
+            /* 认证抽屉（#auth-modal）：极简宽体侧滑 */
+            .auth-shell-drawer {
+                position: relative;
+                width: min(440px, 100vw);
+                min-height: 100%;
+                box-sizing: border-box;
+                padding: 56px 40px 40px;
+                background: var(--card-bg, #fff);
+                color: var(--text-color, #111);
+                border-left: 1px solid var(--input-border, #e8e8ec);
+                box-shadow: -24px 0 80px rgba(15, 23, 42, 0.06);
+            }
+            #auth-modal .auth-modal-close { top: 20px; right: 24px; z-index: 2; }
+            .auth-shell-body { display: flex; flex-direction: column; gap: 28px; max-width: 360px; margin: 0 auto; }
+            .auth-shell-brand { margin-bottom: 4px; }
+            .auth-shell-kicker { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #9ca3af; margin: 0 0 10px; font-weight: 600; }
+            .auth-shell-h2 { font-size: 1.65rem; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 8px; line-height: 1.2; }
+            .auth-shell-h3 { font-size: 1.15rem; font-weight: 600; margin: 0 0 8px; letter-spacing: -0.01em; }
+            .auth-shell-lead { font-size: 14px; line-height: 1.55; color: #6b7280; margin: 0; }
+            .auth-shell-lead--tight { margin-top: -4px; }
+            .auth-shell-step { display: flex; flex-direction: column; gap: 14px; animation: auth-shell-in 0.22s ease; }
+            .auth-shell-step[hidden] { display: none !important; }
+            @keyframes auth-shell-in { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+            .auth-shell-oauth { display: flex; justify-content: center; gap: 16px; margin-top: 4px; }
+            .auth-shell-iconbtn {
+                width: 48px; height: 48px; border-radius: 50%; border: 1px solid #e5e7eb; background: #fafafa; color: #374151;
+                cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 1.1rem;
+                transition: border-color 0.15s, background 0.15s, transform 0.12s;
+            }
+            .auth-shell-iconbtn:hover { background: #fff; border-color: #d1d5db; transform: translateY(-1px); }
+            .auth-shell-iconbtn-mark { font-size: 15px; font-weight: 700; color: #07c160; }
+            .auth-shell-or { display: flex; align-items: center; gap: 16px; margin: 8px 0 4px; color: #d1d5db; font-size: 12px; }
+            .auth-shell-or::before, .auth-shell-or::after { content: ""; flex: 1; height: 1px; background: #ececf0; }
+            .auth-shell-or span { color: #9ca3af; }
+            .auth-shell-label { font-size: 12px; font-weight: 600; color: #6b7280; margin-bottom: -6px; }
+            .auth-shell-field {
+                width: 100%; box-sizing: border-box; padding: 14px 16px; border-radius: 10px; border: 1px solid #e8e8ec;
+                font-size: 15px; background: var(--input-bg, #fafafa); color: var(--text-color, #111); outline: none;
+                transition: border-color 0.15s, box-shadow 0.15s;
+            }
+            .auth-shell-field:focus { border-color: #c7c9d1; box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.05); }
+            .auth-shell-field::placeholder { color: #b4b8c2; }
+            .auth-shell-field--grow { flex: 1; min-width: 0; }
+            .auth-shell-inline { display: flex; gap: 10px; align-items: stretch; }
+            .auth-shell-primary {
+                margin-top: 6px; width: 100%; padding: 14px 16px; border: none; border-radius: 10px; background: #111; color: #fff;
+                font-size: 15px; font-weight: 600; cursor: pointer; transition: opacity 0.15s, transform 0.1s;
+            }
+            .auth-shell-primary:hover { opacity: 0.92; }
+            .auth-shell-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+            .auth-shell-secondary {
+                flex-shrink: 0; padding: 0 14px; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff; color: #374151;
+                font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
+            }
+            .auth-shell-secondary:hover { background: #f9fafb; }
+            .auth-shell-rowlinks { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; }
+            .auth-shell-link { border: none; background: none; color: #4d6bfe; font-size: 13px; cursor: pointer; padding: 4px 2px; text-decoration: underline; text-underline-offset: 3px; }
+            .auth-shell-link:hover { color: #4338ca; }
+            .auth-shell-dot { color: #d1d5db; font-size: 13px; user-select: none; }
+            .auth-shell-back { align-self: flex-start; border: none; background: none; color: #6b7280; font-size: 13px; cursor: pointer; margin: -8px 0 4px; padding: 4px 0; }
+            .auth-shell-back:hover { color: #111; }
+            .auth-shell-stack { display: flex; flex-direction: column; gap: 12px; margin: 0; }
+            .auth-shell-account { font-size: 15px; font-weight: 600; margin: -6px 0 4px; word-break: break-all; }
+            .auth-shell-mini { font-size: 12px; color: #9ca3af; margin: -4px 0 0; line-height: 1.45; }
+            .auth-shell-alert {
+                padding: 16px 18px; border-radius: 12px; border: 1px solid #fecaca; background: #fff5f5; color: #7f1d1d; font-size: 14px; line-height: 1.5;
+            }
+            .auth-shell-alert strong { display: block; margin-bottom: 6px; font-size: 15px; }
+            .auth-shell-alert p { margin: 0; color: #991b1b; }
             .auth-error { color: #dc2626; font-size: 13px; margin-top: 12px; }
+            .auth-shell-error { color: #dc2626; font-size: 13px; margin: 8px 0 0; line-height: 1.4; }
             /* 官方演示数据集弹窗（Bootstrap modal 内，复用 CSS 变量） */
             .demo-ds-modal .demo-ds-modal__content {
                 border-radius: 14px;
@@ -712,11 +818,11 @@
                 }
                 return out;
             }
-            /** SSE 主路径从未写入 chatHistory 时，从 #chatContent 回填最近 1～2 轮，避免点建议时 history: [] */
-            function ensureChatHistoryFromDomIfEmpty() {
-                if (chatHistory && chatHistory.length > 0) return;
+            /** 从 #chatContent 扫描 user/ai 气泡，抽取 { user, ai } 回合（供 history 回填与删除后重建） */
+            function collectChatTurnsFromDom(maxTurns) {
+                maxTurns = maxTurns || 40;
                 var root = document.getElementById('chatContent');
-                if (!root) return;
+                if (!root) return [];
                 var rows = root.querySelectorAll('.message-row');
                 var pendingUser = null;
                 var buf = [];
@@ -738,7 +844,16 @@
                         }
                     }
                 }
-                var take = buf.slice(-2);
+                return buf.slice(-maxTurns);
+            }
+            function rebuildChatHistoryFromDom() {
+                chatHistory = collectChatTurnsFromDom(40);
+                if (chatHistory.length) console.log('📜 [chatHistory] 已从 DOM 重建', chatHistory.length, '轮');
+            }
+            /** SSE 主路径从未写入 chatHistory 时，从 #chatContent 回填最近 1～2 轮，避免点建议时 history: [] */
+            function ensureChatHistoryFromDomIfEmpty() {
+                if (chatHistory && chatHistory.length > 0) return;
+                var take = collectChatTurnsFromDom(2);
                 for (var j = 0; j < take.length; j++) chatHistory.push(take[j]);
                 if (take.length) console.log('📜 [chatHistory] 从 DOM 回填', take.length, '轮');
             }
@@ -748,6 +863,7 @@
             }
             window.ensureChatHistoryFromDomIfEmpty = ensureChatHistoryFromDomIfEmpty;
             window.appendTurnToChatHistory = appendTurnToChatHistory;
+            window.rebuildChatHistoryFromDom = rebuildChatHistoryFromDom;
             let uploadedFiles = []; // 已上传的文件（用于聊天请求）
             let isProcessing = false; 
             window.DEMO_STATE = window.DEMO_STATE || 'IDLE';
@@ -1171,8 +1287,17 @@
             var skillsTotal = 0;
             var skillsPageSize = 12;
 
-            /** 特色科研流程：顶尖实验室沉淀技能（前端注入，与后端列表合并展示；点击后走 getTargetDomainFromSkill 硬路由） */
+            /** 前端置顶技能：特色科研流程 / 「全部」第 1 页 / 「化学」第 1 页与 API 结果按名称去重合并；点击后走 getTargetDomainFromSkill 硬路由 */
             window.__FEATURED_RESEARCH_SKILLS = [
+                {
+                    id: 'feat_drug_similarity',
+                    name: '药物相似性评估工具',
+                    main_category: '化学',
+                    sub_category: '预测与建模',
+                    description: 'Lipinski 五规则快筛与 PubChem/ChEMBL 结构相似性检索双模式；点击「使用」后在弹窗中选择路线。',
+                    tags: ['药物筛选', 'Lipinski', '分子相似度', 'PySkills'],
+                    prompt_template: ''
+                },
                 {
                     id: 'sted_ec_trajectory',
                     name: '单细胞时空轨迹推断 (STED-EC)',
@@ -1246,12 +1371,31 @@
                         skillsTotal = (data && data.total) != null ? data.total : 0;
                         var featured = window.__FEATURED_RESEARCH_SKILLS || [];
                         if (featured.length) {
+                            var _featNames = {};
+                            featured.forEach(function(f) { if (f && f.name) _featNames[f.name] = true; });
+                            var _dedupeAgainstFeatured = function(arr) {
+                                return (arr || []).filter(function(s) { return s && s.name && !_featNames[s.name]; });
+                            };
                             if (skillsCurrentMain === '特色科研流程') {
-                                items = featured.concat(items.filter(function(s) { return (s.main_category || '') !== '特色科研流程'; }));
+                                items = featured.concat(_dedupeAgainstFeatured(items.filter(function(s) { return (s.main_category || '') !== '特色科研流程'; })));
                                 skillsTotal = Math.max(skillsTotal, items.length);
                             } else if (skillsCurrentMain === '' && skillsCurrentPage === 1) {
-                                items = featured.concat(items);
+                                items = featured.concat(_dedupeAgainstFeatured(items));
                                 skillsTotal += featured.length;
+                            } else if (skillsCurrentMain === '\u5316\u5b66' && skillsCurrentPage === 1) {
+                                var chemFeat = featured.filter(function (f) {
+                                    return f && (f.main_category || '') === '\u5316\u5b66';
+                                });
+                                if (chemFeat.length) {
+                                    var chemPinnedNames = {};
+                                    chemFeat.forEach(function (f) {
+                                        if (f && f.name) chemPinnedNames[f.name] = true;
+                                    });
+                                    items = chemFeat.concat((items || []).filter(function (s) {
+                                        return s && s.name && !chemPinnedNames[s.name];
+                                    }));
+                                    skillsTotal += chemFeat.length;
+                                }
                             }
                         }
                         if (!grid) return;
@@ -1431,10 +1575,89 @@
                 return null;
             }
 
+            var DRUG_SIM_DUAL_SKILL_NAME = '药物相似性评估工具';
+
+            function openDrugSimilarityModeModal(skill, onChoose) {
+                var overlay = document.createElement('div');
+                overlay.id = 'drug-sim-mode-overlay';
+                overlay.setAttribute('role', 'dialog');
+                overlay.setAttribute('aria-modal', 'true');
+                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.58);backdrop-filter:blur(4px);z-index:10050;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+                var box = document.createElement('div');
+                box.style.cssText = 'max-width:480px;width:100%;background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);border-radius:16px;box-shadow:0 25px 60px rgba(15,23,42,0.35);border:1px solid #e2e8f0;padding:24px 24px 20px;font-family:system-ui,-apple-system,sans-serif;color:#0f172a;';
+                var safeTitle = (skill && skill.name) ? String(skill.name).replace(/</g, '').replace(/>/g, '') : '药物相似性';
+                box.innerHTML = '<div style="width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#2563eb,#7c3aed);margin-bottom:12px;"></div>' +
+                    '<h3 style="margin:0 0 6px;font-size:19px;font-weight:650;letter-spacing:-0.02em;">选择分析方式</h3>' +
+                    '<p style="margin:0 0 20px;font-size:14px;line-height:1.55;color:#475569;">「' + safeTitle + '」提供两种互补能力，请二选一：</p>' +
+                    '<div style="display:flex;flex-direction:column;gap:12px;">' +
+                    '<button type="button" id="drug-sim-btn-lipinski" style="text-align:left;padding:14px 16px;border-radius:12px;border:1px solid #bfdbfe;background:#eff6ff;color:#1e3a8a;cursor:pointer;font-size:14px;line-height:1.45;transition:transform .12s ease, box-shadow .12s ease;">' +
+                    '<strong style="display:block;margin-bottom:4px;font-size:15px;">Lipinski 类药性快筛</strong>' +
+                    '<span style="font-weight:400;color:#334155;">基于五规则评估 MW、logP、氢键供体/受体与口服小分子成药潜势（本地计算，无需外网）。</span></button>' +
+                    '<button type="button" id="drug-sim-btn-similarity" style="text-align:left;padding:14px 16px;border-radius:12px;border:1px solid #c4b5fd;background:#f5f3ff;color:#4c1d95;cursor:pointer;font-size:14px;line-height:1.45;transition:transform .12s ease, box-shadow .12s ease;">' +
+                    '<strong style="display:block;margin-bottom:4px;font-size:15px;">高通量结构相似性搜索</strong>' +
+                    '<span style="font-weight:400;color:#334155;">对接 PubChem/ChEMBL 等库检索结构类似物并生成 HTML 报告（需联网，耗时随检索规模变化）。</span></button>' +
+                    '</div>' +
+                    '<div style="display:flex;justify-content:flex-end;margin-top:20px;">' +
+                    '<button type="button" id="drug-sim-cancel" style="padding:9px 16px;border-radius:10px;border:1px solid #cbd5e1;background:#fff;color:#475569;cursor:pointer;font-size:14px;">取消</button>' +
+                    '</div>';
+                overlay.appendChild(box);
+                document.body.appendChild(overlay);
+                function close() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+                var btnL = box.querySelector('#drug-sim-btn-lipinski');
+                var btnS = box.querySelector('#drug-sim-btn-similarity');
+                var btnCancel = box.querySelector('#drug-sim-cancel');
+                if (btnCancel) btnCancel.onclick = function() { close(); };
+                overlay.addEventListener('click', function(ev) { if (ev.target === overlay) close(); });
+                if (btnL) btnL.onmouseenter = function() { this.style.boxShadow = '0 6px 20px rgba(37,99,235,0.2)'; };
+                if (btnL) btnL.onmouseleave = function() { this.style.boxShadow = ''; };
+                if (btnS) btnS.onmouseenter = function() { this.style.boxShadow = '0 6px 20px rgba(124,58,237,0.2)'; };
+                if (btnS) btnS.onmouseleave = function() { this.style.boxShadow = ''; };
+                if (btnL) btnL.onclick = function() { close(); if (typeof onChoose === 'function') onChoose('lipinski'); };
+                if (btnS) btnS.onclick = function() { close(); if (typeof onChoose === 'function') onChoose('similarity'); };
+            }
+
+            function buildDrugSimPromptLipinski() {
+                return '[Skill_Route: lipinski_druglikeness]\n' +
+                    '您好。我需要使用 **Lipinski 五规则** 对候选分子进行**口服小分子成药潜势**的快速筛查：请根据 SMILES 计算分子量 (MW)、脂水分配系数 (logP)、氢键供体/受体数目，并给出是否具药物相似性（is_druglike，违反 Lipinski 规则条数≤1 为 true）。\n\n' +
+                    '**数据提交**\n' +
+                    '- 在消息中直接给出 **一行 SMILES**，或上传 `.smi` / `.txt`（首行或首列为 SMILES）。\n\n' +
+                    '**参考 SMILES（阿司匹林，可替换为您的分子）**\n' +
+                    'CC(=O)Oc1ccccc1C(=O)O\n\n' +
+                    '（助手侧：未上传附件时，将反引号或正文中的 SMILES 写入 `smiles_text`；已上传时仅用附件列表中的路径写入 `file_path`。）';
+            }
+
+            function buildDrugSimPromptSimilarity() {
+                return '[Skill_Route: drug_similarity_search]\n' +
+                    '您好。我需要在 **PubChem / ChEMBL** 等公共化合物库中检索与查询分子 **结构相似** 的命中并生成 **HTML 可视化报告**（需联网，耗时会随检索规模变化）。\n\n' +
+                    '**可调参数（可选）**\n' +
+                    '- **top_n**：返回的相似分子条数（默认 10）。\n' +
+                    '- **fingerprint / metric / databases_csv**：指纹类型、相似度度量、库列表（逗号分隔，默认 pubchem,chembl）。\n\n' +
+                    '**数据提交**\n' +
+                    '- 单行 **SMILES**，或上传 SMILES 文本文件路径。\n\n' +
+                    '**参考 SMILES（阿司匹林）**\n' +
+                    'CC(=O)Oc1ccccc1C(=O)O\n\n' +
+                    '（助手侧：未上传时写入 `smiles_text`；已上传时写入 `file_path`。）';
+            }
+
             function useSkillFromApi(skill) {
                 if (!isLoggedIn()) {
                     openAuthModal();
                     showToast('请先登录或注册，再使用技能发起对话', 'warning');
+                    return;
+                }
+                if (skill && skill.name === DRUG_SIM_DUAL_SKILL_NAME) {
+                    openDrugSimilarityModeModal(skill, function(mode) {
+                        showChatView();
+                        window._pendingSkillTargetDomain = null;
+                        var inp = document.getElementById('userInput');
+                        var text = mode === 'similarity' ? buildDrugSimPromptSimilarity() : buildDrugSimPromptLipinski();
+                        if (inp) {
+                            inp.value = text;
+                            if (typeof autoResize === 'function') autoResize(inp);
+                            if (typeof checkInput === 'function') checkInput();
+                            inp.focus();
+                        }
+                    });
                     return;
                 }
                 showChatView();
@@ -1691,7 +1914,8 @@
                         wsPane.classList.add('workspace-active');
                         if (btnExpand) btnExpand.textContent = '收起工作台';
                     }
-                    const minW = 400, maxW = 800;
+                    const minW = 400;
+                    const maxW = Math.max(minW + 80, Math.floor(window.innerWidth * 0.66));
                     const w = Math.max(minW, Math.min(maxW, window.innerWidth - e.clientX));
                     wsPane.style.width = w + 'px';
                 });
@@ -1744,32 +1968,121 @@
             function isSkillToolResultRenderable(tr) {
                 return tr && typeof tr === 'object' && !Array.isArray(tr) && tr.status === 'success';
             }
+            if (typeof window.__skillWorkspaceReportEntries === 'undefined') {
+                window.__skillWorkspaceReportEntries = [];
+            }
+            var SKILL_WS_HISTORY_ACC_ID = 'skill-ws-history-accordion';
+            var SKILL_WS_MAX_ENTRIES = 50;
+            function _skillCsvPickField(row, candidates) {
+                if (!row || typeof row !== 'object') return '';
+                var map = {};
+                Object.keys(row).forEach(function (k) {
+                    map[String(k).trim().toLowerCase()] = k;
+                });
+                for (var ci = 0; ci < candidates.length; ci++) {
+                    var orig = map[String(candidates[ci]).toLowerCase()];
+                    if (orig != null && row[orig] != null && String(row[orig]).trim() !== '') {
+                        return String(row[orig]);
+                    }
+                }
+                return '';
+            }
+            function _skillCsvParseRows(text) {
+                if (typeof Papa !== 'undefined') {
+                    var p = Papa.parse((text || '').trim(), { header: true, skipEmptyLines: true });
+                    var rows = p.data || [];
+                    return {
+                        rows: rows,
+                        fields: (p.meta && p.meta.fields) ? p.meta.fields.slice() : [],
+                        errMsg: (p.errors && p.errors[0] && p.errors[0].message) ? String(p.errors[0].message) : ''
+                    };
+                }
+                var lines = (text || '').replace(/\r\n/g, '\n').split('\n').filter(function (l) { return l.trim().length; });
+                if (!lines.length) return { rows: [], fields: [], errMsg: '空文件' };
+                var hdr = lines[0].split(',').map(function (s) { return s.trim().replace(/^"|"$/g, ''); });
+                var outRows = [];
+                for (var li = 1; li < lines.length; li++) {
+                    var cells = lines[li].split(',');
+                    var o = {};
+                    for (var hj = 0; hj < hdr.length; hj++) {
+                        o[hdr[hj]] = (cells[hj] != null ? cells[hj] : '').trim().replace(/^"|"$/g, '');
+                    }
+                    outRows.push(o);
+                }
+                return { rows: outRows, fields: hdr, errMsg: '' };
+            }
+            /** CSV 单元格：纯数字且小数位超过 3 位时截断为 3 位，避免长浮点撑破表格 */
+            function _skillCsvFormatLongFloatCell(val) {
+                if (val == null) return '';
+                var s = String(val).trim();
+                if (!s) return s;
+                var m = /^(-?\d+)\.(\d+)$/.exec(s);
+                if (!m) return s;
+                if (m[2].length <= 3) return s;
+                var n = parseFloat(s);
+                return typeof n === 'number' && isFinite(n) ? n.toFixed(3) : s;
+            }
+            /** 药物相似性等：fetch CSV → 原生表格（不依赖后续脚本才定义的 buildSimpleCsvTableHtml） */
+            window.renderSkillCSVTable = async function (containerEl, csvUrl) {
+                if (!containerEl || !csvUrl) return;
+                containerEl.innerHTML = '<div class="skill-csv-loading">正在加载数据表…</div>';
+                await Promise.resolve();
+                try {
+                    var res = await fetch(csvUrl, { credentials: 'same-origin' });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    var text = await res.text();
+                    var parsed = _skillCsvParseRows(text);
+                    var rows = parsed.rows;
+                    if (!rows.length) {
+                        containerEl.innerHTML = '<p class="skill-ws-empty small mb-0">CSV 无数据行' +
+                            (parsed.errMsg ? '（' + _skillWsEscapeHtml(parsed.errMsg) + '）' : '') + '</p>';
+                        return;
+                    }
+                    var headLabels = [
+                        { key: 'rank', label: '排名 (Rank)' },
+                        { key: 'name', label: '分子名称 (Name)' },
+                        { key: 'id', label: '数据库 ID' },
+                        { key: 'sim', label: '相似度 (Similarity)' },
+                        { key: 'mw', label: '分子量 (MW)' },
+                        { key: 'logp', label: 'LogP' },
+                        { key: 'smiles', label: 'SMILES' }
+                    ];
+                    var htmlParts = [
+                        '<div class="skill-csv-table-scroll skill-mm-csv-table-mount">',
+                        '<table class="custom-kimi-table skill-mm-native-csv-table" role="table"><thead><tr>'
+                    ];
+                    headLabels.forEach(function (col) {
+                        htmlParts.push('<th scope="col">' + _skillWsEscapeHtml(col.label) + '</th>');
+                    });
+                    htmlParts.push('</tr></thead><tbody>');
+                    rows.forEach(function (row, idx) {
+                        var rank = _skillCsvPickField(row, ['rank', '#']) || String(idx + 1);
+                        var name = _skillCsvPickField(row, ['molecule_name', 'name', 'compound_name', 'compound']);
+                        var idv = _skillCsvPickField(row, ['molecule_id', 'id', 'cid', 'chembl_id']);
+                        var sim = _skillCsvPickField(row, ['similarity_score', 'similarity', 'tanimoto', 'score']);
+                        var mw = _skillCsvPickField(row, ['mw', 'molecular_weight', 'molecular weight']);
+                        var logp = _skillCsvPickField(row, ['logp', 'LogP', 'logp_calc', 'log_p']);
+                        var smi = _skillCsvPickField(row, ['hit_smiles', 'smiles', 'SMILES', 'canonical_smiles']);
+                        var cells = [rank, name, idv, sim, mw, logp].map(function (c) {
+                            return _skillCsvFormatLongFloatCell(c);
+                        });
+                        htmlParts.push('<tr>');
+                        cells.forEach(function (c) {
+                            htmlParts.push('<td>' + _skillWsEscapeHtml(c) + '</td>');
+                        });
+                        htmlParts.push('<td class="custom-kimi-td-smiles"><code class="kimi-smiles-code">' + _skillWsEscapeHtml(smi) + '</code></td>');
+                        htmlParts.push('</tr>');
+                    });
+                    htmlParts.push('</tbody></table></div>');
+                    containerEl.innerHTML = htmlParts.join('');
+                } catch (err) {
+                    containerEl.innerHTML = '<p class="skill-ws-empty small mb-0 skill-csv-error">' + _skillWsEscapeHtml(String(err && err.message ? err.message : err)) + '</p>';
+                }
+            };
             /**
-             * 技能快车道 · 多模态万能渲染（仅写入 #skill-tool-workspace-root，与组学 .unified-report-container 隔离）
-             * 优先级：markdown → html/pdf iframe → 图片 → data 看板；底部 CSV/ZIP/打印
+             * 单条技能面板 HTML（不含外层手风琴），供历史列表复用。
              */
-            function renderSkillToolWorkspace(toolName, toolResult) {
-                if (!isSkillToolResultRenderable(toolResult)) return;
-                var wp = document.getElementById('workspace-pane');
-                var btnExpand = document.getElementById('btn-expand-workspace');
-                if (wp) {
-                    wp.classList.add('workspace-active');
-                    if (btnExpand) btnExpand.textContent = '收起工作台';
-                }
-                if (typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
-                var ph = document.getElementById('workspace-placeholder');
-                if (ph) ph.style.display = 'none';
-                var workspaceRoot = document.getElementById('active-workspace-content');
-                if (!workspaceRoot) return;
-
-                var skillRoot = document.getElementById('skill-tool-workspace-root');
-                if (!skillRoot) {
-                    skillRoot = document.createElement('div');
-                    skillRoot.id = 'skill-tool-workspace-root';
-                    skillRoot.className = 'skill-workspace-root';
-                    workspaceRoot.insertBefore(skillRoot, workspaceRoot.firstChild);
-                }
-
+            function buildSkillToolPanelInnerHTML(toolName, toolResult) {
                 function pick(key) { return skillPickUrl(toolResult, key); }
                 var csvUrl = pick('csv_url');
                 var zipUrl = pick('zip_url');
@@ -1783,7 +2096,7 @@
                 var footerActions = '';
                 footerActions += linkBtn('下载 CSV', csvUrl);
                 footerActions += linkBtn('下载 ZIP', zipUrl);
-                footerActions += '<button type="button" class="skill-ws-btn skill-ws-btn--ghost skill-mm-footer__btn" id="skill-ws-print-btn">打印报告</button>';
+                footerActions += '<button type="button" class="skill-ws-btn skill-ws-btn--ghost skill-mm-footer__btn skill-ws-print-btn">打印报告</button>';
 
                 var parts = [];
 
@@ -1800,14 +2113,35 @@
 
                 var htmlUrl = pick('html_url');
                 var pdfUrl = pick('pdf_url');
+                var isDrugSim = toolName && String(toolName).indexOf('drug_similarity') !== -1;
                 var frameSrc = '';
                 if (htmlUrl) frameSrc = skillWorkspaceSafeHref(htmlUrl);
                 else if (pdfUrl) frameSrc = skillWorkspaceSafeHref(pdfUrl);
                 if (frameSrc) {
                     var frameTitle = htmlUrl ? '交互式 HTML 报告' : 'PDF 文档';
+                    var wrapCls = 'skill-mm-block skill-mm-iframe-wrap' + (htmlUrl ? ' skill-mm-iframe-preview-wrap' : '');
+                    var openFullHref = htmlUrl ? (skillWorkspaceAbsoluteMediaUrl(htmlUrl) || skillWorkspaceSafeHref(htmlUrl) || '') : '';
+                    var openBtn = '';
+                    if (htmlUrl && openFullHref) {
+                        openBtn =
+                            '<a href="' + _skillWsEscapeHtml(openFullHref) + '" target="_blank" rel="noopener noreferrer" ' +
+                            'class="btn btn-outline-primary btn-sm skill-mm-report-open-btn" role="button">' +
+                            '🔗 查看完整可视化报告</a>';
+                    }
                     parts.push(
-                        '<div class="skill-mm-block skill-mm-iframe-wrap">' +
+                        '<div class="' + wrapCls + '">' +
                         '<iframe class="skill-mm-iframe" title="' + _skillWsEscapeHtml(frameTitle) + '" src="' + _skillWsEscapeHtml(frameSrc) + '" sandbox="allow-scripts allow-same-origin allow-popups allow-downloads allow-forms"></iframe>' +
+                        openBtn +
+                        '</div>'
+                    );
+                }
+                if (isDrugSim && csvUrl) {
+                    // 与本轮 PySkills 落盘的 similarity_results.csv 同源（DrugSimilarityTool 全链路），renderSkillCSVTable 仅只读展开。
+                    var csvFetchUrl = skillWorkspaceAbsoluteMediaUrl(csvUrl) || skillWorkspaceSafeHref(csvUrl) || '';
+                    parts.push(
+                        '<div class="skill-mm-block skill-mm-csv-kimi-wrap">' +
+                        '<div class="skill-mm-csv-table-heading">相似命中数据表</div>' +
+                        '<div class="skill-csv-table-container" data-csv-url="' + _skillWsEscapeHtml(csvFetchUrl) + '"></div>' +
                         '</div>'
                     );
                 }
@@ -1852,7 +2186,8 @@
                 var gridSkip = {
                     status: 1, message: 1, markdown: 1, data: 1,
                     html_url: 1, csv_url: 1, zip_url: 1, json_url: 1, pdf_url: 1,
-                    image_url: 1, image_urls: 1
+                    image_url: 1, image_urls: 1,
+                    query_smiles: 1, stdout_tail: 1, stderr_tail: 1
                 };
                 if (dataBlock && typeof dataBlock === 'object' && !Array.isArray(dataBlock) && Object.keys(dataBlock).length > 0) {
                     var cardsHtml = '';
@@ -1875,7 +2210,7 @@
                 var sub = msg ? '<p class="skill-ws-subtitle">' + _skillWsEscapeHtml(msg) + '</p>' : '';
                 var title = toolName ? ('技能报告 · ' + _skillWsEscapeHtml(String(toolName))) : '技能报告';
 
-                skillRoot.innerHTML =
+                return (
                     '<section class="skill-workspace-panel skill-mm-engine" aria-label="技能工具结果">' +
                     '<header class="skill-ws-header"><h4 class="skill-ws-title">' + title + '</h4>' + sub + '</header>' +
                     '<div class="skill-ws-body skill-mm-body">' + parts.join('') + '</div>' +
@@ -1883,8 +2218,11 @@
                     '<div class="skill-mm-divider" role="separator"></div>' +
                     '<div class="skill-mm-footer-actions">' + footerActions + '</div>' +
                     '</footer>' +
-                    '</section>';
-
+                    '</section>'
+                );
+            }
+            function hydrateSkillWorkspacePanels(skillRoot) {
+                if (!skillRoot) return;
                 skillRoot.querySelectorAll('.skill-mm-img').forEach(function (img) {
                     img.addEventListener('error', function () {
                         img.style.display = 'none';
@@ -1916,10 +2254,138 @@
                     applyScale();
                 });
 
-                var printBtn = skillRoot.querySelector('#skill-ws-print-btn');
-                if (printBtn) {
-                    printBtn.addEventListener('click', function() { window.print(); });
+                skillRoot.querySelectorAll('.skill-ws-print-btn').forEach(function (printBtn) {
+                    printBtn.addEventListener('click', function (ev) {
+                        if (ev) ev.preventDefault();
+                        if (typeof window.handlePrintWorkspace === 'function') window.handlePrintWorkspace();
+                    });
+                });
+                skillRoot.querySelectorAll('.skill-csv-table-container[data-csv-url]').forEach(function (el) {
+                    var u = el.getAttribute('data-csv-url');
+                    if (!u) return;
+                    if (typeof window.renderSkillCSVTable !== 'function') {
+                        el.innerHTML = '<p class="skill-ws-empty small mb-0">表格模块未就绪</p>';
+                        return;
+                    }
+                    window.renderSkillCSVTable(el, u).catch(function (err) {
+                        el.innerHTML = '<p class="skill-ws-empty small mb-0 skill-csv-error">' + _skillWsEscapeHtml(String(err && err.message ? err.message : err)) + '</p>';
+                    });
+                });
+            }
+            function showSkillWorkspaceChrome() {
+                var wp = document.getElementById('workspace-pane');
+                var btnExpand = document.getElementById('btn-expand-workspace');
+                if (wp) {
+                    wp.classList.add('workspace-active');
+                    if (btnExpand) btnExpand.textContent = '收起工作台';
                 }
+                if (typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
+                var ph = document.getElementById('workspace-placeholder');
+                if (ph) ph.style.display = 'none';
+            }
+            function renderSkillWorkspaceHistoryAccordion() {
+                var workspaceRoot = document.getElementById('active-workspace-content');
+                if (!workspaceRoot) return;
+                var skillRoot = document.getElementById('skill-tool-workspace-root');
+                if (!skillRoot) {
+                    skillRoot = document.createElement('div');
+                    skillRoot.id = 'skill-tool-workspace-root';
+                    skillRoot.className = 'skill-workspace-root';
+                    workspaceRoot.insertBefore(skillRoot, workspaceRoot.firstChild);
+                }
+                var entries = window.__skillWorkspaceReportEntries || [];
+                if (entries.length === 0) {
+                    skillRoot.innerHTML = '';
+                    return;
+                }
+                var n = entries.length;
+                var accId = SKILL_WS_HISTORY_ACC_ID;
+                var chunks = ['<div class="accordion skill-ws-history-accordion" id="' + accId + '">'];
+                for (var i = 0; i < n; i++) {
+                    var entry = entries[i];
+                    var isLatest = i === n - 1;
+                    var hId = entry.id + '-heading';
+                    var cId = entry.id + '-collapse';
+                    var tsLabel = new Date(entry.ts).toLocaleTimeString();
+                    var toolLabel = entry.toolName ? String(entry.toolName) : '(未命名工具)';
+                    var summaryText = '技能报告 #' + (i + 1) + ' · ' + toolLabel + ' (' + tsLabel + ')';
+                    var btnClass = 'accordion-button' + (isLatest ? '' : ' collapsed');
+                    var exp = isLatest ? 'true' : 'false';
+                    var collClass = 'accordion-collapse collapse' + (isLatest ? ' show' : '');
+                    var panelInner = buildSkillToolPanelInnerHTML(entry.toolName, entry.toolResult);
+                    chunks.push(
+                        '<div class="accordion-item skill-ws-history-item" style="border:0;">' +
+                        '<h2 class="accordion-header" id="' + hId + '">' +
+                        '<button class="' + btnClass + '" type="button" data-bs-toggle="collapse" data-bs-target="#' + cId + '" data-bs-parent="#' + accId + '" aria-expanded="' + exp + '" aria-controls="' + cId + '">' +
+                        '<i class="bi bi-lightning-charge" style="margin-right:8px;"></i> ' + _skillWsEscapeHtml(summaryText) +
+                        '</button></h2>' +
+                        '<div id="' + cId + '" class="' + collClass + '" aria-labelledby="' + hId + '">' +
+                        '<div class="accordion-body p-0">' + panelInner + '</div></div></div>'
+                    );
+                }
+                chunks.push('</div>');
+                skillRoot.innerHTML = chunks.join('');
+                hydrateSkillWorkspacePanels(skillRoot);
+            }
+            /**
+             * Worker 返回的 stdout_tail / query_smiles 注入当前 AI 气泡的「执行记录」区（.process-log-zone），右侧工作台仅保留报告/表格。
+             */
+            function injectSkillToolStdoutIntoProcessLog(toolName, toolResult) {
+                if (!toolResult || typeof toolResult !== 'object') return;
+                var d = toolResult.data;
+                if (!d || typeof d !== 'object') return;
+                var stdout = d.stdout_tail != null ? String(d.stdout_tail) : '';
+                var qsmiles = d.query_smiles != null ? String(d.query_smiles) : '';
+                if (!stdout.trim() && !qsmiles.trim()) return;
+                var logZone = (window.currentMessageZones && window.currentMessageZones.logZone) ||
+                    (function () {
+                        var list = document.querySelectorAll('#chatContent .message-row.ai');
+                        if (!list.length) return null;
+                        return list[list.length - 1].querySelector('.process-log-zone');
+                    })();
+                if (!logZone) return;
+                var label = (toolName && String(toolName).trim()) ? String(toolName).trim() : '技能工具';
+                var body = (qsmiles.trim() ? 'query_smiles: ' + qsmiles.trim() + '\n\n' : '') + stdout;
+                var last = logZone.lastElementChild;
+                if (last && last.classList && last.classList.contains('skill-tool-terminal-exec')) {
+                    var pre0 = last.querySelector('pre');
+                    if (pre0 && pre0.textContent === body) return;
+                }
+                var details = document.createElement('details');
+                details.className = 'agent-thought-block skill-tool-terminal-exec';
+                var sum = document.createElement('summary');
+                var smTxt = document.createElement('span');
+                smTxt.className = 'thought-summary-text';
+                smTxt.textContent = '\u2713 [\u7ec8\u7aef\u6267\u884c] ' + label;
+                sum.appendChild(smTxt);
+                var pre = document.createElement('pre');
+                pre.style.fontSize = '11px';
+                pre.style.whiteSpace = 'pre-wrap';
+                pre.style.margin = '0.5rem 0 0';
+                pre.textContent = body;
+                details.appendChild(sum);
+                details.appendChild(pre);
+                logZone.appendChild(details);
+            }
+            /**
+             * 技能快车道 · 多模态万能渲染（写入 #skill-tool-workspace-root；与 Task 对齐为「历史追加 + Bootstrap 手风琴」）
+             * @param {string} toolName
+             * @param {object} toolResult
+             * @param {string} [mode] 传入 'replace' 时清空历史（如快照恢复），默认追加
+             */
+            function renderSkillToolWorkspace(toolName, toolResult, mode) {
+                if (!isSkillToolResultRenderable(toolResult)) return;
+                window.__skillWorkspaceReportEntries = window.__skillWorkspaceReportEntries || [];
+                if (mode === 'replace') {
+                    window.__skillWorkspaceReportEntries = [];
+                }
+                var entryId = 'sk' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+                window.__skillWorkspaceReportEntries.push({ id: entryId, toolName: toolName || '', toolResult: toolResult, ts: Date.now() });
+                while (window.__skillWorkspaceReportEntries.length > SKILL_WS_MAX_ENTRIES) {
+                    window.__skillWorkspaceReportEntries.shift();
+                }
+                showSkillWorkspaceChrome();
+                renderSkillWorkspaceHistoryAccordion();
             }
             window.renderSkillToolWorkspace = renderSkillToolWorkspace;
 
@@ -1963,6 +2429,7 @@
                 if (wp) wp.classList.remove('workspace-active');
                 if (titleEl) titleEl.textContent = '新会话';
                 if (workspaceContent) workspaceContent.innerHTML = '';
+                window.__skillWorkspaceReportEntries = [];
                 var wsPhReset = document.getElementById('workspace-placeholder');
                 if (wsPhReset) wsPhReset.style.display = '';
                 chatHistory = [];
@@ -2539,7 +3006,7 @@
                     pane.style.width = pane.dataset.prevWidth;
                 }
             }
-            // ================= Phase 3: 侧栏用户区与登录/注册弹窗 =================
+            // ================= Phase 3: 侧栏用户区与认证抽屉（分步壳层） =================
             function updateSidebarUser() {
                 var area = document.getElementById('sidebar-user-area');
                 if (!area) return;
@@ -2577,10 +3044,109 @@
                 if (typeof showAdminConsoleIfNeeded === 'function') showAdminConsoleIfNeeded();
                 if (typeof window.syncImmersiveDemoEntryVisibility === 'function') window.syncImmersiveDemoEntryVisibility();
             }
+            function authShellSetStep(step) {
+                var root = document.getElementById('auth-modal');
+                if (!root) return;
+                root.querySelectorAll('.auth-shell-step').forEach(function(p) {
+                    if (p.getAttribute('data-auth-step') === step) p.removeAttribute('hidden');
+                    else p.setAttribute('hidden', '');
+                });
+            }
+            function authShellMaskEmail(email) {
+                var e = (email || '').trim();
+                var at = e.indexOf('@');
+                if (at <= 0) return e || '—';
+                var local = e.slice(0, at);
+                var domain = e.slice(at);
+                if (local.length <= 3) return (local.charAt(0) || '*') + '***' + domain;
+                if (local.length <= 6) return local.slice(0, 2) + '****' + local.slice(-1) + domain;
+                return local.slice(0, 3) + '****' + local.slice(-3) + domain;
+            }
+            function authShellMaskPhone(phone) {
+                var d = (phone || '').replace(/\D/g, '');
+                if (d.length < 7) return (phone || '').trim() || '—';
+                if (d.length >= 11) return d.slice(0, 3) + '****' + d.slice(-4);
+                return d.slice(0, 3) + '****' + d.slice(-3);
+            }
+            /** 注册成功后写入，供登录 MFA 展示「注册时绑定的渠道 + 掩码」 */
+            function authShellPersistDemoMfaFromRegister(email, phone) {
+                try {
+                    var em = (email || '').trim();
+                    var ph = (phone || '').trim();
+                    if (em) {
+                        sessionStorage.setItem('gibh_auth_demo_mfa_channel', 'email');
+                        sessionStorage.setItem('gibh_auth_demo_mfa_masked', authShellMaskEmail(em));
+                    } else if (ph) {
+                        sessionStorage.setItem('gibh_auth_demo_mfa_channel', 'phone');
+                        sessionStorage.setItem('gibh_auth_demo_mfa_masked', authShellMaskPhone(ph));
+                    }
+                } catch (e0) { }
+            }
+            /** 进入 MFA 步时刷新说明文案（渠道 + 隐式掩码 + 固定演示码 123456） */
+            function authShellRefreshMfaLead() {
+                var el = document.getElementById('auth-shell-mfa-lead');
+                if (!el) return;
+                var ch = '';
+                var masked = '';
+                try {
+                    ch = (sessionStorage.getItem('gibh_auth_demo_mfa_channel') || '').trim();
+                    masked = (sessionStorage.getItem('gibh_auth_demo_mfa_masked') || '').trim();
+                } catch (e1) { }
+                var loginId = ((document.getElementById('auth-username-login') && document.getElementById('auth-username-login').value) || '').trim();
+                if (!masked) {
+                    if (loginId.indexOf('@') !== -1) {
+                        ch = 'email';
+                        masked = authShellMaskEmail(loginId);
+                    } else {
+                        var digits = loginId.replace(/\D/g, '');
+                        if (digits.length >= 8) {
+                            ch = 'phone';
+                            masked = authShellMaskPhone(loginId);
+                        }
+                    }
+                }
+                var tail = ' 演示固定验证码为 123456（未真实发送短信/邮件；对接后端后将替换为真实 OTP）。';
+                if (ch === 'email' && masked) {
+                    el.textContent = '您注册时绑定的二次验证方式为【邮箱】。验证码接收地址：' + masked + '。' + tail;
+                    return;
+                }
+                if (ch === 'phone' && masked) {
+                    el.textContent = '您注册时绑定的二次验证方式为【手机短信】。验证码接收号码：' + masked + '。' + tail;
+                    return;
+                }
+                el.textContent = '本浏览器未记录您注册时填写的邮箱或手机号（请先完成一次注册以写入演示缓存，或使用邮箱/手机号作为登录标识）。' + tail;
+            }
+            function authShellGoLogin(identifier) {
+                var id = (identifier || '').trim();
+                var hid = document.getElementById('auth-username-login');
+                var lab = document.getElementById('auth-shell-account-label');
+                var pw = document.getElementById('auth-shell-login-password');
+                if (hid) hid.value = id;
+                if (lab) lab.textContent = id || '—';
+                if (pw) pw.value = '';
+                authShellSetStep('login');
+            }
+            function resetAuthShellToGate() {
+                var gateId = document.getElementById('auth-gate-identifier');
+                if (gateId) gateId.value = '';
+                var hidUser = document.getElementById('auth-username-login');
+                if (hidUser) hidUser.value = '';
+                var pw = document.getElementById('auth-shell-login-password');
+                if (pw) pw.value = '';
+                var mfa = document.getElementById('auth-shell-mfa-code');
+                if (mfa) mfa.value = '';
+                var opw = document.getElementById('auth-shell-oauth-password');
+                if (opw) opw.value = '';
+                var errEl = document.getElementById('auth-modal-error');
+                if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+                authShellSetStep('gate');
+            }
             function openAuthModal() {
                 var el = document.getElementById('auth-modal');
                 if (el) { el.style.display = 'flex'; el.setAttribute('aria-hidden', 'false'); }
-                document.getElementById('auth-modal-error').style.display = 'none';
+                var errEl = document.getElementById('auth-modal-error');
+                if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+                resetAuthShellToGate();
             }
             function closeAuthModal() {
                 var el = document.getElementById('auth-modal');
@@ -3021,6 +3587,7 @@
                 toggleLoadingState(false);
                 if (chatContent) { while (chatContent.firstChild) chatContent.removeChild(chatContent.firstChild); }
                 if (workspaceContent) workspaceContent.innerHTML = '';
+                window.__skillWorkspaceReportEntries = [];
                 window.currentMessageZones = null;
                 window.workflowCache = {};
                 if (wrapper) wrapper.classList.add('hidden');
@@ -3924,12 +4491,22 @@
                     this.textContent = wp.classList.contains('workspace-active') ? '收起工作台' : '展开工作台';
                 };
                 var btnPrint = document.getElementById('btn-workspace-print');
-                if (btnPrint) btnPrint.onclick = function() { typeof window.printReport === 'function' && window.printReport(); };
+                if (btnPrint) {
+                    btnPrint.onclick = function () {
+                        try {
+                            if (typeof window.handlePrintWorkspace === 'function') window.handlePrintWorkspace();
+                            else if (typeof window.printReport === 'function') window.printReport();
+                        } catch (err) {
+                            console.error('[btn-workspace-print]', err);
+                            alert('打印出错：' + (err && err.message ? err.message : String(err)));
+                        }
+                    };
+                }
                 var btnExpandAll = document.getElementById('btn-workspace-expand-all');
                 if (btnExpandAll) btnExpandAll.onclick = function() {
                     var root = document.getElementById('active-workspace-content');
                     if (!root) return;
-                    var collapses = root.querySelectorAll('.execution-instance .accordion-collapse');
+                    var collapses = root.querySelectorAll('.execution-instance .accordion-collapse, #skill-ws-history-accordion .accordion-collapse');
                     collapses.forEach(function(c) {
                         if (!c) return;
                         c.classList.add('show');
@@ -4144,82 +4721,154 @@
                 var authClose = document.getElementById('auth-modal-close');
                 if (authBackdrop) authBackdrop.onclick = closeAuthModal;
                 if (authClose) authClose.onclick = closeAuthModal;
-                var authTabs = authModal ? authModal.querySelectorAll('.auth-tab') : [];
-                authTabs.forEach(function(btn) {
-                    btn.onclick = function() {
-                        var tab = btn.getAttribute('data-tab');
-                        authTabs.forEach(function(b) { b.classList.toggle('active', b === btn); });
-                        var loginPanel = document.getElementById('auth-modal-panel-login');
-                        var regPanel = document.getElementById('auth-modal-panel-register');
-                        if (loginPanel) loginPanel.style.display = tab === 'login' ? 'block' : 'none';
-                        if (regPanel) regPanel.style.display = tab === 'register' ? 'block' : 'none';
-                        document.getElementById('auth-modal-error').style.display = 'none';
-                    };
-                });
-                var formLogin = document.getElementById('auth-form-login');
-                if (formLogin) {
-                    formLogin.onsubmit = function(e) {
-                        e.preventDefault();
-                        var errEl = document.getElementById('auth-modal-error');
-                        var username = (document.getElementById('auth-username-login').value || '').trim();
-                        var password = document.getElementById('auth-password-login').value || '';
-                        if (!username || !password) { errEl.textContent = '请输入用户名和密码'; errEl.style.display = 'block'; return; }
-                        errEl.style.display = 'none';
-                        var submitBtn = formLogin.querySelector('.auth-submit-btn');
-                        if (submitBtn) submitBtn.disabled = true;
-                        fetch('/api/auth/login', {
+
+                function performAuthLoginFetch(username, password, submitBtn) {
+                    var errEl = document.getElementById('auth-modal-error');
+                    if (submitBtn) submitBtn.disabled = true;
+                    fetch('/api/auth/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: 'username=' + encodeURIComponent(username) + '&password=' + encodeURIComponent(password)
+                    }).then(parseJsonOrReject).then(function(data) {
+                        var token = data.access_token;
+                        if (!token) {
+                            if (errEl) { errEl.textContent = '登录失败：未返回 Token'; errEl.style.display = 'block'; }
+                            return Promise.reject({ detail: 'NO_ACCESS_TOKEN' });
+                        }
+                        localStorage.setItem('access_token', token);
+                        localStorage.setItem('username', data.username || username);
+                        localStorage.setItem('user_role', (data.role || 'user'));
+                        var guestUuid = window.GUEST_UUID || localStorage.getItem('guest_uuid') || '';
+                        return fetch('/api/auth/merge_guest_data', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                            body: 'username=' + encodeURIComponent(username) + '&password=' + encodeURIComponent(password)
-                        }).then(parseJsonOrReject).then(function(data) {
-                            var token = data.access_token;
-                            if (!token) { errEl.textContent = '登录失败：未返回 Token'; errEl.style.display = 'block'; if (submitBtn) submitBtn.disabled = false; return; }
-                            localStorage.setItem('access_token', token);
-                            localStorage.setItem('username', data.username || username);
-                            localStorage.setItem('user_role', (data.role || 'user'));
-                            var guestUuid = window.GUEST_UUID || localStorage.getItem('guest_uuid') || '';
-                            return fetch('/api/auth/merge_guest_data', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                                body: JSON.stringify({ guest_uuid: guestUuid })
-                            }).then(function(mr) { return mr.text().then(function(t) {
-                                var ok = mr.ok; try { var d = t ? JSON.parse(t) : {}; return { mergeOk: ok, data: d }; } catch (e) { return { mergeOk: ok, data: { detail: t || ('HTTP ' + mr.status) } }; }
-                            }); });
-                        }).then(function(result) {
-                            if (submitBtn) submitBtn.disabled = false;
-                            closeAuthModal();
-                            updateSidebarUser();
-                            if (typeof window.syncImmersiveDemoEntryVisibility === 'function') window.syncImmersiveDemoEntryVisibility();
-                            if (result && result.mergeOk) {
-                                alert('登录成功，游客资产已同步！');
-                            } else {
-                                alert('登录成功！');
+                            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                            body: JSON.stringify({ guest_uuid: guestUuid })
+                        }).then(function(mr) { return mr.text().then(function(t) {
+                            var ok = mr.ok; try { var d = t ? JSON.parse(t) : {}; return { mergeOk: ok, data: d }; } catch (e) { return { mergeOk: ok, data: { detail: t || ('HTTP ' + mr.status) } }; }
+                        }); });
+                    }).then(function(result) {
+                        if (submitBtn) submitBtn.disabled = false;
+                        closeAuthModal();
+                        updateSidebarUser();
+                        if (typeof window.syncImmersiveDemoEntryVisibility === 'function') window.syncImmersiveDemoEntryVisibility();
+                        if (result && result.mergeOk) alert('登录成功，游客资产已同步！');
+                        else alert('登录成功！');
+                        fetchSessions();
+                        fetchAssets();
+                        if (typeof fetchFavoriteWorkflows === 'function') fetchFavoriteWorkflows();
+                    }).catch(function(err) {
+                        if (submitBtn) submitBtn.disabled = false;
+                        if (!errEl) return;
+                        var det = err && err.detail;
+                        if (det === 'ACCOUNT_PENDING') {
+                            errEl.style.display = 'none';
+                            if (typeof showToast === 'function') showToast('您的账号尚在审核中，通过后即可登录', 'warning');
+                            else { errEl.textContent = '您的账号尚在审核中，通过后即可登录'; errEl.style.display = 'block'; }
+                            return;
+                        }
+                        if (det === 'ACCOUNT_REJECTED') {
+                            errEl.style.display = 'none';
+                            if (typeof showToast === 'function') showToast('该账号未通过审核，如有疑问请联系管理员', 'warning');
+                            else { errEl.textContent = '该账号未通过审核，如有疑问请联系管理员'; errEl.style.display = 'block'; }
+                            return;
+                        }
+                        if (det === 'NO_ACCESS_TOKEN') return;
+                        errEl.textContent = (err && (err.detail || err.message)) || '登录失败，请重试';
+                        errEl.style.display = 'block';
+                    });
+                }
+
+                var gateContinue = document.getElementById('auth-gate-continue');
+                if (gateContinue) {
+                    gateContinue.onclick = function() {
+                        var errEl = document.getElementById('auth-modal-error');
+                        var raw = (document.getElementById('auth-gate-identifier') && document.getElementById('auth-gate-identifier').value || '').trim();
+                        if (!raw) {
+                            if (errEl) { errEl.textContent = '请输入用户名、邮箱或手机号'; errEl.style.display = 'block'; }
+                            return;
+                        }
+                        if (errEl) errEl.style.display = 'none';
+                        if (raw.indexOf('@') !== -1 || /^\+?[0-9][\d\s-]{5,}$/.test(raw)) {
+                            if (typeof showToast === 'function') {
+                                showToast('邮箱/手机分流将由后端接通；当前仍以整段字符串作为用户名调用现有接口。', 'info');
                             }
-                            fetchSessions();
-                            fetchAssets();
-                            if (typeof fetchFavoriteWorkflows === 'function') fetchFavoriteWorkflows();
-                        }).catch(function(err) {
-                            if (submitBtn) submitBtn.disabled = false;
-                            var det = err && err.detail;
-                            if (det === 'ACCOUNT_PENDING') {
-                                errEl.style.display = 'none';
-                                if (typeof showToast === 'function') showToast('您的账号尚在审核中，通过后即可登录', 'warning');
-                                else errEl.textContent = '您的账号尚在审核中，通过后即可登录';
-                                if (typeof showToast !== 'function') errEl.style.display = 'block';
-                                return;
-                            }
-                            if (det === 'ACCOUNT_REJECTED') {
-                                errEl.style.display = 'none';
-                                if (typeof showToast === 'function') showToast('该账号未通过审核，如有疑问请联系管理员', 'warning');
-                                else errEl.textContent = '该账号未通过审核，如有疑问请联系管理员';
-                                if (typeof showToast !== 'function') errEl.style.display = 'block';
-                                return;
-                            }
-                            errEl.textContent = (err && (err.detail || err.message)) || '登录失败，请重试';
-                            errEl.style.display = 'block';
-                        });
+                        }
+                        authShellGoLogin(raw);
                     };
                 }
+                var linkReg = document.getElementById('auth-link-register');
+                if (linkReg) linkReg.onclick = function() { authShellSetStep('register'); };
+                var backReg = document.getElementById('auth-back-from-register');
+                if (backReg) backReg.onclick = function() { authShellSetStep('gate'); };
+                var backLog = document.getElementById('auth-back-from-login');
+                if (backLog) backLog.onclick = function() { authShellSetStep('gate'); };
+                var demoOauth = document.getElementById('auth-link-demo-oauth');
+                if (demoOauth) demoOauth.onclick = function() { authShellSetStep('oauth_challenge'); };
+                var oauthCancel = document.getElementById('auth-oauth-cancel');
+                if (oauthCancel) oauthCancel.onclick = function() { authShellSetStep('gate'); };
+
+                var oauthWe = document.getElementById('auth-oauth-wechat');
+                if (oauthWe) oauthWe.onclick = function() { if (typeof showToast === 'function') showToast('微信登录待接入', 'info'); else alert('微信登录待接入'); };
+                var oauthGh = document.getElementById('auth-oauth-github');
+                if (oauthGh) oauthGh.onclick = function() { authShellSetStep('oauth_challenge'); };
+                var oauthGo = document.getElementById('auth-oauth-google');
+                if (oauthGo) oauthGo.onclick = function() { if (typeof showToast === 'function') showToast('Google 登录待接入', 'info'); else alert('Google 登录待接入'); };
+
+                var sendEmail = document.getElementById('auth-send-email-code');
+                if (sendEmail) sendEmail.onclick = function() { if (typeof showToast === 'function') showToast('演示：邮箱验证码通道未对接服务端', 'info'); else alert('演示：邮箱验证码未对接'); };
+                var sendPhone = document.getElementById('auth-send-phone-code');
+                if (sendPhone) sendPhone.onclick = function() { if (typeof showToast === 'function') showToast('演示：短信验证码通道未对接服务端', 'info'); else alert('演示：短信验证码未对接'); };
+
+                var btnLoginPw = document.getElementById('auth-btn-login-password');
+                if (btnLoginPw) {
+                    btnLoginPw.onclick = function() {
+                        var errEl = document.getElementById('auth-modal-error');
+                        var password = (document.getElementById('auth-shell-login-password') && document.getElementById('auth-shell-login-password').value) || '';
+                        if (!password) { if (errEl) { errEl.textContent = '请输入密码'; errEl.style.display = 'block'; } return; }
+                        if (errEl) errEl.style.display = 'none';
+                        authShellSetStep('mfa');
+                        if (typeof authShellRefreshMfaLead === 'function') authShellRefreshMfaLead();
+                        var mfa = document.getElementById('auth-shell-mfa-code');
+                        if (mfa) mfa.value = '';
+                    };
+                }
+                var mfaBack = document.getElementById('auth-mfa-back');
+                if (mfaBack) mfaBack.onclick = function() { authShellSetStep('login'); };
+
+                var btnMfa = document.getElementById('auth-btn-mfa-confirm');
+                if (btnMfa) {
+                    btnMfa.onclick = function() {
+                        var errEl = document.getElementById('auth-modal-error');
+                        var code = ((document.getElementById('auth-shell-mfa-code') && document.getElementById('auth-shell-mfa-code').value) || '').trim();
+                        if (code !== '123456') {
+                            if (errEl) { errEl.textContent = '演示阶段二次验证码固定为 123456，请按上方说明输入'; errEl.style.display = 'block'; }
+                            return;
+                        }
+                        if (errEl) errEl.style.display = 'none';
+                        var username = ((document.getElementById('auth-username-login') && document.getElementById('auth-username-login').value) || '').trim();
+                        var password = (document.getElementById('auth-shell-login-password') && document.getElementById('auth-shell-login-password').value) || '';
+                        if (!username || !password) {
+                            if (errEl) { errEl.textContent = '会话已失效，请返回上一步'; errEl.style.display = 'block'; }
+                            return;
+                        }
+                        if (typeof showToast === 'function') showToast('演示 MFA 已通过（123456）；正在请求 /api/auth/login …', 'info');
+                        performAuthLoginFetch(username, password, btnMfa);
+                    };
+                }
+
+                var btnOauthMock = document.getElementById('auth-btn-oauth-bind-mock');
+                if (btnOauthMock) {
+                    btnOauthMock.onclick = function() {
+                        var errEl = document.getElementById('auth-modal-error');
+                        var p = (document.getElementById('auth-shell-oauth-password') && document.getElementById('auth-shell-oauth-password').value) || '';
+                        if (!p) { if (errEl) { errEl.textContent = '请输入本地密码（演示）'; errEl.style.display = 'block'; } return; }
+                        if (errEl) errEl.style.display = 'none';
+                        if (typeof showToast === 'function') showToast('演示：所有权挑战完成（未调用后端）', 'success');
+                        resetAuthShellToGate();
+                        closeAuthModal();
+                    };
+                }
+
                 var formRegister = document.getElementById('auth-form-register');
                 if (formRegister) {
                     formRegister.onsubmit = function(e) {
@@ -4227,9 +4876,16 @@
                         var errEl = document.getElementById('auth-modal-error');
                         var username = (document.getElementById('auth-username-register').value || '').trim();
                         var password = document.getElementById('auth-password-register').value || '';
+                        var em = (document.getElementById('auth-register-email') && document.getElementById('auth-register-email').value || '').trim();
+                        var ph = (document.getElementById('auth-register-phone') && document.getElementById('auth-register-phone').value || '').trim();
                         if (!username || !password) { errEl.textContent = '请输入用户名和密码'; errEl.style.display = 'block'; return; }
+                        if (!em && !ph) {
+                            errEl.textContent = '请至少填写邮箱或手机号（目标架构要求；验证码为演示 UI）';
+                            errEl.style.display = 'block';
+                            return;
+                        }
                         errEl.style.display = 'none';
-                        var submitBtn = formRegister.querySelector('.auth-submit-btn');
+                        var submitBtn = formRegister.querySelector('.auth-shell-primary');
                         if (submitBtn) submitBtn.disabled = true;
                         fetch('/api/auth/register', {
                             method: 'POST',
@@ -4239,8 +4895,9 @@
                             if (submitBtn) submitBtn.disabled = false;
                             errEl.textContent = '';
                             errEl.style.display = 'none';
+                            if (typeof authShellPersistDemoMfaFromRegister === 'function') authShellPersistDemoMfaFromRegister(em, ph);
                             var regMsg = (data && data.message) ? data.message : '注册已提交，请等待管理员审核';
-                            if (typeof showToast === 'function') showToast(regMsg, 'info');
+                            if (typeof showToast === 'function') showToast(regMsg + '（邮箱/手机绑定字段尚未写入后端；已缓存掩码供登录 MFA 展示）', 'info');
                             else alert(regMsg);
                             formRegister.reset();
                         }).catch(function(err) {
@@ -4249,6 +4906,47 @@
                             errEl.style.display = 'block';
                         });
                     };
+                }
+                if (authModal) {
+                    authModal.addEventListener('keydown', function(ev) {
+                        if (ev.key !== 'Enter') return;
+                        var tgt = ev.target;
+                        if (!tgt || !tgt.id) return;
+                        if (tgt.tagName === 'TEXTAREA') return;
+                        if (tgt.tagName === 'BUTTON') return;
+                        if (typeof tgt.closest === 'function' && tgt.closest('button')) return;
+                        var fid = tgt.id;
+                        if (fid === 'auth-gate-identifier') {
+                            ev.preventDefault();
+                            if (gateContinue) gateContinue.click();
+                            return;
+                        }
+                        if (fid === 'auth-shell-login-password') {
+                            ev.preventDefault();
+                            if (btnLoginPw) btnLoginPw.click();
+                            return;
+                        }
+                        if (fid === 'auth-shell-mfa-code') {
+                            ev.preventDefault();
+                            if (btnMfa) btnMfa.click();
+                            return;
+                        }
+                        if (fid === 'auth-shell-oauth-password') {
+                            ev.preventDefault();
+                            if (btnOauthMock) btnOauthMock.click();
+                            return;
+                        }
+                        if (formRegister && formRegister.contains(tgt) && tgt.tagName === 'INPUT') {
+                            var ty = (tgt.getAttribute('type') || '').toLowerCase();
+                            if (ty === 'button' || ty === 'submit' || ty === 'hidden') return;
+                            ev.preventDefault();
+                            if (typeof formRegister.requestSubmit === 'function') formRegister.requestSubmit();
+                            else {
+                                var subEl = formRegister.querySelector('button[type="submit"], input[type="submit"]');
+                                if (subEl) subEl.click();
+                            }
+                        }
+                    });
                 }
                 var _skillDropzoneEnterCount = 0;
                 var _skillModalDragBlocker = null;
@@ -6522,6 +7220,7 @@
                                 case 'skill_tool_result':
                                     if (data && data.tool_result != null && typeof data.tool_result === 'object' && !Array.isArray(data.tool_result) && data.tool_result.status === 'success') {
                                         try { renderSkillToolWorkspace(data.tool_name, data.tool_result); } catch (e) { console.warn('skill_tool_result', e); }
+                                        try { injectSkillToolStdoutIntoProcessLog(data.tool_name, data.tool_result); } catch (e2) { console.warn('injectSkillToolStdoutIntoProcessLog', e2); }
                                     }
                                     break;
 
@@ -7641,10 +8340,8 @@
                                 ? (Number(data.duration ?? data.total_duration)).toFixed(1)
                                 : ((Date.now() - startTime) / 1000).toFixed(1);
 
-                            if (data && data.tool_result != null && typeof data.tool_result === 'object' && !Array.isArray(data.tool_result) && data.tool_result.status === 'success') {
-                                try { renderSkillToolWorkspace(data.tool_name, data.tool_result); } catch (e) { console.warn('renderSkillToolWorkspace', e); }
-                            }
-                            
+                            // 技能右栏：仅由 SSE `skill_tool_result` 渲染；`done` 会再次携带相同 tool_result（快照/兼容），此处若再 render 会导致手风琴重复两条。
+
                             // 🔥 TASK 1: CRITICAL - 彻底移除所有 Thinking spinner 和容器
                             // 1. Remove .thinking-container immediately
                             const thinkingContainers = document.querySelectorAll('.thinking-container');
@@ -8414,8 +9111,25 @@
                 return row.querySelector('.bubble');
             }
 
-            // 全局历史聚合：报告在右栏 #active-workspace-content，从整页取「最后一个」对应区块；空块不输出防首页留白
-            window.printReport = function() {
+            /**
+             * 工作台打印：仅触发 window.print()；显示/隐藏、flex 解锁、iframe 与 CSV 分页由 style.css @media print 统一处理。
+             */
+            window.handlePrintWorkspace = function () {
+                var wp = document.getElementById('workspace-pane');
+                if (!wp || !wp.classList.contains('workspace-active')) {
+                    if (typeof showToast === 'function') showToast('请先展开右侧工作台', 'warning');
+                    else alert('请先展开右侧工作台');
+                    return;
+                }
+                try {
+                    window.print();
+                } catch (e) {
+                    console.warn('[handlePrintWorkspace]', e);
+                }
+            };
+
+            // 全局历史聚合（兜底）：从整页取「最后一个」报告区块，写入独立窗口再打印（非 Skills 主路径）
+            window.printReportLegacyAggregated = function () {
                 var root = document.body;
                 var allDiagnosis = root.querySelectorAll('.report-diagnosis-content');
                 var allExecution = root.querySelectorAll('.report-execution-content');
@@ -8468,6 +9182,11 @@
                 doc.close();
                 printWin.focus();
                 setTimeout(function() { printWin.print(); }, 400);
+            };
+
+            /** 兼容旧名：右上角与技能内「打印」统一走智能工作台打印 */
+            window.printReport = function () {
+                if (typeof window.handlePrintWorkspace === 'function') window.handlePrintWorkspace();
             };
 
             // 🔥 核心功能：局部打印 (只打印报告部分，不打印聊天记录) - Legacy function
@@ -8591,8 +9310,11 @@
                 if (s.indexOf('results/') === 0) return '/' + s;
                 return '/uploads/' + s.replace(/^\/?/, '');
             };
-            window.buildSimpleCsvTableHtml = function(csvText, maxRows) {
+            window.buildSimpleCsvTableHtml = function(csvText, maxRows, tableOpts) {
                 maxRows = maxRows || 200;
+                tableOpts = tableOpts || {};
+                var wrapStyle = tableOpts.wrapStyle || 'overflow-x:auto;max-height:300px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;';
+                var tableClass = tableOpts.tableClass || 'table table-sm table-striped mb-0';
                 if (typeof Papa === 'undefined') {
                     return '<p class="text-danger small mb-0">PapaParse 未加载，无法预览 CSV</p>';
                 }
@@ -8611,8 +9333,8 @@
                 }
                 if (!data.length) return '<p class="text-muted small mb-0">空 CSV</p>';
                 var rows = data.slice(0, maxRows);
-                var html = '<div style="overflow-x:auto;max-height:300px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;">';
-                html += '<table class="table table-sm table-striped mb-0" style="font-size:12px;margin:0;"><thead><tr>';
+                var html = '<div style="' + wrapStyle + '">';
+                html += '<table class="' + tableClass + '" style="font-size:12px;margin:0;"><thead><tr>';
                 fields.forEach(function(h) {
                     html += '<th style="white-space:nowrap;padding:6px 8px;">' + escapeHtml(String(h)) + '</th>';
                 });
@@ -10385,23 +11107,48 @@
             }
 
             function copyText(btn) {
-                let text = "";
-                const container = btn.closest('.message-container');
+                var text = '';
+                var container = btn.closest('.message-container');
                 if (container) {
-                    text = container.querySelector('.bubble').innerText;
+                    var tz = container.querySelector('.text-zone.markdown-body, .text-zone.text-container, .text-zone');
+                    if (tz) text = (tz.innerText || '').trim();
+                    if (!text) {
+                        var bub = container.querySelector('.bubble');
+                        text = bub ? (bub.innerText || '').trim() : '';
+                    }
+                }
+                var origHtml = btn.innerHTML;
+                function onCopied() {
+                    btn.innerHTML = '<i class="bi bi-check"></i>\u5df2\u590d\u5236';
+                    setTimeout(function() { btn.innerHTML = origHtml; }, 2000);
+                    if (typeof showToast === 'function') showToast('\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f', 'success');
                 }
                 if (navigator.clipboard && window.isSecureContext) {
-                    navigator.clipboard.writeText(text).then(() => {
-                        const icon = btn.querySelector('i');
-                        if(icon) { const originalClass = icon.className; icon.className = 'bi bi-check'; setTimeout(() => icon.className = originalClass, 2000); }
+                    navigator.clipboard.writeText(text).then(onCopied).catch(function() {
+                        var textArea = document.createElement('textarea');
+                        textArea.value = text;
+                        textArea.style.position = 'fixed';
+                        textArea.style.left = '-9999px';
+                        document.body.appendChild(textArea);
+                        textArea.focus();
+                        textArea.select();
+                        try {
+                            if (document.execCommand('copy')) onCopied();
+                        } catch (err) {}
+                        document.body.removeChild(textArea);
                     });
                 } else {
-                    const textArea = document.createElement("textarea");
-                    textArea.value = text;
-                    textArea.style.position = "fixed"; textArea.style.left = "-9999px";
-                    document.body.appendChild(textArea); textArea.focus(); textArea.select();
-                    try { document.execCommand('copy'); } catch (err) {}
-                    document.body.removeChild(textArea);
+                    var textArea2 = document.createElement('textarea');
+                    textArea2.value = text;
+                    textArea2.style.position = 'fixed';
+                    textArea2.style.left = '-9999px';
+                    document.body.appendChild(textArea2);
+                    textArea2.focus();
+                    textArea2.select();
+                    try {
+                        if (document.execCommand('copy')) onCopied();
+                    } catch (err) {}
+                    document.body.removeChild(textArea2);
                 }
             }
 
@@ -10432,10 +11179,39 @@
             function deleteMessage(btn) {
                 var row = btn.closest('.message-row');
                 if (!row) return;
+                var afterRemove = function() {
+                    row.remove();
+                    if (typeof rebuildChatHistoryFromDom === 'function') rebuildChatHistoryFromDom();
+                };
+                if (row.classList.contains('ai')) {
+                    var chatContent = document.getElementById('chatContent');
+                    var rows = chatContent ? Array.prototype.slice.call(chatContent.querySelectorAll('.message-row')) : [];
+                    var idx = rows.indexOf(row);
+                    var prevRow = idx > 0 ? rows[idx - 1] : null;
+                    var midAi = row.dataset.messageId;
+                    var midUser = prevRow && prevRow.classList.contains('user') ? prevRow.dataset.messageId : null;
+                    var rmDom = function() {
+                        row.remove();
+                        if (prevRow && prevRow.classList.contains('user')) prevRow.remove();
+                        if (typeof rebuildChatHistoryFromDom === 'function') rebuildChatHistoryFromDom();
+                    };
+                    if (!midAi && !midUser) {
+                        rmDom();
+                        return;
+                    }
+                    var p = Promise.resolve();
+                    if (midAi) p = p.then(function() { return fetch('/api/messages/' + midAi, { method: 'DELETE', headers: getAuthHeaders() }); });
+                    if (midUser) p = p.then(function() { return fetch('/api/messages/' + midUser, { method: 'DELETE', headers: getAuthHeaders() }); });
+                    p.then(function() { rmDom(); }).catch(function() { rmDom(); });
+                    return;
+                }
                 var mid = row.dataset.messageId;
-                if (!mid) { row.remove(); return; }
+                if (!mid) {
+                    afterRemove();
+                    return;
+                }
                 fetch('/api/messages/' + mid, { method: 'DELETE', headers: getAuthHeaders() })
-                    .then(function(r) { if (r.ok) row.remove(); });
+                    .then(function(r) { if (r.ok) afterRemove(); });
             }
             function regenerateMessage(btn) {
                 var row = btn.closest('.message-row');
@@ -10448,12 +11224,21 @@
                 var prevRow = rows[idx - 1];
                 if (!prevRow.classList.contains('user')) return;
                 var bubble = prevRow.querySelector('.bubble');
-                var prevText = bubble ? bubble.innerText : '';
-                var mid = row.dataset.messageId;
-                if (mid) fetch('/api/messages/' + mid, { method: 'DELETE', headers: getAuthHeaders() }).catch(function() {});
+                var prevText = bubble ? String(bubble.innerText || '').trim() : '';
+                if (!prevText) return;
+                var midAi = row.dataset.messageId;
+                var midUser = prevRow.dataset.messageId;
+                if (midAi) fetch('/api/messages/' + midAi, { method: 'DELETE', headers: getAuthHeaders() }).catch(function() {});
+                if (midUser) fetch('/api/messages/' + midUser, { method: 'DELETE', headers: getAuthHeaders() }).catch(function() {});
                 row.remove();
-                if (typeof sendMessage === 'function') sendMessage(prevText);
+                prevRow.remove();
+                if (typeof rebuildChatHistoryFromDom === 'function') rebuildChatHistoryFromDom();
+                if (typeof sendMessage === 'function') sendMessage(null, prevText);
             }
+            window.copyText = copyText;
+            window.deleteMessage = deleteMessage;
+            window.regenerateMessage = regenerateMessage;
+            window.editMessage = editMessage;
             
             // 🔥 TASK 5: 参数推荐切换函数
             window.toggleParameterRecommendations = function(formId, useRecommended) {
@@ -10504,17 +11289,51 @@
                     console.warn('[applyRecommendedParams] 未找到表单容器: ' + formId);
                     return;
                 }
+                var maxSteps = typeof stepsLength === 'number' && stepsLength > 0 ? stepsLength : 24;
                 var applied = 0;
                 for (var key in rec.params) {
                     if (!rec.params.hasOwnProperty(key)) continue;
                     var val = rec.params[key];
                     var value = (val && typeof val === 'object' && 'value' in val) ? val.value : val;
                     var cleanKey = String(key).replace(/^[`\s]+|[`\s]+$/g, '').replace(/^\*+|\*+$/g, '').trim();
+                    var normHuman = cleanKey.replace(/\s+/g, '_').replace(/-/g, '_').toLowerCase();
                     var element = form.querySelector('[name="' + cleanKey + '"]');
+                    if (!element && normHuman !== cleanKey) {
+                        element = form.querySelector('[name="' + normHuman + '"]');
+                    }
                     if (!element) {
-                        for (var i = 0; i < (stepsLength || 20); i++) {
+                        try {
+                            element = form.querySelector('.param-input[data-param-name="' + CSS.escape(cleanKey) + '"]');
+                        } catch (e1) {
+                            try {
+                                var esc = cleanKey.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+                                element = form.querySelector('.param-input[data-param-name="' + esc + '"]');
+                            } catch (e2) { element = null; }
+                        }
+                    }
+                    if (!element && normHuman !== cleanKey) {
+                        try {
+                            element = form.querySelector('.param-input[data-param-name="' + CSS.escape(normHuman) + '"]');
+                        } catch (e3) { element = null; }
+                    }
+                    if (!element) {
+                        for (var i = 0; i < maxSteps; i++) {
                             element = form.querySelector('[name="param_' + i + '_' + cleanKey + '"]');
                             if (element) break;
+                        }
+                    }
+                    if (!element && normHuman !== cleanKey) {
+                        for (var j = 0; j < maxSteps; j++) {
+                            element = form.querySelector('[name="param_' + j + '_' + normHuman + '"]');
+                            if (element) break;
+                        }
+                    }
+                    if (!element) {
+                        var mStep = cleanKey.match(/^(\d+)[.:_]\s*(.+)$/);
+                        if (mStep) {
+                            var si = parseInt(mStep[1], 10);
+                            var sub = mStep[2].trim();
+                            if (!isNaN(si)) element = form.querySelector('[name="param_' + si + '_' + sub + '"]');
                         }
                     }
                     if (element) {

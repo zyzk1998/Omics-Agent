@@ -56,6 +56,7 @@ config/settings.local.yaml
 *.pem
 .env
 .env.local
+.env.new
 .env.*.local
 
 # 测试数据目录（大文件，不提交）
@@ -192,6 +193,9 @@ gibh-desktop-app/dist-out/
 # 勿将安装包留在 app 根目录提交；应放到 services/nginx/html/downloads/
 gibh-desktop-app/*.exe
 gibh-desktop-app/*.AppImage
+
+# 架构动画演示：以 docs/animated_architecture.html 为准；根目录同名多为本地拷备
+/animated_architecture.html
 
 # 供网页下载的安装包（由 CI 或手工从 dist-out 复制，勿提交大二进制）
 services/nginx/html/downloads/*.exe

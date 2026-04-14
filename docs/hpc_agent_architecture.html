@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>生信大模型智能体 · 架构与数据流</title>
+  <style>
+    :root {
+      --bg-deep: #0a0e17;
+      --grid: rgba(0, 255, 200, 0.055);
+      --cyan: #00e5cc;
+      --cyan-dim: rgba(0, 229, 204, 0.28);
+      --violet: #a78bfa;
+      --amber: #fbbf24;
+      --orange: #fb923c;
+      --blue-packet: #38bdf8;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --panel: rgba(18, 26, 43, 0.88);
+      --line: rgba(0, 229, 204, 0.35);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      font-family: "JetBrains Mono", "SF Mono", Consolas, "Microsoft YaHei UI", sans-serif;
+      background: var(--bg-deep);
+      color: var(--text);
+      overflow-x: hidden;
+    }
+
+    .stage {
+      position: relative;
+      min-height: 100%;
+      background:
+        linear-gradient(180deg, #0d1525 0%, var(--bg-deep) 50%, #080c14 100%),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+        linear-gradient(var(--grid) 1px, transparent 1px);
+      background-size: 100% 100%, 28px 28px, 28px 28px;
+    }
+
+    .stage::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse 75% 55% at 50% 38%, rgba(0, 229, 204, 0.07), transparent 65%);
+      pointer-events: none;
+    }
+
+    .title-bar {
+      position: relative;
+      z-index: 20;
+      padding: 14px 22px;
+      border-bottom: 1px solid rgba(0, 229, 204, 0.14);
+      background: linear-gradient(180deg, rgba(10, 14, 23, 0.92), transparent);
+    }
+
+    .title-bar h1 {
+      font-size: clamp(15px, 2.1vw, 18px);
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      background: linear-gradient(90deg, var(--cyan), var(--violet));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .title-bar .sub {
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--muted);
+      max-width: 720px;
+      line-height: 1.45;
+    }
+
+    .canvas {
+      position: relative;
+      z-index: 5;
+      width: calc(100% - 32px);
+      max-width: 1180px;
+      min-height: 520px;
+      aspect-ratio: 16 / 10;
+      margin: 16px auto 96px;
+      border: 1px solid rgba(0, 229, 204, 0.22);
+      border-radius: 12px;
+      background: var(--panel);
+      box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+        0 18px 48px rgba(0, 0, 0, 0.42);
+    }
+
+    .canvas svg.connectors {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .canvas svg.connectors path {
+      fill: none;
+      stroke: rgba(0, 229, 204, 0.22);
+      stroke-width: 1;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .canvas svg.connectors .dash {
+      stroke-dasharray: 5 4;
+      stroke: rgba(167, 139, 250, 0.35);
+    }
+
+    .canvas svg.connectors .signal-path {
+      stroke: var(--cyan);
+      stroke-dasharray: 100;
+      stroke-dashoffset: 100;
+      opacity: 0;
+    }
+
+    .canvas svg.connectors .signal-path.on {
+      opacity: 0.85;
+      animation: dash-reveal 1s linear forwards;
+    }
+
+    @keyframes dash-reveal {
+      from { stroke-dashoffset: 100; }
+      to { stroke-dashoffset: 0; }
+    }
+
+    .zone-hint {
+      position: absolute;
+      z-index: 2;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      text-transform: none;
+    }
+
+    .zh-1 { left: 4%; top: 3%; }
+    .zh-2 { left: 26%; top: 25%; }
+    .zh-3 { right: 4%; top: 3%; }
+    .zh-4 { left: 4%; bottom: 16%; }
+
+    .module {
+      position: absolute;
+      z-index: 3;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(15, 23, 42, 0.65);
+      padding: 9px 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      box-shadow: 0 0 20px var(--cyan-dim);
+      transition: border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+
+    .module .title {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--cyan);
+      letter-spacing: 0.02em;
+      line-height: 1.35;
+    }
+
+    .module .code {
+      font-size: 9px;
+      color: var(--violet);
+      opacity: 0.92;
+    }
+
+    .module .meta {
+      font-size: 9px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .module.is-flash {
+      animation: flash-mod 0.5s ease-in-out 2;
+    }
+
+    @keyframes flash-mod {
+      50% {
+        border-color: rgba(251, 191, 36, 0.75);
+        box-shadow: 0 0 28px rgba(251, 191, 36, 0.25);
+      }
+    }
+
+    .module.is-edge {
+      border-color: rgba(167, 139, 250, 0.85);
+      box-shadow: 0 0 24px rgba(167, 139, 250, 0.2);
+    }
+
+    .module.is-active {
+      border-color: rgba(251, 146, 60, 0.85);
+      box-shadow: 0 0 22px rgba(251, 146, 60, 0.22);
+    }
+
+    .z1-ui {
+      left: 4%;
+      top: 13%;
+      width: 21%;
+      height: 15%;
+    }
+
+    .z1-router {
+      left: 29%;
+      top: 7%;
+      width: 28%;
+      height: 13%;
+    }
+
+    .z2-orch {
+      left: 25%;
+      top: 28%;
+      width: 44%;
+      height: 34%;
+    }
+
+    .subchain {
+      display: flex;
+      margin-top: 4px;
+      border: 1px solid rgba(0, 229, 204, 0.25);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .subchain .sub {
+      flex: 1;
+      padding: 6px 5px;
+      font-size: 9px;
+      color: var(--text);
+      border-right: 1px solid rgba(0, 229, 204, 0.18);
+      line-height: 1.35;
+    }
+
+    .subchain .sub:last-child { border-right: none; }
+
+    .subchain .sub em {
+      display: block;
+      font-style: normal;
+      font-size: 8px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
+    .z3-local {
+      right: 3.5%;
+      top: 12%;
+      width: 23%;
+      height: 15%;
+    }
+
+    .z3-worker {
+      right: 3.5%;
+      top: 32%;
+      width: 23%;
+      height: 13%;
+    }
+
+    .z3-cluster {
+      right: 2%;
+      top: 50%;
+      width: 29%;
+      height: 23%;
+    }
+
+    .cluster-status {
+      margin-top: 4px;
+      padding: 6px 7px;
+      border: 1px solid rgba(0, 229, 204, 0.22);
+      border-radius: 6px;
+      font-size: 9px;
+      color: var(--muted);
+    }
+
+    .cluster-status .bar {
+      height: 4px;
+      margin-top: 6px;
+      border: 1px solid rgba(0, 229, 204, 0.2);
+      border-radius: 2px;
+      overflow: hidden;
+      background: rgba(0, 0, 0, 0.25);
+    }
+
+    .cluster-status .bar > i {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: var(--orange);
+      font-style: normal;
+    }
+
+    .z4-storage {
+      left: 4%;
+      bottom: 4%;
+      width: 92%;
+      height: 12%;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .z4-storage .blurb {
+      font-size: 9px;
+      color: var(--muted);
+      text-align: right;
+      flex: 1;
+    }
+
+    .packet-layer {
+      position: absolute;
+      inset: 0;
+      z-index: 8;
+      pointer-events: none;
+    }
+
+    .data-packet,
+    .task-chunk {
+      position: absolute;
+      width: 11px;
+      height: 11px;
+      margin-left: -5px;
+      margin-top: -5px;
+      border-radius: 3px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .data-packet { background: var(--blue-packet); box-shadow: 0 0 12px rgba(56, 189, 248, 0.45); }
+    .data-packet.violet { background: var(--violet); box-shadow: 0 0 12px rgba(167, 139, 250, 0.45); }
+    .data-packet.amber { background: var(--amber); box-shadow: 0 0 12px rgba(251, 191, 36, 0.4); }
+    .data-packet.orange { background: var(--orange); box-shadow: 0 0 12px rgba(251, 146, 60, 0.45); }
+    .data-packet.cyan { background: var(--cyan); box-shadow: 0 0 12px rgba(0, 229, 204, 0.45); }
+
+    .task-chunk {
+      width: 9px;
+      height: 9px;
+      margin-left: -4px;
+      margin-top: -4px;
+      background: var(--amber);
+      box-shadow: 0 0 10px rgba(251, 191, 36, 0.4);
+    }
+
+    .task-chunk .tag {
+      position: absolute;
+      left: 11px;
+      top: -3px;
+      font-size: 8px;
+      color: var(--amber);
+      white-space: nowrap;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    }
+
+    .caption {
+      position: absolute;
+      left: 50%;
+      bottom: 19%;
+      transform: translateX(-50%);
+      max-width: 92%;
+      padding: 9px 16px;
+      border: 1px solid rgba(0, 229, 204, 0.28);
+      border-radius: 8px;
+      background: rgba(10, 14, 23, 0.9);
+      font-size: 11px;
+      color: var(--text);
+      text-align: center;
+      z-index: 12;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+
+    .caption.show { opacity: 1; }
+
+    .caption kbd {
+      display: inline-block;
+      padding: 1px 7px;
+      margin: 0 3px;
+      border-radius: 4px;
+      border: 1px solid rgba(0, 229, 204, 0.35);
+      font-size: 10px;
+      color: var(--cyan);
+      background: rgba(0, 229, 204, 0.08);
+    }
+
+    .dock {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 30;
+      padding: 14px 16px 18px;
+      display: flex;
+      justify-content: center;
+      background: linear-gradient(0deg, rgba(8, 12, 20, 0.96), transparent);
+      border-top: 1px solid rgba(0, 229, 204, 0.12);
+    }
+
+    .btn-run {
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 12px 22px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      color: #0f172a;
+      background: linear-gradient(135deg, var(--cyan), #2dd4bf);
+      box-shadow: 0 4px 0 #0d9488, 0 10px 32px rgba(0, 229, 204, 0.28);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .btn-run:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 5px 0 #0d9488, 0 14px 36px rgba(0, 229, 204, 0.35);
+    }
+
+    .btn-run:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    @media (max-width: 720px) {
+      .module .meta, .z4-storage .blurb { display: none; }
+      .canvas { min-height: 480px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <header class="title-bar">
+      <h1>生信大模型智能体 · 架构与数据流</h1>
+      <p class="sub">系统级示意：对齐 GIBH-AGENT-V2 白皮书中的 <strong>SemanticRouter</strong>、<strong>AgentOrchestrator</strong>、<strong>OmicsAssetManager</strong>、<strong>Executor</strong>、<strong>TaaS Worker</strong> 与共享数据路径；不展开实现细节。</p>
+    </header>
+
+    <div class="canvas" id="blueprint" aria-label="架构与数据流">
+      <svg class="connectors" viewBox="0 0 1000 625" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M 140 125 L 310 98" />
+        <path d="M 430 98 L 430 205" />
+        <path d="M 430 205 L 210 248" />
+        <path d="M 430 205 L 430 252" />
+        <path d="M 430 205 L 660 248" />
+        <path d="M 660 248 L 875 248" />
+        <path class="dash" d="M 875 248 L 915 345" />
+        <path d="M 210 248 L 210 328" />
+        <path d="M 430 328 L 500 548" />
+        <path d="M 210 328 L 500 548" />
+        <path d="M 915 345 L 500 548" />
+        <path id="path-signal" class="signal-path" d="M 500 565 L 140 125" />
+      </svg>
+
+      <span class="zone-hint zh-1">接入与会话</span>
+      <span class="zone-hint zh-2">编排与资产</span>
+      <span class="zone-hint zh-3">执行与算力</span>
+      <span class="zone-hint zh-4">路径与持久化</span>
+
+      <div class="module z1-ui" id="mod-ui">
+        <span class="title">交互与会话</span>
+        <span class="code">services/nginx/html · SSE</span>
+        <span class="meta">对话、上传入口；与编排器下行事件同源展示。</span>
+      </div>
+
+      <div class="module z1-router" id="mod-router">
+        <span class="title">语义路由 SemanticRouter</span>
+        <span class="code">gibh_agent/core/semantic_router.py</span>
+        <span class="meta">Task / Chat / hpc 等路由；与全局意图、快车道协同。</span>
+      </div>
+
+      <div class="module z2-orch" id="mod-orch">
+        <span class="title">Agent 编排器 AgentOrchestrator</span>
+        <span class="code">gibh_agent/core/orchestrator.py</span>
+        <span class="meta">技能快车道 <code style="color:var(--amber)">[Skill_Route: …]</code>、工作流复用、流式 SSE。</span>
+        <div class="subchain" id="subchain">
+          <div class="sub" id="mod-parser">
+            多模态资产总线
+            <em>OmicsAssetManager · 嗅探与捆绑</em>
+          </div>
+          <div class="sub" id="mod-graph">
+            Planner / 工作流
+            <em>模板与 SOP 规划</em>
+          </div>
+          <div class="sub" id="mod-res">
+            执行器反射注入
+            <em>Executor · 签名驱动参数</em>
+          </div>
+        </div>
+      </div>
+
+      <div class="module z3-local" id="mod-local">
+        <span class="title">本地轻量生信工具</span>
+        <span class="code">gibh_agent/tools · 同进程调用</span>
+        <span class="meta">短耗时算子；重型不得阻塞主进程（宪法条款）。</span>
+      </div>
+
+      <div class="module z3-worker" id="mod-hpc">
+        <span class="title">重型算子 Worker（TaaS）</span>
+        <span class="code">workers/worker-pyskills · HTTP JSON</span>
+        <span class="meta">共享挂载路径传递；RNA-fold 等长时程算子。</span>
+      </div>
+
+      <div class="module z3-cluster" id="mod-cluster">
+        <span class="title">超算中心作业区（对接形态）</span>
+        <span class="code">队列作业 · 共享文件系统</span>
+        <span class="meta">与中心侧批处理脚本、数据岛策略对齐；本页仅示意边界。</span>
+        <div class="cluster-status" id="cluster-status">
+          <span id="cluster-text">状态：空闲</span>
+          <div class="bar" aria-hidden="true"><i id="cluster-bar"></i></div>
+        </div>
+      </div>
+
+      <div class="module z4-storage" id="mod-storage">
+        <div>
+          <span class="title">上传与结果目录</span>
+          <span class="code">OmicsAssetManager / RESULTS_DIR</span>
+        </div>
+        <span class="blurb">与 <code>resolve_omics_paths</code>、执行器注入共用同一套解析路径语义。</span>
+      </div>
+
+      <div class="caption" id="caption" role="status" aria-live="polite"></div>
+      <div class="packet-layer" id="packet-layer"></div>
+    </div>
+
+    <footer class="dock">
+      <button type="button" class="btn-run" id="btn-run">演示：提交大规模 RNA-Seq 分析请求</button>
+    </footer>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
+  <script>
+(function () {
+  var blueprint = document.getElementById("blueprint");
+  var layer = document.getElementById("packet-layer");
+  var btn = document.getElementById("btn-run");
+  var caption = document.getElementById("caption");
+  var signalPath = document.getElementById("path-signal");
+  var clusterText = document.getElementById("cluster-text");
+  var clusterBar = document.getElementById("cluster-bar");
+
+  var mods = {
+    ui: document.getElementById("mod-ui"),
+    router: document.getElementById("mod-router"),
+    orch: document.getElementById("mod-orch"),
+    parser: document.getElementById("mod-parser"),
+    graph: document.getElementById("mod-graph"),
+    res: document.getElementById("mod-res"),
+    local: document.getElementById("mod-local"),
+    hpc: document.getElementById("mod-hpc"),
+    cluster: document.getElementById("mod-cluster"),
+    storage: document.getElementById("mod-storage"),
+  };
+
+  var running = false;
+
+  function center(el) {
+    var br = blueprint.getBoundingClientRect();
+    var r = el.getBoundingClientRect();
+    return {
+      x: r.left - br.left + r.width / 2,
+      y: r.top - br.top + r.height / 2,
+    };
+  }
+
+  function setCap(html, on) {
+    caption.innerHTML = html;
+    caption.classList.toggle("show", !!on);
+  }
+
+  function clearLayer() {
+    layer.innerHTML = "";
+  }
+
+  function makePacket(cls) {
+    var el = document.createElement("div");
+    el.className = "data-packet" + (cls ? " " + cls : "");
+    layer.appendChild(el);
+    return el;
+  }
+
+  function makeTaskChunk(label) {
+    var el = document.createElement("div");
+    el.className = "task-chunk";
+    var t = document.createElement("span");
+    t.className = "tag";
+    t.textContent = label;
+    el.appendChild(t);
+    layer.appendChild(el);
+    return el;
+  }
+
+  function place(el, pt) {
+    el.style.left = pt.x + "px";
+    el.style.top = pt.y + "px";
+  }
+
+  function moveLinear(el, from, to, duration, done) {
+    place(el, from);
+    anime({
+      targets: el,
+      left: [from.x + "px", to.x + "px"],
+      top: [from.y + "px", to.y + "px"],
+      duration: duration,
+      easing: "linear",
+      complete: done || function () {},
+    });
+  }
+
+  function moveTwoSegment(el, a, b, c, d1, d2, done) {
+    place(el, a);
+    anime({
+      targets: el,
+      left: [a.x + "px", b.x + "px"],
+      top: [a.y + "px", b.y + "px"],
+      duration: d1,
+      easing: "linear",
+      complete: function () {
+        anime({
+          targets: el,
+          left: [b.x + "px", c.x + "px"],
+          top: [b.y + "px", c.y + "px"],
+          duration: d2,
+          easing: "linear",
+          complete: done || function () {},
+        });
+      },
+    });
+  }
+
+  function wait(ms) {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, ms);
+    });
+  }
+
+  function setCluster(text, pct) {
+    clusterText.textContent = text;
+    clusterBar.style.width = (pct || 0) + "%";
+  }
+
+  function resetUi() {
+    Object.keys(mods).forEach(function (k) {
+      mods[k].classList.remove("is-flash", "is-edge", "is-active");
+    });
+    signalPath.classList.remove("on");
+    signalPath.style.animation = "none";
+    signalPath.getBoundingClientRect();
+    signalPath.style.animation = "";
+    signalPath.style.opacity = "0";
+    signalPath.style.strokeDashoffset = "100";
+    setCluster("状态：空闲", 0);
+    clearLayer();
+    setCap("", false);
+  }
+
+  async function runSequence() {
+    if (running) return;
+    if (typeof anime === "undefined") {
+      window.alert("Anime.js 未能加载，请检查网络后重试。");
+      return;
+    }
+    running = true;
+    btn.disabled = true;
+    resetUi();
+
+    var u0 = center(mods.ui);
+    var r0 = center(mods.router);
+    var o0 = center(mods.orch);
+    var p0 = center(mods.parser);
+    var l0 = center(mods.local);
+    var h0 = center(mods.hpc);
+    var c0 = center(mods.cluster);
+    var s0 = center(mods.storage);
+
+    setCap("① 用户侧：<kbd>自然语言 + 上传路径</kbd> 进入会话层。", true);
+    mods.ui.classList.add("is-flash");
+    await wait(220);
+    var pkt = makePacket("");
+    place(pkt, u0);
+    await new Promise(function (res) {
+      moveLinear(pkt, u0, r0, 900, res);
+    });
+    mods.ui.classList.remove("is-flash");
+
+    setCap("② <kbd>SemanticRouter</kbd> 完成语义判决后，将本次会话路由为 <kbd>Task</kbd> 模式。", true);
+    mods.router.classList.add("is-edge");
+    await wait(320);
+    pkt.classList.add("violet");
+    await new Promise(function (res) {
+      moveLinear(pkt, r0, o0, 900, res);
+    });
+    mods.router.classList.remove("is-edge");
+    layer.removeChild(pkt);
+
+    setCap("③ 请求进入 <kbd>AgentOrchestrator</kbd>，在 <kbd>OmicsAssetManager</kbd> 上完成资产规范化。", true);
+    var pkt2 = makePacket("amber");
+    place(pkt2, o0);
+    await new Promise(function (res) {
+      moveLinear(pkt2, o0, p0, 720, res);
+    });
+    await wait(520);
+    layer.removeChild(pkt2);
+
+    setCap("④ 编排器拆分为并行子任务：本地质控、Worker 重型步骤、超算侧比对/定量。", true);
+    var ta = makeTaskChunk("本地 QC");
+    var tb = makeTaskChunk("Worker");
+    var tc = makeTaskChunk("超算");
+    place(ta, p0);
+    place(tb, p0);
+    place(tc, p0);
+    anime({
+      targets: ta,
+      left: [p0.x + "px", p0.x - 16 + "px"],
+      top: [p0.y + "px", p0.y - 10 + "px"],
+      duration: 380,
+      easing: "linear",
+    });
+    anime({
+      targets: tb,
+      left: [p0.x + "px", p0.x + "px"],
+      top: [p0.y + "px", p0.y + 14 + "px"],
+      duration: 380,
+      easing: "linear",
+    });
+    anime({
+      targets: tc,
+      left: [p0.x + "px", p0.x + 16 + "px"],
+      top: [p0.y + "px", p0.y - 10 + "px"],
+      duration: 380,
+      easing: "linear",
+    });
+    await wait(420);
+
+    await new Promise(function (res) {
+      moveLinear(ta, { x: p0.x - 16, y: p0.y - 10 }, l0, 1000, res);
+    });
+    mods.local.classList.add("is-active");
+    await wait(480);
+    mods.local.classList.remove("is-active");
+    layer.removeChild(ta);
+
+    mods.hpc.classList.add("is-active");
+    await Promise.all([
+      new Promise(function (res) {
+        moveLinear(tb, { x: p0.x, y: p0.y + 14 }, h0, 1000, res);
+      }),
+      new Promise(function (res) {
+        moveLinear(tc, { x: p0.x + 16, y: p0.y - 10 }, h0, 1000, res);
+      }),
+    ]);
+
+    place(tb, { x: h0.x, y: h0.y });
+    place(tc, { x: h0.x, y: h0.y });
+    setCap("⑤ <kbd>TaaS Worker</kbd> 与超算队列经挂载目录衔接；虚线路径表示跨域慢链路。", true);
+    setCluster("状态：队列中", 0);
+    var elbow = { x: c0.x, y: h0.y };
+    await Promise.all([
+      new Promise(function (res) {
+        moveTwoSegment(tb, h0, elbow, c0, 880, 1500, res);
+      }),
+      new Promise(function (res) {
+        moveTwoSegment(tc, h0, elbow, c0, 880, 1500, res);
+      }),
+    ]);
+    mods.hpc.classList.remove("is-active");
+    mods.cluster.classList.add("is-active");
+
+    setCluster("状态：运行中 0%", 0);
+    await new Promise(function (res) {
+      anime({
+        targets: clusterBar,
+        width: ["0%", "100%"],
+        duration: 2600,
+        easing: "linear",
+        update: function (anim) {
+          setCluster("状态：运行中 " + Math.round(anim.progress) + "%", anim.progress);
+        },
+        complete: function () {
+          setCluster("状态：已完成", 100);
+          res();
+        },
+      });
+    });
+    await wait(380);
+    layer.removeChild(tb);
+    layer.removeChild(tc);
+    mods.cluster.classList.remove("is-active");
+
+    setCap("⑥ 汇总产物写入 <kbd>上传与结果目录</kbd>；SSE 将完成态回传会话层。", true);
+    var blue = makePacket("cyan");
+    var mergePt = { x: (l0.x + c0.x) / 2, y: (l0.y + c0.y) / 2 };
+    place(blue, mergePt);
+    await new Promise(function (res) {
+      moveLinear(blue, mergePt, s0, 1150, res);
+    });
+    mods.storage.classList.add("is-active");
+    await wait(280);
+    layer.removeChild(blue);
+    mods.storage.classList.remove("is-active");
+
+    setCap("⑦ 成功回传：<kbd>done</kbd> 事件与快照链路对齐（参见项目「思考过程和历史快照」约定）。", true);
+    signalPath.classList.add("on");
+    mods.ui.classList.add("is-flash");
+    await wait(1300);
+    mods.ui.classList.remove("is-flash");
+    signalPath.classList.remove("on");
+
+    setCap("演示结束。以上为系统级数据流示意，非接口契约。", true);
+    await wait(2200);
+    setCap("", false);
+
+    running = false;
+    btn.disabled = false;
+  }
+
+  btn.addEventListener("click", function () {
+    runSequence().catch(function (e) {
+      console.error(e);
+      running = false;
+      btn.disabled = false;
+    });
+  });
+})();
+  </script>
+</body>
+</html>

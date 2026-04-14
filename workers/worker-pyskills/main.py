@@ -9,7 +9,10 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import os
 import re
+import subprocess
+import sys
 import threading
 import traceback
 import uuid
@@ -21,6 +24,7 @@ from pydantic import BaseModel, Field
 import RNA
 import pymol
 from rdkit import Chem
+from rdkit.Chem import Descriptors, Lipinski as RDKitLipinski
 import gseapy
 
 from sa_score_compat import load_calculate_score
@@ -45,6 +49,9 @@ logging.basicConfig(level=logging.INFO)
 PYSKILLS_PUBLIC_BASE = "/uploads/results/pyskills"
 _pymol_lock = threading.Lock()
 _pymol_launcher_started = False
+
+# 与 docker-compose 挂载一致：宿主机 ./third_party/drug-similarity -> 容器 /app/third_party/drug-similarity
+DRUG_SIM_BUNDLE = Path(os.environ.get("DRUG_SIMILARITY_BUNDLE", "/app/third_party/drug-similarity")).resolve()
 
 
 def _pyskills_out_dir() -> Path:
@@ -435,6 +442,168 @@ async def run_sascore(req: ToolRequest):
         raise
     except Exception as e:
         logger.exception("run_sascore")
+        raise HTTPException(status_code=500, detail=traceback.format_exc()) from e
+
+
+class LipinskiRequest(BaseModel):
+    """与 sascore 一致：file_path 指向含 SMILES 的文本文件（共享 uploads 卷）。"""
+
+    file_path: str
+
+
+@app.post("/api/lipinski")
+async def run_lipinski(req: LipinskiRequest):
+    """Lipinski Rule of Five：MW、LogP、HBD、HBA 与 is_druglike（违反 ≤1 条为 true）。"""
+    try:
+        p = Path(req.file_path).expanduser()
+        if not p.is_file():
+            raise HTTPException(status_code=400, detail=f"文件不存在: {req.file_path}")
+        raw = _read_text_safe(p)
+        smiles = _first_smiles_from_text(raw)
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            raise HTTPException(status_code=400, detail=f"无法解析 SMILES: {smiles!r}")
+        mw = float(round(Descriptors.MolWt(mol), 4))
+        logp = float(round(Descriptors.MolLogP(mol), 4))
+        hbd = int(RDKitLipinski.NumHDonors(mol))
+        hba = int(RDKitLipinski.NumHAcceptors(mol))
+        violations = 0
+        if mw > 500:
+            violations += 1
+        if logp > 5:
+            violations += 1
+        if hbd > 5:
+            violations += 1
+        if hba > 10:
+            violations += 1
+        is_druglike = violations <= 1
+        return {
+            "status": "success",
+            "data": {
+                "MW": mw,
+                "logP": logp,
+                "HBD": hbd,
+                "HBA": hba,
+                "lipinski_violations": violations,
+                "is_druglike": is_druglike,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("run_lipinski")
+        raise HTTPException(status_code=500, detail=traceback.format_exc()) from e
+
+
+class DrugSimilarityRequest(BaseModel):
+    file_path: str
+    top_n: int = Field(default=10, ge=1, le=50)
+    fingerprint: str = Field(default="morgan_ecfp")
+    metric: str = Field(default="tanimoto")
+    databases: list[str] = Field(default_factory=lambda: ["pubchem", "chembl"])
+    # 与 third_party/drug-similarity/find_similar.py → get_similar_from_all 默认对齐
+    similarity_threshold: float = Field(default=0.5, ge=0.05, le=0.99)
+    max_results_per_db: int = Field(default=100, ge=10, le=500)
+
+
+@app.post("/api/drug_similarity")
+async def run_drug_similarity(req: DrugSimilarityRequest):
+    """
+    调用技能包 scripts/drug_similarity.py（需联网访问公共化学库）。
+    产物写入 /app/uploads/results/drug_similarity/<run_id>/similarity_report.html 与 similarity_results.csv。
+    """
+    script = DRUG_SIM_BUNDLE / "scripts" / "drug_similarity.py"
+    if not script.is_file():
+        raise HTTPException(
+            status_code=503,
+            detail="药物相似性技能包未挂载：缺少 /app/third_party/drug-similarity/scripts/drug_similarity.py（请检查 compose 卷）。",
+        )
+    try:
+        p = Path(req.file_path).expanduser()
+        if not p.is_file():
+            raise HTTPException(status_code=400, detail=f"文件不存在: {req.file_path}")
+        raw = _read_text_safe(p)
+        smiles = _first_smiles_from_text(raw)
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            raise HTTPException(status_code=400, detail=f"无法解析 SMILES: {smiles!r}")
+        canon = Chem.MolToSmiles(mol)
+        dbs = [str(d).lower().strip() for d in (req.databases or []) if str(d).strip()]
+        if not dbs:
+            dbs = ["pubchem", "chembl"]
+        allowed_db = {"pubchem", "chembl", "drugbank", "bindingdb", "zinc", "chemspider"}
+        dbs = [d for d in dbs if d in allowed_db] or ["pubchem", "chembl"]
+        run_id = uuid.uuid4().hex[:16]
+        out_dir = Path("/app/uploads/results/drug_similarity") / run_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_html = out_dir / "similarity_report.html"
+        cmd: list[str] = [
+            sys.executable,
+            str(script),
+            "--input",
+            canon,
+            "--input-type",
+            "smiles",
+            "--top-n",
+            str(int(req.top_n)),
+            "--similarity-threshold",
+            str(float(req.similarity_threshold)),
+            "--max-results-per-db",
+            str(int(req.max_results_per_db)),
+            "--fingerprint",
+            str(req.fingerprint or "morgan_ecfp").lower(),
+            "--metric",
+            str(req.metric or "tanimoto").lower(),
+            "--output-format",
+            "html",
+            "--output",
+            str(out_html),
+        ]
+        for db in dbs:
+            cmd.extend(["--databases", db])
+        logger.info("drug_similarity CLI: %s", " ".join(cmd))
+        proc = subprocess.run(
+            cmd,
+            cwd=str(DRUG_SIM_BUNDLE),
+            capture_output=True,
+            text=True,
+            timeout=900,
+            env={**os.environ, "PYTHONNOUSERSITE": "1"},
+        )
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
+            logger.error(
+                "drug_similarity CLI 失败 rc=%s stderr=%s stdout=%s",
+                proc.returncode,
+                (proc.stderr or "")[:8000],
+                (proc.stdout or "")[:4000],
+            )
+            logger.warning("drug_similarity CLI 失败: %s", err[:2000])
+            raise HTTPException(status_code=500, detail=f"drug_similarity 执行失败: {err[:4000]}")
+        if not out_html.is_file():
+            raise HTTPException(status_code=500, detail="未生成 similarity_report.html")
+        public_html = f"/uploads/results/drug_similarity/{run_id}/similarity_report.html"
+        out_csv = out_dir / "similarity_results.csv"
+        csv_public = f"/uploads/results/drug_similarity/{run_id}/similarity_results.csv"
+        data_payload: dict = {
+            "html_url": public_html,
+            "query_smiles": canon,
+            "stdout_tail": (proc.stdout or "")[-4000:],
+        }
+        # 与 drug_similarity.py 同目录落盘的 Top-N 命中表（pandas/csv）；供前端「下载 CSV」
+        if out_csv.is_file():
+            data_payload["csv_url"] = csv_public
+        return {
+            "status": "success",
+            "message": "结构相似性检索完成，已生成交互式 HTML 报告（基于公共库检索，结果依赖外网数据可用性）。",
+            "data": data_payload,
+        }
+    except HTTPException:
+        raise
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="drug_similarity 执行超时（>900s）") from None
+    except Exception as e:
+        logger.exception("run_drug_similarity")
         raise HTTPException(status_code=500, detail=traceback.format_exc()) from e
 
 

@@ -1,0 +1,8 @@
+# 构建期由 micromamba 读取：仅走清华 Anaconda 云镜像，不回落 defaults，避免境外源卡死。
+# show_channel_urls: false 降低日志噪声并符合「关闭 show_channel_urls」要求。
+channel_priority: strict
+show_channel_urls: false
+channels:
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/bioconda
+  - nodefaults

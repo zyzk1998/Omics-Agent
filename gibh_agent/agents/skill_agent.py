@@ -21,6 +21,20 @@ from gibh_agent.core.utils import sanitize_for_json
 
 logger = logging.getLogger(__name__)
 
+# 药物相似性技能（逻辑 ID drug_similarity）：双工具 persona，供填参 LLM 对齐科学叙事
+DRUG_SIM_PERSONA_LIPINSKI = (
+    "你是计算化学与成药性（drug-likeness）方向的助理：当前任务为 **Lipinski 五规则** 快筛，"
+    "侧重口服小分子 **ADME 相关理化描述符**（分子量、logP、氢键供体/受体、可旋转键等）与 **Rule-of-Five 合规性** 解读，"
+    "避免展开 PubChem 相似性检索话术。"
+)
+DRUG_SIM_PERSONA_SIMILARITY = (
+    "你是化学信息学与药物发现方向的助理：当前任务为 **高通量结构相似性检索**，"
+    "侧重 **分子指纹 / 相似度度量**、命中列表与 **类似物/先导系列** 的发现与聚类叙事，"
+    "避免把重点写成单纯 Lipinski 合规判断。"
+    "填参时勿随意改小检索面：未写明时保持 **similarity_threshold=0.5**、**max_results_per_db=100**，"
+    "与原始 Skills 包 `find_similar.py` → `get_similar_from_all` 默认一致，以免 Top 命中缩水。"
+)
+
 _FASTA_SUFFIXES = (".fa", ".fasta", ".faa", ".ffn")
 
 
@@ -237,6 +251,13 @@ class SkillAgent:
         got = _loads(s)
         return got if got is not None else {}
 
+    def _drug_similarity_persona_prefix(self, tool_name: str) -> str:
+        if tool_name == "lipinski_druglikeness":
+            return DRUG_SIM_PERSONA_LIPINSKI + "\n\n"
+        if tool_name == "drug_similarity_search":
+            return DRUG_SIM_PERSONA_SIMILARITY + "\n\n"
+        return ""
+
     def _messages_for_streaming_arg_extract(
         self, tool_name: str, user_query: str, file_paths: List[str]
     ) -> List[Dict[str, str]]:
@@ -250,15 +271,18 @@ class SkillAgent:
                 schema_hint = str(list(meta.args_schema.model_fields.keys()))
         clean = strip_skill_route_tag(user_query)
         fp_block = "\n".join(f"- {p}" for p in file_paths) if file_paths else "(无上传文件)"
+        persona = self._drug_similarity_persona_prefix(tool_name)
         system = (
-            "你是生物信息学助手的参数抽取模块。用户已通过 [Skill_Route] 指定工具。"
+            persona
+            + "你是生物信息学助手的参数抽取模块。用户已通过 [Skill_Route] 指定工具。"
             f"先用 {THINK_OPEN}…{THINK_CLOSE} 写简短推理；闭合标签之后，输出必须且仅为一个符合 RFC 8259 的 JSON 对象，"
             "供程序 json.loads 直接解析（解析失败会导致技能失败）。"
             "JSON 规则：双引号包裹所有键名与字符串值；布尔必须小写 true/false；禁止尾逗号；禁止在 JSON 外再写任何字符。"
             "FASTA 作为字符串值时，换行必须转义为 \\n，写成一行合法 JSON（例如 \"fasta_content\": \">id\\nAUGC...\"）。"
             "禁止编造 file_path：路径必须逐字来自【可用本地文件绝对路径】列表；若列表为空或用户未上传，"
             "对 PySkills 类工具请改用内联字段（勿写 /app/uploads/demo_*.fa 等虚构路径）："
-            "rnafold_analysis→fasta_content；sascore_analysis→smiles_text；pymol_analysis→pdb_content；gseapy_analysis→table_content。"
+            "rnafold_analysis→fasta_content；sascore_analysis→smiles_text；lipinski_druglikeness→smiles_text；"
+            "drug_similarity_search→smiles_text；pymol_analysis→pdb_content；gseapy_analysis→table_content。"
             "有上传文件时优先 file_path 并用列表中的绝对路径。"
             "若用户未单独写一行 SMILES，但正文中用反引号标出参考分子 SMILES（或列表项中带 SMILES），"
             "须将**第一个**可解析的 SMILES 填入 smiles_text，不得留空导致工具失败。"
@@ -304,7 +328,7 @@ class SkillAgent:
                         chosen = p
                         break
                 out["file_path"] = chosen or file_paths[0]
-            elif tool_name == "sascore_analysis":
+            elif tool_name in ("sascore_analysis", "lipinski_druglikeness", "drug_similarity_search"):
                 chosen_sm: Optional[str] = None
                 for p in file_paths:
                     pl = p.lower()
@@ -335,7 +359,7 @@ class SkillAgent:
             ex = _extract_inline_fasta_for_fallback(clean)
             if ex:
                 out["fasta_content"] = ex
-        if tool_name == "sascore_analysis" and "smiles_text" in fields and not file_paths:
+        if tool_name in ("sascore_analysis", "lipinski_druglikeness", "drug_similarity_search") and "smiles_text" in fields and not file_paths:
             exs = _extract_inline_smiles_for_fallback(clean)
             if exs:
                 out["smiles_text"] = exs
@@ -367,7 +391,7 @@ class SkillAgent:
         fp = (args.get("file_path") or "").strip() if isinstance(args.get("file_path"), str) else ""
         has_upload = bool(file_paths) or bool(fp)
 
-        if tool_name == "sascore_analysis" and "smiles_text" in fields:
+        if tool_name in ("sascore_analysis", "lipinski_druglikeness", "drug_similarity_search") and "smiles_text" in fields:
             if _blank(args.get("smiles_text")) and not has_upload:
                 sm = _extract_inline_smiles_for_fallback(clean)
                 if sm:
@@ -398,10 +422,13 @@ class SkillAgent:
             return {}
         clean = strip_skill_route_tag(user_query)
         fp_block = "\n".join(f"- {p}" for p in file_paths) if file_paths else "(无上传文件)"
+        persona = self._drug_similarity_persona_prefix(tool_name)
         system = (
-            "你是生物信息学助手的参数抽取模块。用户已通过 [Skill_Route] 指定工具，"
+            persona
+            + "你是生物信息学助手的参数抽取模块。用户已通过 [Skill_Route] 指定工具，"
             "你必须调用给定的 function，并从用户描述与文件路径中推断合法参数。"
             "禁止编造 file_path：路径必须来自用户上传列表；若无上传，使用 fasta_content / smiles_text / pdb_content / table_content 等内联字段。"
+            "lipinski_druglikeness 与 drug_similarity_search 与 sascore 相同：优先 file_path，否则 smiles_text。"
             "function 参数字段须可被服务端严格校验：字符串用双引号、布尔为小写 true/false；"
             "FASTA/PDB/CSV 整段作为字符串时，换行在参数里须为 \\n。"
             "若用户仅在模板中列出带反引号的参考 SMILES，须任选第一个合法 SMILES 写入 smiles_text。"
@@ -566,11 +593,16 @@ class SkillAgent:
         """
         self._pending_done_tool = None
         step_id = f"skill_{uuid.uuid4().hex[:8]}"
+        step_banner = f"执行技能: {tool_name}"
+        if tool_name == "lipinski_druglikeness":
+            step_banner = "执行技能: Lipinski 类药性快筛（逻辑技能 drug_similarity / PK & Rule-of-Five）"
+        elif tool_name == "drug_similarity_search":
+            step_banner = "执行技能: 结构相似性检索（逻辑技能 drug_similarity / 聚类与类似物发现）"
         yield self._agentic_emit(
             {
                 "action": "step_start",
                 "step_id": step_id,
-                "content": f"执行技能: {tool_name}",
+                "content": step_banner,
                 "state": "running",
             }
         )

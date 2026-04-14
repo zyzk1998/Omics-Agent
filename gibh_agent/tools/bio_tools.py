@@ -237,8 +237,29 @@ def _write_pyskills_artifacts(
             w.writerow(["sa_score"])
             w.writerow([data.get("sa_score")])
         csv_url = _public_results_url(f"pyskills/{run_id}/sascore.csv")
+    elif tool_tag == "lipinski" and isinstance(data, dict) and "MW" in data:
+        csv_path = out_dir / "lipinski.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["MW", "logP", "HBD", "HBA", "lipinski_violations", "is_druglike"])
+            w.writerow(
+                [
+                    data.get("MW"),
+                    data.get("logP"),
+                    data.get("HBD"),
+                    data.get("HBA"),
+                    data.get("lipinski_violations", ""),
+                    data.get("is_druglike"),
+                ]
+            )
+        csv_url = _public_results_url(f"pyskills/{run_id}/lipinski.csv")
+    # drug_similarity：真实 Top-N 表由 worker + drug_similarity.py 写入 similarity_results.csv，经 data.csv_url 复用；不再生成 query/html 摘要 CSV。
 
-    if not csv_url and not (tool_tag == "pymol" and isinstance(data.get("image_url"), str)):
+    if (
+        not csv_url
+        and not (tool_tag == "pymol" and isinstance(data.get("image_url"), str))
+        and tool_tag != "drug_similarity"
+    ):
         # 无表格字段时导出 key-value 摘要；PyMOL 仅图像时可不生成无意义 CSV
         buf = io.StringIO()
         w = csv.writer(buf)
@@ -269,6 +290,13 @@ def _normalize_worker_success(
             msg += " 已包含分区函数碱基配对概率串（可用于 dot plot）；详见 JSON / CSV。"
     elif tool_tag == "sascore":
         msg = "合成可行性（SA Score）计算完成，数值越低通常越易合成。"
+    elif tool_tag == "lipinski":
+        msg = "Lipinski 五规则评估完成（MW、LogP、氢键供体/受体与违反条数）。"
+    elif tool_tag == "drug_similarity":
+        msg = (
+            (safe.get("message") if isinstance(safe.get("message"), str) else None)
+            or "结构相似性检索完成，详见 HTML 报告链接。"
+        )
     elif tool_tag == "pymol":
         msg = (safe.get("message") if isinstance(safe.get("message"), str) else None) or "蛋白质三维结构卡通渲染已完成。"
     elif tool_tag == "gseapy":
@@ -286,6 +314,14 @@ def _normalize_worker_success(
         for ukey in ("image_url", "csv_url", "html_url", "pdf_url"):
             if isinstance(d.get(ukey), str) and d[ukey].startswith("/uploads/") and not out.get(ukey):
                 out[ukey] = d[ukey]
+    # drug_similarity：仅 similarity_report.html + similarity_results.csv（由 DrugSimilarityTool
+    # 与 find_similar 同一检索面写入）；此处只做 URL 对齐，不存在「精简版 HTML」第二路径。
+    if tool_tag == "drug_similarity" and isinstance(out.get("data"), dict):
+        dd = out["data"]
+        for ukey in ("html_url", "csv_url"):
+            v = dd.get(ukey)
+            if isinstance(v, str) and v.strip().startswith("/uploads/"):
+                out[ukey] = v.strip()
     return out
 
 
@@ -396,6 +432,131 @@ async def sascore_analysis(file_path: str = "", smiles_text: str = "") -> dict:
 
     if isinstance(body, dict) and body.get("status") == "success":
         return _normalize_worker_success("sascore", body)
+    if isinstance(body, dict) and body.get("status") != "success":
+        return {"status": "error", "message": body.get("message") or str(body)}
+    return body if isinstance(body, dict) else {"status": "error", "message": str(body)}
+
+
+_DRUG_SIM_HTTP_TIMEOUT = float(os.getenv("PYSKILLS_DRUG_SIM_TIMEOUT", "920"))
+
+
+@registry.register(
+    name="lipinski_druglikeness",
+    description=(
+        "基于 Lipinski Rule of Five 评估小分子口服成药潜势。"
+        "输入二选一：file_path（已上传 SMILES 文本文件）或 smiles_text（单行 SMILES）。"
+        "输出 MW、logP、HBD、HBA、is_druglike（违反规则条数≤1 为 true）。"
+    ),
+    category="Bioinformatics",
+    output_type="json",
+)
+@safe_tool_execution
+async def lipinski_druglikeness(file_path: str = "", smiles_text: str = "") -> dict:
+    try:
+        resolved = _resolve_sascore_input(file_path, smiles_text)
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+
+    try:
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            resp = await client.post(_pyskills_url("/api/lipinski"), json={"file_path": resolved})
+            resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        r = e.response
+        detail = _http_error_detail(r)
+        logger.warning("lipinski_druglikeness HTTP %s: %s", r.status_code, detail[:500])
+        return {"status": "error", "message": _friendly_http_error(detail), "http_status": r.status_code}
+    except httpx.RequestError as e:
+        logger.warning("lipinski_druglikeness 连接失败: %s", e)
+        return {
+            "status": "error",
+            "message": (
+                "无法连接 PySkills 微服务（请确认已启动 worker-pyskills 容器，且 "
+                f"PYSKILLS_BASE_URL={PYSKILLS_BASE_URL} 可达）。详情：{e}"
+            ),
+        }
+
+    try:
+        body = resp.json()
+    except json.JSONDecodeError:
+        return {"status": "error", "message": "PySkills 返回非 JSON 响应"}
+
+    if isinstance(body, dict) and body.get("status") == "success":
+        return _normalize_worker_success("lipinski", body)
+    if isinstance(body, dict) and body.get("status") != "success":
+        return {"status": "error", "message": body.get("message") or str(body)}
+    return body if isinstance(body, dict) else {"status": "error", "message": str(body)}
+
+
+@registry.register(
+    name="drug_similarity_search",
+    description=(
+        "在 PubChem/ChEMBL 等公共库中检索与查询分子结构相似的化合物，生成交互式 HTML 报告（需联网，耗时较长）。"
+        "输入二选一：file_path（已上传 SMILES 文本）或 smiles_text（单行 SMILES）。"
+        "可选：top_n（默认 10）、fingerprint（默认 morgan_ecfp）、metric（默认 tanimoto）、"
+        "databases_csv（逗号分隔库名，如 pubchem,chembl）；"
+        "similarity_threshold（默认 0.5，与原始包 find_similar.py 中 get_similar_from_all 一致）、"
+        "max_results_per_db（默认 100，每库相似检索候选上限）。"
+    ),
+    category="Bioinformatics",
+    output_type="json",
+)
+@safe_tool_execution
+async def drug_similarity_search(
+    file_path: str = "",
+    smiles_text: str = "",
+    top_n: int = 10,
+    fingerprint: str = "morgan_ecfp",
+    metric: str = "tanimoto",
+    databases_csv: str = "pubchem,chembl",
+    similarity_threshold: float = 0.5,
+    max_results_per_db: int = 100,
+) -> dict:
+    try:
+        resolved = _resolve_sascore_input(file_path, smiles_text)
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+
+    dbs = [x.strip().lower() for x in (databases_csv or "").split(",") if x.strip()]
+    if not dbs:
+        dbs = ["pubchem", "chembl"]
+    payload: Dict[str, Any] = {
+        "file_path": resolved,
+        "top_n": int(top_n),
+        "fingerprint": (fingerprint or "morgan_ecfp").strip().lower(),
+        "metric": (metric or "tanimoto").strip().lower(),
+        "databases": dbs,
+        # 与 worker CLI `--similarity-threshold` / `--max-results-per-db` 同源，禁止在编排层静默改写
+        "similarity_threshold": float(similarity_threshold),
+        "max_results_per_db": int(max_results_per_db),
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=_DRUG_SIM_HTTP_TIMEOUT) as client:
+            resp = await client.post(_pyskills_url("/api/drug_similarity"), json=payload)
+            resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        r = e.response
+        detail = _http_error_detail(r)
+        logger.warning("drug_similarity_search HTTP %s: %s", r.status_code, detail[:500])
+        return {"status": "error", "message": _friendly_http_error(detail), "http_status": r.status_code}
+    except httpx.RequestError as e:
+        logger.warning("drug_similarity_search 连接失败: %s", e)
+        return {
+            "status": "error",
+            "message": (
+                "无法连接 PySkills 微服务（请确认已启动 worker-pyskills 容器，且 "
+                f"PYSKILLS_BASE_URL={PYSKILLS_BASE_URL} 可达）。详情：{e}"
+            ),
+        }
+
+    try:
+        body = resp.json()
+    except json.JSONDecodeError:
+        return {"status": "error", "message": "PySkills 返回非 JSON 响应"}
+
+    if isinstance(body, dict) and body.get("status") == "success":
+        return _normalize_worker_success("drug_similarity", body)
     if isinstance(body, dict) and body.get("status") != "success":
         return {"status": "error", "message": body.get("message") or str(body)}
     return body if isinstance(body, dict) else {"status": "error", "message": str(body)}

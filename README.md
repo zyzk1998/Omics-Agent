@@ -57,6 +57,11 @@
 | **推理服务层（Inference Layer）** | SiliconFlow API / Local LLM | 大语言模型推理服务，支持多模态输入（文本、图像、文件）和流式输出 |
 | **数据持久层（Persistence Layer）** | 本地文件系统 + SQLite（可选） | 用户数据隔离、会话管理、结果存储和元数据管理 |
 
+### 架构静态演示页（汇报用）
+
+- **`docs/hpc_agent_architecture.html`**（根目录 **`hpc_agent_architecture.html`** 为同内容副本）：与 `docs/ARCHITECTURE_CORE_PRINCIPLES.md` 命名一致的系统级数据流示意，Anime.js 分步演示。
+- **`docs/animated_architecture.html`**：流水线动效版典型链路演示。说明见白皮书 **§7 对外演示与架构静态页**。
+
 ### 架构演进
 
 **当前版本（V2）**：已实现**动态 Tool-RAG 架构**，支持工具自动发现、语义检索、动态规划和通用执行
