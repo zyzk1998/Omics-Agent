@@ -4,7 +4,12 @@ const path = require('path');
 const fs = require('fs');
 const { app, BrowserWindow } = require('electron');
 
-/** 与网页 favicon 同源：仓库内由 services/nginx/html/static/favicon.png 复制为 app-icon.png，打包后随应用分发 */
+/** Windows 任务栏 / 开始菜单分组图标与安装包一致，需与 package.json 的 appId 相同 */
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.gibh.agent.demo');
+}
+
+/** 窗口与安装包图标：gibh-desktop-app/app-icon.png（建议与 nginx static/favicon.png 同源复制） */
 function getWindowIconPath() {
   const p = path.join(__dirname, 'app-icon.png');
   return fs.existsSync(p) ? p : undefined;

@@ -28,7 +28,7 @@
     <div class="wrap">
         <div class="back"><a href="/">← 返回首页</a></div>
         <h1>下载桌面客户端</h1>
-        <p class="lead">安装后将从独立窗口打开本站的 Omics Agent 界面（瘦客户端）。请根据您的系统选择安装包。</p>
+        <p class="lead">安装后将从独立窗口打开本站的 Omics Agent 界面（瘦客户端）。当前推荐 <strong>V0.11</strong>（构建版本号 <code>0.11.0</code>）。请根据您的系统选择安装包。</p>
 
         <div class="card">
             <strong>Windows（64 位）</strong>
@@ -61,6 +61,7 @@
             var winA = document.getElementById('win-dl');
             var linuxA = document.getElementById('linux-dl');
             var winCandidates = [
+                base + 'Omics%20Agent%20Setup%200.11.0.exe',
                 base + 'Omics%20Agent%20Setup%200.10.0.exe',
                 base + 'Omics%20Agent%20Setup%201.0.0.exe',
                 base + 'GIBH-Agent-Demo-Setup-0.10.0.exe',
@@ -86,6 +87,7 @@
             }
             pickWinUrl(0);
             var linuxCandidates = [
+                base + 'Omics%20Agent-0.11.0.AppImage',
                 base + 'Omics%20Agent-0.10.0.AppImage',
                 base + 'Omics%20Agent-1.0.0.AppImage',
                 base + 'GIBH-Agent-Demo-Setup-0.10.0.AppImage',

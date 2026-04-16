@@ -1,19 +1,21 @@
 {
   "name": "gibh-desktop-app",
-  "version": "0.10.0",
-  "description": "GIBH-AGENT-V2 Electron thin-client demo",
+  "version": "0.11.0",
+  "description": "GIBH-AGENT-V2 Electron thin-client (V0.11)",
   "author": "GIBH Omics Agent",
   "main": "main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder",
+    "icons:win": "node scripts/gen-win-icon.js",
+    "dist": "npm run icons:win && electron-builder",
     "dist:linux": "electron-builder --linux"
   },
   "devDependencies": {
     "electron": "^28.3.3",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "png-to-ico": "^2.1.8"
   },
   "build": {
     "appId": "com.gibh.agent.demo",
@@ -29,7 +31,7 @@
     ],
     "win": {
       "artifactName": "${productName} Setup ${version}.${ext}",
-      "icon": "app-icon.png",
+      "icon": "icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -45,7 +47,10 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Omics Agent"
+      "shortcutName": "Omics Agent",
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "installerHeaderIcon": "icon.ico"
     },
     "linux": {
       "artifactName": "${productName}-${version}.${ext}",
