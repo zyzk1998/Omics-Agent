@@ -1,0 +1,52 @@
+---
+description: GIBH-AGENT-V2 架构开发宪法（工具命名、TaaS、安全执行、前端微创）
+alwaysApply: true
+---
+
+# GIBH-AGENT-V2 架构开发宪法
+
+后续所有开发须严格遵守以下条款。
+
+## 1. 工具参数命名铁律
+
+在 `gibh_agent/tools/` 下**新增或修改**的工具函数，路径类参数名**仅允许**下列词汇表中的名称，**禁止**自造新变量名：
+
+- `file_path` — 通用单文件
+- `data_path` — 旧版兼容的逗号拼接多路径
+- `input_dir` / `matrix_dir` — 目录路径
+- `image_path` / `mask_path` — 医学影像成对路径
+- `sequence_or_path` — FASTA 序列或路径
+
+## 2. 底层算子黑盒原则（TaaS）
+
+**严禁**在智能体主进程内做密集 CPU/GPU 计算。重型算法须：
+
+- 封装为独立微服务（Worker），或
+- 使用 `asyncio.create_subprocess_exec` 等形式与主进程隔离。
+
+## 3. 防爆装甲
+
+工具函数须使用 `@safe_tool_execution`（或项目等价装饰器）拦截异常，并返回标准结构：`{"status": "success"|"error", "message": "..."}`（及项目约定的其它字段）。
+
+## 4. 前端微创原则
+
+修改 UI 时：
+
+- 死守 **UTF-8**；
+- **严禁**破坏现有 **Flexbox** 布局；
+- **严禁**全量覆盖 `index.html`（应做最小 diff、锚点式修改）。
+
+## 5. 时光机 state_snapshot 四联同步（执行记录 / 思考 / 入库 / 历史）
+
+凡改动 **SSE 事件形态**、**`AgentOrchestrator._emit_sse` 对 `state_snapshot` 的写入**、**消息入库 `content` 结构**、或 **`services/nginx/html/index.html` 中 `handleServerEvent` / `createRestoreAIMessageRowWithSnapshot` / `mergeAgentContentToSnapshot`** 之一，须主动核对其余链路是否仍一致：
+
+- **`thought`** → 快照 **`reasoning`**（不得混入 `text`）；历史用 `snap.reasoning` 渲染思考折叠块。  
+- **`message`** → 快照 **`text`**。  
+- **`status`**（非 `[AgenticLog]`）→ **`process_log`** 条目 `{content, state}`；**`done`** 须写 **`duration`** 并维护最后一条完成态（与直播 footer 计时器一致）。  
+- 参考文档：`docs/思考过程和历史快照.md`；旧审计草案：`docs/STATE_SNAPSHOT_AUDIT_AND_SCHEMA_DRAFT.md`。
+
+**禁止**：只改后端聚合不改前端历史恢复，或反之；禁止在文档字符串中写与实现矛盾的快照规则（易误导后续排障）。
+
+## 6. 数据诊断「参数推荐」与一键应用
+
+凡改动 **`BaseAgent._perform_data_diagnosis` / `_extract_parameter_recommendations`**、**`gibh_agent/core/diagnosis_param_whitelist.py`**、**编排器诊断调用**，或前端 **`applyRecommendedParams` / `renderWorkflowForm` 推荐结构** 之一，须对照 **`docs/参数推荐功能_开发与维护指南.md`**：LLM 表格第一列必须与表单 **`name="param_{步骤索引}_{Key}"`** 中的 **Key** 一致；新模态须在 **`get_step_metadata` / `generate_template`** 中暴露可调键，并在诊断调用中传入 **`workflow_for_whitelist`**。

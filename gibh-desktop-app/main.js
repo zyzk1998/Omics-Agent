@@ -38,7 +38,7 @@ function createMainWindow() {
   const webBase =
     process.env.OMICS_AGENT_WEB_URL && String(process.env.OMICS_AGENT_WEB_URL).trim()
       ? String(process.env.OMICS_AGENT_WEB_URL).trim().replace(/\/$/, '')
-      : 'http://192.168.32.31:8018';
+      : 'http://127.0.0.1:8018';
   win.loadURL(webBase);
 }
 

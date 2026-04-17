@@ -91,7 +91,7 @@ class HPCMCPManager:
 
     def __init__(self) -> None:
         self._gateway: str = (os.getenv("MCP_GATEWAY_URL") or "http://mcp-gateway:8002").rstrip("/")
-        self._url: str = (os.getenv("HPC_MCP_URL") or "http://192.168.32.31:8001/mcp").rstrip("/")
+        self._url: str = (os.getenv("HPC_MCP_URL") or "http://127.0.0.1:8001/mcp").rstrip("/")
         self._transport: str = os.getenv("HPC_MCP_TRANSPORT") or "streamableHttp"
         self._client: Optional[httpx.AsyncClient] = None
         self._last_error: Optional[str] = None

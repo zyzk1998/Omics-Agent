@@ -90,7 +90,7 @@ def _call_result_to_json(result: Any) -> Dict[str, Any]:
 
 
 class ReconnectBody(BaseModel):
-    url: str = Field(default="http://192.168.32.31:8001/mcp")
+    url: str = Field(default="http://127.0.0.1:8001/mcp")
     transport: str = Field(default="streamableHttp")
 
 
@@ -107,7 +107,7 @@ class GatewayState:
         self._connected: bool = False
         self._last_error: Optional[str] = None
         self._tools: List[Dict[str, Any]] = []
-        self.url: str = (os.getenv("HPC_MCP_URL") or "http://192.168.32.31:8001/mcp").rstrip("/")
+        self.url: str = (os.getenv("HPC_MCP_URL") or "http://127.0.0.1:8001/mcp").rstrip("/")
         self.transport: str = os.getenv("HPC_MCP_TRANSPORT") or "streamableHttp"
 
     @property

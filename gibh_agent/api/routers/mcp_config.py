@@ -15,7 +15,7 @@ router = APIRouter(tags=["config"])
 
 
 class MCPConfigBody(BaseModel):
-    url: str = Field(default="http://192.168.32.31:8001/mcp", description="MCP Server URL")
+    url: str = Field(default="http://127.0.0.1:8001/mcp", description="MCP Server URL")
     transport: str = Field(default="streamableHttp", description="streamableHttp | sse")
 
 
