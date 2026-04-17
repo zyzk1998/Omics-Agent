@@ -4,90 +4,165 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>生信大模型智能体 · 架构与数据流</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg-deep: #0a0e17;
-      --grid: rgba(0, 255, 200, 0.055);
-      --cyan: #00e5cc;
-      --cyan-dim: rgba(0, 229, 204, 0.28);
-      --violet: #a78bfa;
-      --amber: #fbbf24;
-      --orange: #fb923c;
-      --blue-packet: #38bdf8;
-      --text: #e2e8f0;
-      --muted: #94a3b8;
-      --panel: rgba(18, 26, 43, 0.88);
-      --line: rgba(0, 229, 204, 0.35);
+      --canvas-bg: #f0f4f8;
+      --grid-line: rgba(100, 116, 139, 0.07);
+      --text: #111827;
+      --muted: #6b7280;
+      --border: #d1d5db;
+      --card: #ffffff;
+      --wire: rgba(148, 163, 184, 0.65);
+      --shadow-node: 0 6px 20px rgba(15, 23, 42, 0.06);
+      --online: #15803d;
+      --offline: #b91c1c;
+      --busy: #b45309;
+      --accent: #0f766e;
+      --node-size: 120px;
+      --radius: 12px;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     html, body {
-      height: 100%;
-      font-family: "JetBrains Mono", "SF Mono", Consolas, "Microsoft YaHei UI", sans-serif;
-      background: var(--bg-deep);
+      min-height: 100%;
+      font-family: Inter, Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #f8f9fa;
       color: var(--text);
-      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
     }
 
     .stage {
-      position: relative;
       min-height: 100%;
-      background:
-        linear-gradient(180deg, #0d1525 0%, var(--bg-deep) 50%, #080c14 100%),
-        linear-gradient(90deg, var(--grid) 1px, transparent 1px),
-        linear-gradient(var(--grid) 1px, transparent 1px);
-      background-size: 100% 100%, 28px 28px, 28px 28px;
-    }
-
-    .stage::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      background: radial-gradient(ellipse 75% 55% at 50% 38%, rgba(0, 229, 204, 0.07), transparent 65%);
-      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      background-color: var(--canvas-bg);
+      background-image:
+        linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+        linear-gradient(var(--grid-line) 1px, transparent 1px);
+      background-size: 28px 28px;
     }
 
     .title-bar {
-      position: relative;
-      z-index: 20;
-      padding: 14px 22px;
-      border-bottom: 1px solid rgba(0, 229, 204, 0.14);
-      background: linear-gradient(180deg, rgba(10, 14, 23, 0.92), transparent);
+      flex-shrink: 0;
+      padding: 14px 20px;
+      border-bottom: 1px solid #e5e7eb;
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(6px);
     }
 
     .title-bar h1 {
-      font-size: clamp(15px, 2.1vw, 18px);
-      font-weight: 600;
-      letter-spacing: 0.03em;
-      background: linear-gradient(90deg, var(--cyan), var(--violet));
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
+      font-size: clamp(15px, 1.8vw, 18px);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text);
     }
 
-    .title-bar .sub {
-      margin-top: 6px;
-      font-size: 11px;
-      color: var(--muted);
-      max-width: 720px;
-      line-height: 1.45;
+    .board-wrap {
+      flex: 1;
+      padding: 16px 16px 112px;
+      max-width: 1440px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .main-board {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) min(400px, 100%);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .canvas-col {
+      min-width: 0;
     }
 
     .canvas {
       position: relative;
-      z-index: 5;
-      width: calc(100% - 32px);
-      max-width: 1180px;
-      min-height: 520px;
+      width: 100%;
       aspect-ratio: 16 / 10;
-      margin: 16px auto 96px;
-      border: 1px solid rgba(0, 229, 204, 0.22);
+      min-height: 360px;
+      border: 1px solid #e5e7eb;
       border-radius: 12px;
-      background: var(--panel);
-      box-shadow:
-        0 0 0 1px rgba(255, 255, 255, 0.04) inset,
-        0 18px 48px rgba(0, 0, 0, 0.42);
+      background: #fafbfc;
+      box-shadow: var(--shadow-node);
+      overflow: hidden;
+    }
+
+    /* 动态箭头层（whotowork 式：脉冲路径 + 中点标题 + 简要弹框） */
+    #synapse-dyn {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 6;
+      pointer-events: none;
+      overflow: visible;
+    }
+
+    #synapse-dyn path.synapse-base-dyn {
+      fill: none;
+      stroke: #94a3b8;
+      stroke-width: 5;
+      opacity: 0.22;
+      vector-effect: non-scaling-stroke;
+    }
+
+    /* 常亮数据流：稳定描边 + 微光，不做「流光一闪」 */
+    #synapse-dyn path.synapse-pulse-dyn {
+      fill: none;
+      stroke: #0d9488;
+      stroke-width: 2.75;
+      stroke-dasharray: none;
+      vector-effect: non-scaling-stroke;
+      opacity: 1;
+      filter: drop-shadow(0 0 4px rgba(13, 148, 136, 0.5));
+    }
+
+    #synapse-dyn .synapse-float-label {
+      font-size: 11px;
+      font-weight: 700;
+      fill: #0f172a;
+      text-anchor: middle;
+      dominant-baseline: middle;
+      paint-order: stroke;
+      stroke: #ffffff;
+      stroke-width: 3.5px;
+      pointer-events: none;
+    }
+
+    .arrow-callout {
+      position: absolute;
+      z-index: 14;
+      max-width: min(260px, 42vw);
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #e2e8f0;
+      background: rgba(255, 255, 255, 0.97);
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+      font-size: 12px;
+      line-height: 1.5;
+      color: #334155;
+      transform: translate(-50%, calc(-100% - 14px));
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+
+    .arrow-callout.visible {
+      opacity: 1;
+    }
+
+    .arrow-callout .ac-title {
+      font-weight: 700;
+      font-size: 12px;
+      color: #0f172a;
+      margin-bottom: 6px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #e2e8f0;
     }
 
     .canvas svg.connectors {
@@ -99,290 +174,225 @@
       pointer-events: none;
     }
 
-    .canvas svg.connectors path {
+    .canvas svg.connectors .solid {
       fill: none;
-      stroke: rgba(0, 229, 204, 0.22);
-      stroke-width: 1;
+      stroke: var(--wire);
+      stroke-width: 1.25;
       vector-effect: non-scaling-stroke;
     }
 
     .canvas svg.connectors .dash {
-      stroke-dasharray: 5 4;
-      stroke: rgba(167, 139, 250, 0.35);
+      fill: none;
+      stroke: var(--wire);
+      stroke-width: 1;
+      stroke-dasharray: 4 5;
+      vector-effect: non-scaling-stroke;
+      opacity: 0.9;
     }
 
-    .canvas svg.connectors .signal-path {
-      stroke: var(--cyan);
-      stroke-dasharray: 100;
-      stroke-dashoffset: 100;
+    .canvas svg.connectors .flow {
+      fill: none;
+      stroke: #94a3b8;
+      stroke-width: 1.25;
+      stroke-dasharray: 6 10;
+      stroke-dashoffset: 0;
       opacity: 0;
+      vector-effect: non-scaling-stroke;
     }
 
-    .canvas svg.connectors .signal-path.on {
-      opacity: 0.85;
-      animation: dash-reveal 1s linear forwards;
+    .canvas svg.connectors .flow.on {
+      opacity: 0.45;
+      animation: flow-line 1.1s linear infinite;
     }
 
-    @keyframes dash-reveal {
-      from { stroke-dashoffset: 100; }
-      to { stroke-dashoffset: 0; }
+    @keyframes flow-line {
+      to { stroke-dashoffset: -32; }
     }
 
-    .zone-hint {
-      position: absolute;
+    .nodes {
+      position: relative;
       z-index: 2;
-      font-size: 9px;
-      letter-spacing: 0.12em;
-      color: var(--muted);
-      text-transform: none;
+      width: 100%;
+      height: 100%;
     }
 
-    .zh-1 { left: 4%; top: 3%; }
-    .zh-2 { left: 26%; top: 25%; }
-    .zh-3 { right: 4%; top: 3%; }
-    .zh-4 { left: 4%; bottom: 16%; }
-
-    .module {
+    .node {
       position: absolute;
-      z-index: 3;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: rgba(15, 23, 42, 0.65);
-      padding: 9px 11px;
+      width: var(--node-size);
+      height: var(--node-size);
+      margin-left: calc(var(--node-size) / -2);
+      margin-top: calc(var(--node-size) / -2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--card);
+      box-shadow: var(--shadow-node);
       display: flex;
       flex-direction: column;
-      gap: 5px;
-      box-shadow: 0 0 20px var(--cyan-dim);
-      transition: border-color 0.25s ease, box-shadow 0.25s ease;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      text-align: center;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
     }
 
-    .module .title {
-      font-size: 10px;
-      font-weight: 600;
-      color: var(--cyan);
-      letter-spacing: 0.02em;
-      line-height: 1.35;
+    .node-icon { color: #374151; line-height: 0; }
+    .node-icon svg { display: block; }
+
+    .node-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1f2937;
+      max-width: 6em;
+      line-height: 1.2;
     }
 
-    .module .code {
+    .node-status {
       font-size: 9px;
-      color: var(--violet);
-      opacity: 0.92;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: var(--online);
     }
 
-    .module .meta {
-      font-size: 9px;
-      color: var(--muted);
-      line-height: 1.4;
+    .node-status.is-offline { color: var(--offline); }
+    .node-status.is-busy { color: var(--busy); }
+
+    .node.is-pulse {
+      animation: node-pulse 0.55s ease-in-out 2;
     }
 
-    .module.is-flash {
-      animation: flash-mod 0.5s ease-in-out 2;
+    .node.is-hot {
+      border-color: var(--accent);
+      box-shadow: 0 8px 28px rgba(15, 118, 110, 0.12);
     }
 
-    @keyframes flash-mod {
+    .node.is-warn,
+    .node.node-offline {
+      border-color: #fca5a5;
+    }
+
+    @keyframes node-pulse {
       50% {
-        border-color: rgba(251, 191, 36, 0.75);
-        box-shadow: 0 0 28px rgba(251, 191, 36, 0.25);
+        border-color: #9ca3af;
+        box-shadow: 0 10px 32px rgba(15, 23, 42, 0.1);
       }
     }
 
-    .module.is-edge {
-      border-color: rgba(167, 139, 250, 0.85);
-      box-shadow: 0 0 24px rgba(167, 139, 250, 0.2);
+    .pos-user { left: 16%; top: 24%; }
+    .pos-router { left: 44%; top: 24%; }
+    .pos-orch { left: 18%; top: 52%; }
+    .pos-local { left: 36%; top: 52%; }
+    .pos-worker { left: 54%; top: 52%; }
+    .pos-storage { left: 72%; top: 52%; }
+    .pos-cluster { left: 54%; top: 78%; }
+
+    /* 右侧：whotowork 式 Master-Detail（企业浅色版） */
+    .detail-panel {
+      background: #fafbfc;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 16px 18px;
+      position: sticky;
+      top: 12px;
+      max-height: calc(100vh - 140px);
+      overflow: auto;
+      box-shadow: var(--shadow-node);
     }
 
-    .module.is-active {
-      border-color: rgba(251, 146, 60, 0.85);
-      box-shadow: 0 0 22px rgba(251, 146, 60, 0.22);
-    }
-
-    .z1-ui {
-      left: 4%;
-      top: 13%;
-      width: 21%;
-      height: 15%;
-    }
-
-    .z1-router {
-      left: 29%;
-      top: 7%;
-      width: 28%;
-      height: 13%;
-    }
-
-    .z2-orch {
-      left: 25%;
-      top: 28%;
-      width: 44%;
-      height: 34%;
-    }
-
-    .subchain {
-      display: flex;
-      margin-top: 4px;
-      border: 1px solid rgba(0, 229, 204, 0.25);
-      border-radius: 6px;
-      overflow: hidden;
-    }
-
-    .subchain .sub {
-      flex: 1;
-      padding: 6px 5px;
-      font-size: 9px;
+    .detail-panel h2 {
+      font-size: 15px;
+      font-weight: 700;
       color: var(--text);
-      border-right: 1px solid rgba(0, 229, 204, 0.18);
-      line-height: 1.35;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #ccfbf1;
     }
 
-    .subchain .sub:last-child { border-right: none; }
-
-    .subchain .sub em {
-      display: block;
-      font-style: normal;
-      font-size: 8px;
-      color: var(--muted);
-      margin-top: 3px;
-    }
-
-    .z3-local {
-      right: 3.5%;
-      top: 12%;
-      width: 23%;
-      height: 15%;
-    }
-
-    .z3-worker {
-      right: 3.5%;
-      top: 32%;
-      width: 23%;
-      height: 13%;
-    }
-
-    .z3-cluster {
-      right: 2%;
-      top: 50%;
-      width: 29%;
-      height: 23%;
-    }
-
-    .cluster-status {
-      margin-top: 4px;
-      padding: 6px 7px;
-      border: 1px solid rgba(0, 229, 204, 0.22);
-      border-radius: 6px;
-      font-size: 9px;
-      color: var(--muted);
-    }
-
-    .cluster-status .bar {
-      height: 4px;
-      margin-top: 6px;
-      border: 1px solid rgba(0, 229, 204, 0.2);
-      border-radius: 2px;
-      overflow: hidden;
-      background: rgba(0, 0, 0, 0.25);
-    }
-
-    .cluster-status .bar > i {
-      display: block;
-      height: 100%;
-      width: 0%;
-      background: var(--orange);
-      font-style: normal;
-    }
-
-    .z4-storage {
-      left: 4%;
-      bottom: 4%;
-      width: 92%;
-      height: 12%;
-      flex-direction: row;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }
-
-    .z4-storage .blurb {
-      font-size: 9px;
-      color: var(--muted);
-      text-align: right;
-      flex: 1;
-    }
-
-    .packet-layer {
-      position: absolute;
-      inset: 0;
-      z-index: 8;
-      pointer-events: none;
-    }
-
-    .data-packet,
-    .task-chunk {
-      position: absolute;
-      width: 11px;
-      height: 11px;
-      margin-left: -5px;
-      margin-top: -5px;
-      border-radius: 3px;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-    }
-
-    .data-packet { background: var(--blue-packet); box-shadow: 0 0 12px rgba(56, 189, 248, 0.45); }
-    .data-packet.violet { background: var(--violet); box-shadow: 0 0 12px rgba(167, 139, 250, 0.45); }
-    .data-packet.amber { background: var(--amber); box-shadow: 0 0 12px rgba(251, 191, 36, 0.4); }
-    .data-packet.orange { background: var(--orange); box-shadow: 0 0 12px rgba(251, 146, 60, 0.45); }
-    .data-packet.cyan { background: var(--cyan); box-shadow: 0 0 12px rgba(0, 229, 204, 0.45); }
-
-    .task-chunk {
-      width: 9px;
-      height: 9px;
-      margin-left: -4px;
-      margin-top: -4px;
-      background: var(--amber);
-      box-shadow: 0 0 10px rgba(251, 191, 36, 0.4);
-    }
-
-    .task-chunk .tag {
-      position: absolute;
-      left: 11px;
-      top: -3px;
-      font-size: 8px;
-      color: var(--amber);
-      white-space: nowrap;
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
-    }
-
-    .caption {
-      position: absolute;
-      left: 50%;
-      bottom: 19%;
-      transform: translateX(-50%);
-      max-width: 92%;
-      padding: 9px 16px;
-      border: 1px solid rgba(0, 229, 204, 0.28);
-      border-radius: 8px;
-      background: rgba(10, 14, 23, 0.9);
+    .step-badge {
       font-size: 11px;
-      color: var(--text);
-      text-align: center;
-      z-index: 12;
-      opacity: 0;
-      transition: opacity 0.3s ease;
-      pointer-events: none;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 8px;
+      letter-spacing: 0.04em;
     }
 
-    .caption.show { opacity: 1; }
+    .detail-item {
+      margin-bottom: 14px;
+    }
 
-    .caption kbd {
-      display: inline-block;
-      padding: 1px 7px;
-      margin: 0 3px;
+    .detail-item-label {
+      font-weight: 600;
+      font-size: 11px;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+    }
+
+    .detail-item-value {
+      font-size: 13px;
+      line-height: 1.65;
+      color: #1e293b;
+      background: #fff;
+      padding: 10px 12px;
+      border-radius: 6px;
+      border-left: 3px solid var(--accent);
+      word-break: break-word;
+    }
+
+    .detail-item-value code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      background: #f1f5f9;
+      padding: 2px 5px;
       border-radius: 4px;
-      border: 1px solid rgba(0, 229, 204, 0.35);
-      font-size: 10px;
-      color: var(--cyan);
-      background: rgba(0, 229, 204, 0.08);
+      color: #0f172a;
+    }
+
+    .detail-item-value ul {
+      margin: 8px 0 0 18px;
+    }
+
+    .detail-item-value li {
+      margin-bottom: 4px;
+    }
+
+    details.flow-acc {
+      margin-top: 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    details.flow-acc > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 10px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #334155;
+      user-select: none;
+    }
+
+    details.flow-acc > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details.flow-acc > summary::before {
+      content: "▸ ";
+      color: var(--accent);
+    }
+
+    details.flow-acc[open] > summary::before {
+      content: "▾ ";
+    }
+
+    .flow-acc-body {
+      padding: 0 12px 12px;
+      font-size: 12px;
+      line-height: 1.65;
+      color: #475569;
+      border-top: 1px solid #f1f5f9;
     }
 
     .dock {
@@ -390,42 +400,84 @@
       left: 0;
       right: 0;
       bottom: 0;
-      z-index: 30;
-      padding: 14px 16px 18px;
+      z-index: 40;
+      padding: 10px 16px 14px;
       display: flex;
+      flex-wrap: wrap;
+      align-items: center;
       justify-content: center;
-      background: linear-gradient(0deg, rgba(8, 12, 20, 0.96), transparent);
-      border-top: 1px solid rgba(0, 229, 204, 0.12);
+      gap: 10px;
+      background: linear-gradient(0deg, rgba(248, 250, 252, 0.98), rgba(248, 250, 252, 0.92));
+      border-top: 1px solid #e5e7eb;
     }
 
-    .btn-run {
+    .dock-meta {
+      width: 100%;
+      text-align: center;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 2px;
+    }
+
+    .dock button {
       font-family: inherit;
       font-size: 12px;
       font-weight: 600;
-      padding: 12px 22px;
-      border: none;
+      padding: 10px 18px;
+      border: 1px solid var(--border);
       border-radius: 10px;
       cursor: pointer;
-      color: #0f172a;
-      background: linear-gradient(135deg, var(--cyan), #2dd4bf);
-      box-shadow: 0 4px 0 #0d9488, 0 10px 32px rgba(0, 229, 204, 0.28);
-      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      color: var(--text);
+      background: #fff;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
     }
 
-    .btn-run:hover:not(:disabled) {
-      transform: translateY(-1px);
-      box-shadow: 0 5px 0 #0d9488, 0 14px 36px rgba(0, 229, 204, 0.35);
+    .dock button:hover:not(:disabled) {
+      border-color: #94a3b8;
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
     }
 
-    .btn-run:disabled {
-      opacity: 0.5;
+    .dock button:disabled {
+      opacity: 0.42;
       cursor: not-allowed;
-      transform: none;
+    }
+
+    .dock button.primary {
+      background: #0f766e;
+      border-color: #0f766e;
+      color: #fff;
+    }
+
+    .dock button.primary:hover:not(:disabled) {
+      background: #0d9488;
+      border-color: #0d9488;
+    }
+
+    .dock button.ghost {
+      background: #f9fafb;
+    }
+
+    @media (max-width: 960px) {
+      .main-board {
+        grid-template-columns: 1fr;
+      }
+      .detail-panel {
+        position: relative;
+        top: 0;
+        max-height: none;
+      }
     }
 
     @media (max-width: 720px) {
-      .module .meta, .z4-storage .blurb { display: none; }
-      .canvas { min-height: 480px; }
+      :root { --node-size: 100px; }
+      .node-title { font-size: 12px; }
+      .pos-user { left: 14%; top: 20%; }
+      .pos-router { left: 50%; top: 20%; }
+      .pos-orch { left: 14%; top: 46%; }
+      .pos-local { top: 46%; left: 38%; }
+      .pos-worker { top: 46%; left: 62%; }
+      .pos-storage { left: 86%; top: 46%; }
+      .pos-cluster { left: 50%; top: 74%; }
     }
   </style>
 </head>
@@ -433,98 +485,127 @@
   <div class="stage">
     <header class="title-bar">
       <h1>生信大模型智能体 · 架构与数据流</h1>
-      <p class="sub">系统级示意：对齐 GIBH-AGENT-V2 白皮书中的 <strong>SemanticRouter</strong>、<strong>AgentOrchestrator</strong>、<strong>OmicsAssetManager</strong>、<strong>Executor</strong>、<strong>TaaS Worker</strong> 与共享数据路径；不展开实现细节。</p>
     </header>
 
-    <div class="canvas" id="blueprint" aria-label="架构与数据流">
-      <svg class="connectors" viewBox="0 0 1000 625" preserveAspectRatio="none" aria-hidden="true">
-        <path d="M 140 125 L 310 98" />
-        <path d="M 430 98 L 430 205" />
-        <path d="M 430 205 L 210 248" />
-        <path d="M 430 205 L 430 252" />
-        <path d="M 430 205 L 660 248" />
-        <path d="M 660 248 L 875 248" />
-        <path class="dash" d="M 875 248 L 915 345" />
-        <path d="M 210 248 L 210 328" />
-        <path d="M 430 328 L 500 548" />
-        <path d="M 210 328 L 500 548" />
-        <path d="M 915 345 L 500 548" />
-        <path id="path-signal" class="signal-path" d="M 500 565 L 140 125" />
-      </svg>
+    <div class="board-wrap">
+      <div class="main-board">
+        <div class="canvas-col">
+          <div class="canvas" id="blueprint" aria-label="架构拓扑">
+            <svg id="synapse-dyn" viewBox="0 0 1000 625" preserveAspectRatio="none" aria-hidden="true"></svg>
+            <div id="arrow-callout" class="arrow-callout" role="tooltip" hidden></div>
+            <svg class="connectors" viewBox="0 0 1000 625" preserveAspectRatio="none" aria-hidden="true">
+              <defs>
+                <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8 Z" fill="#94a3b8" />
+                </marker>
+              </defs>
+              <path class="solid" marker-end="url(#arrow)" d="M 210 150 L 360 150" />
+              <path class="dash" d="M 440 210 L 440 270" />
+              <path class="dash" d="M 440 270 L 180 300" />
+              <path class="dash" d="M 440 270 L 360 300" />
+              <path class="dash" d="M 440 270 L 540 300" />
+              <path class="dash" d="M 440 270 L 720 300" />
+              <path class="dash" d="M 540 340 L 540 470" />
+              <path id="path-flow" class="flow" d="M 540 500 L 210 150" />
+            </svg>
 
-      <span class="zone-hint zh-1">接入与会话</span>
-      <span class="zone-hint zh-2">编排与资产</span>
-      <span class="zone-hint zh-3">执行与算力</span>
-      <span class="zone-hint zh-4">路径与持久化</span>
+            <div class="nodes">
+              <div class="node pos-user" id="mod-user" role="img" aria-label="用户输入，在线">
+                <div class="node-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
+                </div>
+                <span class="node-title">用户输入</span>
+                <span class="node-status">ONLINE</span>
+              </div>
 
-      <div class="module z1-ui" id="mod-ui">
-        <span class="title">交互与会话</span>
-        <span class="code">services/nginx/html · SSE</span>
-        <span class="meta">对话、上传入口；与编排器下行事件同源展示。</span>
-      </div>
+              <div class="node pos-router" id="mod-router" role="img" aria-label="语义路由，在线">
+                <div class="node-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="18" cy="5" r="3" />
+                    <circle cx="6" cy="12" r="3" />
+                    <circle cx="18" cy="19" r="3" />
+                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                  </svg>
+                </div>
+                <span class="node-title">语义路由</span>
+                <span class="node-status">ONLINE</span>
+              </div>
 
-      <div class="module z1-router" id="mod-router">
-        <span class="title">语义路由 SemanticRouter</span>
-        <span class="code">gibh_agent/core/semantic_router.py</span>
-        <span class="meta">Task / Chat / hpc 等路由；与全局意图、快车道协同。</span>
-      </div>
+              <div class="node pos-orch" id="mod-orch" role="img" aria-label="编排中枢，在线">
+                <div class="node-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2 2 7l10 5 10-5-10-5z" />
+                    <path d="M2 17l10 5 10-5M2 12l10 5 10-5" />
+                  </svg>
+                </div>
+                <span class="node-title">编排中枢</span>
+                <span class="node-status">ONLINE</span>
+              </div>
 
-      <div class="module z2-orch" id="mod-orch">
-        <span class="title">Agent 编排器 AgentOrchestrator</span>
-        <span class="code">gibh_agent/core/orchestrator.py</span>
-        <span class="meta">技能快车道 <code style="color:var(--amber)">[Skill_Route: …]</code>、工作流复用、流式 SSE。</span>
-        <div class="subchain" id="subchain">
-          <div class="sub" id="mod-parser">
-            多模态资产总线
-            <em>OmicsAssetManager · 嗅探与捆绑</em>
-          </div>
-          <div class="sub" id="mod-graph">
-            Planner / 工作流
-            <em>模板与 SOP 规划</em>
-          </div>
-          <div class="sub" id="mod-res">
-            执行器反射注入
-            <em>Executor · 签名驱动参数</em>
+              <div class="node pos-local" id="mod-local" role="img" aria-label="本地算子，在线">
+                <div class="node-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="16 18 22 12 16 6" />
+                    <polyline points="8 6 2 12 8 18" />
+                  </svg>
+                </div>
+                <span class="node-title">本地算子</span>
+                <span class="node-status">ONLINE</span>
+              </div>
+
+              <div class="node pos-worker" id="mod-worker" role="img" aria-label="算力服务，在线">
+                <div class="node-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
+                    <rect x="9" y="9" width="6" height="6" />
+                    <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3" />
+                  </svg>
+                </div>
+                <span class="node-title">算力服务</span>
+                <span class="node-status">ONLINE</span>
+              </div>
+
+              <div class="node pos-storage" id="mod-storage" role="img" aria-label="数据存储，在线">
+                <div class="node-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                  </svg>
+                </div>
+                <span class="node-title">数据存储</span>
+                <span class="node-status">ONLINE</span>
+              </div>
+
+              <div class="node pos-cluster node-offline" id="mod-cluster" role="img" aria-label="超算作业，离线">
+                <div class="node-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="3" width="20" height="6" rx="1" />
+                    <rect x="2" y="14" width="20" height="6" rx="1" />
+                    <path d="M6 6h.01M6 17h.01" />
+                  </svg>
+                </div>
+                <span class="node-title">超算作业</span>
+                <span class="node-status is-offline" id="cluster-status-label">OFFLINE</span>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div class="module z3-local" id="mod-local">
-        <span class="title">本地轻量生信工具</span>
-        <span class="code">gibh_agent/tools · 同进程调用</span>
-        <span class="meta">短耗时算子；重型不得阻塞主进程（宪法条款）。</span>
+        <aside class="detail-panel" id="detail-panel" aria-live="polite">
+          <div class="step-badge" id="step-badge"></div>
+          <div id="detail-body"></div>
+        </aside>
       </div>
-
-      <div class="module z3-worker" id="mod-hpc">
-        <span class="title">重型算子 Worker（TaaS）</span>
-        <span class="code">workers/worker-pyskills · HTTP JSON</span>
-        <span class="meta">共享挂载路径传递；RNA-fold 等长时程算子。</span>
-      </div>
-
-      <div class="module z3-cluster" id="mod-cluster">
-        <span class="title">超算中心作业区（对接形态）</span>
-        <span class="code">队列作业 · 共享文件系统</span>
-        <span class="meta">与中心侧批处理脚本、数据岛策略对齐；本页仅示意边界。</span>
-        <div class="cluster-status" id="cluster-status">
-          <span id="cluster-text">状态：空闲</span>
-          <div class="bar" aria-hidden="true"><i id="cluster-bar"></i></div>
-        </div>
-      </div>
-
-      <div class="module z4-storage" id="mod-storage">
-        <div>
-          <span class="title">上传与结果目录</span>
-          <span class="code">OmicsAssetManager / RESULTS_DIR</span>
-        </div>
-        <span class="blurb">与 <code>resolve_omics_paths</code>、执行器注入共用同一套解析路径语义。</span>
-      </div>
-
-      <div class="caption" id="caption" role="status" aria-live="polite"></div>
-      <div class="packet-layer" id="packet-layer"></div>
     </div>
 
     <footer class="dock">
-      <button type="button" class="btn-run" id="btn-run">演示：提交大规模 RNA-Seq 分析请求</button>
+      <div class="dock-meta" id="dock-meta"></div>
+      <button type="button" class="ghost" id="btn-prev" disabled>上一步</button>
+      <button type="button" class="primary" id="btn-next">开始演练</button>
+      <button type="button" class="ghost" id="btn-reset">重置</button>
     </footer>
   </div>
 
@@ -532,27 +613,27 @@
   <script>
 (function () {
   var blueprint = document.getElementById("blueprint");
-  var layer = document.getElementById("packet-layer");
-  var btn = document.getElementById("btn-run");
-  var caption = document.getElementById("caption");
-  var signalPath = document.getElementById("path-signal");
-  var clusterText = document.getElementById("cluster-text");
-  var clusterBar = document.getElementById("cluster-bar");
+  var synapseDyn = document.getElementById("synapse-dyn");
+  var arrowCallout = document.getElementById("arrow-callout");
+  var detailBody = document.getElementById("detail-body");
+  var stepBadge = document.getElementById("step-badge");
+  var dockMeta = document.getElementById("dock-meta");
+  var btnPrev = document.getElementById("btn-prev");
+  var btnNext = document.getElementById("btn-next");
+  var btnReset = document.getElementById("btn-reset");
+  var flowPath = document.getElementById("path-flow");
+  var clusterLabel = document.getElementById("cluster-status-label");
+  var clusterNode = document.getElementById("mod-cluster");
 
-  var mods = {
-    ui: document.getElementById("mod-ui"),
-    router: document.getElementById("mod-router"),
-    orch: document.getElementById("mod-orch"),
-    parser: document.getElementById("mod-parser"),
-    graph: document.getElementById("mod-graph"),
-    res: document.getElementById("mod-res"),
-    local: document.getElementById("mod-local"),
-    hpc: document.getElementById("mod-hpc"),
-    cluster: document.getElementById("mod-cluster"),
-    storage: document.getElementById("mod-storage"),
-  };
+  var nodeIds = ["mod-user", "mod-router", "mod-orch", "mod-local", "mod-worker", "mod-cluster", "mod-storage"];
+  var nodes = {};
+  nodeIds.forEach(function (id) {
+    nodes[id] = document.getElementById(id);
+  });
 
-  var running = false;
+  var stepIndex = -1;
+  var animating = false;
+  var defsInstalled = false;
 
   function center(el) {
     var br = blueprint.getBoundingClientRect();
@@ -563,264 +644,552 @@
     };
   }
 
-  function setCap(html, on) {
-    caption.innerHTML = html;
-    caption.classList.toggle("show", !!on);
+  function normFromClient(pt) {
+    var br = blueprint.getBoundingClientRect();
+    return {
+      x: (pt.x / br.width) * 1000,
+      y: (pt.y / br.height) * 625,
+    };
   }
 
-  function clearLayer() {
-    layer.innerHTML = "";
+  function normCenterNode(id) {
+    return normFromClient(center(nodes[id]));
   }
 
-  function makePacket(cls) {
-    var el = document.createElement("div");
-    el.className = "data-packet" + (cls ? " " + cls : "");
-    layer.appendChild(el);
-    return el;
+  function bezierPoint(t, p0, p1, p2, p3) {
+    var u = 1 - t;
+    var u2 = u * u;
+    var u3 = u2 * u;
+    var t2 = t * t;
+    var t3 = t2 * t;
+    return {
+      x: u3 * p0.x + 3 * u2 * t * p1.x + 3 * u * t2 * p2.x + t3 * p3.x,
+      y: u3 * p0.y + 3 * u2 * t * p1.y + 3 * u * t2 * p2.y + t3 * p3.y,
+    };
   }
 
-  function makeTaskChunk(label) {
-    var el = document.createElement("div");
-    el.className = "task-chunk";
-    var t = document.createElement("span");
-    t.className = "tag";
-    t.textContent = label;
-    el.appendChild(t);
-    layer.appendChild(el);
-    return el;
-  }
-
-  function place(el, pt) {
-    el.style.left = pt.x + "px";
-    el.style.top = pt.y + "px";
-  }
-
-  function moveLinear(el, from, to, duration, done) {
-    place(el, from);
-    anime({
-      targets: el,
-      left: [from.x + "px", to.x + "px"],
-      top: [from.y + "px", to.y + "px"],
-      duration: duration,
-      easing: "linear",
-      complete: done || function () {},
-    });
-  }
-
-  function moveTwoSegment(el, a, b, c, d1, d2, done) {
-    place(el, a);
-    anime({
-      targets: el,
-      left: [a.x + "px", b.x + "px"],
-      top: [a.y + "px", b.y + "px"],
-      duration: d1,
-      easing: "linear",
-      complete: function () {
-        anime({
-          targets: el,
-          left: [b.x + "px", c.x + "px"],
-          top: [b.y + "px", c.y + "px"],
-          duration: d2,
-          easing: "linear",
-          complete: done || function () {},
-        });
-      },
-    });
-  }
-
-  function wait(ms) {
-    return new Promise(function (resolve) {
-      setTimeout(resolve, ms);
-    });
-  }
-
-  function setCluster(text, pct) {
-    clusterText.textContent = text;
-    clusterBar.style.width = (pct || 0) + "%";
-  }
-
-  function resetUi() {
-    Object.keys(mods).forEach(function (k) {
-      mods[k].classList.remove("is-flash", "is-edge", "is-active");
-    });
-    signalPath.classList.remove("on");
-    signalPath.style.animation = "none";
-    signalPath.getBoundingClientRect();
-    signalPath.style.animation = "";
-    signalPath.style.opacity = "0";
-    signalPath.style.strokeDashoffset = "100";
-    setCluster("状态：空闲", 0);
-    clearLayer();
-    setCap("", false);
-  }
-
-  async function runSequence() {
-    if (running) return;
-    if (typeof anime === "undefined") {
-      window.alert("Anime.js 未能加载，请检查网络后重试。");
-      return;
+  function buildCurvePath(p0, p1) {
+    var dx = p1.x - p0.x;
+    var dy = p1.y - p0.y;
+    var midX = (p0.x + p1.x) / 2;
+    var midY = (p0.y + p1.y) / 2;
+    var c1x;
+    var c1y;
+    var c2x;
+    var c2y;
+    if (Math.abs(dy) > Math.abs(dx)) {
+      c1x = p0.x + dx * 0.2;
+      c1y = p0.y + dy * 0.3;
+      c2x = p1.x - dx * 0.2;
+      c2y = p1.y - dy * 0.3;
+    } else {
+      c1x = midX - dy * 0.28;
+      c1y = midY + dx * 0.28;
+      c2x = midX + dy * 0.28;
+      c2y = midY - dx * 0.28;
     }
-    running = true;
-    btn.disabled = true;
-    resetUi();
+    var d = "M " + p0.x + " " + p0.y + " C " + c1x + " " + c1y + ", " + c2x + " " + c2y + ", " + p1.x + " " + p1.y;
+    var mid = bezierPoint(0.5, p0, { x: c1x, y: c1y }, { x: c2x, y: c2y }, p1);
+    return { d: d, mid: mid, c1: { x: c1x, y: c1y }, c2: { x: c2x, y: c2y } };
+  }
 
-    var u0 = center(mods.ui);
-    var r0 = center(mods.router);
-    var o0 = center(mods.orch);
-    var p0 = center(mods.parser);
-    var l0 = center(mods.local);
-    var h0 = center(mods.hpc);
-    var c0 = center(mods.cluster);
-    var s0 = center(mods.storage);
+  function ensureDynDefs() {
+    if (defsInstalled) return;
+    defsInstalled = true;
+    var defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+    var m = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+    m.setAttribute("id", "arrowhead-dyn");
+    m.setAttribute("markerWidth", "9");
+    m.setAttribute("markerHeight", "9");
+    m.setAttribute("refX", "8");
+    m.setAttribute("refY", "4.5");
+    m.setAttribute("orient", "auto");
+    var mp = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    mp.setAttribute("d", "M0,0 L9,4.5 L0,9 Z");
+    mp.setAttribute("fill", "#0d9488");
+    m.appendChild(mp);
+    defs.appendChild(m);
+    synapseDyn.appendChild(defs);
+  }
 
-    setCap("① 用户侧：<kbd>自然语言 + 上传路径</kbd> 进入会话层。", true);
-    mods.ui.classList.add("is-flash");
-    await wait(220);
-    var pkt = makePacket("");
-    place(pkt, u0);
-    await new Promise(function (res) {
-      moveLinear(pkt, u0, r0, 900, res);
+  function clearDynSynapse() {
+    while (synapseDyn.lastChild) {
+      synapseDyn.removeChild(synapseDyn.lastChild);
+    }
+    defsInstalled = false;
+  }
+
+  function hideCallout() {
+    arrowCallout.classList.remove("visible");
+    arrowCallout.hidden = true;
+    arrowCallout.innerHTML = "";
+  }
+
+  function showCalloutAtNorm(mid, title, brief) {
+    arrowCallout.removeAttribute("hidden");
+    arrowCallout.innerHTML =
+      "<div class=\"ac-title\"></div><div class=\"ac-body\"></div>";
+    arrowCallout.querySelector(".ac-title").textContent = title || "";
+    arrowCallout.querySelector(".ac-body").textContent = brief || "";
+    arrowCallout.style.left = (mid.x / 1000) * 100 + "%";
+    arrowCallout.style.top = (mid.y / 625) * 100 + "%";
+    requestAnimationFrame(function () {
+      arrowCallout.classList.add("visible");
     });
-    mods.ui.classList.remove("is-flash");
+  }
 
-    setCap("② <kbd>SemanticRouter</kbd> 完成语义判决后，将本次会话路由为 <kbd>Task</kbd> 模式。", true);
-    mods.router.classList.add("is-edge");
-    await wait(320);
-    pkt.classList.add("violet");
-    await new Promise(function (res) {
-      moveLinear(pkt, r0, o0, 900, res);
+  function drawSynapseArrow(fromId, toId, label, brief) {
+    clearDynSynapse();
+    hideCallout();
+    var a = nodes[fromId];
+    var b = nodes[toId];
+    if (!a || !b) return;
+    ensureDynDefs();
+    var p0 = normCenterNode(fromId);
+    var p1 = normCenterNode(toId);
+    var geo = buildCurvePath(p0, p1);
+
+    var base = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    base.setAttribute("d", geo.d);
+    base.setAttribute("class", "synapse-base-dyn");
+    synapseDyn.appendChild(base);
+
+    var pulse = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    pulse.setAttribute("d", geo.d);
+    pulse.setAttribute("class", "synapse-pulse-dyn");
+    pulse.setAttribute("marker-end", "url(#arrowhead-dyn)");
+    synapseDyn.appendChild(pulse);
+
+    if (label) {
+      var txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      txt.setAttribute("class", "synapse-float-label");
+      txt.setAttribute("x", String(geo.mid.x));
+      txt.setAttribute("y", String(geo.mid.y - 14));
+      txt.textContent = label;
+      synapseDyn.appendChild(txt);
+    }
+
+    showCalloutAtNorm(geo.mid, label || "数据流", brief || "");
+  }
+
+  function clearHot() {
+    nodeIds.forEach(function (k) {
+      var n = nodes[k];
+      if (n) n.classList.remove("is-pulse", "is-hot", "is-warn");
     });
-    mods.router.classList.remove("is-edge");
-    layer.removeChild(pkt);
+    flowPath.classList.remove("on");
+  }
 
-    setCap("③ 请求进入 <kbd>AgentOrchestrator</kbd>，在 <kbd>OmicsAssetManager</kbd> 上完成资产规范化。", true);
-    var pkt2 = makePacket("amber");
-    place(pkt2, o0);
-    await new Promise(function (res) {
-      moveLinear(pkt2, o0, p0, 720, res);
+  function resetClusterOffline() {
+    clusterNode.classList.add("node-offline");
+    clusterLabel.textContent = "OFFLINE";
+    clusterLabel.className = "node-status is-offline";
+    clusterNode.classList.add("is-warn");
+    clusterNode.setAttribute("aria-label", "超算作业，离线");
+  }
+
+  function setClusterOnline() {
+    clusterLabel.textContent = "ONLINE";
+    clusterLabel.className = "node-status";
+    clusterNode.classList.remove("node-offline", "is-warn");
+    clusterNode.setAttribute("aria-label", "超算作业，在线");
+  }
+
+  function syncClusterForViewStep(idx) {
+    if (idx >= 6) {
+      setClusterOnline();
+    } else {
+      resetClusterOffline();
+    }
+  }
+
+  function setHot(ids, pulse) {
+    clearHot();
+    (ids || []).forEach(function (id) {
+      var el = nodes[id];
+      if (!el) return;
+      el.classList.add("is-hot");
+      if (pulse) el.classList.add("is-pulse");
     });
-    await wait(520);
-    layer.removeChild(pkt2);
+  }
 
-    setCap("④ 编排器拆分为并行子任务：本地质控、Worker 重型步骤、超算侧比对/定量。", true);
-    var ta = makeTaskChunk("本地 QC");
-    var tb = makeTaskChunk("Worker");
-    var tc = makeTaskChunk("超算");
-    place(ta, p0);
-    place(tb, p0);
-    place(tc, p0);
-    anime({
-      targets: ta,
-      left: [p0.x + "px", p0.x - 16 + "px"],
-      top: [p0.y + "px", p0.y - 10 + "px"],
-      duration: 380,
-      easing: "linear",
-    });
-    anime({
-      targets: tb,
-      left: [p0.x + "px", p0.x + "px"],
-      top: [p0.y + "px", p0.y + 14 + "px"],
-      duration: 380,
-      easing: "linear",
-    });
-    anime({
-      targets: tc,
-      left: [p0.x + "px", p0.x + 16 + "px"],
-      top: [p0.y + "px", p0.y - 10 + "px"],
-      duration: 380,
-      easing: "linear",
-    });
-    await wait(420);
-
-    await new Promise(function (res) {
-      moveLinear(ta, { x: p0.x - 16, y: p0.y - 10 }, l0, 1000, res);
-    });
-    mods.local.classList.add("is-active");
-    await wait(480);
-    mods.local.classList.remove("is-active");
-    layer.removeChild(ta);
-
-    mods.hpc.classList.add("is-active");
-    await Promise.all([
-      new Promise(function (res) {
-        moveLinear(tb, { x: p0.x, y: p0.y + 14 }, h0, 1000, res);
-      }),
-      new Promise(function (res) {
-        moveLinear(tc, { x: p0.x + 16, y: p0.y - 10 }, h0, 1000, res);
-      }),
-    ]);
-
-    place(tb, { x: h0.x, y: h0.y });
-    place(tc, { x: h0.x, y: h0.y });
-    setCap("⑤ <kbd>TaaS Worker</kbd> 与超算队列经挂载目录衔接；虚线路径表示跨域慢链路。", true);
-    setCluster("状态：队列中", 0);
-    var elbow = { x: c0.x, y: h0.y };
-    await Promise.all([
-      new Promise(function (res) {
-        moveTwoSegment(tb, h0, elbow, c0, 880, 1500, res);
-      }),
-      new Promise(function (res) {
-        moveTwoSegment(tc, h0, elbow, c0, 880, 1500, res);
-      }),
-    ]);
-    mods.hpc.classList.remove("is-active");
-    mods.cluster.classList.add("is-active");
-
-    setCluster("状态：运行中 0%", 0);
-    await new Promise(function (res) {
+  function moveDot(fromId, toId) {
+    return new Promise(function (resolve) {
+      if (typeof anime === "undefined") {
+        resolve();
+        return;
+      }
+      var a = nodes[fromId];
+      var b = nodes[toId];
+      if (!a || !b) {
+        resolve();
+        return;
+      }
+      var p0 = center(a);
+      var p1 = center(b);
+      var dot = document.createElement("div");
+      dot.setAttribute("aria-hidden", "true");
+      dot.style.cssText =
+        "position:absolute;z-index:9;width:9px;height:9px;border-radius:50%;" +
+        "background:#fff;border:1px solid #64748b;box-shadow:0 1px 4px rgba(15,23,42,.1);" +
+        "pointer-events:none;margin:-4px 0 0 -4px;";
+      blueprint.appendChild(dot);
+      dot.style.left = p0.x + "px";
+      dot.style.top = p0.y + "px";
       anime({
-        targets: clusterBar,
-        width: ["0%", "100%"],
-        duration: 2600,
-        easing: "linear",
-        update: function (anim) {
-          setCluster("状态：运行中 " + Math.round(anim.progress) + "%", anim.progress);
-        },
+        targets: dot,
+        left: [p0.x + "px", p1.x + "px"],
+        top: [p0.y + "px", p1.y + "px"],
+        duration: 780,
+        easing: "easeInOutQuad",
         complete: function () {
-          setCluster("状态：已完成", 100);
-          res();
+          if (dot.parentNode) blueprint.removeChild(dot);
+          resolve();
         },
       });
     });
-    await wait(380);
-    layer.removeChild(tb);
-    layer.removeChild(tc);
-    mods.cluster.classList.remove("is-active");
-
-    setCap("⑥ 汇总产物写入 <kbd>上传与结果目录</kbd>；SSE 将完成态回传会话层。", true);
-    var blue = makePacket("cyan");
-    var mergePt = { x: (l0.x + c0.x) / 2, y: (l0.y + c0.y) / 2 };
-    place(blue, mergePt);
-    await new Promise(function (res) {
-      moveLinear(blue, mergePt, s0, 1150, res);
-    });
-    mods.storage.classList.add("is-active");
-    await wait(280);
-    layer.removeChild(blue);
-    mods.storage.classList.remove("is-active");
-
-    setCap("⑦ 成功回传：<kbd>done</kbd> 事件与快照链路对齐（参见项目「思考过程和历史快照」约定）。", true);
-    signalPath.classList.add("on");
-    mods.ui.classList.add("is-flash");
-    await wait(1300);
-    mods.ui.classList.remove("is-flash");
-    signalPath.classList.remove("on");
-
-    setCap("演示结束。以上为系统级数据流示意，非接口契约。", true);
-    await wait(2200);
-    setCap("", false);
-
-    running = false;
-    btn.disabled = false;
   }
 
-  btn.addEventListener("click", function () {
-    runSequence().catch(function (e) {
-      console.error(e);
-      running = false;
-      btn.disabled = false;
-    });
-  });
+  var steps = [
+    {
+      title: "演练说明",
+      hot: [],
+      noAnim: true,
+      body: ""
+        + "<h2>手动分步演练</h2>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">操作方式</div>"
+        + "<div class=\"detail-item-value\">阅读右侧说明后，点击下方<strong>「下一步」</strong>：将<strong>直接播放本步数据流动画</strong>（粒子 + 箭头脉冲 + 路径中点标题与弹框摘要），播放结束后自动进入下一轮说明。全程不自动连播、无单独「播放」按钮。</div></div>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">与脱机评估的关系</div>"
+        + "<div class=\"detail-item-value\">语义路由在仓库中有独立脚本 <code>eval_semantic_router.py</code> 做场景回归；其中「无 SMILES / 无文件却要走成药工具」一类用例应判 <code>clarify</code>，若误走 <code>skill_fast_lane</code> 说明提示词护栏需微调（与拓扑中「语义路由」一步一致）。</div></div>"
+        + "<details class=\"flow-acc\"><summary>展开：本页字段口径（与编排器上下文对齐）</summary>"
+        + "<div class=\"flow-acc-body\"><code>file_status.has_files</code>、<code>file_status.types</code>、<code>mcp_status.compute_scheduler</code>、<code>recent_history</code> 等会进入路由提示词；仅靠用户句内自报路径而上下文未挂载文件时，应拦截澄清而非盲跑 task。</div></details>",
+    },
+    {
+      title: "① 用户输入 → 语义路由",
+      hot: ["mod-user", "mod-router"],
+      anim: [["mod-user", "mod-router"]],
+      arrowLabel: "递交请求",
+      arrowBrief: "自然语言、上传索引与 session 元数据封装后送入 SemanticRouter 上下文。",
+      body: ""
+        + "<h2>① 接入层：请求进入语义路由</h2>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">数据载体（Payload）</div>"
+        + "<div class=\"detail-item-value\"><ul>"
+        + "<li>自然语言 utterance（会话主文本）</li>"
+        + "<li>附件索引：上传路径列表、MIME/后缀摘要（供资产总线前置判断）</li>"
+        + "<li>会话元数据：<code>session_id</code>、可选 <code>recent_history</code> 摘要</li>"
+        + "</ul></div></div>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">处理要点</div>"
+        + "<div class=\"detail-item-value\">浏览器经 Nginx 与 API 建立连接；下行事件若走 SSE，与编排器写入的 <code>state_snapshot</code> 字段对齐（思考进 <code>reasoning</code>，正文进 <code>text</code>）。本步在拓扑上抽象为「用户输入」到「语义路由」的首次递交。</div></div>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">上游 / 下游</div>"
+        + "<div class=\"detail-item-value\">上游：人类用户与前端；下游：<code>SemanticRouter</code>（<code>gibh_agent/core/semantic_router.py</code>）输出离散路由标签（如 <code>task</code> / <code>chat</code> / <code>hpc</code> / <code>clarify</code> / <code>skill_fast_lane</code>）。</div></div>"
+        + "<details class=\"flow-acc\"><summary>展开：路由判决逻辑（摘要）</summary>"
+        + "<div class=\"flow-acc-body\">路由器在「可执行管线」与「缺数据」「超算未开」「技能快车道条件不足」之间做硬约束审计；命中风险则 <code>clarify</code> 返回澄清话术，由编排器承接，不进入重型执行链。</div></details>",
+    },
+    {
+      title: "② 语义路由 → 编排中枢",
+      hot: ["mod-router", "mod-orch"],
+      anim: [["mod-router", "mod-orch"]],
+      arrowLabel: "路由判决",
+      arrowBrief: "输出 route / confidence / rationale；无依据的技能快车道须判 clarify（见 eval 魔鬼陷阱用例）。",
+      body: ""
+        + "<h2>② 判决结果进入编排中枢</h2>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">数据载体</div>"
+        + "<div class=\"detail-item-value\"><ul>"
+        + "<li><code>route</code>、<code>confidence</code>、<code>rationale_short</code>（短理由，可展示）</li>"
+        + "<li>可选 <code>skill_id</code>（仅 <code>skill_fast_lane</code> 合法时携带）</li>"
+        + "</ul></div></div>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">处理要点</div>"
+        + "<div class=\"detail-item-value\"><code>AgentOrchestrator</code>（<code>gibh_agent/core/orchestrator.py</code>）据路由分支调度：对话、澄清、工作流执行、HPC 代理或技能单站。置信度为 0 的兜底澄清由编排器生成，不计入路由器统计 PASS/FAIL。</div></div>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">上游 / 下游</div>"
+        + "<div class=\"detail-item-value\">上游：语义路由 JSON；下游：Omics 资产规范化、Planner、Executor 反射注入等内部子链路（本看板合并显示为「编排中枢」）。</div></div>"
+        + "<details class=\"flow-acc\"><summary>展开：与 eval 失败样例的对应关系</summary>"
+        + "<div class=\"flow-acc-body\">评估集「魔鬼：语义重叠陷阱」期望：仅有口语「相似度」、无 SMILES、无文件时 → <code>clarify</code>，禁止 <code>skill_fast_lane</code>。若 LLM 仍输出快车道，应收紧 <code>SEMANTIC_ROUTER_SYSTEM_PROMPT</code> 中关于 <code>drug_similarity</code> 触发条件。</div></details>",
+    },
+    {
+      title: "③ 编排中枢 → 本地算子",
+      hot: ["mod-orch", "mod-local"],
+      anim: [["mod-orch", "mod-local"]],
+      arrowLabel: "轻量执行",
+      arrowBrief: "DataAsset 与步骤参数经 safe_tool 外壳进入同进程工具链。",
+      body: ""
+        + "<h2>③ 轻量路径：同进程工具</h2>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">数据载体</div>"
+        + "<div class=\"detail-item-value\"><code>DataAsset</code> 列表、步骤参数表、工作流模板键；调用仍经 <code>@safe_tool_execution</code> 统一错误外壳。</div></div>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">处理要点</div>"
+        + "<div class=\"detail-item-value\">短耗时、非密集计算可在智能体进程内完成；重型算子必须外抛至 Worker 或外部集群（架构宪法）。</div></div>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">上游 / 下游</div>"
+        + "<div class=\"detail-item-value\">上游：编排器子调度；下游：工具返回 JSON → 写回执行记录 / SSE / 可选落盘。</div></div>"
+        + "<details class=\"flow-acc\"><summary>展开：路径形参命名（工具层）</summary>"
+        + "<div class=\"flow-acc-body\">工具签名仅使用约定名：<code>file_path</code>、<code>data_path</code>、<code>input_dir</code>、<code>matrix_dir</code>、<code>image_path</code>、<code>mask_path</code>、<code>sequence_or_path</code> 等，由执行器按反射注入。</div></details>",
+    },
+    {
+      title: "④ 编排中枢 → 算力服务",
+      hot: ["mod-orch", "mod-worker"],
+      anim: [["mod-orch", "mod-worker"]],
+      arrowLabel: "TaaS 投递",
+      arrowBrief: "JSON 任务与挂载路径发往 Worker；主进程不做重计算。",
+      body: ""
+        + "<h2>④ 重型路径：TaaS Worker</h2>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">数据载体</div>"
+        + "<div class=\"detail-item-value\">HTTP JSON：输入路径指向共享挂载区；任务描述与资源限额由 Worker 服务解析。</div></div>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">处理要点</div>"
+        + "<div class=\"detail-item-value\">主进程只做编排与 I/O，不在内层做 CPU/GPU 密集循环；RNA-fold 等长时程任务典型落点。</div></div>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">上游 / 下游</div>"
+        + "<div class=\"detail-item-value\">上游：编排器；下游：共享存储上的中间文件、日志；必要时再交给超算批处理。</div></div>",
+    },
+    {
+      title: "⑤ 算力服务 → 超算作业",
+      hot: ["mod-worker", "mod-cluster"],
+      anim: [["mod-worker", "mod-cluster"]],
+      arrowLabel: "跨域作业",
+      arrowBrief: "队列 + 共享 FS；MCP 未开时路由须 clarify，禁止盲发 HPC。",
+      afterAnim: function () {
+        clusterLabel.textContent = "BUSY";
+        clusterLabel.className = "node-status is-busy";
+        clusterNode.setAttribute("aria-label", "超算作业，繁忙");
+        return new Promise(function (res) {
+          setTimeout(function () {
+            clusterLabel.textContent = "ONLINE";
+            clusterLabel.className = "node-status";
+            clusterNode.classList.remove("node-offline", "is-warn");
+            clusterNode.setAttribute("aria-label", "超算作业，在线");
+            res();
+          }, 600);
+        });
+      },
+      body: ""
+        + "<h2>⑤ 跨域：队列与共享文件系统</h2>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">数据载体</div>"
+        + "<div class=\"detail-item-value\">作业脚本、批量 FASTA/H5AD 清单、队列 ID；虚线拓扑表示链路与延迟不确定。</div></div>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">处理要点</div>"
+        + "<div class=\"detail-item-value\"><code>compute_scheduler</code> 关闭时，路由侧应 <code>clarify</code> 而非盲发 HPC（与评估用例「越权 HPC」「MCP 关」一致）。播放本步后卡片状态由 OFFLINE → BUSY → ONLINE 仅为示意。</div></div>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">上游 / 下游</div>"
+        + "<div class=\"detail-item-value\">上游：Worker 投递；下游：中心侧批处理产出 → 回写挂载目录。</div></div>",
+    },
+    {
+      title: "⑥ 超算作业 → 数据存储",
+      hot: ["mod-cluster", "mod-storage"],
+      anim: [["mod-cluster", "mod-storage"]],
+      arrowLabel: "产物落盘",
+      arrowBrief: "结果路径写入 Omics / RESULTS_DIR 语义，与 resolve_omics_paths 对齐。",
+      body: ""
+        + "<h2>⑥ 产物落盘与路径语义</h2>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">数据载体</div>"
+        + "<div class=\"detail-item-value\">结果表、日志、AnnData、图表路径；与 <code>OmicsAssetManager</code> / <code>RESULTS_DIR</code> 同一套解析语义。</div></div>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">处理要点</div>"
+        + "<div class=\"detail-item-value\">执行器与体检共用 <code>resolve_omics_paths</code> 口径，避免「前端一套、后端一套」的隐性分叉。</div></div>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">上游 / 下游</div>"
+        + "<div class=\"detail-item-value\">上游：超算/Worker 完成态；下游：会话层可下载、可再次作为输入资产。</div></div>",
+    },
+    {
+      title: "⑦ 回传会话（SSE / 快照）",
+      hot: ["mod-storage", "mod-user"],
+      anim: null,
+      arrowLabel: "完成态回传",
+      arrowBrief: "done 与 state_snapshot 经 SSE 回会话；与历史恢复四联字段一致。",
+      onPlay: function () {
+        drawSynapseArrow("mod-storage", "mod-user", "完成态回传", "done 与 state_snapshot 经 SSE 回会话；与历史恢复四联字段一致。");
+        flowPath.classList.add("on");
+        pulseUser();
+        return new Promise(function (res) {
+          setTimeout(function () {
+            flowPath.classList.remove("on");
+            res();
+          }, 1400);
+        });
+      },
+      body: ""
+        + "<h2>⑦ 完成态回到用户侧</h2>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">数据载体</div>"
+        + "<div class=\"detail-item-value\"><code>done</code> 事件、<code>state_snapshot</code>（含 <code>duration</code>）、过程日志条目；历史恢复时思考与正文分区渲染。</div></div>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">处理要点</div>"
+        + "<div class=\"detail-item-value\">修改 SSE 形态或快照结构时，须四联校验：编排器写入、入库、前端 <code>handleServerEvent</code> / 历史折叠组件（参见项目内「思考过程和历史快照」约定）。</div></div>"
+        + "<div class=\"detail-item\"><div class=\"detail-item-label\">上游 / 下游</div>"
+        + "<div class=\"detail-item-value\">上游：存储与编排汇总；下游：浏览器会话 UI。</div></div>"
+        + "<details class=\"flow-acc\"><summary>展开：本步动画说明</summary>"
+        + "<div class=\"flow-acc-body\">拓扑上以虚线流光自超算区方向指向「用户输入」示意回传；不额外发射粒子以免与实线语义混淆。</div></details>",
+    },
+  ];
+
+  function pulseUser() {
+    var el = nodes["mod-user"];
+    if (!el) return;
+    el.classList.add("is-pulse", "is-hot");
+    setTimeout(function () {
+      el.classList.remove("is-pulse", "is-hot");
+    }, 1400);
+  }
+
+  function restorePersistentArrowForView(k) {
+    if (k <= 0) {
+      clearDynSynapse();
+      hideCallout();
+      return;
+    }
+    var prev = steps[k - 1];
+    if (prev.noAnim) {
+      clearDynSynapse();
+      hideCallout();
+      return;
+    }
+    if (typeof prev.onPlay === "function" && (!prev.anim || !prev.anim.length)) {
+      drawSynapseArrow("mod-storage", "mod-user", prev.arrowLabel || "", prev.arrowBrief || "");
+      return;
+    }
+    if (!prev.anim || !prev.anim.length) {
+      clearDynSynapse();
+      hideCallout();
+      return;
+    }
+    var lastPair = prev.anim[prev.anim.length - 1];
+    var li = prev.anim.length - 1;
+    var lab = Array.isArray(prev.arrowLabel) ? prev.arrowLabel[li] : prev.arrowLabel;
+    var br = Array.isArray(prev.arrowBrief) ? prev.arrowBrief[li] : prev.arrowBrief;
+    drawSynapseArrow(lastPair[0], lastPair[1], lab || "", br || "");
+  }
+
+  function refreshNavButtons() {
+    btnPrev.disabled = animating || stepIndex < 0;
+    if (!animating) {
+      btnNext.disabled = false;
+    }
+  }
+
+  function runStepAnim(s) {
+    if (s.noAnim) return Promise.resolve();
+    if (typeof s.onPlay === "function") return s.onPlay();
+    if (!s.anim || !s.anim.length) return Promise.resolve();
+    if (s.anim.length === 1) {
+      var pair0 = s.anim[0];
+      drawSynapseArrow(pair0[0], pair0[1], s.arrowLabel, s.arrowBrief);
+      return moveDot(pair0[0], pair0[1]);
+    }
+    return s.anim.reduce(function (p, pair, i) {
+      return p.then(function () {
+        var lab = Array.isArray(s.arrowLabel) ? s.arrowLabel[i] : s.arrowLabel;
+        var br = Array.isArray(s.arrowBrief) ? s.arrowBrief[i] : s.arrowBrief;
+        drawSynapseArrow(pair[0], pair[1], lab, br);
+        return moveDot(pair[0], pair[1]);
+      });
+    }, Promise.resolve());
+  }
+
+  function renderStep() {
+    if (stepIndex < 0) {
+      clearDynSynapse();
+      hideCallout();
+      stepBadge.textContent = "";
+      detailBody.innerHTML =
+        "<h2>准备就绪</h2><div class=\"detail-item-value\" style=\"border-left-color:#cbd5e1\">点击下方<strong>「开始演练」</strong>查看第 1 步说明；之后每次点<strong>「下一步」</strong>都会先播放本步流向，再进入下一步。任意步骤可用<strong>「上一步」</strong>回退（拓扑箭头会恢复为对应步完成后的常亮状态）。</div>";
+      dockMeta.textContent = "";
+      btnNext.textContent = "开始演练";
+      btnNext.disabled = false;
+      refreshNavButtons();
+      return;
+    }
+
+    var s = steps[stepIndex];
+    stepBadge.textContent = "步骤 " + (stepIndex + 1) + " / " + steps.length;
+    detailBody.innerHTML = s.body;
+    dockMeta.textContent = s.noAnim
+      ? "本步无粒子动画；点「下一步」将直接进入下一说明。"
+      : "点「下一步」将播放本步粒子，并在箭头上常亮显示步骤名与弹框摘要，直至下一步再切换。";
+
+    setHot(s.hot, false);
+    syncClusterForViewStep(stepIndex);
+    restorePersistentArrowForView(stepIndex);
+
+    if (stepIndex >= steps.length - 1) {
+      btnNext.textContent = "下一步（完成并重置）";
+    } else {
+      btnNext.textContent = "下一步";
+    }
+    btnNext.disabled = false;
+    refreshNavButtons();
+  }
+
+  function applyStepEnter() {
+    if (stepIndex < 1) resetClusterOffline();
+  }
+
+  function onNextClick() {
+    if (animating) return;
+    if (typeof anime === "undefined" && stepIndex >= 0 && !steps[stepIndex].noAnim) {
+      window.alert("动画库未能加载，请检查网络后重试。");
+      return;
+    }
+
+    if (stepIndex < 0) {
+      stepIndex = 0;
+      applyStepEnter();
+      renderStep();
+      return;
+    }
+
+    var s = steps[stepIndex];
+    animating = true;
+    btnNext.disabled = true;
+    btnPrev.disabled = true;
+
+    runStepAnim(s)
+      .then(function () {
+        if (typeof s.afterAnim === "function") return s.afterAnim();
+        return Promise.resolve();
+      })
+      .then(function () {
+        if (stepIndex >= steps.length - 1) {
+          fullReset();
+          return;
+        }
+        stepIndex += 1;
+        applyStepEnter();
+        renderStep();
+      })
+      .catch(function (e) {
+        console.error(e);
+        clearDynSynapse();
+        hideCallout();
+        btnNext.disabled = false;
+        refreshNavButtons();
+      })
+      .finally(function () {
+        animating = false;
+        refreshNavButtons();
+      });
+  }
+
+  function onPrevClick() {
+    if (animating) return;
+    if (stepIndex < 0) return;
+    if (stepIndex === 0) {
+      stepIndex = -1;
+      clearDynSynapse();
+      hideCallout();
+      clearHot();
+      resetClusterOffline();
+      renderStep();
+      return;
+    }
+    stepIndex -= 1;
+    applyStepEnter();
+    renderStep();
+  }
+
+  function fullReset() {
+    stepIndex = -1;
+    animating = false;
+    clearDynSynapse();
+    hideCallout();
+    clearHot();
+    resetClusterOffline();
+    renderStep();
+  }
+
+  btnPrev.addEventListener("click", onPrevClick);
+  btnNext.addEventListener("click", onNextClick);
+  btnReset.addEventListener("click", fullReset);
+
+  renderStep();
 })();
   </script>
 </body>

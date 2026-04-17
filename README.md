@@ -61,6 +61,7 @@
 
 - **`docs/hpc_agent_architecture.html`**（根目录 **`hpc_agent_architecture.html`** 为同内容副本）：与 `docs/ARCHITECTURE_CORE_PRINCIPLES.md` 命名一致的系统级数据流示意，Anime.js 分步演示。
 - **`docs/animated_architecture.html`**：流水线动效版典型链路演示。说明见白皮书 **§7 对外演示与架构静态页**。
+- **瘦客户端**：根目录 **`gibh-desktop-app/`**（Electron，`main.js` 中 `loadURL` 指向已部署的 nginx 控制台，与浏览器同源）。分层示意见根目录 **`设计与模块.md`**。
 
 ### 架构演进
 
@@ -164,6 +165,7 @@ GIBH-AGENT-V2/
 ├── docker-compose.yml              # 容器编排配置
 ├── server.py                       # FastAPI 服务器入口
 ├── requirements.txt                # Python 依赖
+├── gibh-desktop-app/               # Electron 瘦客户端（main.js loadURL 与 nginx 同源）
 │
 ├── services/                       # 服务配置
 │   ├── api/                        # API 服务 Dockerfile

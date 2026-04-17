@@ -270,14 +270,35 @@ class DeepReActRunner:
                         await emit_callback("suggestions", {"suggestions": hit_options})
                     return "human_input_required"
 
+                try:
+                    args = json.loads(args_str)
+                except json.JSONDecodeError as e:
+                    err_body = (
+                        f"Action Input Parsing Error: Invalid JSON. {e!s}. Raw input was: {args_str!r}"
+                    )
+                    logger.warning(
+                        "[DeepReAct] %s (tool=%s call_id=%s)",
+                        err_body,
+                        tool_name,
+                        call_id,
+                    )
+                    await emit_callback(
+                        "process_log",
+                        {"message": f"❌ {tool_name}：参数 JSON 无效，已喂回模型供纠错"},
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": err_body,
+                        }
+                    )
+                    continue
+
                 await emit_callback(
                     "process_log",
                     {"message": f"⏳ 正在执行算子: {tool_name}"},
                 )
-                try:
-                    args = json.loads(args_str)
-                except json.JSONDecodeError:
-                    args = {}
 
                 tool_fn = self._registry.get_tool(tool_name)
                 # 动态 MCP schema 注入场景：工具可能尚未在 Registry 注册，经网关 POST /call 代理执行

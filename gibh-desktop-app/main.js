@@ -9,7 +9,7 @@ if (process.platform === 'win32') {
   app.setAppUserModelId('com.gibh.agent.demo');
 }
 
-/** 窗口与安装包图标：gibh-desktop-app/app-icon.png（建议与 nginx static/favicon.png 同源复制） */
+/** 窗口与安装包图标：gibh-desktop-app/app-icon.png（圆角白底+主体，四角透明；sync_desktop_app_icon.sh 同步到站点；npm run icons:win 用 ico-codec 生成 PNG-in-ICO → build/icon.ico） */
 function getWindowIconPath() {
   const p = path.join(__dirname, 'app-icon.png');
   return fs.existsSync(p) ? p : undefined;
@@ -30,8 +30,16 @@ function createMainWindow() {
 
   win.setMenuBarVisibility(false);
 
-  // Demo 阶段，请将此处的 IP 替换为真实的服务器 Nginx 访问地址
-  win.loadURL('http://192.168.32.31:8018');
+  /**
+   * 界面与浏览器同源：加载 Nginx 上的 `index.html` / `css/main.css` 等静态资源。
+   * 仓库内修改 `services/nginx/html/` 后，部署到该 URL 所指站点即可，瘦客户端无需再拷一份前端文件。
+   * 覆盖默认地址：启动前设置环境变量 OMICS_AGENT_WEB_URL（例如 http://127.0.0.1:8018）。
+   */
+  const webBase =
+    process.env.OMICS_AGENT_WEB_URL && String(process.env.OMICS_AGENT_WEB_URL).trim()
+      ? String(process.env.OMICS_AGENT_WEB_URL).trim().replace(/\/$/, '')
+      : 'http://192.168.32.31:8018';
+  win.loadURL(webBase);
 }
 
 app.whenReady().then(createMainWindow);

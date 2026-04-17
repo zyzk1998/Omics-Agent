@@ -9,13 +9,17 @@
     "start": "electron .",
     "pack": "electron-builder --dir",
     "icons:win": "node scripts/gen-win-icon.js",
-    "dist": "npm run icons:win && electron-builder",
-    "dist:linux": "electron-builder --linux"
+    "sync:download-page": "node scripts/write-download-release-meta.js",
+    "dist": "npm run icons:win && electron-builder && npm run sync:download-page",
+    "dist:linux": "electron-builder --linux && npm run sync:download-page",
+    "dist:web": "npm run icons:win && electron-builder --linux --win portable && npm run sync:download-page"
   },
   "devDependencies": {
     "electron": "^28.3.3",
     "electron-builder": "^24.13.3",
-    "png-to-ico": "^2.1.8"
+    "ico-codec": "^1.0.0",
+    "png-to-ico": "^2.1.8",
+    "pngjs": "^6.0.0"
   },
   "build": {
     "appId": "com.gibh.agent.demo",
@@ -32,6 +36,8 @@
     "win": {
       "artifactName": "${productName} Setup ${version}.${ext}",
       "icon": "icon.ico",
+      "sign": null,
+      "signAndEditExecutable": false,
       "target": [
         {
           "target": "nsis",
@@ -42,7 +48,8 @@
       ]
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
+      "allowElevation": true,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,

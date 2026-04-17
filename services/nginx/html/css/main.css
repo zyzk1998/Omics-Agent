@@ -422,7 +422,7 @@
             #input-wrapper-bottom .input-wrapper {
                 position: relative;
                 width: 100%;
-                max-width: 840px;
+                max-width: calc(840px * 4 / 5);
                 margin: 0 auto;
                 left: 0;
                 right: 0;
@@ -434,7 +434,7 @@
                 top: auto;
                 transform: none;
                 width: calc(100% - 48px);
-                max-width: 840px;
+                max-width: calc(840px * 4 / 5);
                 margin: 0 auto 20px auto;
                 padding: 0 12px;
             }
@@ -1924,7 +1924,7 @@
                 transition: box-shadow 0.25s ease;
             }
             #inputWrapper.input-center,
-            #inputWrapper.input-bottom { width: calc(100% - 48px); max-width: 840px; margin: 0 auto 20px auto; }
+            #inputWrapper.input-bottom { width: calc(100% - 48px); max-width: calc(840px * 4 / 5); margin: 0 auto 20px auto; }
             .main-input.chat-input.chat-input-guide-pulse {
                 animation: chat-input-guide-pulse 1.2s ease-out 1;
             }
@@ -2171,6 +2171,7 @@
             .icon-btn:hover { background: #e5e7eb; color: #1f2329; }
             .icon-btn:disabled { cursor: not-allowed; opacity: 0.5; }
             .icon-btn.icon-btn-text { width: auto; min-width: 32px; padding: 0 12px; font-size: 14px; }
+            a.icon-btn { text-decoration: none; color: inherit; }
             .icon-btn-star { background: #f3f4f6; border-radius: 20px; color: #6b7280; }
             .icon-btn-star:hover { background: #e5e7eb; color: #374151; }
             .send-btn {

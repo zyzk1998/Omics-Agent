@@ -1,0 +1,29 @@
+{
+  "theme": "base",
+  "themeVariables": {
+    "darkMode": false,
+    "background": "#ffffff",
+    "fontFamily": "\"Segoe UI\", \"Microsoft YaHei\", \"PingFang SC\", sans-serif",
+    "fontSize": "15px",
+    "primaryColor": "#ffffff",
+    "primaryTextColor": "#3a3428",
+    "primaryBorderColor": "#6a9e7a",
+    "secondaryColor": "#ffffff",
+    "secondaryTextColor": "#4a4238",
+    "secondaryBorderColor": "#b8a88c",
+    "tertiaryColor": "#ffffff",
+    "tertiaryTextColor": "#3d5a62",
+    "tertiaryBorderColor": "#7eb3c8",
+    "lineColor": "#5a8068",
+    "textColor": "#3a3428",
+    "clusterBkg": "#ffffff",
+    "clusterBorder": "#88b898",
+    "titleColor": "#2d4a38",
+    "edgeLabelBackground": "#ffffff",
+    "nodeTextColor": "#3a3428",
+    "defaultLinkColor": "#5a8068",
+    "noteBkgColor": "#ffffff",
+    "noteTextColor": "#3a3428",
+    "noteBorderColor": "#d4a06a"
+  }
+}

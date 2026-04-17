@@ -3196,9 +3196,12 @@ class AgentOrchestrator:
             DeepReActCircuitBreakerError,
             DeepReActRunner,
         )
+        from gibh_agent.core.prompt_manager import REACT_MASTER_PROMPT
         from gibh_agent.core.tool_registry import registry
 
         chat_system = (
+            REACT_MASTER_PROMPT.strip()
+            + "\n\n"
             "你是一个友好的AI助手，帮助用户解答问题。使用中文回答。\n\n"
             "【互动与追问规范】在完成全部解答后，必须在**最末尾**基于上下文生成 1～2 个用户最可能问的后续短问题。\n"
             "必须且只能使用以下严格 JSON，并用 `<suggest>` 与 `</suggest>` 标签包裹；**禁止**在标签外附加任何说明文字：\n"
@@ -3478,44 +3481,64 @@ class AgentOrchestrator:
                 await asyncio.sleep(0.01)
             return
 
-        completion = None
+        MAX_CHAT_TOOL_ITERATIONS = 10
+        completion: Any = None
         _bepi_chat = AgentOrchestrator._is_bepipred3_skill_chat_intent(query)
         _first_max_tokens = 4096 if _bepi_chat else 1000
-        _tool_choice: Any = "auto"
+        _tool_choice_first: Any = "auto"
         if _bepi_chat and tools:
-            # 技能广场 BepiPred3：强制首轮调用工具，避免推理模型空答后落入 Task/Chroma 路径
-            _tool_choice = {"type": "function", "function": {"name": "bepipred3_prediction"}}
-        try:
-            completion = await llm_client.achat(
-                messages,
-                tools=tools,
-                tool_choice=_tool_choice,
-                temperature=0.2 if _bepi_chat else 0.7,
-                max_tokens=_first_max_tokens,
-                model=model_name,
-            )
-        except Exception as e:
-            logger.warning("⚠️ [Orchestrator] 带 tools 的 achat 失败，回退无工具流式: %s", e, exc_info=True)
-            if _bepi_chat and _tool_choice != "auto":
-                try:
-                    completion = await llm_client.achat(
-                        messages,
-                        tools=tools,
-                        tool_choice="auto",
-                        temperature=0.2,
-                        max_tokens=_first_max_tokens,
-                        model=model_name,
-                    )
-                except Exception as e2:
-                    logger.warning("⚠️ [Orchestrator] BepiPred3 回退 auto 仍失败: %s", e2, exc_info=True)
+            # 技能广场 BepiPred3：仅首轮强制调用工具，避免推理模型空答后落入 Task/Chroma 路径
+            _tool_choice_first = {"type": "function", "function": {"name": "bepipred3_prediction"}}
 
-        if completion and getattr(completion.choices[0].message, "tool_calls", None):
+        _used_chat_tools = False
+        for _chat_tool_iter in range(MAX_CHAT_TOOL_ITERATIONS):
+            _tool_choice_cur = _tool_choice_first if _chat_tool_iter == 0 else "auto"
+            try:
+                completion = await llm_client.achat(
+                    messages,
+                    tools=tools,
+                    tool_choice=_tool_choice_cur,
+                    temperature=0.2 if _bepi_chat else 0.7,
+                    max_tokens=_first_max_tokens,
+                    model=model_name,
+                )
+            except Exception as e:
+                logger.warning("⚠️ [Orchestrator] 带 tools 的 achat 失败，回退无工具流式: %s", e, exc_info=True)
+                if _bepi_chat and _tool_choice_cur != "auto":
+                    try:
+                        completion = await llm_client.achat(
+                            messages,
+                            tools=tools,
+                            tool_choice="auto",
+                            temperature=0.2,
+                            max_tokens=_first_max_tokens,
+                            model=model_name,
+                        )
+                    except Exception as e2:
+                        logger.warning("⚠️ [Orchestrator] BepiPred3 回退 auto 仍失败: %s", e2, exc_info=True)
+                        completion = None
+                else:
+                    completion = None
+
+            if not completion:
+                break
+
             msg = completion.choices[0].message
-            messages.append(self._assistant_openai_tool_message_to_dict(msg))
+            tcalls = getattr(msg, "tool_calls", None)
+            if not tcalls:
+                break
+
+            _used_chat_tools = True
+            if hasattr(msg, "model_dump"):
+                messages.append(msg.model_dump(exclude_none=True))
+            else:
+                messages.append(self._assistant_openai_tool_message_to_dict(msg))
+
             for tc in msg.tool_calls:
                 fn = getattr(tc, "function", None)
                 name = getattr(fn, "name", None) if fn is not None else None
                 args_raw = (getattr(fn, "arguments", None) if fn is not None else None) or "{}"
+                call_id = getattr(tc, "id", "") or ""
                 if not name:
                     continue
                 if name == "mcp_web_search":
@@ -3555,8 +3578,14 @@ class AgentOrchestrator:
                     await asyncio.sleep(0.01)
                 try:
                     args = json.loads(args_raw)
-                except json.JSONDecodeError:
-                    args = {}
+                except json.JSONDecodeError as e:
+                    err_msg = (
+                        f"Action Input Parsing Error: Invalid JSON. {e!s}. Raw input was: {args_raw!r}"
+                    )
+                    logger.warning("⚠️ [Orchestrator] 聊天模式 %s", err_msg)
+                    messages.append({"role": "tool", "tool_call_id": call_id, "content": err_msg})
+                    continue
+
                 tool_fn = registry.get_tool(name)
                 if name and name.startswith("hpc_mcp_") and "compute_scheduler" not in enabled_mcps:
                     result_payload = {
@@ -3583,23 +3612,21 @@ class AgentOrchestrator:
                 messages.append(
                     {
                         "role": "tool",
-                        "tool_call_id": getattr(tc, "id", ""),
+                        "tool_call_id": call_id,
                         "content": json.dumps(result_payload, ensure_ascii=False),
                     }
                 )
-            async for event_type, data in stream_from_llm_chunks(
-                llm_client.astream(messages, temperature=0.7, max_tokens=2000, model=model_name),
-                model_name=model_name,
-            ):
-                if _llm_first_byte is None:
-                    _llm_first_byte = time.time()
-                    logger.info("[Profiler] 收到 LLM 首字节 - 耗时: %.2fs", _llm_first_byte - _t_llm_start)
-                yield self._emit_sse(state_snapshot, event_type, data)
-                await asyncio.sleep(0.01)
-            return
+        else:
+            logger.warning(
+                "Reached MAX_CHAT_TOOL_ITERATIONS (%s) in _stream_chat_mode; proceeding to final stream.",
+                MAX_CHAT_TOOL_ITERATIONS,
+            )
 
+        _final_max_tokens = 2000 if _used_chat_tools else 1000
         async for event_type, data in stream_from_llm_chunks(
-            llm_client.astream(messages, temperature=0.7, max_tokens=1000, model=model_name),
+            llm_client.astream(
+                messages, temperature=0.7, max_tokens=_final_max_tokens, model=model_name
+            ),
             model_name=model_name,
         ):
             if _llm_first_byte is None:

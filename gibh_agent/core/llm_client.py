@@ -6,6 +6,7 @@
 from typing import Optional, AsyncIterator, Dict, Any
 from openai import OpenAI, AsyncOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
+import json
 import os
 import re
 import logging
@@ -97,7 +98,7 @@ class LLMClient:
             ChatCompletion 对象
         """
         import logging
-        import json
+
         logger = logging.getLogger(__name__)
         
         params = {

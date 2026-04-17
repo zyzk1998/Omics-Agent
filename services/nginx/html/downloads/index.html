@@ -4,48 +4,41 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>下载桌面客户端 · Omics Agent</title>
-    <link rel="icon" type="image/png" href="/static/favicon.png?v=4">
+    <link rel="icon" type="image/png" href="/static/favicon.png?v=10">
     <style>
         :root { --fg: #1f2937; --muted: #6b7280; --accent: #2563eb; --bg: #f9fafb; --card: #fff; }
         * { box-sizing: border-box; }
         body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", sans-serif; margin: 0; color: var(--fg); background: var(--bg); line-height: 1.5; }
         .wrap { max-width: 40rem; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
-        h1 { font-size: 1.35rem; font-weight: 600; margin: 0 0 0.5rem; }
-        p.lead { color: var(--muted); margin: 0 0 1.5rem; font-size: 0.95rem; }
+        h1 { font-size: 1.35rem; font-weight: 600; margin: 0 0 0.35rem; }
+        .ver-line { color: var(--muted); font-size: 0.95rem; margin: 0 0 1.5rem; }
         .card { background: var(--card); border-radius: 12px; padding: 1.25rem 1.35rem; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 1rem; }
         .btn { display: inline-block; padding: 0.65rem 1.1rem; background: var(--accent); color: #fff !important; text-decoration: none; border-radius: 8px; font-weight: 500; font-size: 0.95rem; }
         .btn:hover { filter: brightness(1.06); }
         .btn[disabled], .btn.missing { background: #9ca3af; pointer-events: none; cursor: not-allowed; }
-        ul { margin: 0.5rem 0 0; padding-left: 1.2rem; color: var(--muted); font-size: 0.9rem; }
-        .note { font-size: 0.85rem; color: var(--muted); margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #e5e7eb; }
-        code { background: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.85em; }
+        .note { font-size: 0.85rem; color: var(--muted); margin-top: 1rem; display: none; }
         .back { margin-bottom: 1.25rem; }
         .back a { color: var(--accent); text-decoration: none; font-size: 0.9rem; }
         .back a:hover { text-decoration: underline; }
+        .card-h { font-size: 1rem; font-weight: 600; margin: 0 0 0.75rem; }
     </style>
 </head>
 <body>
     <div class="wrap">
         <div class="back"><a href="/">← 返回首页</a></div>
         <h1>下载桌面客户端</h1>
-        <p class="lead">安装后将从独立窗口打开本站的 Omics Agent 界面（瘦客户端）。当前推荐 <strong>V0.11</strong>（构建版本号 <code>0.11.0</code>）。请根据您的系统选择安装包。</p>
+        <p class="ver-line" id="ver-line">版本 —</p>
 
         <div class="card">
-            <strong>Windows（64 位）</strong>
-            <p style="margin: 0.5rem 0 1rem; color: var(--muted); font-size: 0.9rem;">NSIS 安装程序，下载后双击按向导安装；安装后可在开始菜单或桌面启动。</p>
+            <div class="card-h">Windows（64 位）</div>
             <a id="win-dl" class="btn" href="#" download>下载 Windows 安装包</a>
-            <p id="win-missing" class="note" style="display:none;">管理员尚未将安装包放到本站 <code>/downloads/</code> 目录。请将构建得到的 <code>.exe</code>（见下方常见文件名）复制到该目录后刷新本页。</p>
+            <p id="win-missing" class="note">暂无可用的安装包，请稍后再试。</p>
         </div>
 
         <div class="card">
-            <strong>Linux（x86_64）</strong>
-            <p style="margin: 0.5rem 0 1rem; color: var(--muted); font-size: 0.9rem;">AppImage（在 <code>gibh-desktop-app/package.json</code> 的 <code>build.linux.target</code> 中配置）。下载后执行 <code>chmod +x *.AppImage</code>，再双击或在终端运行。</p>
+            <div class="card-h">Linux（x86_64）</div>
             <a id="linux-dl" class="btn" href="#" download>下载 Linux AppImage</a>
-            <p id="linux-missing" class="note" style="display:none;">尚未检测到 AppImage。请在 Linux 上进入 <code>gibh-desktop-app</code> 执行 <code>npm run dist:linux</code>（或 <code>npm run dist -- --linux</code>），将 <code>dist-out</code> 内生成的 <code>.AppImage</code> 复制到服务器仓库的 <code>services/nginx/html/downloads/</code> 后刷新本页（勿写到 <code>dist-out</code> 当作下载目录）。</p>
-        </div>
-
-        <div class="note">
-            <strong>说明：</strong>客户端内嵌的服务地址在构建时写入 <code>main.js</code>（当前为 <code>loadURL</code> 指向的地址）。更换公网或内网入口时请重新打包后再上传安装包。
+            <p id="linux-missing" class="note">暂无可用的安装包，请稍后再试。</p>
         </div>
     </div>
     <script>
@@ -58,60 +51,94 @@
                 xhr.onerror = onFail;
                 xhr.send();
             }
+            function fileUrl(name) {
+                return base + encodeURIComponent(name);
+            }
             var winA = document.getElementById('win-dl');
             var linuxA = document.getElementById('linux-dl');
-            var winCandidates = [
-                base + 'Omics%20Agent%20Setup%200.11.0.exe',
-                base + 'Omics%20Agent%20Setup%200.10.0.exe',
-                base + 'Omics%20Agent%20Setup%201.0.0.exe',
-                base + 'GIBH-Agent-Demo-Setup-0.10.0.exe',
-                base + 'GIBH-Agent-Demo-Setup-1.0.0.exe',
-                base + 'GIBH%20Agent%20Demo%20Setup%200.10.0.exe',
-                base + 'GIBH%20Agent%20Demo%20Setup%201.0.0.exe'
-            ];
-            function pickWinUrl(i) {
-                if (!winA) return;
-                if (i >= winCandidates.length) {
-                    winA.classList.add('missing');
-                    winA.setAttribute('href', '#');
-                    winA.removeAttribute('download');
-                    winA.textContent = '安装包未就绪';
-                    var m = document.getElementById('win-missing');
-                    if (m) m.style.display = 'block';
-                    return;
-                }
-                probe(winCandidates[i], function () {
-                    winA.setAttribute('href', winCandidates[i]);
-                    winA.setAttribute('download', '');
-                }, function () { pickWinUrl(i + 1); });
+            var verLine = document.getElementById('ver-line');
+
+            var staticFallback = {
+                version: '0.11.0',
+                displayVersion: 'V0.11',
+                productName: 'Omics Agent',
+                winSetupFile: 'Omics Agent Setup 0.11.0.exe',
+                linuxAppImageFile: 'Omics Agent-0.11.0.AppImage'
+            };
+
+            function setVersion(meta) {
+                if (!verLine) return;
+                var dv = meta.displayVersion || ('V' + meta.version);
+                var v = meta.version || '';
+                verLine.textContent = '当前版本 ' + dv + '（' + v + '）';
             }
-            pickWinUrl(0);
-            var linuxCandidates = [
-                base + 'Omics%20Agent-0.11.0.AppImage',
-                base + 'Omics%20Agent-0.10.0.AppImage',
-                base + 'Omics%20Agent-1.0.0.AppImage',
-                base + 'GIBH-Agent-Demo-Setup-0.10.0.AppImage',
-                base + 'GIBH-Agent-Demo-Setup-1.0.0.AppImage',
-                base + 'GIBH%20Agent%20Demo-0.10.0.AppImage',
-                base + 'GIBH%20Agent%20Demo-1.0.0.AppImage'
-            ];
-            function pickLinuxUrl(i) {
-                if (!linuxA) return;
-                if (i >= linuxCandidates.length) {
-                    linuxA.classList.add('missing');
-                    linuxA.setAttribute('href', '#');
-                    linuxA.removeAttribute('download');
-                    linuxA.textContent = 'AppImage 未就绪';
-                    var m = document.getElementById('linux-missing');
-                    if (m) m.style.display = 'block';
-                    return;
+
+            function run(meta) {
+                setVersion(meta);
+                /** 只链接 client-release.json 中的确切文件名，不回退旧包，避免「页上 0.11、实际下 1.0.0」 */
+                var winUrl = meta.winSetupFile ? fileUrl(meta.winSetupFile) : '';
+                if (winA) {
+                    if (!winUrl) {
+                        winA.classList.add('missing');
+                        winA.setAttribute('href', '#');
+                        winA.removeAttribute('download');
+                        winA.textContent = '暂不可下载';
+                        var w0 = document.getElementById('win-missing');
+                        if (w0) w0.style.display = 'block';
+                    } else {
+                        probe(winUrl, function () {
+                            winA.classList.remove('missing');
+                            winA.setAttribute('href', winUrl);
+                            winA.setAttribute('download', '');
+                            winA.textContent = '下载 Windows 安装包';
+                        }, function () {
+                            winA.classList.add('missing');
+                            winA.setAttribute('href', '#');
+                            winA.removeAttribute('download');
+                            winA.textContent = '暂不可下载';
+                            var wm = document.getElementById('win-missing');
+                            if (wm) {
+                                wm.textContent = '服务器上尚未提供与当前版本一致的安装包（' + (meta.winSetupFile || '') + '）。';
+                                wm.style.display = 'block';
+                            }
+                        });
+                    }
                 }
-                probe(linuxCandidates[i], function () {
-                    linuxA.setAttribute('href', linuxCandidates[i]);
-                    linuxA.setAttribute('download', '');
-                }, function () { pickLinuxUrl(i + 1); });
+
+                var linuxUrl = meta.linuxAppImageFile ? fileUrl(meta.linuxAppImageFile) : '';
+                if (linuxA) {
+                    if (!linuxUrl) {
+                        linuxA.classList.add('missing');
+                        linuxA.setAttribute('href', '#');
+                        linuxA.removeAttribute('download');
+                        linuxA.textContent = '暂不可下载';
+                        var l0 = document.getElementById('linux-missing');
+                        if (l0) l0.style.display = 'block';
+                    } else {
+                        probe(linuxUrl, function () {
+                            linuxA.classList.remove('missing');
+                            linuxA.setAttribute('href', linuxUrl);
+                            linuxA.setAttribute('download', '');
+                            linuxA.textContent = '下载 Linux AppImage';
+                        }, function () {
+                            linuxA.classList.add('missing');
+                            linuxA.setAttribute('href', '#');
+                            linuxA.removeAttribute('download');
+                            linuxA.textContent = '暂不可下载';
+                            var lm = document.getElementById('linux-missing');
+                            if (lm) {
+                                lm.textContent = '服务器上尚未提供与当前版本一致的安装包（' + (meta.linuxAppImageFile || '') + '）。';
+                                lm.style.display = 'block';
+                            }
+                        });
+                    }
+                }
             }
-            pickLinuxUrl(0);
+
+            fetch(base + 'client-release.json?t=' + Date.now(), { cache: 'no-store' })
+                .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+                .then(function (j) { run(j); })
+                .catch(function () { run(staticFallback); });
         })();
     </script>
 </body>
