@@ -23,6 +23,8 @@
         .card-h { font-size: 1rem; font-weight: 600; margin: 0 0 0.75rem; }
         .changelog { font-size: 0.9rem; color: var(--fg); margin: 0; padding-left: 1.15rem; }
         .changelog li { margin: 0.35rem 0; }
+        .dl-hint { font-size: 0.82rem; color: var(--muted); margin: 0 0 0.75rem; line-height: 1.45; }
+        .dl-hint code { font-size: 0.9em; background: #f3f4f6; padding: 0.1em 0.35em; border-radius: 4px; }
     </style>
 </head>
 <body>
@@ -42,6 +44,7 @@
 
         <div class="card">
             <div class="card-h">Windows（64 位）</div>
+            <p class="dl-hint">链接由 <code>client-release.json</code> 中的文件名决定；页面会检测文件是否已放到本站 <code>/downloads/</code>。若长期「暂不可下载」，请在 x64 Windows 上进入仓库 <code>gibh-desktop-app</code> 执行 <code>npm run dist</code>，将生成的 <code>Omics Agent Setup 0.12.0.exe</code> 上传到服务器同目录（Linux 上交叉编 NSIS 需 Wine，见 electron-builder 文档）。</p>
             <a id="win-dl" class="btn" href="#" download>下载 Windows 安装包</a>
             <p id="win-missing" class="note">暂无可用的安装包，请稍后再试。</p>
         </div>
