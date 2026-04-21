@@ -103,7 +103,7 @@ const payload = {
   updatedAt: new Date().toISOString(),
 };
 
-/** 若站点已手动固定 Windows 安装包文件名（如暂提供旧版 exe），保留 winSetupFile / platformNote，避免 npm run sync 覆盖 */
+/** 若站点已手动固定 Windows 安装包文件名（如暂提供旧版 exe），保留 winSetupFile，避免 npm run sync 覆盖 */
 let effectiveWin = winSetupFile;
 let effectiveLinux = linuxAppImageFile;
 try {
@@ -112,7 +112,6 @@ try {
     if (prev && prev.winPinned === true && prev.winSetupFile) {
       payload.winSetupFile = prev.winSetupFile;
       payload.winPinned = true;
-      if (prev.platformNote) payload.platformNote = prev.platformNote;
       effectiveWin = payload.winSetupFile;
       console.log('保留 winPinned：Windows 安装包文件名为', effectiveWin);
     }

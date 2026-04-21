@@ -5,6 +5,5 @@
   "winSetupFile": "Omics Agent Setup 0.11.0.exe",
   "linuxAppImageFile": "Omics Agent-0.12.0.AppImage",
   "updatedAt": "2026-04-21T10:21:32.227Z",
-  "winPinned": true,
-  "platformNote": "Windows 安装包当前为 V0.11；Linux AppImage 为 V0.12。"
+  "winPinned": true
 }

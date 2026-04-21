@@ -23,8 +23,6 @@
         .card-h { font-size: 1rem; font-weight: 600; margin: 0 0 0.75rem; }
         .changelog { font-size: 0.9rem; color: var(--fg); margin: 0; padding-left: 1.15rem; }
         .changelog li { margin: 0.35rem 0; }
-        .dl-hint { font-size: 0.82rem; color: var(--muted); margin: 0 0 0.75rem; line-height: 1.45; }
-        .dl-hint code { font-size: 0.9em; background: #f3f4f6; padding: 0.1em 0.35em; border-radius: 4px; }
     </style>
 </head>
 <body>
@@ -32,7 +30,6 @@
         <div class="back"><a href="/">← 返回首页</a></div>
         <h1>下载桌面客户端</h1>
         <p class="ver-line" id="ver-line">版本 —</p>
-        <p class="ver-line" id="ver-sub" style="margin-top:-1rem;font-size:0.88rem;display:none;"></p>
 
         <div class="card">
             <div class="card-h">本版更新说明（V0.12）</div>
@@ -45,7 +42,6 @@
 
         <div class="card">
             <div class="card-h">Windows（64 位）</div>
-            <p class="dl-hint">链接由 <code>client-release.json</code> 的 <code>winSetupFile</code> 决定。当前 Windows 提供 <strong>V0.11</strong> 安装包；若需替换，将对应 <code>.exe</code> 放到本站 <code>/downloads/</code> 并更新 JSON。</p>
             <a id="win-dl" class="btn" href="#" download>下载 Windows 安装包</a>
             <p id="win-missing" class="note">暂无可用的安装包，请稍后再试。</p>
         </div>
@@ -78,8 +74,7 @@
                 displayVersion: 'V0.12',
                 productName: 'Omics Agent',
                 winSetupFile: 'Omics Agent Setup 0.11.0.exe',
-                linuxAppImageFile: 'Omics Agent-0.12.0.AppImage',
-                platformNote: 'Windows 安装包当前为 V0.11；Linux AppImage 为 V0.12。'
+                linuxAppImageFile: 'Omics Agent-0.12.0.AppImage'
             };
 
             function setVersion(meta) {
@@ -87,16 +82,6 @@
                 var dv = meta.displayVersion || ('V' + meta.version);
                 var v = meta.version || '';
                 verLine.textContent = '当前版本 ' + dv + '（' + v + '）';
-                var sub = document.getElementById('ver-sub');
-                if (sub) {
-                    if (meta.platformNote) {
-                        sub.style.display = 'block';
-                        sub.textContent = meta.platformNote;
-                    } else {
-                        sub.style.display = 'none';
-                        sub.textContent = '';
-                    }
-                }
             }
 
             function run(meta) {
