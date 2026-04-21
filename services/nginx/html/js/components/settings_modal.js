@@ -67,8 +67,22 @@ function closeSettingsModal() {
     }
 }
 
+function migrateLegacyDefaultModel() {
+    var dm = localStorage.getItem('default_model');
+    var legacy = {
+        'deepseek-ai/DeepSeek-R1': 1,
+        'Pro/zai-org/GLM-5': 1,
+        'Pro/moonshotai/Kimi-K2.5': 1,
+        'Qwen/Qwen3.5-397B-A17B': 1
+    };
+    if (!dm || legacy[dm]) {
+        localStorage.setItem('default_model', 'deepseek-reasoner');
+    }
+}
+
 function applyDefaultModelFromStorage() {
-    var stored = localStorage.getItem('default_model') || 'deepseek-ai/DeepSeek-R1';
+    migrateLegacyDefaultModel();
+    var stored = localStorage.getItem('default_model') || 'deepseek-reasoner';
     var sel = document.getElementById('modelSelect');
     if (!sel) return;
     var opts = [].slice.call(sel.options || []);
@@ -231,7 +245,8 @@ function openSettingsModal() {
     ensureSettingsMcpUiMounted();
     var defaultModel = document.getElementById('setting-default-model');
     if (defaultModel) {
-        defaultModel.value = localStorage.getItem('default_model') || 'deepseek-ai/DeepSeek-R1';
+        migrateLegacyDefaultModel();
+        defaultModel.value = localStorage.getItem('default_model') || 'deepseek-reasoner';
     }
     syncMcpSwitchesFromStorage();
     updateHpcContextBadge();
@@ -440,7 +455,7 @@ function initSettingsModalBindings() {
             window.location.reload();
         };
     }
-    localStorage.setItem('default_model', 'deepseek-ai/DeepSeek-R1');
+    migrateLegacyDefaultModel();
     applyDefaultModelFromStorage();
 }
 

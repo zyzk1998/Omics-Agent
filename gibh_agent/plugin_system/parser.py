@@ -19,13 +19,11 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DYNAMIC_ROOT = "/app/uploads/dynamic_skills"
-
-
 def _dynamic_root() -> Path:
-    root = Path(os.path.abspath(os.environ.get("DYNAMIC_SKILLS_DIR", DEFAULT_DYNAMIC_ROOT)))
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    """动态技能解压根目录（见 gibh_agent.core.skills_assets_layout）。"""
+    from gibh_agent.core.skills_assets_layout import get_dynamic_skills_root as _root
+
+    return _root()
 
 
 def get_dynamic_skills_root() -> Path:

@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 
 from sqlalchemy import inspect as sa_inspect, text
+from typing import Optional
+
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
@@ -26,7 +28,7 @@ def _is_duplicate_column_error(exc: BaseException) -> bool:
     return False
 
 
-def ensure_users_approval_columns(engine: Engine | None) -> None:
+def ensure_users_approval_columns(engine: Optional[Engine]) -> None:
     if engine is None:
         return
     insp = sa_inspect(engine)

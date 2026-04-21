@@ -34,7 +34,7 @@ class BaseAgent(ABC):
     
     def __init__(
         self,
-        llm_client: LLMClient,
+        llm_client: Optional[LLMClient],
         prompt_manager: PromptManager,
         expert_role: str
     ):
@@ -42,11 +42,13 @@ class BaseAgent(ABC):
         初始化基础智能体
         
         Args:
-            llm_client: LLM 客户端
+            llm_client: LLM 客户端（本地模式非空；云端多厂商时为 None，由 llm_for_request 按请求 model 创建）
             prompt_manager: 提示管理器
             expert_role: 专家角色名称（如 "rna_expert"）
         """
         self.llm_client = llm_client
+        self._request_model_name: Optional[str] = None
+        self._llm_client_cache: Optional[Tuple[str, LLMClient]] = None
         self.prompt_manager = prompt_manager
         self.expert_role = expert_role
         self.diagnostician = DataDiagnostician()
@@ -55,6 +57,28 @@ class BaseAgent(ABC):
             "file_registry": {},  # Key: filename, Value: {path, metadata, timestamp}
             "active_file": None   # 当前活动的文件名
         }
+
+    def set_request_model_name(self, model_name: Optional[str]) -> None:
+        """由编排器在每轮请求入口设置，保证与首脑使用同一注册表 model id。"""
+        self._request_model_name = (model_name or "").strip() or None
+        self._llm_client_cache = None
+
+    def llm_for_request(self) -> LLMClient:
+        """
+        本次请求应使用的 LLM：本地模式返回启动绑定的客户端；
+        云端模式（llm_client 为 None）按 MODEL_ROUTING_TABLE + 编排器下发的 model 创建，并做同请求缓存。
+        """
+        if self.llm_client is not None:
+            return self.llm_client
+        from gibh_agent.core.llm_client import LLMClientFactory
+        from gibh_agent.core.llm_cloud_providers import validate_and_resolve_model_name
+
+        mn = validate_and_resolve_model_name(self._request_model_name or None)
+        if self._llm_client_cache and self._llm_client_cache[0] == mn:
+            return self._llm_client_cache[1]
+        cli = LLMClientFactory.create_for_model(mn)
+        self._llm_client_cache = (mn, cli)
+        return cli
     
     def register_file(
         self,
@@ -194,40 +218,52 @@ class BaseAgent(ABC):
         self,
         query: str,
         context: Dict[str, Any] = None,
-        stream: bool = False
+        stream: bool = False,
+        history: Optional[List[Dict[str, str]]] = None,
     ) -> AsyncIterator[str]:
         """
         通用聊天方法
-        
+
         Args:
             query: 用户查询
             context: 上下文信息
             stream: 是否流式输出
-        
+            history: 可选多轮对话（user/assistant），用于 HITL 纠偏：若上层已将「被打断前的部分 assistant」
+                与用户新指令一并持久化并传入，模型可衔接上下文。默认 None 时仍为单轮 system+user。
+
         Yields:
             响应文本块
         """
         context = context or {}
-        
+
         # 获取系统提示词
         system_prompt = self.prompt_manager.get_system_prompt(
             self.expert_role,
             context
         )
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": query}
-        ]
+
+        messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+        if history:
+            for h in history[-12:]:
+                if not isinstance(h, dict):
+                    continue
+                role = (h.get("role") or "user").strip().lower()
+                if role not in ("user", "assistant", "system"):
+                    role = "user"
+                content = h.get("content") or h.get("message") or ""
+                if content:
+                    messages.append({"role": role, "content": str(content)})
+        messages.append({"role": "user", "content": query})
         
         try:
+            _llm = self.llm_for_request()
             if stream:
                 # 流式输出：直接传递内容，让前端处理 think 标签
                 # DeepSeek-R1 的 think 过程会以 <think>...</think> 标签形式返回
                 # 也支持旧协议的 <think>...</think> 标签
                 has_yielded = False
                 try:
-                    async for chunk in self.llm_client.astream(messages):
+                    async for chunk in _llm.astream(messages):
                         if chunk.choices and chunk.choices[0].delta.content:
                             content = chunk.choices[0].delta.content
                             if content:
@@ -242,9 +278,9 @@ class BaseAgent(ABC):
                         # 如果已经有一些输出，只记录错误，不重复输出错误信息
                         logger.warning(f"⚠️ 流式响应中断，但已有部分输出")
             else:
-                completion = await self.llm_client.achat(messages)
+                completion = await _llm.achat(messages)
                 # 提取 think 过程和实际内容
-                think_content, actual_content = self.llm_client.extract_think_and_content(completion)
+                think_content, actual_content = _llm.extract_think_and_content(completion)
                 
                 # 如果有 think 内容，包装在标签中
                 if think_content:
@@ -254,8 +290,7 @@ class BaseAgent(ABC):
         except AuthenticationError as e:
             error_msg = (
                 f"\n\n❌ 认证错误 (Error code: 401 - Invalid token)\n"
-                f"请检查 API 密钥是否正确设置。\n"
-                f"设置方法: export SILICONFLOW_API_KEY='your_api_key_here'\n"
+                f"请检查当前模型对应厂商的 API 密钥（见仓库 LLM_CLOUD_SWITCHING.txt 与 MODEL_ROUTING_TABLE）。\n"
                 f"详细错误: {str(e)}"
             )
             logger.error(f"API 认证失败: {e}")
@@ -794,14 +829,7 @@ Use Simplified Chinese for all content."""
             # 🔥 CRITICAL DEBUGGING: 包装在详细的 try-except 中
             # 🔥 TASK 2: 统一LLM客户端获取逻辑（与规划阶段一致）
             try:
-                # 🔥 TASK 2: 如果 self.llm_client 不可用，使用工厂方法创建（与规划阶段一致）
-                llm_client_to_use = self.llm_client
-                if not llm_client_to_use:
-                    logger.warning("⚠️ [DataDiagnostician] self.llm_client 不可用，使用 LLMClientFactory.create_default()")
-                    from gibh_agent.core.llm_client import LLMClientFactory
-                    llm_client_to_use = LLMClientFactory.create_default()
-                    logger.info(f"✅ [DataDiagnostician] 已创建默认LLM客户端: {llm_client_to_use.base_url}")
-                
+                llm_client_to_use = self.llm_for_request()
                 logger.info(f"📞 [DataDiagnostician] 调用 LLM 生成报告...")
                 logger.info(f"📊 [DataDiagnostician] 统计数据摘要: n_samples={stats.get('n_samples', stats.get('n_cells', stats.get('n_rows', 0)))}, n_features={stats.get('n_features', stats.get('n_genes', stats.get('n_metabolites', stats.get('n_cols', 0))))}")
                 logger.info(f"📊 [DataDiagnostician] Stats JSON 长度: {len(stats_json)} 字符")
@@ -1929,14 +1957,7 @@ Use Simplified Chinese for all content."""
                 logger.info(f"✅ [AnalysisSummary] 关键指标已提取，包含数据，准备发送给LLM")
             
             try:
-                # 🔥 TASK 3: 统一LLM客户端获取逻辑（与规划阶段一致）
-                llm_client_to_use = self.llm_client
-                if not llm_client_to_use:
-                    logger.warning("⚠️ [AnalysisSummary] self.llm_client 不可用，使用 LLMClientFactory.create_default()")
-                    from gibh_agent.core.llm_client import LLMClientFactory
-                    llm_client_to_use = LLMClientFactory.create_default()
-                    logger.info(f"✅ [AnalysisSummary] 已创建默认LLM客户端: {llm_client_to_use.base_url}")
-                
+                llm_client_to_use = self.llm_for_request()
                 # 🔥 修复：检查prompt总长度，避免超过API限制
                 system_message_length = len(messages[0]["content"]) if messages else 0
                 user_message_length = len(messages[1]["content"]) if len(messages) > 1 else 0
@@ -2297,8 +2318,9 @@ Evaluate and return ONLY the JSON object:"""
             ]
             
             logger.info(f"📞 [QualityEvaluation] 调用 LLM 评估分析质量...")
-            completion = await self.llm_client.achat(messages, temperature=0.2, max_tokens=500)
-            think_content, response = self.llm_client.extract_think_and_content(completion)
+            _q_llm = self.llm_for_request()
+            completion = await _q_llm.achat(messages, temperature=0.2, max_tokens=500)
+            think_content, response = _q_llm.extract_think_and_content(completion)
             
             if response:
                 # Try to parse JSON from response

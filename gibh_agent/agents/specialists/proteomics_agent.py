@@ -1,5 +1,5 @@
 """蛋白质组学智能体（Proteomics Agent）"""
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from ..base_agent import BaseAgent
 from ...core.llm_client import LLMClient
 from ...core.prompt_manager import PromptManager
@@ -8,7 +8,7 @@ from ...core.prompt_manager import PromptManager
 class ProteomicsAgent(BaseAgent):
     """蛋白质组学智能体（占位符，待实现）"""
     
-    def __init__(self, llm_client: LLMClient, prompt_manager: PromptManager):
+    def __init__(self, llm_client: Optional[LLMClient], prompt_manager: PromptManager):
         super().__init__(llm_client, prompt_manager, "proteomics_expert")
     
     async def process_query(

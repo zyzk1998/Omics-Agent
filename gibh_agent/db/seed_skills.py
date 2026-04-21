@@ -560,7 +560,24 @@ END
     {"name": "分子量计算工具", "sub_category": "数据分析", "description": "根据 SMILES 表达式计算分子量。"},
     {"name": "Tanimoto 距离矩阵计算工具", "sub_category": "数据分析", "description": "基于分子指纹 (Morgan Fingerprint) 计算 Tanimoto 距离矩阵。"},
     {"name": "CP2K", "sub_category": "预测与建模", "description": "量子化学与固体物理模拟软件包，主要用于原子级别的分子动力学模拟。"},
-    {"name": "DRTtools", "sub_category": "数据分析", "description": "基于弛豫时间分布方法的电化学阻抗谱分析工具。"},
+    {
+        "name": "DRTtools",
+        "sub_category": "电化学",
+        "description": "EIS 电化学阻抗谱 → DRT 弛豫时间分布分析；子进程执行，输出 JSON 与图像（需上传 frequency/Z_real/Z_imag 等列 CSV）。",
+        "prompt_template": """[Skill_Route: eis_drt_analysis]
+您好。我已上传 **电化学阻抗谱(EIS)** 数据，请使用 **弛豫时间分布（DRT）** 方法完成反演与可视化，用于分辨不同弛豫过程（如界面电荷转移、扩散等）。
+
+**输入数据（请在此替换为您的文件）**
+- 请在对话中 **上传 CSV**（或脚本支持的文本格式），包含 **frequency（Hz）**、**Z_real**、**Z_imag（Ω）** 等列；列名需与仪器导出一致。
+- **占位说明**：若文件尚未上传，请先将「原始 EIS 数据文件」保存后拖入附件区；助手仅使用会话附件解析得到的 **`file_path`**，禁止臆造路径。
+
+**可选参数**
+- **regularization_lambda**：正则强度（默认 0.1，对应底层 `--lambda`）。
+- **method**：反演/正则方法名（默认 `tikhonov`，与底层脚本一致）。
+
+（助手侧：仅将附件列表中的绝对路径写入工具参数 `file_path`；未上传附件时请先提醒用户上传数据文件。）
+""",
+    },
 ]
 for skill in ADDITIONAL_CHEMISTRY_SKILLS:
     skill["main_category"] = "化学"

@@ -1192,7 +1192,7 @@
                     coreFunction: "用户交互接口",
                     dataIO: "Input: 自然语言查询 + 文件上传 → Output: HTTP POST /api/chat、/api/upload 等",
                     technologyDescription: "基于 Vanilla JS 的单页前端（index.html），使用 FormData 处理文件上传（POST /api/upload），通过 fetch + ReadableStream 消费 SSE 流（POST /api/chat）。提供技能广场、历史会话、数据资产、工作流收藏、用户菜单与系统设置等模块；鉴权依赖 /api/auth（登录/注册/游客合并），会话与消息持久化依赖 /api/sessions、/api/sessions/{id}/messages。",
-                    keyLogic: "用户在聊天区输入查询并上传文件，前端将 message、uploaded_files、stream、session_id、user_id 发送至 /api/chat；支持多模型切换（Qwen3.5-Plus、DeepSeek-R1、GLM-5 等），模型选择通过请求体或前端 #modelSelect 传入。",
+                    keyLogic: "用户在聊天区输入查询并上传文件，前端将 message、uploaded_files、stream、session_id、user_id 发送至 /api/chat；支持多模型切换（DeepSeek Reasoner、GLM 5.1、Kimi K2.5 等），模型选择通过请求体或前端 #modelSelect 传入。",
                     designRationale: "前后端解耦：前端负责交互与 SSE 解析（status/workflow/step_result/diagnosis/message/done），后端负责编排、规划与执行。RESTful + SSE 保证实时体验与可维护性。",
                     upstreamDownstream: "Upstream: N/A (用户入口) | Downstream: FastAPI 网关 (接收 /api/chat、/api/upload 等)",
                     llmLogic: "N/A - User Interface Layer（不直接调用 LLM API）",
@@ -1213,7 +1213,7 @@
                     component: "首席科学家 (Lead Scientist / Planner)",
                     coreFunction: "core.planner.WorkflowPlanner.plan_workflow()",
                     dataIO: "Input: UserQuery + FileMetadata + ToolSchemas (RAG) → Output: JSON Workflow {workflow_name, steps: [{step_id, tool_id, name, params, selected}]}",
-                    technologyDescription: "WorkflowPlanner（core.planner）结合 Chain-of-Thought 与 RAG：先通过 Tool Retriever（ChromaDB）语义检索 top-k 工具 Schema，注入 LLM 提示词；支持 skip_steps/target_steps 动态勾选步骤。多模型支持：Qwen3.5-Plus、DeepSeek-R1、GLM-5 等由前端/请求传入 model_name，统一经 LLMClient 调用。JSON Schema / Pydantic 校验 LLM 输出；参数推荐基于 FileMetadata（如样本数、特征数）。",
+                    technologyDescription: "WorkflowPlanner（core.planner）结合 Chain-of-Thought 与 RAG：先通过 Tool Retriever（ChromaDB）语义检索 top-k 工具 Schema，注入 LLM 提示词；支持 skip_steps/target_steps 动态勾选步骤。多模型支持：DeepSeek Reasoner、GLM 5.1、Kimi K2.5 等由前端/请求传入 model_name，统一经 LLMClient 调用。JSON Schema / Pydantic 校验 LLM 输出；参数推荐基于 FileMetadata（如样本数、特征数）。",
                     keyLogic: "CoT 拆解科学问题 → 领域/模式分类 → 生成步骤序列（含 selected）；错误时接收 Executor 反馈，LLM 分析后输出修正方案并重试。",
                     designRationale: "规划与执行解耦，支持 Human-in-the-loop 预览与修改；Schema 校验降低无效工作流；RAG 保证工具与意图对齐。",
                     upstreamDownstream: "Upstream: Orchestrator + Retriever (ToolSchemas) | Downstream: Agent/Executor、前端 (workflow 事件)",
@@ -1257,12 +1257,12 @@
                     component: "大语言模型服务 (LLM Service)",
                     coreFunction: "llm_client.achat() / llm_client.astream()，统一 LLMClient 封装",
                     dataIO: "Input: messages, temperature, max_tokens, model_name → Output: JSON / Stream",
-                    technologyDescription: "多模型路由：Qwen3.5-Plus（阿里云）、DeepSeek-R1、GLM-5 Pro 等，由请求 model_name 或前端 #modelSelect 决定。Orchestrator 意图分类、Planner 工作流规划与错误修正、Agent 领域诊断报告，均通过同一 LLMClient 调用。",
+                    technologyDescription: "多模型路由：DeepSeek Reasoner、GLM 5.1、Kimi K2.5 等，由请求 model_name 或前端 #modelSelect 决定。Orchestrator 意图分类、Planner 工作流规划与错误修正、Agent 领域诊断报告，均通过同一 LLMClient 调用。",
                     keyLogic: "意图分类 (Zero-shot)、规划 (CoT + Few-shot)、错误分析、诊断报告。",
                     designRationale: "推理引擎统一封装，模型可插拔；虚线表示「调用关系」不占主数据流。",
                     upstreamDownstream: "Upstream: Orchestrator / Planner / Agent | Downstream: 各模块消费 LLM 响应",
                     llmLogic: "LLM 服务本体；被 Orchestrator、Planner、Agent 调用。",
-                    academicBasis: "DeepSeek-R1 / Qwen / GLM 技术报告；Chain-of-Thought 与 RAG 文献。"
+                    academicBasis: "DeepSeek / GLM / Kimi 技术报告；Chain-of-Thought 与 RAG 文献。"
                 },
                 output: {
                     component: "分析结果 (Analysis Results)",
@@ -1284,14 +1284,14 @@
                     anatomy: '<strong>上下文：</strong>用户在前端输入自然语言并上传文件（或先 POST /api/upload 再传 file_path）。<strong>意义：</strong>流程入口，将非结构化输入转为可处理请求。<strong>关键变量：</strong>message、uploaded_files（file_name/file_path）、stream、session_id、user_id、model_name。',
                     human_desc: 'The user sends message and uploaded file refs to the backend via POST /api/chat.',
                     function_sig: 'POST /api/chat (ChatRequest) -> StreamingResponse (SSE)',
-                    payload_preview: '{"message":"分析这个数据","uploaded_files":[{"file_name":"x.h5ad","file_path":"/app/uploads/..."}],"stream":true,"session_id":"uuid","user_id":"owner_id","model_name":"deepseek-ai/DeepSeek-R1"}',
+                        payload_preview: '{"message":"分析这个数据","uploaded_files":[{"file_name":"x.h5ad","file_path":"/app/uploads/..."}],"stream":true,"session_id":"uuid","user_id":"owner_id","model_name":"deepseek-reasoner"}',
                     param_mapping: {
                         'message': '用户自然语言查询',
                         'uploaded_files': '上传文件列表，项含 file_name / file_path（或 name/path）',
                         'stream': 'true 时启用 SSE 流式输出',
                         'user_id': '当前用户/游客标识（JWT 或 guest_uuid）',
                         'session_id': '会话 ID，新建会话时由后端生成并落库',
-                        'model_name': '可选，指定 LLM 模型（如 Qwen3.5-Plus、DeepSeek-R1）'
+                        'model_name': '可选，指定 LLM 模型（如 deepseek-reasoner、glm-5.1、kimi-k2.5）'
                     }
                 },
                 'orch-planner': {
@@ -2583,7 +2583,7 @@
             <div class="flow-step">
                 <ul>
                     <li><strong>Modalities</strong>：RNA、代谢组学、空间组学 (Visium)、影像组学 (NIfTI) 等多模态领域 Agent；FileInspector / ModalitySniffer 做文件治理与模态检测</li>
-                    <li><strong>Reasoning</strong>：多模型（Qwen3.5-Plus、DeepSeek-R1、GLM-5 等）— 意图分类、WorkflowPlanner 动态规划、错误分析、领域诊断报告</li>
+                    <li><strong>Reasoning</strong>：多模型（DeepSeek Reasoner、GLM 5.1、Kimi K2.5 等）— 意图分类、WorkflowPlanner 动态规划、错误分析、领域诊断报告</li>
                     <li><strong>Memory</strong>：ChromaDB — 工具 RAG；MySQL — 会话/消息/资产/技能/工作流收藏（Session、Message、Asset、Skill、UserSavedSkill、WorkflowTemplate）</li>
                     <li><strong>Scheduling</strong>：FastAPI 同步/异步，AgentOrchestrator.stream_process() 主路径；<strong>可选</strong> Celery + Redis 用于 /api/workflow/status/{run_id} 等异步任务状态查询</li>
                     <li><strong>Streaming</strong>：SSE 事件 — status / workflow / step_result / diagnosis / message / done / state_snapshot；前端 ReadableStream 解析并渲染</li>

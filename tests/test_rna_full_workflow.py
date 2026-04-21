@@ -26,6 +26,7 @@ from gibh_agent.core.tool_retriever import ToolRetriever
 from gibh_agent.agents.specialists.rna_agent import RNAAgent
 from gibh_agent.core.orchestrator import Orchestrator
 from gibh_agent.core.llm_client import LLMClientFactory
+from gibh_agent.core.llm_cloud_providers import get_default_chat_model
 
 # 配置日志
 logging.basicConfig(
@@ -64,7 +65,7 @@ async def test_data_diagnosis():
     file_inspector = FileInspector(upload_dir)
     
     # 初始化RNAAgent
-    llm_client = LLMClientFactory.create_default()
+    llm_client = LLMClientFactory.create_for_model(get_default_chat_model())
     rna_agent = RNAAgent(
         prompt_manager=prompt_manager,
         tool_retriever=tool_retriever,
@@ -117,7 +118,7 @@ async def test_full_workflow():
     upload_dir = str(test_data_dir)
     prompt_manager = PromptManager()
     tool_retriever = ToolRetriever()
-    llm_client = LLMClientFactory.create_default()
+    llm_client = LLMClientFactory.create_for_model(get_default_chat_model())
     
     # 初始化RNAAgent
     rna_agent = RNAAgent(
@@ -208,7 +209,7 @@ async def test_ai_report_generation():
     upload_dir = str(project_root / "test_data")
     prompt_manager = PromptManager()
     tool_retriever = ToolRetriever()
-    llm_client = LLMClientFactory.create_default()
+    llm_client = LLMClientFactory.create_for_model(get_default_chat_model())
     
     # 初始化RNAAgent
     rna_agent = RNAAgent(

@@ -17,7 +17,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["DynamicSkill"])
 
-ALLOWED_ROOT = Path(os.path.abspath(os.environ.get("DYNAMIC_SKILLS_DIR", "/app/uploads/dynamic_skills")))
+def _allowed_dynamic_root() -> Path:
+    """
+    与 gibh_agent/core/skills_assets_layout.get_dynamic_skills_dir 保持一致（本镜像不含 gibh_agent 包）。
+    优先级：DYNAMIC_SKILLS_DIR → ${UPLOAD_DIR}/skills_assets/script/runtime
+    """
+    override = os.environ.get("DYNAMIC_SKILLS_DIR")
+    if override and str(override).strip():
+        root = Path(os.path.abspath(override.strip()))
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+    upload = os.environ.get("UPLOAD_DIR", "/app/uploads").strip()
+    root = Path(os.path.abspath(upload)) / "skills_assets" / "script" / "runtime"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+ALLOWED_ROOT = _allowed_dynamic_root()
 
 
 class DynamicRunBody(BaseModel):

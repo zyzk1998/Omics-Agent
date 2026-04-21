@@ -98,7 +98,6 @@
 
             <!-- 用户头像悬浮菜单（Kimi 风格，position:fixed 防侧栏 overflow 裁剪） -->
             <div id="user-profile-menu" class="popover-menu" aria-hidden="true">
-                <div class="popover-item" data-action="profile"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></span>个人主页</div>
                 <div class="popover-item" data-action="client"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg></span>下载客户端</div>
                 <div class="popover-item" data-action="help-whotowork"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></span>帮助文档</div>
                 <div class="popover-item" data-action="help-api"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></span>API 文档</div>
@@ -112,6 +111,12 @@
 
             <!-- 技能广场（企业级应用市场：正交过滤 + 真分页） -->
             <div id="skills-square-pane">
+                <div id="toolbar-wrapper-skills" class="return-chat-toolbar-host" style="display: none; width: 100%; padding-bottom: 4px; margin-bottom: 6px; align-items: center;">
+                    <button class="btn-return-chat" style="display: inline-flex; align-items: center; background-color: transparent; border: none; padding: 4px 8px; font-size: 13px; font-weight: 500; color: #4b5563; cursor: pointer; border-radius: 6px; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#f3f4f6'" onmouseout="this.style.backgroundColor='transparent'">
+                        <svg style="width: 14px; height: 14px; margin-right: 4px; color: #9ca3af;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                        返回当前会话
+                    </button>
+                </div>
                 <div class="skills-square-header">
                     <div class="skills-square-title-wrap">
                         <div class="skills-square-title">技能广场</div>
@@ -138,16 +143,56 @@
             </div>
 
             <!-- 历史会话专属页（Kimi 级极简布局） -->
-            <div id="history-page-pane" style="display: none; flex: 1; overflow-y: auto; background: #fff;">
+            <div id="history-pane" style="display: none; flex: 1; overflow-y: auto; background: #fff;">
                 <div class="history-page-container">
+                    <div id="toolbar-wrapper-history" class="return-chat-toolbar-host" style="display: none; width: 100%; padding-bottom: 4px; margin-bottom: 6px; align-items: center;">
+                        <button class="btn-return-chat" style="display: inline-flex; align-items: center; background-color: transparent; border: none; padding: 4px 8px; font-size: 13px; font-weight: 500; color: #4b5563; cursor: pointer; border-radius: 6px; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#f3f4f6'" onmouseout="this.style.backgroundColor='transparent'">
+                            <svg style="width: 14px; height: 14px; margin-right: 4px; color: #9ca3af;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                            返回当前会话
+                        </button>
+                    </div>
                     <h2 class="history-page-title">历史会话</h2>
                     <input type="text" id="history-search-input" class="history-search-input" placeholder="搜索历史会话...">
                     <div id="full-history-list" class="full-history-list"></div>
                 </div>
             </div>
 
+            <!-- 数据资产全屏页（与侧栏资产同源 /api/assets） -->
+            <div id="data-assets-pane" style="display: none; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; background: #f8f9fa;">
+                <div style="flex: 1; min-height: 0; overflow-y: auto; padding: 32px 40px; box-sizing: border-box;">
+                    <div id="toolbar-wrapper-data-assets" class="return-chat-toolbar-host" style="display: none; width: 100%; padding-bottom: 4px; margin-bottom: 6px; align-items: center;">
+                        <button class="btn-return-chat" style="display: inline-flex; align-items: center; background-color: transparent; border: none; padding: 4px 8px; font-size: 13px; font-weight: 500; color: #4b5563; cursor: pointer; border-radius: 6px; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#f3f4f6'" onmouseout="this.style.backgroundColor='transparent'">
+                            <svg style="width: 14px; height: 14px; margin-right: 4px; color: #9ca3af;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                            返回当前会话
+                        </button>
+                    </div>
+                    <h1 class="file-management-title" style="color:#111827;">数据资产</h1>
+                    <p class="file-management-subtitle" style="color:#64748b;margin-bottom:20px;">与侧栏「数据资产」同步，集中查看与管理已上传文件。</p>
+                    <div class="file-management-table-wrap">
+                        <table class="science-table" id="data-assets-table">
+                            <thead>
+                                <tr>
+                                    <th onclick="sortAssets('file_name')" style="cursor:pointer;user-select:none;">文件名 <span class="sort-icon"><svg viewBox="0 0 24 24"><path d="M7 15l5 5 5-5M7 9l5-5 5 5"/></svg></span></th>
+                                    <th onclick="sortAssets('modality')" style="cursor:pointer;user-select:none;">所属模态 <span class="sort-icon"><svg viewBox="0 0 24 24"><path d="M7 15l5 5 5-5M7 9l5-5 5 5"/></svg></span></th>
+                                    <th>物理路径</th>
+                                    <th onclick="sortAssets('created_at')" style="cursor:pointer;user-select:none;">上传时间 <span class="sort-icon"><svg viewBox="0 0 24 24"><path d="M7 15l5 5 5-5M7 9l5-5 5 5"/></svg></span></th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="data-assets-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <!-- 文件管理页（上下排版 + 顶部渐变 Banner） -->
             <div id="file-management-pane" style="display: none; flex: 1;">
+                <div id="toolbar-wrapper-files" class="return-chat-toolbar-host file-management-toolbar-strip" style="display: none; width: 100%; padding-bottom: 4px; margin-bottom: 6px; align-items: center;">
+                    <button class="btn-return-chat" style="display: inline-flex; align-items: center; background-color: transparent; border: none; padding: 4px 8px; font-size: 13px; font-weight: 500; color: #4b5563; cursor: pointer; border-radius: 6px; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#f3f4f6'" onmouseout="this.style.backgroundColor='transparent'">
+                        <svg style="width: 14px; height: 14px; margin-right: 4px; color: #9ca3af;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                        返回当前会话
+                    </button>
+                </div>
                 <div class="file-mgr-banner file-management-banner">
                     <h1 class="file-management-title">文件管理</h1>
                     <p class="file-management-subtitle">构建科研文件的集中存储和统一管理空间，支持多格式内容预览与跨模块调用</p>
@@ -249,10 +294,9 @@
                             </div>
                             <div class="model-select-wrap" title="模型切换">
                                 <select id="modelSelect" class="ghost-btn model-select-native" title="模型切换" style="appearance: none; outline: none; cursor: pointer;">
-                                    <option value="deepseek-ai/DeepSeek-R1" selected> DeepSeek-R1</option>
-                                    <option value="Pro/zai-org/GLM-5"> GLM-5 Pro</option>
-                                    <option value="Pro/moonshotai/Kimi-K2.5"> Kimi K2.5</option>
-                                    <option value="Qwen/Qwen3.5-397B-A17B"> Qwen3.5-397B-A17B</option>
+                                    <option value="deepseek-reasoner" selected> DeepSeek Reasoner</option>
+                                    <option value="glm-5.1"> GLM 5.1</option>
+                                    <option value="kimi-k2.5"> Kimi K2.5</option>
                                 </select>
                                 <span class="model-chevron">▼</span>
                             </div>
@@ -409,10 +453,9 @@
                     <div class="settings-row">
                         <label class="settings-label">默认模型</label>
                         <select id="setting-default-model" class="settings-control">
-                            <option value="deepseek-ai/DeepSeek-R1" selected>DeepSeek-R1</option>
-                            <option value="Pro/zai-org/GLM-5">GLM-5 Pro</option>
-                            <option value="Pro/moonshotai/Kimi-K2.5">Kimi K2.5</option>
-                            <option value="Qwen/Qwen3.5-397B-A17B">Qwen3.5-397B-A17B</option>
+                            <option value="deepseek-reasoner" selected>DeepSeek Reasoner</option>
+                            <option value="glm-5.1">GLM 5.1</option>
+                            <option value="kimi-k2.5">Kimi K2.5</option>
                         </select>
                     </div>
                     <div id="settings-mcp-root" class="settings-mcp-section" data-mcp-layout="v2">
@@ -875,6 +918,96 @@
             let currentAbortController = null;
             // Phase 5: 当前会话 ID（SSE 首包 session 事件写入，发消息时带出，新建会话时清空）
             let currentSessionId = null;
+            /** 仅当次有效：从「已显示的对话」点侧栏「技能广场 / 数据资产」离开时写入；返回 / 进聊天 / 刷新后必为 null，不用 localStorage 控制返回条显隐 */
+            window._volatileActiveSessionIdToReturn = null;
+            /** 全局：用户离开聊天主视图前最后一次「有 ID 的」会话（等同 Pinia 的 lastActiveSessionId，持久化到 localStorage） */
+            var LAST_ACTIVE_SESSION_STORAGE_KEY = 'gibh_last_active_session_id';
+            function getLastActiveSessionId() {
+                try {
+                    if (window.__lastActiveSessionId && String(window.__lastActiveSessionId).trim()) {
+                        return String(window.__lastActiveSessionId).trim();
+                    }
+                    var v = localStorage.getItem(LAST_ACTIVE_SESSION_STORAGE_KEY);
+                    return (v && String(v).trim()) ? String(v).trim() : null;
+                } catch (_e) {
+                    return (window.__lastActiveSessionId && String(window.__lastActiveSessionId).trim()) || null;
+                }
+            }
+            function setLastActiveSessionId(id) {
+                var s = (id != null && String(id).trim()) ? String(id).trim() : null;
+                window.__lastActiveSessionId = s;
+                try {
+                    if (s) localStorage.setItem(LAST_ACTIVE_SESSION_STORAGE_KEY, s);
+                    else localStorage.removeItem(LAST_ACTIVE_SESSION_STORAGE_KEY);
+                } catch (_e2) {}
+            }
+            /** 仅在离开聊天主区域、且当前存在会话 ID 时写入；currentSessionId 为空时不覆盖已有记忆 */
+            function persistLastChatSessionBeforeLeaving() {
+                if (typeof currentSessionId !== 'undefined' && currentSessionId) {
+                    setLastActiveSessionId(currentSessionId);
+                }
+            }
+            function syncVolatileReturnSessionFromChatBeforeLeavingToSkillsOrAssets() {
+                var cp = document.getElementById('chat-pane');
+                var chatVis = false;
+                if (cp) {
+                    var d = (cp.style && cp.style.display) ? String(cp.style.display).trim() : '';
+                    if (d === 'none') chatVis = false;
+                    else if (d === 'flex' || d === '') {
+                        try {
+                            chatVis = window.getComputedStyle(cp).display !== 'none';
+                        } catch (_e) { chatVis = true; }
+                    } else chatVis = true;
+                }
+                if (chatVis && typeof currentSessionId !== 'undefined' && currentSessionId) {
+                    window._volatileActiveSessionIdToReturn = String(currentSessionId).trim();
+                } else {
+                    window._volatileActiveSessionIdToReturn = null;
+                }
+                if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
+            }
+            function refreshReturnToSessionButtons() {
+                var last = (typeof window._volatileActiveSessionIdToReturn !== 'undefined' && window._volatileActiveSessionIdToReturn)
+                    ? String(window._volatileActiveSessionIdToReturn).trim() : '';
+                var disp = last ? 'flex' : 'none';
+                ['toolbar-wrapper-skills', 'toolbar-wrapper-history', 'toolbar-wrapper-data-assets', 'toolbar-wrapper-files'].forEach(function (id) {
+                    var w = document.getElementById(id);
+                    if (w) w.style.display = disp;
+                });
+                document.querySelectorAll('.btn-return-chat').forEach(function (b) {
+                    if (!b) return;
+                    if (last) b.setAttribute('title', '返回会话 ' + last.slice(0, 12) + (last.length > 12 ? '…' : ''));
+                    else b.setAttribute('title', '返回当前会话');
+                });
+            }
+            /** 技能卡片「使用」：与 fetchSkills 模板内 onclick 对应；显隐用 .show / .hidden 与 #modeDropdown 一致 */
+            window.toggleDropdown = function toggleDropdown(btn, ev) {
+                if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+                if (!btn || !btn.closest) return;
+                var wrap = btn.closest('.skill-dropdown-container');
+                if (!wrap) return;
+                var menu = wrap.querySelector('.skill-sq-use-menu');
+                if (!menu) return;
+                var opening = !menu.classList.contains('show');
+                document.querySelectorAll('#skillsGrid .skill-sq-use-menu').forEach(function (m) {
+                    m.classList.remove('show');
+                    m.classList.add('hidden');
+                });
+                if (!opening) return;
+                var hasSess = !!((typeof currentSessionId !== 'undefined' && currentSessionId) ||
+                    (typeof window._volatileActiveSessionIdToReturn !== 'undefined' && window._volatileActiveSessionIdToReturn) ||
+                    ((typeof getLastActiveSessionId === 'function') && getLastActiveSessionId()));
+                var contBtn = menu.querySelector('.skill-dd-continue');
+                if (contBtn) {
+                    contBtn.disabled = !hasSess;
+                    contBtn.classList.toggle('is-disabled', !hasSess);
+                }
+                menu.classList.remove('hidden');
+                menu.classList.add('show');
+            };
+            window.getLastActiveSessionId = getLastActiveSessionId;
+            window.setLastActiveSessionId = setLastActiveSessionId;
+            window.refreshReturnToSessionButtons = refreshReturnToSessionButtons;
             
             // #region agent log
             // 已禁用调试请求: fetch('http://localhost:7242/ingest/...',...).catch(()=>{});
@@ -1269,7 +1402,7 @@
 
             function getSelectedModel() {
                 var sel = document.getElementById('modelSelect');
-                return (sel && sel.value) ? sel.value : 'deepseek-ai/DeepSeek-R1';
+                return (sel && sel.value) ? sel.value : 'deepseek-reasoner';
             }
             // 多模态组学分析：点击子项注入高质量组学 Prompt 模板（步骤可动态规划）
             var OMICS_PROMPT_TEMPLATES = {
@@ -1340,6 +1473,15 @@
             ];
 
             /* 技能收藏状态 100% 来自后端 GET /api/skills 的 saved 字段与 UserSavedSkill 表，不使用 localStorage。*/
+            /** 已实现/已对接后端的技能置顶（与 API ORDER BY 双保险；合并特色区后仍再排一次） */
+            function sortSkillsPinImplemented(items) {
+                return (items || []).slice().sort(function(a, b) {
+                    var ia = (a && (a.is_implemented === true || a.is_implemented === 1)) ? 1 : 0;
+                    var ib = (b && (b.is_implemented === true || b.is_implemented === 1)) ? 1 : 0;
+                    if (ib !== ia) return ib - ia;
+                    return 0;
+                });
+            }
             function fetchSkills(mainCat, page) {
                 skillsCurrentMain = (mainCat != null && mainCat !== undefined) ? (mainCat || '') : skillsCurrentMain;
                 skillsCurrentPage = page || 1;
@@ -1369,6 +1511,7 @@
                     .then(function(data) {
                         console.log('🔍 [Skills API Response] 请求大类:', skillsCurrentMain, '返回数据:', data);
                         var items = (data && data.items) || [];
+                        items = sortSkillsPinImplemented(items);
                         skillsTotal = (data && data.total) != null ? data.total : 0;
                         var featured = window.__FEATURED_RESEARCH_SKILLS || [];
                         if (featured.length) {
@@ -1407,11 +1550,14 @@
                         } else {
                             window._lastSkillsItems = items;
                             if (emptyEl) emptyEl.style.display = 'none';
-                            var skillCardIcons = { '转录组学': '🧬', '空间组学': '🗺️', '代谢组学': '🧪', '医学影像组学': '🩻', '基因组学': '🧬', '表观遗传组学': '📊', '蛋白质组学': '🔗', '轨迹推断': '📈', '动态插件': '⚡', '用户上传': '📦' };
+                            var skillCardIcons = { '转录组学': '🧬', '空间组学': '🗺️', '代谢组学': '🧪', '医学影像组学': '🩻', '基因组学': '🧬', '表观遗传组学': '📊', '蛋白质组学': '🔗', '轨迹推断': '📈', '动态插件': '⚡', '用户上传': '📦', '电化学': '🔋' };
                             grid.innerHTML = items.map(function(s) {
                                 try {
                                     var name = (s.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-                                    var desc = (s.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                                    var rawDescStr = (s.description || '');
+                                    var descMaxLen = 220;
+                                    var descTrimmed = rawDescStr.length > descMaxLen ? rawDescStr.slice(0, descMaxLen) + '\u2026' : rawDescStr;
+                                    var desc = descTrimmed.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
                                     var mainCat = (s.main_category || '').replace(/</g, '&lt;');
                                     var subCat = (s.sub_category || '').replace(/</g, '&lt;');
                                     var icon = s.plain_doc_skill
@@ -1422,7 +1568,9 @@
                                     if (mainCat) catBadges += '<span class="cat-badge">' + mainCat + '</span>';
                                     if (subCat) catBadges += '<span class="cat-badge">' + subCat + '</span>';
                                     var tagSub = (subCat || '数据分析').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                                    var tagsHtml = '<span class="tag">动态工作流</span><span class="tag">' + tagSub + '</span>';
+                                    var implOk = (s.is_implemented === true || s.is_implemented === 1);
+                                    var flowTag = implOk ? '动态工作流·已接入' : '动态工作流·规划中';
+                                    var tagsHtml = '<span class="tag">' + flowTag.replace(/</g, '&lt;') + '</span><span class="tag">' + tagSub + '</span>';
                                     var isSaved = !!(s.saved === true);
                                     var isDyn = !!(s.is_dynamic_plugin === true);
                                     var addBtnTitle = isSaved ? '已收藏' : '添加到我的工具';
@@ -1432,10 +1580,9 @@
                                     var bookmarkBlock = isDyn
                                         ? '<span class="icon-btn icon-btn--disabled" title="动态插件暂不支持收藏" style="opacity:0.45;cursor:not-allowed;pointer-events:none;">' + addBtnSvg + '</span>'
                                         : '<button type="button" class="icon-btn btn-skill-bookmark" title="' + addBtnTitle + '" data-skill-id="' + s.id + '" data-saved="' + (isSaved ? '1' : '0') + '">' + addBtnSvg + '</button>';
-                                    var footerActionsHtml = '<div class="footer-actions">' +
-                                        bookmarkBlock +
+                                    var footerActionsHtml = bookmarkBlock +
                                         '<button type="button" class="icon-btn" title="分享"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg></button>' +
-                                        '<button type="button" class="icon-btn" title="复制"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button></div>';
+                                        '<button type="button" class="icon-btn" title="复制"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>';
                                     return '<div class="' + cardClass + '" data-skill-id="' + s.id + '">' +
                                         '<div class="skill-card-header">' +
                                         '<div class="skill-icon">' + icon + '</div>' +
@@ -1443,22 +1590,52 @@
                                         '<h3 class="skill-title">' + name + '</h3>' +
                                         '<div class="skill-categories">' + catBadges + '</div></div></div>' +
                                         '<div class="skill-desc">' + desc + '</div>' +
-                                        '<div class="skill-tags-row">' +
                                         '<div class="skill-tags">' + tagsHtml + '</div>' +
-                                        '<button type="button" class="skill-use-btn-inline" data-skill-id="' + s.id + '">使用</button></div>' +
-                                        '<div class="skill-footer">' + footerActionsHtml + '</div></div>';
+                                        '<div style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: auto; padding-top: 12px; border-top: 1px solid #f9fafb;">' +
+                                        '<div style="display: flex; align-items: center; gap: 12px; color: #9ca3af;">' +
+                                        footerActionsHtml +
+                                        '</div>' +
+                                        '<div class="skill-dropdown-container" data-skill-id="' + s.id + '" style="position: relative; display: inline-block;">' +
+                                        '<button class="skill-use-btn-inline" style="background-color: #f9fafb; border: 1px solid #e5e7eb; color: #374151; font-size: 12px; font-weight: 500; padding: 6px 12px; border-radius: 9999px; cursor: pointer; opacity: 1; transform: none;" onclick="toggleDropdown(this, event)">' +
+                                        '使用</button>' +
+                                        '<div class="popover-menu skill-sq-use-menu hidden" style="position: absolute; right: 0; bottom: 100%; margin-bottom: 4px; width: 144px; background: white; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); border: 1px solid #f3f4f6; z-index: 99999;">' +
+                                        '<button type="button" class="popover-item" data-mode="new" data-skill-id="' + s.id + '" role="menuitem">\u2728 \u65b0\u5efa\u4f1a\u8bdd</button>' +
+                                        '<button type="button" class="popover-item skill-dd-continue" data-mode="continue" data-skill-id="' + s.id + '" role="menuitem">🔄 \u5728\u5f53\u524d\u4f1a\u8bdd\u7ee7\u7eed</button>' +
+                                        '</div></div></div></div>';
                                 } catch (err) {
                                     console.error('❌ 渲染单张技能卡片失败:', err, s);
                                     return '';
                                 }
                             }).join('');
-                            grid.querySelectorAll('.skill-use-btn-inline').forEach(function(btn) {
-                                btn.onclick = function(e) {
-                                    e.stopPropagation();
-                                    var id = btn.getAttribute('data-skill-id');
-                                    var item = items.find(function(s) { return String(s.id) === String(id); });
-                                    if (item) useSkillFromApi(item);
-                                };
+                            if (!window.__skillUseDropdownDocBound) {
+                                window.__skillUseDropdownDocBound = true;
+                                document.addEventListener('click', function (ev) {
+                                    if (ev.target && ev.target.closest && ev.target.closest('.skill-dropdown-container')) return;
+                                    document.querySelectorAll('#skillsGrid .skill-sq-use-menu').forEach(function (m) {
+                                        m.classList.remove('show');
+                                        m.classList.add('hidden');
+                                    });
+                                });
+                            }
+                            grid.querySelectorAll('.skill-dropdown-container').forEach(function (wrap) {
+                                var menu = wrap.querySelector('.skill-sq-use-menu');
+                                if (!menu) return;
+                                menu.querySelectorAll('.popover-item[data-mode]').forEach(function (it) {
+                                    it.onclick = function (ev) {
+                                        ev.preventDefault();
+                                        ev.stopPropagation();
+                                        menu.classList.remove('show');
+                                        menu.classList.add('hidden');
+                                        var mode = it.getAttribute('data-mode');
+                                        var sid = it.getAttribute('data-skill-id');
+                                        if (mode === 'continue' && !getLastActiveSessionId()) {
+                                            if (typeof showToast === 'function') showToast('当前无活跃会话，请先在对话中建立会话或选择「新建会话」。', 'warning');
+                                            return;
+                                        }
+                                        var item = items.find(function (x) { return String(x.id) === String(sid); });
+                                        if (item) useSkillFromApi(item, mode);
+                                    };
+                                });
                             });
                             grid.querySelectorAll('.btn-skill-bookmark').forEach(function(btn) {
                                 btn.onclick = function(e) {
@@ -1640,7 +1817,28 @@
                     '（助手侧：未上传时写入 `smiles_text`；已上传时写入 `file_path`。）';
             }
 
-            function useSkillFromApi(skill) {
+            /** 将技能 Prompt / 路由域写入当前聊天输入（不改变路由，由调用方先切视图或恢复会话） */
+            function applySkillPromptToChat(skill) {
+                if (!skill) return;
+                try {
+                    if (skill.id != null) window._pendingSkillIdFromSquare = String(skill.id);
+                    else window._pendingSkillIdFromSquare = null;
+                } catch (_pid) {}
+                window._pendingSkillTargetDomain = getTargetDomainFromSkill(skill);
+                var inp = document.getElementById('userInput');
+                if (inp && (skill.prompt_template || skill.name)) {
+                    inp.value = skill.prompt_template || ('请执行与「' + skill.name + '」相关的分析流程。');
+                    if (typeof autoResize === 'function') autoResize(inp);
+                    if (typeof checkInput === 'function') checkInput();
+                    inp.focus();
+                }
+            }
+            /**
+             * @param {object} skill 技能对象
+             * @param {string} [useMode] 'new' | 'continue' — 新建会话（原逻辑）或在 lastActiveSessionId 对应会话中注入
+             */
+            function useSkillFromApi(skill, useMode) {
+                useMode = useMode || 'new';
                 if (!isLoggedIn()) {
                     openAuthModal();
                     showToast('请先登录或注册，再使用技能发起对话', 'warning');
@@ -1648,38 +1846,54 @@
                 }
                 if (skill && skill.name === DRUG_SIM_DUAL_SKILL_NAME) {
                     openDrugSimilarityModeModal(skill, function(mode) {
-                        showChatView();
-                        window._pendingSkillTargetDomain = null;
-                        var inp = document.getElementById('userInput');
-                        var text = mode === 'similarity' ? buildDrugSimPromptSimilarity() : buildDrugSimPromptLipinski();
-                        if (inp) {
-                            inp.value = text;
-                            if (typeof autoResize === 'function') autoResize(inp);
-                            if (typeof checkInput === 'function') checkInput();
-                            inp.focus();
+                        var injectDrug = function() {
+                            window._pendingSkillTargetDomain = null;
+                            var inp = document.getElementById('userInput');
+                            var text = mode === 'similarity' ? buildDrugSimPromptSimilarity() : buildDrugSimPromptLipinski();
+                            if (inp) {
+                                inp.value = text;
+                                if (typeof autoResize === 'function') autoResize(inp);
+                                if (typeof checkInput === 'function') checkInput();
+                                inp.focus();
+                            }
+                        };
+                        if (useMode === 'continue') {
+                            var sid = getLastActiveSessionId();
+                            if (!sid) {
+                                if (typeof showToast === 'function') showToast('当前无活跃会话', 'warning');
+                                return;
+                            }
+                            loadSessionAndRestore(sid, '', function() { injectDrug(); });
+                            return;
                         }
+                        showChatView();
+                        injectDrug();
                     });
                     return;
                 }
-                showChatView();
-                window._pendingSkillTargetDomain = getTargetDomainFromSkill(skill);
-                var inp = document.getElementById('userInput');
-                if (inp && skill && (skill.prompt_template || skill.name)) {
-                    inp.value = skill.prompt_template || ('请执行与「' + skill.name + '」相关的分析流程。');
-                    if (typeof autoResize === 'function') autoResize(inp);
-                    if (typeof checkInput === 'function') checkInput();
-                    inp.focus();
+                if (useMode === 'continue') {
+                    var sid2 = getLastActiveSessionId();
+                    if (!sid2) {
+                        if (typeof showToast === 'function') showToast('当前无活跃会话', 'warning');
+                        return;
+                    }
+                    loadSessionAndRestore(sid2, '', function() { applySkillPromptToChat(skill); });
+                    return;
                 }
+                showChatView();
+                applySkillPromptToChat(skill);
             }
 
             function hideAllMainPanes() {
-                var panes = ['chat-pane', 'skills-square-pane', 'history-page-pane', 'file-management-pane'];
+                var panes = ['chat-pane', 'skills-square-pane', 'history-pane', 'data-assets-pane', 'file-management-pane'];
                 panes.forEach(function(id) {
                     var el = document.getElementById(id);
                     if (el) el.style.display = 'none';
                 });
             }
             function showSkillsView() {
+                syncVolatileReturnSessionFromChatBeforeLeavingToSkillsOrAssets();
+                persistLastChatSessionBeforeLeaving();
                 hideAllMainPanes();
                 var skillsPane = document.getElementById('skills-square-pane');
                 var wsPane = document.getElementById('workspace-pane');
@@ -1700,6 +1914,8 @@
             }
             /** 打开技能广场并切换到指定大类 Tab（与 .skills-nav-tab data-main 一致） */
             function showSkillsSquareMainCategory(mainCat) {
+                syncVolatileReturnSessionFromChatBeforeLeavingToSkillsOrAssets();
+                persistLastChatSessionBeforeLeaving();
                 hideAllMainPanes();
                 var skillsPane = document.getElementById('skills-square-pane');
                 var wsPane = document.getElementById('workspace-pane');
@@ -1729,6 +1945,8 @@
             }
             window.showSkillsSquareMainCategory = showSkillsSquareMainCategory;
             function showChatView() {
+                window._volatileActiveSessionIdToReturn = null;
+                if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
                 hideAllMainPanes();
                 var chatPane = document.getElementById('chat-pane');
                 var wsPane = document.getElementById('workspace-pane');
@@ -1738,6 +1956,8 @@
                 if (rzR) rzR.style.display = 'block';
             }
             function switchToChatView() {
+                window._volatileActiveSessionIdToReturn = null;
+                if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
                 hideAllMainPanes();
                 var chatPane = document.getElementById('chat-pane');
                 var wsPane = document.getElementById('workspace-pane');
@@ -1747,8 +1967,9 @@
                 if (rzR) rzR.style.display = 'block';
             }
             function switchToHistoryView() {
+                persistLastChatSessionBeforeLeaving();
                 hideAllMainPanes();
-                var historyPane = document.getElementById('history-page-pane');
+                var historyPane = document.getElementById('history-pane');
                 var wsPane = document.getElementById('workspace-pane');
                 var rzR = document.getElementById('resizer-right');
                 if (historyPane) historyPane.style.display = 'flex';
@@ -1756,6 +1977,7 @@
                 if (rzR) rzR.style.display = 'none';
             }
             function switchToFileManagementView() {
+                persistLastChatSessionBeforeLeaving();
                 hideAllMainPanes();
                 var fileMgmtPane = document.getElementById('file-management-pane');
                 var wsPane = document.getElementById('workspace-pane');
@@ -1765,15 +1987,29 @@
                 if (rzR) rzR.style.display = 'none';
                 if (typeof renderFileManagementTable === 'function') renderFileManagementTable();
             }
+            function switchToDataAssetsView() {
+                syncVolatileReturnSessionFromChatBeforeLeavingToSkillsOrAssets();
+                persistLastChatSessionBeforeLeaving();
+                hideAllMainPanes();
+                var daPane = document.getElementById('data-assets-pane');
+                var wsPane = document.getElementById('workspace-pane');
+                var rzR = document.getElementById('resizer-right');
+                if (daPane) daPane.style.display = 'flex';
+                if (wsPane) wsPane.style.display = 'none';
+                if (rzR) rzR.style.display = 'none';
+                if (typeof renderFileManagementTable === 'function') renderFileManagementTable();
+            }
+            window.switchToDataAssetsView = switchToDataAssetsView;
             var currentAssetSort = { key: 'created_at', asc: false };
             function renderFileManagementTable(listFromSort) {
-                var tbody = document.getElementById('file-management-tbody');
-                if (!tbody) return;
-                function renderRows(list) {
+                var tbFile = document.getElementById('file-management-tbody');
+                var tbData = document.getElementById('data-assets-tbody');
+                function fillTbody(tb, list) {
+                    if (!tb) return;
                     list = list || [];
-                    tbody.innerHTML = '';
+                    tb.innerHTML = '';
                     if (list.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#6b7280;">暂无数据</td></tr>';
+                        tb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#6b7280;">暂无数据</td></tr>';
                         return;
                     }
                     list.forEach(function(a) {
@@ -1803,14 +2039,17 @@
                                     .then(function() { if (typeof renderFileManagementTable === 'function') renderFileManagementTable(); if (typeof fetchAssets === 'function') fetchAssets(); })
                                     .catch(function(e) { alert(e.detail || '删除失败'); });
                             };
-                            tbody.appendChild(tr);
+                            tb.appendChild(tr);
                     });
                 }
                 if (listFromSort !== undefined) {
-                    renderRows(listFromSort);
+                    fillTbody(tbFile, listFromSort);
+                    fillTbody(tbData, listFromSort);
                     return;
                 }
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#6b7280;">加载中...</td></tr>';
+                if (!tbFile && !tbData) return;
+                if (tbFile) tbFile.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#6b7280;">加载中...</td></tr>';
+                if (tbData) tbData.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#6b7280;">加载中...</td></tr>';
                 fetch('/api/assets', { method: 'GET', headers: getAuthHeaders() })
                     .then(function(r) { return r.ok ? r.json() : Promise.reject(new Error(r.status)); })
                     .then(function(list) {
@@ -1826,9 +2065,14 @@
                         list.sort(sortTs);
                         currentAssetSort.key = 'created_at';
                         currentAssetSort.asc = false;
-                        renderRows(list);
+                        fillTbody(tbFile, list);
+                        fillTbody(tbData, list);
                     })
-                    .catch(function(e) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#dc2626;">加载失败</td></tr>'; });
+                    .catch(function(e) {
+                        var err = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#dc2626;">加载失败</td></tr>';
+                        if (tbFile) tbFile.innerHTML = err;
+                        if (tbData) tbData.innerHTML = err;
+                    });
             }
             window.sortAssets = function(key) {
                 if (currentAssetSort.key === key) {
@@ -2087,6 +2331,7 @@
                 function pick(key) { return skillPickUrl(toolResult, key); }
                 var csvUrl = pick('csv_url');
                 var zipUrl = pick('zip_url');
+                var jsonUrl = pick('json_url');
 
                 function linkBtn(label, url) {
                     if (!url) return '';
@@ -2097,6 +2342,7 @@
                 var footerActions = '';
                 footerActions += linkBtn('下载 CSV', csvUrl);
                 footerActions += linkBtn('下载 ZIP', zipUrl);
+                footerActions += linkBtn('下载 JSON', jsonUrl);
                 footerActions += '<button type="button" class="skill-ws-btn skill-ws-btn--ghost skill-mm-footer__btn skill-ws-print-btn">打印报告</button>';
 
                 var parts = [];
@@ -2188,6 +2434,7 @@
                     status: 1, message: 1, markdown: 1, data: 1,
                     html_url: 1, csv_url: 1, zip_url: 1, json_url: 1, pdf_url: 1,
                     image_url: 1, image_urls: 1,
+                    image_paths: 1, json_paths: 1, script_path: 1, output_dir: 1,
                     query_smiles: 1, stdout_tail: 1, stderr_tail: 1
                 };
                 if (dataBlock && typeof dataBlock === 'object' && !Array.isArray(dataBlock) && Object.keys(dataBlock).length > 0) {
@@ -2435,6 +2682,8 @@
                 if (wsPhReset) wsPhReset.style.display = '';
                 chatHistory = [];
                 currentSessionId = null;  // Phase 5: 新建会话时清空
+                window._volatileActiveSessionIdToReturn = null;
+                if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
                 window.DEMO_STATE = 'IDLE';
                 window._immersiveDemoActive = false;
                 window.demoExecutionCompleted = false;
@@ -2718,7 +2967,7 @@
                     <div class="alert alert-warning mt-2 mb-3" style="background: #fff3cd; border-left: 4px solid #ffc107;">
                         <i class="bi bi-exclamation-triangle"></i> <strong>⚠️ 预览模式：请上传数据以激活流程</strong>
                     </div>
-                    <div class="mt-3 mb-3 p-3" style="background: #f0f7ff; border-radius: 6px; border: 2px dashed #4d6bfe;">
+                    <div class="mt-3 mb-3 p-3" style="background: #f0f7ff; border-radius: 6px; border: 2px dashed #4d6bfe;" id="workflow-template-hint-${workflowId}">
                         <p class="mb-2" style="font-size: 14px; color: #1976D2;">
                             <i class="bi bi-upload"></i> <strong>请上传数据文件以激活工作流</strong>
                         </p>
@@ -2923,7 +3172,11 @@
                 formHtml += `</div>`;
                 formHtml += `<input type="hidden" id="hidden-file-paths-${formId}" value="${escapeHtml(JSON.stringify(filePaths)).replace(/"/g, '&quot;')}">`;
 
-                // 🔥 Task 4: 在「执行工作流」正前方强制注入 id="btn-apply-params" 按钮
+                const _initialPathsArr = Array.isArray(filePaths) ? filePaths.filter(Boolean) : [];
+                const _hasInitialFiles = _initialPathsArr.length > 0;
+                const _previewExecHidden = isTemplateMode && !_hasInitialFiles;
+
+                // 🔥 Task 4: 在「执行工作流」正前方强制注入 id="btn-apply-params" 按钮（非预览）；预览模式也必须渲染执行键，否则 appendPathsToCard 挂载文件后永无可点按钮
                 if (!isTemplateMode) {
                     formHtml += `
                         <div class="mt-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -2931,9 +3184,19 @@
                             <button type="button" class="icon-btn icon-btn-star" onclick="addFavoriteWorkflowFromCard('${formId}')" title="收藏工作流">
                                 <i class="bi bi-star"></i>
                             </button>
-                            <button class="btn btn-success btn-sm" id="execute-workflow-${formId}" 
+                            <button class="btn btn-success btn-sm workflow-card-execute-btn" id="execute-workflow-${formId}" 
                                     onclick="executeWorkflowFromForm(this)">
                                 <i class="bi bi-play-circle"></i> 🚀 执行工作流
+                            </button>
+                        </div>
+                    `;
+                } else {
+                    formHtml += `
+                        <div class="mt-3 d-flex justify-content-end align-items-center flex-wrap gap-2" id="workflow-exec-row-${formId}">
+                            <button type="button" class="btn btn-success btn-sm workflow-card-execute-btn shadow-sm${_previewExecHidden ? ' d-none' : ''}" id="execute-workflow-${formId}"
+                                    style="font-weight:700;${_previewExecHidden ? '' : 'display:inline-flex !important;'}"
+                                    onclick="executeWorkflowFromForm(this)">
+                                <i class="bi bi-play-circle-fill"></i> ▶ 执行工作流
                             </button>
                         </div>
                     `;
@@ -2959,6 +3222,7 @@
             // 🔥 全场景覆盖：实时预览卡片渲染后立即挂载底部按钮（含 STED-EC「载入官方演示数据」）
             var cardEl = cardZoneRef.querySelector('[data-form-id="' + formId + '"]');
             if (cardEl && typeof window.mountUploadExecuteButton === 'function') window.mountUploadExecuteButton(cardEl);
+            if (cardEl && typeof window.syncWorkflowExecuteButtonVisibility === 'function') window.syncWorkflowExecuteButtonVisibility(formId, cardEl);
 
             // 🔥 存储推荐参数供「一键应用」事件委托使用；供 btn-apply-params 读取
             if (typeof window.workflowRecommendations === 'undefined') window.workflowRecommendations = {};
@@ -3169,7 +3433,7 @@
                     return;
                 }
                 closeAllPopovers();
-                if (popoverEl.closest('#sidebar-pane')) {
+                if (popoverEl.closest('#sidebar-pane') || popoverEl.closest('#skills-square-pane')) {
                     popoverEl._popoverOwner = popoverEl.parentElement;
                     document.body.appendChild(popoverEl);
                 }
@@ -3471,7 +3735,7 @@
                                 var viewAllBtn = document.createElement('div');
                                 viewAllBtn.className = 'sidebar-more-btn';
                                 viewAllBtn.textContent = '查看全部文件 ➔';
-                                viewAllBtn.onclick = function() { if (typeof switchToFileManagementView === 'function') switchToFileManagementView(); };
+                                viewAllBtn.onclick = function() { if (typeof switchToDataAssetsView === 'function') switchToDataAssetsView(); };
                                 fileList.appendChild(viewAllBtn);
                             }
                             details.appendChild(fileList);
@@ -3573,7 +3837,7 @@
                 checkInput();
             }
             // Task2: 真·时光机：仅恢复历史，绝不触发 sendMessage
-            function loadSessionAndRestore(sessionId, title) {
+            function loadSessionAndRestore(sessionId, title, onLoaded) {
                 if (typeof switchToChatView === 'function') switchToChatView();
                 currentSessionId = sessionId;
                 var chatContent = document.getElementById('chatContent');
@@ -3622,7 +3886,7 @@
                         return r.json();
                     })
                     .then(function(messages) {
-                        if (!Array.isArray(messages)) return;
+                        if (!Array.isArray(messages)) messages = [];
                         window.currentSessionMessageIds = messages.map(function(m) { return m.id; });
                         for (var i = 0; i < messages.length; i++) {
                             var msg = messages[i];
@@ -3654,6 +3918,9 @@
                         }
                         if (wp && (document.querySelector('#active-workspace-content .report-section, #active-workspace-content .process-steps') != null) && typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
                         if (typeof highlightActiveSession === 'function') highlightActiveSession(sessionId);
+                        if (typeof onLoaded === 'function') {
+                            try { onLoaded(); } catch (eCb) { console.warn('[loadSessionAndRestore] onLoaded', eCb); }
+                        }
                     })
                     .catch(function(e) { console.warn('[loadSessionAndRestore]', e); });
             }
@@ -4542,6 +4809,29 @@
                 // 视图路由：技能广场 / 聊天
                 var btnSkills = document.getElementById('btn-skills-square');
                 if (btnSkills) btnSkills.onclick = function() { showSkillsView(); };
+                (function bindReturnToLastChatButtons() {
+                    function goLastSession() {
+                        if (!isLoggedIn()) {
+                            openAuthModal();
+                            showToast('请登录后返回会话', 'warning');
+                            return;
+                        }
+                        var sid = (typeof window._volatileActiveSessionIdToReturn !== 'undefined' && window._volatileActiveSessionIdToReturn)
+                            ? String(window._volatileActiveSessionIdToReturn).trim() : '';
+                        window._volatileActiveSessionIdToReturn = null;
+                        if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
+                        if (!sid) {
+                            if (typeof showChatView === 'function') showChatView();
+                            if (typeof showToast === 'function') showToast('暂无待返回的会话，已打开对话页', 'info');
+                            return;
+                        }
+                        if (typeof loadSessionAndRestore === 'function') loadSessionAndRestore(sid, '');
+                    }
+                    document.querySelectorAll('.btn-return-chat').forEach(function (b) {
+                        if (b) b.onclick = function (e) { e.preventDefault(); goLastSession(); };
+                    });
+                    if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
+                })();
                 var btnFavorites = document.getElementById('btn-sidebar-favorites');
                 var favBlock = btnFavorites && btnFavorites.closest('.sidebar-favorites-block');
                 if (btnFavorites && favBlock) btnFavorites.onclick = function(ev) {
@@ -4597,17 +4887,7 @@
                     el.addEventListener('click', function() { showChatView(); }, true);
                 });
 
-                var grid = document.getElementById('skillsGrid');
-                if (grid) {
-                    grid.addEventListener('click', function(e) {
-                        var btn = e.target && e.target.closest ? e.target.closest('.skill-use-btn-inline') : null;
-                        if (!btn) return;
-                        var skillId = btn.getAttribute('data-skill-id');
-                        if (skillId) useSkillById(skillId);
-                        e.preventDefault();
-                        e.stopPropagation();
-                    });
-                }
+                // 技能卡片「使用」：下拉菜单在 fetchSkills 内按卡片绑定，不再使用网格委托
 
                 // IDE 拖拽分隔条
                 initResizablePanes();
@@ -4688,7 +4968,6 @@
                         item.onclick = function(ev) {
                             ev.stopPropagation();
                             closeAllPopovers();
-                            if (action === 'profile') alert('个人主页建设中...');
                             if (action === 'client') window.location.href = '/downloads/';
                             if (action === 'help-whotowork') window.open('/whotowork.html', '_blank');
                             if (action === 'help-api') window.open('/api-doc.html', '_blank');
@@ -5159,13 +5438,30 @@
 
             function toggleLoadingState(isLoading) {
                 isProcessing = isLoading;
-                userInput.disabled = isLoading;
-                if (isLoading) {
-                    sendBtn.disabled = true; sendBtn.classList.remove('active'); userInput.style.cursor = 'wait';
-                    stopBtn.classList.add('show');
-                } else {
-                    sendBtn.disabled = false; userInput.style.cursor = 'text'; userInput.focus(); checkInput();
-                    stopBtn.classList.remove('show');
+                try {
+                    if (userInput) {
+                        userInput.disabled = isLoading;
+                        userInput.style.cursor = isLoading ? 'wait' : 'text';
+                    }
+                    if (sendBtn) {
+                        if (isLoading) {
+                            sendBtn.disabled = true;
+                            sendBtn.classList.remove('active');
+                        } else {
+                            sendBtn.disabled = false;
+                            checkInput();
+                        }
+                    }
+                    if (stopBtn) {
+                        if (isLoading) stopBtn.classList.add('show');
+                        else stopBtn.classList.remove('show');
+                    }
+                    if (!isLoading && userInput) {
+                        try { userInput.focus(); } catch (_f) {}
+                    }
+                } catch (e) {
+                    console.error('[toggleLoadingState] UI 更新异常（已尽力保持 isProcessing 一致）:', e);
+                    try { isProcessing = isLoading; } catch (_e2) {}
                 }
             }
 
@@ -6431,7 +6727,7 @@
                     tool_params: toolParams,
                     workflow_data: workflowData,
                     use_history_files: useHistoryFiles,
-                    model_name: (typeof getSelectedModel === 'function' ? getSelectedModel() : 'deepseek-ai/DeepSeek-R1'),
+                    model_name: (typeof getSelectedModel === 'function' ? getSelectedModel() : 'deepseek-reasoner'),
                     stream: true,  // 🔥 启用 SSE 流式传输
                     session_id: currentSessionId || undefined,  // Phase 5: 持久化会话
                     target_domain: currentSkillDomain,  // 确定性意图硬路由：仅技能广场点击时非 null，闲聊为 null
@@ -6611,6 +6907,55 @@
                         // 🔥 状态变量（在正确的作用域内）
                         let messageBuffer = '';
                         let thoughtBuffer = '';
+                        /** 是否已收到 SSE 终态事件（done / error），用于流结束兜底与乱序 message_saved */
+                        let sseStreamTerminalEventReceived = false;
+
+                        /**
+                         * SSE 兜底解锁：停止计时器、收起等待气泡、结束思考区、恢复输入。
+                         * 与 handleDoneEvent 互补：此处不追加「完成」步骤，避免与正常 done 重复时可多次调用（幂等）。
+                         */
+                        function sseUiHardUnlock(reason) {
+                            try { clearInterval(timerInterval); } catch (_c) {}
+                            try {
+                                if (typeof hideWaitingBubble === 'function') hideWaitingBubble();
+                            } catch (_h) {}
+                            try {
+                                if (typeof finalizeThoughtBlock === 'function') finalizeThoughtBlock();
+                            } catch (_ft) {}
+                            try {
+                                toggleLoadingState(false);
+                            } catch (_t) {
+                                try { isProcessing = false; } catch (_i) {}
+                                try {
+                                    if (userInput) {
+                                        userInput.disabled = false;
+                                        userInput.style.cursor = 'text';
+                                    }
+                                } catch (_u) {}
+                                try {
+                                    if (sendBtn) {
+                                        sendBtn.disabled = false;
+                                        checkInput();
+                                    }
+                                } catch (_s) {}
+                                try {
+                                    if (stopBtn) stopBtn.classList.remove('show');
+                                } catch (_st) {}
+                            }
+                            try {
+                                var _sb = document.getElementById('stopBtn');
+                                if (_sb) _sb.style.display = 'none';
+                            } catch (_sbE) {}
+                            try {
+                                document.querySelectorAll('.icon-running').forEach(function (icon) {
+                                    icon.className = 'checklist-icon icon-success';
+                                    icon.textContent = '\u2713';
+                                });
+                            } catch (_ir) {}
+                            if (reason && typeof console !== 'undefined' && console.warn) {
+                                console.warn('[SSE] sseUiHardUnlock:', reason);
+                            }
+                        }
                         
                         // 🔥 获取 DOM 元素引用（确保在正确的作用域内）
                         const debugPanel = document.getElementById('debug-json-content');
@@ -7216,6 +7561,12 @@
                                             }
                                         }
                                     }
+                                    // 兜底：仅在已收到终态事件后加强解锁（避免 message_saved 早于 done 时误开输入导致重复请求）
+                                    try {
+                                        if (sseStreamTerminalEventReceived) {
+                                            sseUiHardUnlock('message_saved-after-terminal');
+                                        }
+                                    } catch (_ms) {}
                                     break;
 
                                 case 'skill_tool_result':
@@ -7226,10 +7577,17 @@
                                     break;
 
                                 case 'done':
-                                    if (typeof finalizeThoughtBlock === 'function') finalizeThoughtBlock();
-                                    // 🔥 TASK 2: 隐藏等待气泡
-                                    hideWaitingBubble();
-                                    handleDoneEvent(data);
+                                    sseStreamTerminalEventReceived = true;
+                                    try {
+                                        if (typeof finalizeThoughtBlock === 'function') finalizeThoughtBlock();
+                                        hideWaitingBubble();
+                                        handleDoneEvent(data);
+                                    } catch (eDone) {
+                                        console.error('[SSE] done 分支处理异常:', eDone);
+                                        sseUiHardUnlock('done-branch-catch');
+                                    } finally {
+                                        sseUiHardUnlock('done-branch-finally');
+                                    }
                                     // 🔥 任务4：工作流结束后静默刷新左侧资产树（后端已更新 modality）
                                     if (typeof fetchAssets === 'function') fetchAssets();
                                     break;
@@ -7239,7 +7597,14 @@
                                     return true; // 返回 true 表示应该停止
                                     
                                 case 'error':
-                                    handleErrorEvent(data);
+                                    sseStreamTerminalEventReceived = true;
+                                    try {
+                                        handleErrorEvent(data);
+                                    } catch (eErr) {
+                                        console.error('[SSE] error 分支处理异常:', eErr);
+                                    } finally {
+                                        sseUiHardUnlock('error-branch-finally');
+                                    }
                                     break;
 
                                 case 'state_snapshot':
@@ -8336,6 +8701,7 @@
 
                         // 🔥 REQUIREMENT 1: 处理完成事件 - 彻底移除 Thinking spinner；统一计时器：优先用后端下发的 duration
                         function handleDoneEvent(data) {
+                            try {
                             clearInterval(timerInterval);
                             const duration = (data && (data.duration != null || data.total_duration != null))
                                 ? (Number(data.duration ?? data.total_duration)).toFixed(1)
@@ -8452,6 +8818,15 @@
                                 stopBtn.style.display = 'none';
                             }
                             toggleLoadingState(false);
+                            } catch (eHde) {
+                                console.error('[handleDoneEvent] 异常:', eHde);
+                            } finally {
+                                try { toggleLoadingState(false); } catch (_tl) {}
+                                try {
+                                    var _sb2 = document.getElementById('stopBtn');
+                                    if (_sb2) _sb2.style.display = 'none';
+                                } catch (_sb2e) {}
+                            }
                         }
                         
                         // 🔥 UI 更新函数：处理澄清问题事件
@@ -8682,8 +9057,19 @@
                             clearInterval(timerInterval);
                             
                             // 🔥 TASK: 增强错误日志输出到控制台
-                            const errorMsg = data.error || data.message || '未知错误';
-                            const errorDetails = data.details || data.debug_info || '';
+                            // 优先展示后端可读 message（含合并后的技术摘要）；code 型 error 仅作补充
+                            const errorMsg =
+                                (data.message && String(data.message).trim()) ||
+                                data.error ||
+                                '未知错误';
+                            let errorDetails = data.detail || data.details || data.debug_info || '';
+                            if (
+                                errorDetails &&
+                                data.message &&
+                                String(data.message).indexOf(String(errorDetails)) !== -1
+                            ) {
+                                errorDetails = '';
+                            }
                             
                             // 输出详细错误信息到控制台
                             console.error('❌ [Frontend Error Handler] 收到后端错误事件');
@@ -8798,6 +9184,12 @@
                                     console.error('❌ 剩余缓冲区 JSON 解析错误:', e);
                                 }
                             }
+                        }
+
+                        if (!sseStreamTerminalEventReceived) {
+                            console.warn('[SSE] 流已关闭但未收到 done/error，执行 UI 兜底（可能为分包/尾包未解析）');
+                            try { addProcessStep('完成（连接已关闭）', 'done'); } catch (_ap) {}
+                            sseUiHardUnlock('reader-closed-without-terminal-event');
                         }
                         
                         // 🔥 最终更新：剔除 <<>> 建议标签并渲染推荐追问芯片（实时流结束时的终极拦截）
@@ -9027,10 +9419,24 @@
 
                 } catch (error) {
                     if (error.name === 'AbortError') return;
-                    aiContentDiv.innerHTML = `<span style="color:red">请求失败: ${error.message}</span>`;
+                    try {
+                        if (aiContentDiv) {
+                            aiContentDiv.innerHTML = `<span style="color:red">请求失败: ${error.message}</span>`;
+                        }
+                    } catch (_ae) {}
                 } finally { 
-                    clearInterval(timerInterval);
-                    toggleLoadingState(false); 
+                    try { clearInterval(timerInterval); } catch (_ci) {}
+                    try {
+                        if (typeof hideWaitingBubble === 'function') hideWaitingBubble();
+                    } catch (_hw) {}
+                    try {
+                        if (typeof finalizeThoughtBlock === 'function') finalizeThoughtBlock();
+                    } catch (_ft2) {}
+                    try { toggleLoadingState(false); } catch (_tlf) {}
+                    try {
+                        var _stopF = document.getElementById('stopBtn');
+                        if (_stopF) _stopF.style.display = 'none';
+                    } catch (_sfe) {}
                     currentAbortController = null;
                 }
             }
@@ -9648,6 +10054,38 @@
                 }).catch(function(e) { console.error(e); alert('收藏失败：' + (e.message || '请稍后重试')); });
             }
             
+            /**
+             * 预览/收藏卡片：根据 hidden-file-paths 中已挂载文件数量，强制同步绿色「执行工作流」按钮与模板区提示显隐。
+             * 必须在 appendPathsToCard 末尾及卡片初次挂载后调用，避免预览模式无 DOM 按钮导致流程卡死。
+             */
+            window.syncWorkflowExecuteButtonVisibility = function(formId, cardRoot) {
+                if (!formId || !cardRoot) return;
+                var hid = cardRoot.querySelector('#hidden-file-paths-' + formId);
+                var arr = [];
+                try {
+                    arr = JSON.parse((hid && hid.value ? hid.value : '[]').replace(/&quot;/g, '"'));
+                } catch (e) { arr = []; }
+                if (!Array.isArray(arr)) arr = [];
+                var n = arr.filter(Boolean).length;
+                var execBtn = cardRoot.querySelector('#execute-workflow-' + formId);
+                if (execBtn) {
+                    if (n > 0) {
+                        execBtn.classList.remove('d-none', 'hidden');
+                        execBtn.style.setProperty('display', 'inline-flex', 'important');
+                        execBtn.disabled = false;
+                    } else {
+                        execBtn.classList.add('d-none');
+                        execBtn.style.removeProperty('display');
+                        execBtn.style.display = 'none';
+                    }
+                }
+                var hintEl = document.getElementById('workflow-template-hint-' + formId);
+                if (hintEl) {
+                    if (n > 0) hintEl.classList.add('d-none');
+                    else hintEl.classList.remove('d-none');
+                }
+            };
+
             // 🔥 收藏卡片：将选中的路径追加到卡片的 file_paths 并渲染为 File Chip，不触发执行（解耦选择与执行）
             window.appendPathsToCard = function(formId, cardElement, paths) {
                 var card = cardElement;
@@ -9703,8 +10141,11 @@
                     });
                     var warnEl = card.querySelector('#file-check-warning-' + formId) || document.getElementById('file-check-warning-' + formId);
                     if (warnEl && warnEl.parentNode) warnEl.parentNode.removeChild(warnEl);
-                    var execBtn = card.querySelector('#execute-workflow-' + formId) || document.getElementById('execute-workflow-' + formId);
-                    if (execBtn) execBtn.disabled = false;
+                    var execBtnLegacy = card.querySelector('#execute-workflow-' + formId) || document.getElementById('execute-workflow-' + formId);
+                    if (execBtnLegacy) execBtnLegacy.disabled = false;
+                    if (typeof window.syncWorkflowExecuteButtonVisibility === 'function') {
+                        window.syncWorkflowExecuteButtonVisibility(formId, card);
+                    }
                 }
             };
 
@@ -9920,6 +10361,9 @@
                 btnRow.appendChild(hint);
                 wrap.appendChild(btnRow);
                 cardElement.after(wrap);
+                if (typeof window.syncWorkflowExecuteButtonVisibility === 'function') {
+                    window.syncWorkflowExecuteButtonVisibility(formId, cardElement);
+                }
                 btn.addEventListener('click', function() {
                     var fileInput = document.createElement('input');
                     fileInput.type = 'file';

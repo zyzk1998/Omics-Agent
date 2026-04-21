@@ -69,7 +69,7 @@ class MetabolomicsAgent(BaseAgent):
     
     def __init__(
         self,
-        llm_client: LLMClient,
+        llm_client: Optional[LLMClient],
         prompt_manager: PromptManager,
         metabolomics_config: Dict[str, Any] = None,
         tool_retriever: Optional[ToolRetriever] = None
@@ -317,8 +317,9 @@ Uploaded Files: {file_names_str}
         ]
         
         try:
-            completion = await self.llm_client.achat(messages, temperature=0.1, max_tokens=128)
-            think_content, response = self.llm_client.extract_think_and_content(completion)
+            _llm = self.llm_for_request()
+            completion = await _llm.achat(messages, temperature=0.1, max_tokens=128)
+            think_content, response = _llm.extract_think_and_content(completion)
             
             # 解析 JSON
             json_str = response.strip()
@@ -388,8 +389,9 @@ File Path: {file_path}
         ]
         
         try:
-            completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=800)
-            think_content, response = self.llm_client.extract_think_and_content(completion)
+            _llm = self.llm_for_request()
+            completion = await _llm.achat(messages, temperature=0.3, max_tokens=800)
+            think_content, response = _llm.extract_think_and_content(completion)
             return response
         except Exception as e:
             logger.error(f"❌ 文件解释生成失败: {e}", exc_info=True)
@@ -979,8 +981,9 @@ Return JSON only (single step_id string or null):
         
         try:
             logger.info(f"🔍 [CHECKPOINT] Calling LLM to extract target end step...")
-            completion = await self.llm_client.achat(messages, temperature=0.1, max_tokens=64)
-            think_content, response = self.llm_client.extract_think_and_content(completion)
+            _llm = self.llm_for_request()
+            completion = await _llm.achat(messages, temperature=0.1, max_tokens=64)
+            think_content, response = _llm.extract_think_and_content(completion)
             logger.info(f"✅ [CHECKPOINT] LLM response received: {response[:100]}...")
             
             import json
@@ -1072,8 +1075,9 @@ Return JSON only:
         
         try:
             logger.info(f"🔍 [CHECKPOINT] Calling LLM to extract workflow parameters...")
-            completion = await self.llm_client.achat(messages, temperature=0.1, max_tokens=256)
-            think_content, response = self.llm_client.extract_think_and_content(completion)
+            _llm = self.llm_for_request()
+            completion = await _llm.achat(messages, temperature=0.1, max_tokens=256)
+            think_content, response = _llm.extract_think_and_content(completion)
             logger.info(f"✅ [CHECKPOINT] LLM response received: {response[:200]}...")
             
             # 解析 JSON
@@ -1265,8 +1269,9 @@ Return JSON only:
                 {"role": "user", "content": prompt}
             ]
             
-            completion = await self.llm_client.achat(messages, temperature=0.2, max_tokens=800)
-            think_content, response = self.llm_client.extract_think_and_content(completion)
+            _llm = self.llm_for_request()
+            completion = await _llm.achat(messages, temperature=0.2, max_tokens=800)
+            think_content, response = _llm.extract_think_and_content(completion)
             
             # 解析 JSON
             json_str = response.strip()
@@ -1451,8 +1456,9 @@ Return JSON only:
             ]
             
             # 🔥 修复：降低 max_tokens 以匹配简洁性要求（最多 200 字）
-            completion = await self.llm_client.achat(messages, temperature=0.2, max_tokens=500)
-            think_content, response = self.llm_client.extract_think_and_content(completion)
+            _llm = self.llm_for_request()
+            completion = await _llm.achat(messages, temperature=0.2, max_tokens=500)
+            think_content, response = _llm.extract_think_and_content(completion)
             from ...core.stream_utils import strip_suggestions_from_text
             if response:
                 response, _ = strip_suggestions_from_text(response)

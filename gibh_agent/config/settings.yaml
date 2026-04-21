@@ -4,10 +4,10 @@
 # LLM 配置
 llm:
   # 默认使用的 LLM 类型: "local" 或 "cloud"
-  # 已改为使用硅基流动 deepseek API
+  # 云端默认通道由根目录 .env 中 LLM_CLOUD_PROVIDER 与各厂商 *_API_KEY 决定（见 LLM_CLOUD_SWITCHING.txt）
   default: "cloud"
   
-  # 注意：使用云端模型需要设置环境变量 SILICONFLOW_API_KEY
+  # 注意：cloud 模式下 logic/vision 均读环境变量，不再依赖下方 cloud.siliconflow 小节初始化
   
   # 本地模型配置（vLLM/Ollama）
   local:
@@ -25,24 +25,17 @@ llm:
       temperature: 0.3
       max_tokens: 2048
   
-  # 云端模型配置
+  # 云端模型配置（实际通道由根目录 .env 中 LLM_CLOUD_PROVIDER + MODEL_ROUTING_TABLE 决定；以下为历史占位，可忽略）
   cloud:
-    # 硅基流动 deepseek API（默认使用）
-    # 注意：模型名称格式为 "deepseek-ai/DeepSeek-R1" 或其他支持的模型
-    # 可通过环境变量 SILICONFLOW_MODEL 自定义模型名称
-    # 前端 /api/chat 可选 model_name（与硅基流动 id 一致，示例）：
-    #   - deepseek-ai/DeepSeek-R1（推荐，支持思考过程流式输出）
-    #   - Pro/zai-org/GLM-5
-    #   - Pro/moonshotai/Kimi-K2.5
-    #   - Qwen/Qwen3.5-397B-A17B
-    siliconflow:
-      base_url: "https://api.siliconflow.cn/v1"
-      api_key: "${SILICONFLOW_API_KEY:}"
-      model: "${SILICONFLOW_MODEL:deepseek-ai/DeepSeek-R1}"
-      temperature: 0.1
-      max_tokens: 4096
+    # --- SiliconFlow（硅基流动）已弃用，以下小节保留注释备查 ---
+    # siliconflow:
+    #   base_url: "https://api.siliconflow.cn/v1"
+    #   api_key: "${SILICONFLOW_API_KEY:}"
+    #   model: "${SILICONFLOW_MODEL:}"
+    #   temperature: 0.1
+    #   max_tokens: 4096
     
-    # DeepSeek 官方 API（备用）
+    # DeepSeek 官方 API（YAML 示例；运行时以环境变量与注册表为准）
     #deepseek:
       #base_url: "https://api.deepseek.com/v1"
       #api_key: "${DEEPSEEK_API_KEY:}"

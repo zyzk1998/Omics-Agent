@@ -97,6 +97,7 @@ for _mod in [
     "bio_tools",
     "radiomics_tools",
     "dynamic_proxy",
+    "drt_tool",
 ]:
     try:
         importlib.import_module(f".{_mod}", package=__name__)

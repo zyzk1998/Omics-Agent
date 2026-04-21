@@ -66,7 +66,7 @@ class RNAAgent(BaseAgent):
     
     def __init__(
         self,
-        llm_client: LLMClient,
+        llm_client: Optional[LLMClient],
         prompt_manager: PromptManager,
         dispatcher: Optional[TaskDispatcher] = None,
         cellranger_config: Optional[Dict[str, Any]] = None,
@@ -353,8 +353,9 @@ Uploaded Files: {file_names_str}
         ]
         
         try:
-            completion = await self.llm_client.achat(messages, temperature=0.1, max_tokens=128)
-            think_content, response = self.llm_client.extract_think_and_content(completion)
+            _llm = self.llm_for_request()
+            completion = await _llm.achat(messages, temperature=0.1, max_tokens=128)
+            think_content, response = _llm.extract_think_and_content(completion)
             
             # 解析 JSON
             json_str = response.strip()
@@ -419,8 +420,9 @@ File Path: {file_path}
         ]
         
         try:
-            completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=800)
-            think_content, response = self.llm_client.extract_think_and_content(completion)
+            _llm = self.llm_for_request()
+            completion = await _llm.achat(messages, temperature=0.3, max_tokens=800)
+            think_content, response = _llm.extract_think_and_content(completion)
             return response
         except Exception as e:
             logger.error(f"❌ 文件解释生成失败: {e}", exc_info=True)
@@ -752,9 +754,10 @@ Return JSON only:
         ]
         
         try:
-            completion = await self.llm_client.achat(messages, temperature=0.1, max_tokens=256)
+            _llm = self.llm_for_request()
+            completion = await _llm.achat(messages, temperature=0.1, max_tokens=256)
             # 提取 think 过程和实际内容
-            think_content, response = self.llm_client.extract_think_and_content(completion)
+            think_content, response = _llm.extract_think_and_content(completion)
             # 如果有 think 内容，记录日志（可选）
             if think_content:
                 import logging
@@ -1073,8 +1076,9 @@ You have access to:
                 {"role": "user", "content": prompt}
             ]
             
-            completion = await self.llm_client.achat(messages, temperature=0.3, max_tokens=2000)
-            think_content, response = self.llm_client.extract_think_and_content(completion)
+            _llm = self.llm_for_request()
+            completion = await _llm.achat(messages, temperature=0.3, max_tokens=2000)
+            think_content, response = _llm.extract_think_and_content(completion)
             from ...core.stream_utils import strip_suggestions_from_text
             if response:
                 response, _ = strip_suggestions_from_text(response)

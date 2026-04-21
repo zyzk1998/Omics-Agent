@@ -12,6 +12,7 @@ import json
 import logging
 import asyncio
 import os
+import traceback
 import re
 import time
 from datetime import datetime
@@ -26,7 +27,9 @@ from .asset_manager import (
     format_routing_asset_digest,
     routing_asset_inventory,
 )
-from .llm_client import LLMClient
+from .llm_client import LLMClient, LLMClientFactory
+from .llm_json_extract import extract_json_object_from_llm_text
+from .llm_cloud_providers import chat_mode_skip_openai_tools, validate_and_resolve_model_name
 from .semantic_router import RouteKind, RouterInput, SemanticRouter
 from .stream_utils import stream_with_suggestions
 from .workflows import WorkflowRegistry
@@ -113,17 +116,30 @@ class AgentOrchestrator:
         # 🔥 对话状态管理
         self.conversation_state: Dict[str, Any] = {}
     
-    def _get_llm_client(self) -> Optional[LLMClient]:
-        """从 agent 中获取 LLM 客户端"""
+    def _get_agent_default_llm_client(self) -> Optional[LLMClient]:
+        """从第一个领域智能体获取当前可用的 LLM（云端用 llm_for_request 按注册表默认/请求模型）。"""
         try:
-            if hasattr(self.agent, 'agents') and self.agent.agents:
-                # 尝试从第一个智能体获取 LLM client
+            if hasattr(self.agent, "agents") and self.agent.agents:
                 first_agent = list(self.agent.agents.values())[0]
-                if hasattr(first_agent, 'llm_client'):
+                if hasattr(first_agent, "llm_for_request"):
+                    return first_agent.llm_for_request()
+                if hasattr(first_agent, "llm_client"):
                     return first_agent.llm_client
             return None
         except Exception as e:
-            logger.warning(f"⚠️ 获取 LLM 客户端失败: {e}")
+            logger.warning("⚠️ 获取 agent 默认 LLM 客户端失败: %s", e)
+            return None
+
+    def _get_llm_client(self, model_name: Optional[str] = None) -> Optional[LLMClient]:
+        """
+        按本次请求的 model_name 解析厂商并新建 LLMClient（与前端多模型下拉一致）。
+        若对应厂商未配置密钥，返回 None（不再误用其它厂商的 base_url）。
+        """
+        try:
+            mn = validate_and_resolve_model_name((model_name or "").strip() or None)
+            return LLMClientFactory.create_for_model(mn)
+        except ValueError as e:
+            logger.error("❌ 无法为 model=%s 创建 LLM 客户端: %s", model_name, e)
             return None
 
     def _is_public_api_chat_intent(self, query: str) -> bool:
@@ -171,6 +187,80 @@ class AgentOrchestrator:
         # 仅保留纯社交礼仪子串（与需求一致：不含天气/新闻/今天等宽泛词）
         social_keywords = ("你好", "您好", "再见", "拜拜", "谢谢", "是谁")
         return any(kw in ql for kw in social_keywords)
+
+    @staticmethod
+    def _extract_workflow_inner_config(workflow_data: Any) -> Optional[Dict[str, Any]]:
+        """将 kwargs['workflow_data'] 规范为内含 steps 的配置 dict（兼容嵌套 workflow_data 根对象）。"""
+        wd = workflow_data
+        if isinstance(wd, str):
+            try:
+                wd = json.loads(wd)
+            except Exception:
+                return None
+        if not isinstance(wd, dict):
+            return None
+        inner = wd.get("workflow_data")
+        if isinstance(inner, dict):
+            return inner
+        return wd
+
+    @staticmethod
+    def _forced_task_fast_lane(kwargs: Dict[str, Any], query: str) -> bool:
+        """
+        全局 Task 快车道（SemanticRouter 之前）：命中则强制 intent_type=task。
+
+        设计原则：仅响应与前端 / server 已约定的「强执行」载荷或不可误判为闲聊的暗号；
+        不依据「上传了文件」「消息里出现分析词」等弱信号，避免误伤纯聊天。
+        """
+        qstrip = (query or "").strip()
+        # 澄清模式 <suggest> 与路由解耦：用户点击后原样回传，由此前缀强制进 Task，避免再次经 SemanticRouter JSON 抖动
+        if qstrip.startswith("⚡ 启动工作流："):
+            return True
+
+        td = kwargs.get("target_domain")
+        if isinstance(td, str) and td.strip():
+            return True
+        ts = kwargs.get("test_dataset_id")
+        if isinstance(ts, str) and ts.strip():
+            return True
+        q = query or ""
+        # 与 server.py 优先级注释对齐：显式 Omics 工具链暗号（非自然语言）
+        if "[Omics_Route:" in q:
+            return True
+
+        wd_raw = kwargs.get("workflow_data")
+        if wd_raw is None:
+            return False
+
+        outer: Any = wd_raw
+        if isinstance(wd_raw, str):
+            try:
+                outer = json.loads(wd_raw)
+            except Exception:
+                return False
+        if not isinstance(outer, dict):
+            return False
+
+        cfg = AgentOrchestrator._extract_workflow_inner_config(outer)
+        if not isinstance(cfg, dict):
+            return False
+        steps = cfg.get("steps")
+        if not isinstance(steps, list) or len(steps) == 0:
+            return False
+
+        # 模板预览（仅看计划、未确认执行）可能带 steps；要求附加执行侧信号，避免误把「预览卡片」当 Task
+        if cfg.get("template_mode") is True:
+            fps_out = outer.get("file_paths")
+            fps_in = cfg.get("file_paths")
+            has_fps = (
+                (isinstance(fps_out, list) and len(fps_out) > 0)
+                or (isinstance(fps_in, list) and len(fps_in) > 0)
+            )
+            if outer.get("execution_id") or outer.get("executionId") or has_fps:
+                return True
+            return False
+
+        return True
 
     def _collect_resolved_upload_paths(
         self, files: Optional[List[Dict[str, Any]]]
@@ -401,7 +491,9 @@ class AgentOrchestrator:
             return True
         return False
 
-    async def _classify_global_intent(self, query: str, files: List[Dict[str, str]] = None) -> str:
+    async def _classify_global_intent(
+        self, query: str, files: List[Dict[str, str]] = None, model_name: Optional[str] = None
+    ) -> str:
         """
         🔥 PHASE 1: Classify global intent (Chat vs Task)
         
@@ -442,7 +534,7 @@ class AgentOrchestrator:
         # 混合资产或非原生单资产：交给 LLM，并注入嗅探摘要
         if upload_types:
             try:
-                llm_client = self._get_llm_client()
+                llm_client = self._get_llm_client(model_name)
                 if not llm_client:
                     return "task"
                 sys_msg = """你是生物信息助手的路由器。根据用户话与「已上传文件的精确资产类型」判断：
@@ -464,14 +556,9 @@ class AgentOrchestrator:
                     messages, temperature=0.1, max_tokens=80
                 )
                 response = completion.choices[0].message.content.strip()
-                import json as _json
-
-                if "```" in response:
-                    response = response.split("```")[1]
-                    if response.startswith("json"):
-                        response = response[4:]
-                response = response.strip()
-                result = _json.loads(response)
+                result = extract_json_object_from_llm_text(response)
+                if not result:
+                    raise ValueError("intent JSON missing")
                 intent_type = result.get("type", "chat")
                 return intent_type if intent_type in ("chat", "task") else "chat"
             except Exception as e:
@@ -497,7 +584,7 @@ class AgentOrchestrator:
         
         # Use LLM for ambiguous cases（无上传文件）
         try:
-            llm_client = self._get_llm_client()
+            llm_client = self._get_llm_client(model_name)
             if not llm_client:
                 # Fallback: if no LLM, treat as chat for safety
                 return "chat"
@@ -518,22 +605,16 @@ class AgentOrchestrator:
             
             completion = await llm_client.achat(messages, temperature=0.1, max_tokens=50)
             response = completion.choices[0].message.content.strip()
-            
-            # Parse JSON response
-            import json
+
             try:
-                # Remove markdown code blocks if present
-                if "```" in response:
-                    response = response.split("```")[1]
-                    if response.startswith("json"):
-                        response = response[4:]
-                response = response.strip()
-                
-                result = json.loads(response)
+                result = extract_json_object_from_llm_text(response)
+                if not result:
+                    if "task" in response.lower():
+                        return "task"
+                    return "chat"
                 intent_type = result.get("type", "chat")
                 return intent_type if intent_type in ["chat", "task"] else "chat"
-            except json.JSONDecodeError:
-                # If JSON parsing fails, check response text
+            except Exception:
                 if "task" in response.lower():
                     return "task"
                 return "chat"
@@ -613,7 +694,34 @@ class AgentOrchestrator:
         }
         owner_id = kwargs.get("owner_id") or kwargs.get("user_id")
         db = kwargs.get("db")
-        model_name = (kwargs.get("model_name") or "").strip() or "deepseek-ai/DeepSeek-R1"
+        try:
+            model_name = validate_and_resolve_model_name(
+                (kwargs.get("model_name") or "").strip() or None
+            )
+        except ValueError as e:
+            err_msg = str(e)
+            logger.error("❌ [Orchestrator] 模型校验失败: %s", err_msg)
+            yield self._emit_sse(
+                state_snapshot,
+                "error",
+                {"error": "unsupported_model", "message": err_msg},
+            )
+            yield self._emit_sse(
+                state_snapshot,
+                "done",
+                {"status": "error", "message": err_msg},
+            )
+            return
+        try:
+            ags = getattr(self.agent, "agents", None) or {}
+            for _ag in ags.values():
+                if _ag is not None and hasattr(_ag, "set_request_model_name"):
+                    _ag.set_request_model_name(model_name)
+            _r = getattr(self.agent, "router", None)
+            if _r is not None and hasattr(_r, "set_request_model_name"):
+                _r.set_request_model_name(model_name)
+        except Exception as _prop_e:
+            logger.debug("set_request_model_name 派发跳过: %s", _prop_e)
         thinking_mode = str(kwargs.get("thinking_mode") or "fast").strip().lower()
         target_domain = kwargs.get("target_domain")
         if target_domain and isinstance(target_domain, str) and not target_domain.strip():
@@ -647,6 +755,8 @@ class AgentOrchestrator:
         _query_str = (query or "").strip()
         # SemanticRouter 判为 drug_similarity 快车道且无 [Skill_Route] 时，由编排器补全暗号并直出 SkillAgent
         _semantic_skill_fast_lane_tool: Optional[str] = None
+        # SemanticRouter 判为 clarify 时：转入聊天流并附加澄清 system 提示（见 _stream_chat_mode）
+        _semantic_clarify_rationale: Optional[str] = None
         match = re.search(r"\[系统注入：用户请求复用工作流模板：\s*(\d+)\s*\]", _query_str)
         logger.info("🔍 [Orchestrator] 尝试拦截复用指令: query=%s -> 匹配结果: %s", _query_str[:80] if _query_str else "", match)
         if match and db and owner_id:
@@ -709,7 +819,19 @@ class AgentOrchestrator:
                 if _p and _p not in seen_paths:
                     seen_paths.add(_p)
                     unique_paths.append(_p)
-            llm_client = self._get_llm_client()
+            llm_client = self._get_llm_client(model_name)
+            if not llm_client:
+                yield self._emit_sse(
+                    state_snapshot,
+                    "message",
+                    {
+                        "content": "技能快车道不可用：无法为当前模型创建 LLM 客户端。请确认 .env 已为该模型对应厂商配置 API Key（见仓库 LLM_CLOUD_SWITCHING.txt）。",
+                    },
+                )
+                yield self._emit_sse(state_snapshot, "done", {"status": "error"})
+                state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                yield self._format_sse("state_snapshot", state_snapshot)
+                return
             from gibh_agent.agents.skill_agent import SkillAgent
 
             def _skill_format_sse(event_type: str, data: Dict[str, Any]) -> str:
@@ -756,9 +878,14 @@ class AgentOrchestrator:
             if AgentOrchestrator._global_chat_keyword_hit(query):
                 intent_type = "chat"
                 logger.info("🔌 [Orchestrator] 命中社交礼仪短路，强制 chat（覆盖 target_domain 快车道）")
-            elif target_domain:
+            elif AgentOrchestrator._forced_task_fast_lane(kwargs, _query_str):
                 intent_type = "task"
-                logger.info(f"🔍 [Orchestrator] 快车道硬路由: target_domain={target_domain}，跳过全局意图分类")
+                logger.info(
+                    "🛡️ [Orchestrator] 全局 Task 快车道：跳过 SemanticRouter（target_domain=%s workflow_data=%s test_dataset_id=%s）",
+                    kwargs.get("target_domain"),
+                    bool(kwargs.get("workflow_data")),
+                    kwargs.get("test_dataset_id"),
+                )
             else:
                 yield self._emit_sse(state_snapshot,"status", {
                     "content": "正在理解您的意图...",
@@ -768,7 +895,7 @@ class AgentOrchestrator:
                 _t_intent_start = time.time()
 
                 if AgentOrchestrator.ENABLE_SEMANTIC_ROUTER:
-                    llm_for_router = self._get_llm_client()
+                    llm_for_router = self._get_llm_client(model_name)
                     if llm_for_router:
                         try:
                             from gibh_agent.core.openai_tools import COMPUTE_SCHEDULER_MCP_KEY
@@ -791,19 +918,27 @@ class AgentOrchestrator:
                                 router_output.confidence,
                                 router_output.rationale_short,
                             )
-                            if router_output.route == RouteKind.clarify:
-                                _msg = (
-                                    router_output.rationale_short
-                                    or "您的需求不够明确，请问您是希望执行生信分析（请上传文件），还是查询超算状态？"
-                                )
-                                yield self._emit_sse(state_snapshot, "message", {"content": _msg})
-                                await asyncio.sleep(0.01)
-                                yield self._emit_sse(state_snapshot, "done", {"status": "success"})
-                                state_snapshot["text"] = self._sanitize_snapshot_text(_msg)
-                                yield self._format_sse("state_snapshot", state_snapshot)
-                                return
+                            yield self._emit_sse(
+                                state_snapshot,
+                                "status",
+                                {
+                                    "content": (
+                                        f"路由判定分析: {router_output.rationale_short} "
+                                        f"（置信度 {router_output.confidence:.2f}，route={router_output.route.value}）"
+                                    ),
+                                    "state": "running",
+                                },
+                            )
+                            await asyncio.sleep(0.01)
 
-                            if router_output.route == RouteKind.hpc:
+                            if router_output.route == RouteKind.clarify:
+                                _semantic_clarify_rationale = (
+                                    router_output.rationale_short
+                                    or "当前缺少明确的数据前提或执行意图，需要向您确认后再继续。"
+                                )
+                                intent_type = "chat"
+
+                            elif router_output.route == RouteKind.hpc:
                                 intent_type = "chat"
                                 force_deep_react_for_semantic_hpc = True
                             elif router_output.route == RouteKind.task:
@@ -875,21 +1010,21 @@ class AgentOrchestrator:
                                 _sem_e,
                                 exc_info=True,
                             )
-                            intent_type = await self._classify_global_intent(query, files)
+                            intent_type = await self._classify_global_intent(query, files, model_name)
                             logger.info(
                                 "[Profiler] 全局意图分类完成 - 耗时: %.2fs",
                                 time.time() - _t_intent_start,
                             )
                             logger.info(f"🔍 [Orchestrator] 全局意图分类: {intent_type}")
                     else:
-                        intent_type = await self._classify_global_intent(query, files)
+                        intent_type = await self._classify_global_intent(query, files, model_name)
                         logger.info(
                             "[Profiler] 全局意图分类完成 - 耗时: %.2fs",
                             time.time() - _t_intent_start,
                         )
                         logger.info(f"🔍 [Orchestrator] 全局意图分类: {intent_type}")
                 else:
-                    intent_type = await self._classify_global_intent(query, files)
+                    intent_type = await self._classify_global_intent(query, files, model_name)
                     logger.info(
                         "[Profiler] 全局意图分类完成 - 耗时: %.2fs",
                         time.time() - _t_intent_start,
@@ -918,7 +1053,19 @@ class AgentOrchestrator:
                 if _p and _p not in seen_paths_fl:
                     seen_paths_fl.add(_p)
                     unique_paths_fl.append(_p)
-            llm_client_fl = self._get_llm_client()
+            llm_client_fl = self._get_llm_client(model_name)
+            if not llm_client_fl:
+                yield self._emit_sse(
+                    state_snapshot,
+                    "message",
+                    {
+                        "content": "语义技能快车道不可用：无法为当前模型创建 LLM 客户端。请检查服务端 .env 中对应厂商的 API Key。",
+                    },
+                )
+                yield self._emit_sse(state_snapshot, "done", {"status": "error"})
+                state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                yield self._format_sse("state_snapshot", state_snapshot)
+                return
             from gibh_agent.agents.skill_agent import SkillAgent
 
             def _skill_format_sse_fl(event_type: str, data: Dict[str, Any]) -> str:
@@ -965,12 +1112,20 @@ class AgentOrchestrator:
             })
             await asyncio.sleep(0.01)
 
-            llm_client = self._get_llm_client()
+            llm_client = self._get_llm_client(model_name)
             if not llm_client:
-                yield self._emit_sse(state_snapshot,"message", {
-                    "content": "抱歉，LLM服务暂时不可用。"
-                })
-                yield self._emit_sse(state_snapshot,"done", {"status": "success"})
+                _mn = (model_name or "").strip() or "（默认）"
+                yield self._emit_sse(
+                    state_snapshot,
+                    "message",
+                    {
+                        "content": (
+                            f"抱歉，无法为模型「{_mn}」创建 LLM 客户端。"
+                            " 请检查服务端环境变量：是否已为该模型对应厂商填写 API Key（仓库根目录 LLM_CLOUD_SWITCHING.txt）。"
+                        ),
+                    },
+                )
+                yield self._emit_sse(state_snapshot, "done", {"status": "error"})
                 state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
                 yield self._format_sse("state_snapshot", state_snapshot)
                 return
@@ -1001,23 +1156,38 @@ class AgentOrchestrator:
                         model_name=model_name,
                         enabled_mcps=enabled_mcps,
                         schema_cache_key=f"{_deep_key}::hpc_openai",
+                        semantic_clarify_rationale=_semantic_clarify_rationale,
                     ):
                         yield sse_chunk
             except Exception as chat_exc:
-                logger.error(
-                    "❌ [Orchestrator] 聊天模式执行失败（不再回退 Task，避免新闻/闲聊误触发工作流）: %s",
-                    chat_exc,
-                    exc_info=True,
+                # 必须用 exception 级别打印完整 traceback；仅靠前端 message 会丢失 KeyError/ValidationError 等真因
+                logger.exception(
+                    "❌ [Orchestrator] 聊天模式执行失败 model_name=%s owner_id=%s（见下方 traceback）",
+                    model_name,
+                    owner_id,
                 )
-                _friendly = self._chat_stream_failure_user_message(chat_exc)
-                yield self._emit_sse(
-                    state_snapshot,
-                    "error",
-                    {
-                        "error": "chat_stream_failed",
-                        "message": _friendly,
-                    },
-                )
+                _friendly, _detail = self._chat_stream_failure_user_message(chat_exc, model_name=model_name)
+                _cls = type(chat_exc).__name__
+                _message_out = (_friendly or "").strip()
+                if _detail and _detail not in _message_out:
+                    _message_out = f"{_message_out}\n\n技术摘要（已脱敏）：{_detail}"
+                if _cls and not _message_out.startswith(f"[{_cls}]"):
+                    _message_out = f"[{_cls}] {_message_out}"
+                err_payload: Dict[str, Any] = {
+                    "error": "chat_stream_failed",
+                    "message": _message_out,
+                    "detail": _detail,
+                    "exception_class": _cls,
+                    "model_name": model_name,
+                }
+                if os.getenv("GIBH_CHAT_EXPOSE_TRACEBACK", "").strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                ):
+                    err_payload["traceback"] = self._sanitize_stacktrace_text(traceback.format_exc())
+                yield self._emit_sse(state_snapshot, "error", err_payload)
                 await asyncio.sleep(0.01)
                 yield self._emit_sse(state_snapshot, "done", {"status": "error"})
                 state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
@@ -1829,7 +1999,7 @@ class AgentOrchestrator:
                     # Check if current message has NEW specific intent (override)
                     from .planner import SOPPlanner
                     from .tool_retriever import ToolRetriever
-                    llm_client = self._get_llm_client()
+                    llm_client = self._get_llm_client(model_name)
                     if llm_client:
                         planner = SOPPlanner(ToolRetriever(), llm_client)
                         new_steps = planner._fallback_intent_analysis(refined_query, list(workflow.steps_dag.keys()))
@@ -1867,7 +2037,7 @@ class AgentOrchestrator:
                 # 血统保证：下方同一套 if not has_files (Branch A 预览) / else (Path A 正式) 与 file_inspector.inspect_file 必走
                 from .planner import SOPPlanner
                 from .tool_retriever import ToolRetriever
-                llm_client = self._get_llm_client()
+                llm_client = self._get_llm_client(model_name)
                 if not llm_client:
                     raise ValueError("LLM 客户端不可用")
                 tool_retriever = ToolRetriever()
@@ -2506,7 +2676,7 @@ class AgentOrchestrator:
                 if planner is None:
                     from .planner import SOPPlanner
                     from .tool_retriever import ToolRetriever
-                    llm_client = self._get_llm_client()
+                    llm_client = self._get_llm_client(model_name)
                     if not llm_client:
                         raise ValueError("LLM 客户端不可用")
                     tool_retriever = ToolRetriever()
@@ -3072,9 +3242,47 @@ class AgentOrchestrator:
         return out
 
     @staticmethod
-    def _chat_stream_failure_user_message(exc: BaseException) -> str:
-        """Chat/MCP 执行失败时对用户的短文案（禁止回落 Task 时配套使用）。"""
-        msg = (str(exc) or "").lower()
+    def _sanitize_stacktrace_text(tb: str, max_len: int = 16000) -> str:
+        """脱敏 traceback 文本（仅掩码疑似密钥），供 GIBH_CHAT_EXPOSE_TRACEBACK=1 时下发。"""
+        raw = tb or ""
+        raw = re.sub(r"sk-[a-zA-Z0-9_-]{8,}", "sk-***", raw, flags=re.IGNORECASE)
+        raw = re.sub(
+            r"(Bearer\s+)[a-zA-Z0-9._-]{12,}",
+            r"\1***",
+            raw,
+            flags=re.IGNORECASE,
+        )
+        if len(raw) > max_len:
+            return raw[: max_len - 20] + "\n... (truncated)"
+        return raw
+
+    @staticmethod
+    def _sanitize_exception_for_client(exc: BaseException, max_len: int = 400) -> str:
+        """脱敏后的异常摘要，供无服务端日志时在浏览器/SSE 中排障（不输出疑似长密钥）。"""
+        raw = f"{type(exc).__name__}: {exc}"
+        raw = re.sub(r"sk-[a-zA-Z0-9_-]{8,}", "sk-***", raw, flags=re.IGNORECASE)
+        raw = re.sub(
+            r"(Bearer\s+)[a-zA-Z0-9._-]{12,}",
+            r"\1***",
+            raw,
+            flags=re.IGNORECASE,
+        )
+        raw = re.sub(r"api[_-]?key[\"']?\s*[:=]\s*[\"']?[^\s\"']{12,}", "api_key=***", raw, flags=re.IGNORECASE)
+        raw = raw.replace("\n", " ").strip()
+        if len(raw) > max_len:
+            return raw[: max_len - 1] + "…"
+        return raw
+
+    @staticmethod
+    def _chat_stream_failure_user_message(
+        exc: BaseException, model_name: Optional[str] = None
+    ) -> Tuple[str, str]:
+        """
+        Chat/MCP 执行失败时的用户文案 + 与 message 同步的 detail 字段。
+        Returns:
+            (message, detail) — detail 为脱敏技术摘要，可与 SSE error.detail 一并下发。
+        """
+        msg_l = (str(exc) or "").lower()
         keys = (
             "timeout",
             "timed out",
@@ -3090,9 +3298,24 @@ class AgentOrchestrator:
             "econnreset",
             "broken pipe",
         )
-        if any(k in msg for k in keys):
-            return "网络检索失败，请稍后再试。"
-        return "对话生成失败，请稍后再试。若需联网查询，请检查网络或 MCP 配置。"
+        mn = (model_name or "").strip() or "（默认）"
+        detail = AgentOrchestrator._sanitize_exception_for_client(exc)
+        if any(k in msg_l for k in keys):
+            friendly = f"网络或连接异常，请稍后再试。当前模型：{mn}。"
+            return friendly, detail
+        if "401" in msg_l or "authentication" in msg_l or "invalid api key" in msg_l or "incorrect api key" in msg_l:
+            friendly = (
+                f"API 认证失败（401）。当前模型：{mn}。"
+                " 请核对服务端 .env 中该模型对应厂商的 API Key 是否有效、未过期。"
+            )
+            return friendly, detail
+        friendly = (
+            "对话生成失败，请稍后再试。"
+            f" 当前模型：{mn}。"
+            " 若刚切换模型，请确认服务端 .env 已为该厂商配置 API Key，且模型 id 已在 MODEL_ROUTING_TABLE 登记（见 LLM_CLOUD_SWITCHING.txt）。"
+            " 若需联网查询，请检查 MCP 网关与网络。"
+        )
+        return friendly, detail
 
     def _build_current_files_hint(self, files: List[Dict[str, Any]]) -> str:
         """组装当前工作台已挂载文件的状态文案，供注入到 LLM 上下文。无文件时返回空字符串。"""
@@ -3392,6 +3615,7 @@ class AgentOrchestrator:
         model_name: str,
         enabled_mcps: List[str],
         schema_cache_key: str = "default::hpc_openai",
+        semantic_clarify_rationale: Optional[str] = None,
     ) -> AsyncIterator[str]:
         """聊天模式：可选 OpenAI tools（如 mcp_web_search），再流式输出最终回复。"""
         from gibh_agent.core.openai_tools import (
@@ -3411,6 +3635,37 @@ class AgentOrchestrator:
             "</suggest>\n"
             "若对话在结束（如告别、再见）则不要输出上述块。"
         )
+        if semantic_clarify_rationale:
+            from gibh_agent.core.capabilities_digest import build_capabilities_digest_for_llm
+
+            _cap_digest = build_capabilities_digest_for_llm()
+            chat_system = (
+                "【路由澄清模式】语义路由判定当前无法安全进入「分析/工作流」执行链，需要先澄清意图或数据前提。\n"
+                f"内部判定摘要（请意译后自然传达给用户，勿机械复述）：{semantic_clarify_rationale}\n\n"
+                "【系统当前真实可用的 SOP 工作流与工具（动态清单，勿编造清单外名称）】\n"
+                f"{_cap_digest}\n\n"
+                "【澄清时的 <suggest> 导向 — Tool-Aware + 启动暗号】\n"
+                "当你建议用户「启动某一类已列出的分析工作流」时，`questions` 里对应字符串**必须且只能**以固定前缀 **`⚡ 启动工作流：`** 开头，"
+                "后接简短工作流意图（与上方 SOP 域一致）；用户点击后会作为下一轮用户输入原样发送，后端凭此前缀**强制进入 task**，不再走语义路由。\n"
+                "**禁止**使用无前缀的泛泛句（如「帮我启动代谢组分析」）作为工作流启动项，否则无法触发强制路由。\n"
+                "JSON 内正确示例：`{\"questions\": [\"⚡ 启动工作流：代谢组学标准分析\", \"⚡ 启动工作流：单细胞转录组分析\"]}`\n"
+                "错误示例（禁止作为工作流启动项）：`{\"questions\": [\"帮我启动代谢组分析\"]}`\n\n"
+                "【输出结构 — 必须严格遵守，否则前端无法解析】\n"
+                "1) 先写一段面向用户的自然语言说明（解释缺什么信息、为何不能直接进入分析）。\n"
+                "2) 紧接其后输出**唯一**一个 `<suggest>...</suggest>` 块；**标签内必须是合法 JSON 对象**，"
+                "**禁止**在 `<suggest>` 里只写纯中文句子而不带 JSON（会导致前端崩溃、气泡空白）。\n"
+                "3) JSON 固定键名为 `questions`，值为字符串数组；数组内每一项必须是**用户第一人称**的可点击「伪用户输入」，"
+                "模拟用户点击后作为下一轮 query 发送（陈述句或指令，禁止反问用户）。\n\n"
+                "【必须输出的确切格式模板 — 请模仿结构，替换为你的文案与选项】\n"
+                "[此处为向用户的自然语言解释说明，可多段]\n"
+                "<suggest>\n"
+                '{"questions": ["⚡ 启动工作流：代谢组学标准分析", "⚡ 启动工作流：单细胞转录组分析"]}\n'
+                "</suggest>\n\n"
+                "【错误示例 — 禁止】\n"
+                "• `<suggest>请问您要分析哪种组学？</suggest>`（缺少 JSON，禁止）\n"
+                "• `<suggest>\"questions\": ...` 未形成合法 JSON（禁止）\n\n"
+                "【第一人称铁律】`questions` 中禁止出现「请问您…」「您可以…吗」等反问；应使用「我想…」「我的数据是…」「请帮我…」等。\n\n"
+            ) + chat_system
         chat_system += (
             "\n\n【数据库工具】你可以调用：query_gene_info（MyGene 基因注释与染色体定位）、"
             "query_uniprot_protein（UniProt 功能与亚细胞定位）、query_reactome_pathway（人类 Reactome 通路）、"
@@ -3465,6 +3720,17 @@ class AgentOrchestrator:
         tools = await self._merge_openai_tools_with_dynamic_hpc(
             tool_names, enabled_mcps, schema_cache_key
         )
+        # deepseek-reasoner：官方网关对「首轮 chat.completions + tools」常见不兼容/400，闲聊改为纯文本流式（见 llm_cloud_providers.chat_mode_skip_openai_tools）
+        if (
+            tools
+            and chat_mode_skip_openai_tools(model_name)
+            and not AgentOrchestrator._is_bepipred3_skill_chat_intent(query)
+        ):
+            logger.info(
+                "💬 [Orchestrator] 模型 %s：闲聊模式跳过 OpenAI tools（含 MCP），仅走文本流式。",
+                model_name,
+            )
+            tools = []
 
         _llm_first_byte = None
         _t_llm_start = time.time()

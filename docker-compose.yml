@@ -1,0 +1,247 @@
+# 数据持久化：uploads/results 使用宿主机 ./data 目录挂载，容器重建不丢。
+# 宿主机 ./data/uploads、./data/results 等若不存在，Docker 会自动创建；entrypoint 会 chown 给容器内 appuser，保证可写。
+services:
+  # =========================================
+  # 0. 用户与资产中台 - MySQL（Phase 1 数据库基建）
+  # =========================================
+  mysql:
+    image: mysql:8.0
+    container_name: gibh_v2_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-omics_agent_root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-omics_agent}
+      MYSQL_USER: ${MYSQL_USER:-omics}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-omics_agent_pwd}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - gibh-network
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # =========================================
+  # 1. 消息队列 - Redis
+  # =========================================
+  redis:
+    image: redis:7-alpine
+    container_name: gibh_v2_redis
+    restart: always
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - gibh-network
+    command: redis-server --appendonly yes
+
+  # =========================================
+  # 2. API 服务器 - FastAPI + Gunicorn（直接暴露端口）
+  # =========================================
+  api-server:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+      args:
+        # BepiPred 子进程 venv 的 PyTorch 源：CPU 默认；NVIDIA 主机可改为 cu121/cu124 等
+        BEPIPRED_TORCH_INDEX: ${BEPIPRED_TORCH_INDEX:-https://download.pytorch.org/whl/cpu}
+    image: gibh-v2-api:latest
+    container_name: gibh_v2_api
+    restart: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ports:
+      - "8028:8028"  # 直接暴露 API 服务器端口
+    # 绝对持久化：uploads/results 挂载到宿主机 ./data，容器重建不丢
+    environment:
+      - TZ=Asia/Shanghai
+      - REDIS_URL=redis://redis:6379/0
+      - UPLOAD_DIR=/app/uploads
+      - RESULTS_DIR=/app/results
+      - PYTHONPATH=/app
+      # BepiPred-3.0：镜像内 /opt/bepipred3-venv（不受 .:/app 挂载覆盖）；本地可覆盖为 third_party/.../.venv/bin/python
+      - BEPIPRED3_PYTHON=${BEPIPRED3_PYTHON:-/opt/bepipred3-venv/bin/python}
+      # entrypoint 运行时补齐 venv 时与构建使用相同 PyTorch 源（GPU 主机请在 .env 设 cu121/cu124）
+      - BEPIPRED_TORCH_INDEX=${BEPIPRED_TORCH_INDEX:-https://download.pytorch.org/whl/cpu}
+      # 设为 0 可关闭启动时自动 pip 安装 BepiPred venv
+      - BEPIPRED3_ENTRYPOINT_BOOTSTRAP=${BEPIPRED3_ENTRYPOINT_BOOTSTRAP:-1}
+      # LLM 密钥由 DEEPSEEK_API_KEY / ZHIPU_API_KEY / MOONSHOT_API_KEY 等与 MODEL_ROUTING_TABLE 驱动（见 .env）
+      # 🔒 安全：文件上传限制
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-209715200}
+      # 🔒 安全：CORS 配置
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      # 修复 Numba 和 Matplotlib 权限问题
+      - NUMBA_CACHE_DIR=/home/appuser/.cache/numba
+      - MPLCONFIGDIR=/home/appuser/.config/matplotlib
+      - HOME=/home/appuser
+      - NUMBA_DISABLE_JIT_CACHING=1
+      - NUMBA_DEBUG_CACHE=1
+      # Phase 1: MySQL 连接（可选，未配置时应用仍可启动）
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-omics_agent}
+      - MYSQL_USER=${MYSQL_USER:-omics}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-omics_agent_pwd}
+      # JWT 不随容器重启失效：从宿主机 .env 或挂载文件读取，不绑定容器
+      - SECRET_KEY=${SECRET_KEY:-}
+      - SECRET_KEY_FILE=${SECRET_KEY_FILE:-}
+      # PySkills 微服务（ViennaRNA / RDKit 等）；与 worker-pyskills 同网络
+      - PYSKILLS_BASE_URL=${PYSKILLS_BASE_URL:-http://worker-pyskills:8000}
+      # 超算 MCP：仅经 mcp-gateway 转发（主镜像不装官方 mcp）
+      - MCP_GATEWAY_URL=${MCP_GATEWAY_URL:-http://mcp-gateway:8002}
+      # HPC 直连默认调 execute_hpc_command；若远端提供 hpc_mcp_chat 可改为该名
+      - HPC_ORCH_CHAT_TOOL=${HPC_ORCH_CHAT_TOOL:-execute_hpc_command}
+      - HPC_MCP_URL=${HPC_MCP_URL:-http://127.0.0.1:8001/mcp}
+      - HPC_MCP_TRANSPORT=${HPC_MCP_TRANSPORT:-streamableHttp}
+      # Task 产线减负（QueryRewriter 旁路 + 关键词意图命中则跳过意图 LLM）；见 docs/TASK_PRODUCTION_LINE_SLIMMING_ANALYSIS.md
+      - GIBH_LITE_TASK_MODE=${GIBH_LITE_TASK_MODE:-0}
+    volumes:
+      - .:/app
+      - ./data/uploads:/app/uploads
+      - ./data/results:/app/results
+      - ./data:/app/data
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      worker-pyskills:
+        condition: service_started
+      mcp-gateway:
+        condition: service_started
+    networks:
+      - gibh-network
+    # 🔧 修复：使用 entrypoint 脚本修复权限
+    entrypoint: ["/entrypoint.sh"]
+    # timeout：长流程（时空动力学/Cell Ranger 等）可能超过 300s；过短会导致 worker 被强杀 → SSE 分块不完整(ERR_INCOMPLETE_CHUNKED_ENCODING)
+    command: gunicorn server:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8028 --timeout 1200 --graceful-timeout 60
+
+  # =========================================
+  # 2a. 超算 MCP 网关（Python 3.11 + 官方 mcp SDK；主 API 经 HTTP 调用）
+  # =========================================
+  mcp-gateway:
+    build:
+      context: .
+      dockerfile: services/mcp-gateway/Dockerfile
+    image: gibh-v2-mcp-gateway:latest
+    container_name: gibh_v2_mcp_gateway
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai
+      - HPC_MCP_URL=${HPC_MCP_URL:-http://127.0.0.1:8001/mcp}
+      - HPC_MCP_TRANSPORT=${HPC_MCP_TRANSPORT:-streamableHttp}
+    ports:
+      - "8002:8002"
+    networks:
+      - gibh-network
+
+  # =========================================
+  # 2b. 传统生信算法综合微服务（ViennaRNA / PyMOL / RDKit / gseapy）
+  # 主 API 通过 http://worker-pyskills:8000/api/... 访问；uploads 与 api-server 共享同一宿主机目录
+  # =========================================
+  worker-pyskills:
+    build:
+      context: ./workers/worker-pyskills
+      # 必须启用 BuildKit，否则 Dockerfile 中 RUN --mount=type=cache 无法解析。示例：
+      #   DOCKER_BUILDKIT=1 docker compose build worker-pyskills
+      # micromamba 版本见 workers/worker-pyskills/Dockerfile 的 MICROMAMBA_VERSION（对应 install.sh 的 VERSION）
+      args:
+        MICROMAMBA_VERSION: ${MICROMAMBA_VERSION:-2.4.0-0}
+    container_name: worker-pyskills
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./data/uploads:/app/uploads
+      # 药物结构相似性技能包（Lipinski 在 worker 内用 RDKit；相似性管线走 scripts/drug_similarity.py）
+      - ./third_party/drug-similarity:/app/third_party/drug-similarity:ro
+    networks:
+      - gibh-network
+
+  # =========================================
+  # 3. Nginx 反向代理服务器（可选，推荐生产环境）
+  # =========================================
+  nginx:
+    image: nginx:alpine
+    container_name: gibh_v2_nginx
+    restart: always
+    ports:
+      - "80:80"
+      # 与本地 python server.py 默认 PORT=8018 对齐；Electron 瘦客户端 gibh-desktop-app/main.js 常用此端口
+      - "8018:80"
+      - "443:443"  # 如果需要 HTTPS
+    volumes:
+      - ./services/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./services/nginx/html:/usr/share/nginx/html:ro
+      - ./data/uploads:/app/uploads:ro
+      - ./data/results:/app/results:ro
+    depends_on:
+      - api-server
+    networks:
+      - gibh-network
+
+  # =========================================
+  # 4. 异步任务处理 - Celery Worker（可选）
+  # =========================================
+  worker:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    image: gibh-v2-api:latest
+    container_name: gibh_v2_worker
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai
+      - REDIS_URL=redis://redis:6379/0
+      - UPLOAD_DIR=/app/uploads
+      - RESULTS_DIR=/app/results
+      - PYTHONPATH=/app
+      # LLM：同 api-server，由挂载的 .env 与注册表提供厂商密钥
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-209715200}
+      # 修复 Numba 和 Matplotlib 权限问题
+      - NUMBA_CACHE_DIR=/home/appuser/.cache/numba
+      - MPLCONFIGDIR=/home/appuser/.config/matplotlib
+      - HOME=/home/appuser
+      - NUMBA_DISABLE_JIT_CACHING=1
+      - NUMBA_DEBUG_CACHE=1
+      - MCP_GATEWAY_URL=${MCP_GATEWAY_URL:-http://mcp-gateway:8002}
+    volumes:
+      - .:/app
+      - ./data/uploads:/app/uploads
+      - ./data/results:/app/results
+      - ./data:/app/data
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      mcp-gateway:
+        condition: service_started
+    # 🔧 修复：在容器启动时修复挂载目录的权限
+    entrypoint: |
+      sh -c "
+        # 修复挂载目录的权限（确保 appuser 可以写入）
+        chown -R appuser:appuser /app/uploads /app/results /app/data 2>/dev/null || true
+        # 执行原始命令
+        exec celery -A gibh_agent.core.celery_app worker --loglevel=info --concurrency=4
+      "
+    networks:
+      - gibh-network
+    command: celery -A gibh_agent.core.celery_app worker --loglevel=info --concurrency=4
+
+networks:
+  gibh-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  redis-data:
+    driver: local
+

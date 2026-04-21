@@ -6,8 +6,8 @@
 用法（仓库根目录）:
   python3 eval_semantic_router.py
 
-依赖: 已配置 SILICONFLOW_API_KEY（或项目默认路由模型所需的其他密钥，见 LLMClientFactory）。
-可选: export EVAL_ROUTER_MODEL='deepseek-ai/DeepSeek-V1' 覆盖默认模型。
+依赖: 已按 .env 中 LLM_CLOUD_PROVIDER 配置对应 *_API_KEY（见 LLM_CLOUD_SWITCHING.txt）。
+可选: export EVAL_ROUTER_MODEL='deepseek-reasoner' 覆盖 create_for_model 所用模型 id。
 
 重要: SemanticRouter 在 LLM 失败 / 解析失败 / 低置信重试耗尽时统一返回 clarify 且 confidence=0.0（兜底）。
 脚本将 confidence==0.0 判为「未发生真实路由推理」，记为 SKIP，避免把 403 欠费误判成「clarify 判对」。
@@ -284,7 +284,7 @@ def _is_router_fallback(out: RouterOutput) -> bool:
 def _provider_hint(rationale: str) -> str:
     r = (rationale or "").lower()
     if "403" in rationale or "balance" in r or "insufficient" in r:
-        return "（疑似上游 403 / 余额或鉴权问题，请检查 SILICONFLOW 账户与 EVAL_ROUTER_MODEL）"
+        return "（疑似上游 403 / 余额或鉴权问题，请检查当前 LLM 厂商账户与 EVAL_ROUTER_MODEL）"
     if "llm 调用异常" in (rationale or "").lower():
         return "（LLM 调用异常，见 rationale 详情）"
     return ""
@@ -296,7 +296,9 @@ async def run_all() -> int:
         if model:
             llm = LLMClientFactory.create_for_model(model)
         else:
-            llm = LLMClientFactory.create_default()
+            from gibh_agent.core.llm_cloud_providers import get_default_chat_model
+
+            llm = LLMClientFactory.create_for_model(get_default_chat_model())
     except ValueError as e:
         print(f"{C.RED}无法创建 LLM 客户端: {e}{C.RESET}", file=sys.stderr)
         return 2

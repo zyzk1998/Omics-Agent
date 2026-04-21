@@ -13,9 +13,9 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import case, or_
 from sqlalchemy.orm import Session
 
+from gibh_agent.core.skill_plaza_utils import infer_skill_implemented_from_prompt
 from gibh_agent.core.deps import (
     get_current_user,
     get_current_owner_id,
@@ -40,10 +40,10 @@ MAX_PROMPT = 50000
 class SkillCreate(BaseModel):
     """用户上传技能表单（强校验，防 SQL 注入 / XSS 通过长度与类型约束）。"""
     name: str = Field(..., min_length=1, max_length=MAX_NAME)
-    description: str | None = Field(None, max_length=MAX_DESCRIPTION)
-    main_category: str | None = Field(None, max_length=MAX_MAIN_CATEGORY)
-    sub_category: str | None = Field(None, max_length=MAX_SUB_CATEGORY)
-    prompt_template: str | None = Field(None, max_length=MAX_PROMPT)
+    description: Optional[str] = Field(None, max_length=MAX_DESCRIPTION)
+    main_category: Optional[str] = Field(None, max_length=MAX_MAIN_CATEGORY)
+    sub_category: Optional[str] = Field(None, max_length=MAX_SUB_CATEGORY)
+    prompt_template: Optional[str] = Field(None, max_length=MAX_PROMPT)
 
 
 @router.get("/skills")
@@ -83,6 +83,7 @@ def list_skills_public(
     if total == 0 and not saved_only:
         try:
             from gibh_agent.db.seed_skills import run_upsert_system_skills
+
             run_upsert_system_skills(db)
             logger.info("[Skills] 已按需幂等补种核心组学 + 生物医药 + 化学技能")
         except Exception as e:
@@ -90,19 +91,20 @@ def list_skills_public(
             logger.warning("[Skills] 按需补种失败: %s", e)
         q = _query()
         total = q.count()
-    offset = (page - 1) * size
-    # 快车道暗号置顶：全局顺序优先于分页，故在 ORDER BY 中体现（等价于全量按暗号+时间排序后 slice）
-    _pt = SkillModel.prompt_template
-    _fast_lane_first = case(
-        (or_(_pt.contains("[Skill_Route:"), _pt.contains("[Omics_Route:")), 0),
-        else_=1,
-    )
-    rows = (
-        q.order_by(_fast_lane_first.asc(), SkillModel.created_at.desc())
-        .offset(offset)
-        .limit(size)
-        .all()
-    )
+
+    all_rows = q.order_by(SkillModel.id.asc()).all()
+    tuples = []
+    for r in all_rows:
+        pt = r.prompt_template or ""
+        impl = infer_skill_implemented_from_prompt(pt)
+        ts = r.created_at.timestamp() if r.created_at else 0.0
+        tuples.append((impl, ts, r))
+    tuples.sort(key=lambda x: (not x[0], -x[1]))
+    sorted_rows = [t[2] for t in tuples]
+
+    offset_db = (page - 1) * size
+    page_rows = sorted_rows[offset_db : offset_db + size]
+
     saved_ids: set = set()
     if owner_id:
         saved_rows = (
@@ -119,11 +121,12 @@ def list_skills_public(
             "main_category": r.main_category,
             "sub_category": r.sub_category,
             "prompt_template": r.prompt_template,
+            "is_implemented": infer_skill_implemented_from_prompt(r.prompt_template or ""),
             "author_id": r.author_id,
             "created_at": r.created_at.isoformat() if r.created_at else None,
             "saved": r.id in saved_ids,
         }
-        for r in rows
+        for r in page_rows
     ]
     return {"items": items, "total": total}
 

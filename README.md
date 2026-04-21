@@ -140,7 +140,7 @@ cd GIBH-AGENT-V2
 # 注意：项目文件夹名称保持为 GIBH-AGENT-V2（避免导入错误），但产品名称为 Omics Agent
 
 # 2. 配置环境变量（可选）
-# 编辑 docker-compose.yml 中的 SILICONFLOW_API_KEY 和 SILICONFLOW_MODEL
+# 编辑 .env 中的 DEEPSEEK_API_KEY / ZHIPU_API_KEY / MOONSHOT_API_KEY（见 LLM_CLOUD_SWITCHING.txt；SiliconFlow 已弃用）
 
 # 3. 启动服务
 # 首次启动会自动构建镜像，耗时较长请耐心等待

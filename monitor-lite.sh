@@ -48,6 +48,26 @@ docker_compose_cmd() {
     fi
 }
 
+# 状态展示：不因 2>/dev/null 吞掉 compose 报错，便于盲排时立刻看到 Restarting / unhealthy
+show_container_health() {
+    echo ""
+    echo -e "${CYAN}${BOLD}======== 容器状态（docker compose ps）========${NC}"
+    cd "${PROJECT_DIR}" || return 1
+    if [ -n "${DOCKER_CMD_PREFIX}" ]; then
+        ${DOCKER_CMD_PREFIX}docker compose ps 2>&1 || ${DOCKER_CMD_PREFIX}docker-compose ps 2>&1 || true
+    else
+        docker compose ps 2>&1 || docker-compose ps 2>&1 || true
+    fi
+    echo ""
+    echo -e "${CYAN}${BOLD}======== 本机容器一览（docker ps）========${NC}"
+    if [ -n "${DOCKER_CMD_PREFIX}" ]; then
+        ${DOCKER_CMD_PREFIX}docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>&1 | head -40
+    else
+        docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>&1 | head -40
+    fi
+    echo ""
+}
+
 print_status() {
     if [ "$1" = "ok" ]; then
         echo -e "${GREEN}✅ $2${NC}"
@@ -118,18 +138,19 @@ manage_services() {
             mkdir -p ${PROJECT_DIR}/data/uploads ${PROJECT_DIR}/results ${PROJECT_DIR}/data/redis
             docker_compose_cmd up -d
             wait_for_service
-            docker_compose_cmd ps
+            show_container_health
             ;;
         2)
             echo "🛑 停止服务..."
             docker_compose_cmd down
             print_status "ok" "服务已停止"
+            show_container_health
             ;;
         3)
             echo "🔄 常规重启 (Restart Only)..."
             docker_compose_cmd restart
             wait_for_service
-            docker_compose_cmd ps
+            show_container_health
             ;;
         4)
             echo "📦 有缓存重建并启动 (Build with Cache & Up - 推荐)..."
@@ -137,7 +158,7 @@ manage_services() {
             export DOCKER_BUILDKIT=1
             docker_compose_cmd up -d --build
             wait_for_service
-            docker_compose_cmd ps
+            show_container_health
             ;;
         5)
             echo -e "${YELLOW}💣 无缓存彻底重建 (No-Cache Rebuild - 耗时极长)${NC}"
@@ -153,7 +174,7 @@ manage_services() {
                 echo "🚀 启动容器..."
                 docker_compose_cmd up -d
                 wait_for_service
-                docker_compose_cmd ps
+                show_container_health
             fi
             ;;
     esac

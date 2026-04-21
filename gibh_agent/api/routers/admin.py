@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -39,8 +39,8 @@ class PendingUserOut(BaseModel):
 
     id: int
     username: str
-    email: str | None
-    created_at: datetime | None
+    email: Optional[str] = None
+    created_at: Optional[datetime] = None
 
 
 def _apply_skill_review_status(
@@ -133,7 +133,7 @@ def approve_user(
     user_id: int,
     db: Session = Depends(get_db_session),
     _admin: User = Depends(get_current_admin_user),
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
@@ -148,7 +148,7 @@ def reject_user(
     user_id: int,
     db: Session = Depends(get_db_session),
     _admin: User = Depends(get_current_admin_user),
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")

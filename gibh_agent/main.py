@@ -48,8 +48,8 @@ class GIBHAgent:
         
         # 初始化路由智能体
         self.router = RouterAgent(
-            llm_client=self.llm_clients["logic"],
-            prompt_manager=self.prompt_manager
+            llm_client=self.llm_clients.get("logic"),
+            prompt_manager=self.prompt_manager,
         )
         
         # 初始化领域智能体
@@ -88,7 +88,7 @@ class GIBHAgent:
                 return config
         return {}
     
-    def _init_llm_clients(self) -> Dict[str, LLMClient]:
+    def _init_llm_clients(self) -> Dict[str, Optional[LLMClient]]:
         """初始化 LLM 客户端"""
         llm_config = self.config.get("llm", {})
         default_type = llm_config.get("default", "cloud")
@@ -100,38 +100,12 @@ class GIBHAgent:
             clients["logic"] = LLMClientFactory.create_from_config(local_config.get("logic", {}))
             clients["vision"] = LLMClientFactory.create_from_config(local_config.get("vision", {}))
         else:
-            # 默认使用硅基流动 deepseek API
-            cloud_config = llm_config.get("cloud", {})
-            siliconflow_config = cloud_config.get("siliconflow", {})
-            if siliconflow_config:
-                # 验证 API 密钥
-                api_key = siliconflow_config.get("api_key", "")
-                if not api_key or api_key.strip() == "":
-                    error_msg = (
-                        "❌ API 密钥未设置！\n"
-                        "请设置环境变量 SILICONFLOW_API_KEY:\n"
-                        "  export SILICONFLOW_API_KEY='your_api_key_here'\n"
-                        "或者在配置文件中直接设置 api_key 字段。"
-                    )
-                    logger.error(error_msg)
-                    raise ValueError(error_msg)
-                
-                clients["logic"] = LLMClientFactory.create_from_config(siliconflow_config)
-                clients["vision"] = LLMClientFactory.create_from_config(siliconflow_config)
-            else:
-                # 回退到工厂方法
-                api_key = os.getenv("SILICONFLOW_API_KEY", "")
-                if not api_key or api_key.strip() == "":
-                    error_msg = (
-                        "❌ API 密钥未设置！\n"
-                        "请设置环境变量 SILICONFLOW_API_KEY:\n"
-                        "  export SILICONFLOW_API_KEY='your_api_key_here'"
-                    )
-                    logger.error(error_msg)
-                    raise ValueError(error_msg)
-                
-                clients["logic"] = LLMClientFactory.create_cloud_siliconflow()
-                clients["vision"] = LLMClientFactory.create_cloud_siliconflow()
+            # 云端：不在此绑定固定 LLMClient；领域智能体与路由在请求内按 model_name 经注册表按需创建（见 MODEL_ROUTING_TABLE）。
+            from gibh_agent.core.llm_cloud_providers import assert_default_model_configurable
+
+            assert_default_model_configurable()
+            clients["logic"] = None
+            clients["vision"] = None
         
         return clients
     
@@ -156,7 +130,7 @@ class GIBHAgent:
         # RNA Agent（转录组）
         test_data_dir = self.config.get("tools", {}).get("test_data_dir", None)
         agents["rna_agent"] = RNAAgent(
-            llm_client=self.llm_clients["logic"],
+            llm_client=self.llm_clients.get("logic"),
             prompt_manager=self.prompt_manager,
             dispatcher=self.dispatcher,
             cellranger_config=self.config.get("tools", {}).get("cellranger", {}),
@@ -166,39 +140,39 @@ class GIBHAgent:
         
         # DNA Agent（基因组）
         agents["dna_agent"] = DNAAgent(
-            llm_client=self.llm_clients["logic"],
+            llm_client=self.llm_clients.get("logic"),
             prompt_manager=self.prompt_manager
         )
         
         # 其他智能体（占位符）
         agents["epigenomics_agent"] = EpigenomicsAgent(
-            llm_client=self.llm_clients["logic"],
+            llm_client=self.llm_clients.get("logic"),
             prompt_manager=self.prompt_manager
         )
         
         agents["metabolomics_agent"] = MetabolomicsAgent(
-            llm_client=self.llm_clients["logic"],
+            llm_client=self.llm_clients.get("logic"),
             prompt_manager=self.prompt_manager,
             metabolomics_config=self.config.get("tools", {}).get("metabolomics", {})
         )
         
         agents["proteomics_agent"] = ProteomicsAgent(
-            llm_client=self.llm_clients["logic"],
+            llm_client=self.llm_clients.get("logic"),
             prompt_manager=self.prompt_manager
         )
         
         agents["spatial_agent"] = SpatialAgent(
-            llm_client=self.llm_clients["logic"],
+            llm_client=self.llm_clients.get("logic"),
             prompt_manager=self.prompt_manager
         )
         
         agents["radiomics_agent"] = RadiomicsAgent(
-            llm_client=self.llm_clients["logic"],
+            llm_client=self.llm_clients.get("logic"),
             prompt_manager=self.prompt_manager
         )
         
         agents["imaging_agent"] = ImagingAgent(
-            llm_client=self.llm_clients["logic"],
+            llm_client=self.llm_clients.get("logic"),
             prompt_manager=self.prompt_manager
         )
         

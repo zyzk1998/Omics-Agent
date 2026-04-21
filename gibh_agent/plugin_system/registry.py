@@ -123,6 +123,8 @@ def persist_plugin(
 
 def plugin_to_skill_plaza_payload(row: DynamicSkillPlugin) -> Dict[str, Any]:
     """供技能广场列表合并展示（与现有 Skill JSON 形状对齐）。"""
+    from gibh_agent.core.skill_plaza_utils import infer_skill_implemented_from_prompt
+
     schema_json = json.dumps(row.parameters_schema or {}, ensure_ascii=False)[:MAX_PROMPT_CHUNK]
     prompt = (
         f"[Skill_Route: execute_dynamic_skill]\n"
@@ -143,6 +145,7 @@ def plugin_to_skill_plaza_payload(row: DynamicSkillPlugin) -> Dict[str, Any]:
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "saved": False,
         "is_dynamic_plugin": True,
+        "is_implemented": infer_skill_implemented_from_prompt(prompt),
         "plugin_db_id": row.id,
         "skill_type": row.skill_type,
     }

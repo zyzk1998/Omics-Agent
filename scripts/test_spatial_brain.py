@@ -24,11 +24,13 @@ async def test_routing():
     from gibh_agent.agents.router_agent import RouterAgent
 
     try:
-        llm = LLMClientFactory.create_cloud_siliconflow() if os.getenv("SILICONFLOW_API_KEY") else None
+        from gibh_agent.core.llm_cloud_providers import get_default_chat_model
+
+        llm = LLMClientFactory.create_for_model(get_default_chat_model())
     except Exception:
         llm = None
     if not llm:
-        print("⚠️  Skipping routing test: no LLM client (set SILICONFLOW_API_KEY for full test)")
+        print("⚠️  Skipping routing test: no LLM client（请配置 MODEL_ROUTING_TABLE 默认模型所需 API Key，见 .env）")
         return True
 
     pm = create_default_prompt_manager()
@@ -57,7 +59,9 @@ async def test_preview_mode():
     assert workflow is not None, "Spatial workflow must be registered"
 
     try:
-        llm = LLMClientFactory.create_cloud_siliconflow() if os.getenv("SILICONFLOW_API_KEY") else None
+        from gibh_agent.core.llm_cloud_providers import get_default_chat_model
+
+        llm = LLMClientFactory.create_for_model(get_default_chat_model())
     except Exception:
         llm = None
     if not llm:

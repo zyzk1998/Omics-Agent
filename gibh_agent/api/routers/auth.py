@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import timedelta
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -76,7 +77,7 @@ def _sync_admin_role(db: Session, user: User) -> None:
         logger.warning("sync admin role 失败: %s", e)
 
 
-def _approval_status_of(user: User) -> str | None:
+def _approval_status_of(user: User) -> Optional[str]:
     v = getattr(user, "approval_status", None)
     if v is None:
         return None

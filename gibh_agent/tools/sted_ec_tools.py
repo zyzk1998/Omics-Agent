@@ -1600,7 +1600,10 @@ def sted_ec_expert_report(
         system_prompt += hpc_chat_system_suffix(enabled_mcps)
         user_content = build_sted_ec_child_user_message(ctx_raw)
 
-        client = LLMClientFactory.create_default()
+        from gibh_agent.core.llm_cloud_providers import validate_and_resolve_model_name
+
+        _mn = validate_and_resolve_model_name((kwargs.get("model_name") or "").strip() or None)
+        client = LLMClientFactory.create_for_model(_mn)
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},

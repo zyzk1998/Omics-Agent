@@ -6,6 +6,7 @@ import json
 from typing import Dict, Any, List, Optional
 from .base_agent import BaseAgent
 from ..core.llm_client import LLMClient
+from ..core.llm_json_extract import extract_json_object_from_llm_text
 from ..core.prompt_manager import PromptManager
 from ..core.sted_ec_intent_keywords import STED_EC_INTENT_KEYWORDS
 from ..core.spatiotemporal_dynamics_keywords import SPATIOTEMPORAL_DYNAMICS_KEYWORDS
@@ -83,7 +84,7 @@ class RouterAgent(BaseAgent):
         "spatiotemporal_dynamics": "rna_agent",
     }
     
-    def __init__(self, llm_client: LLMClient, prompt_manager: PromptManager):
+    def __init__(self, llm_client: Optional[LLMClient], prompt_manager: PromptManager):
         """初始化路由智能体"""
         super().__init__(llm_client, prompt_manager, "router")
     
@@ -464,23 +465,19 @@ If the user asks for STED-EC / moscot / optimal transport / trajectory **without
         ]
         
         try:
-            completion = await self.llm_client.achat(messages, temperature=0.1, max_tokens=256)
+            _llm = self.llm_for_request()
+            completion = await _llm.achat(messages, temperature=0.1, max_tokens=256)
             # 提取 think 过程和实际内容
-            think_content, response = self.llm_client.extract_think_and_content(completion)
+            think_content, response = _llm.extract_think_and_content(completion)
             # 如果有 think 内容，记录日志（可选）
             if think_content:
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.debug(f"Router think process: {think_content[:200]}...")
             
-            # 解析 JSON
-            json_str = response.strip()
-            if "```json" in json_str:
-                json_str = json_str.split("```json")[1].split("```")[0].strip()
-            elif "```" in json_str:
-                json_str = json_str.split("```")[1].split("```")[0].strip()
-            
-            route_result = json.loads(json_str)
+            route_result = extract_json_object_from_llm_text(response)
+            if not route_result:
+                raise ValueError("Router LLM output is not a JSON object")
             
             # 确保路由字段存在
             if "routing" not in route_result:

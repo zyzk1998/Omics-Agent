@@ -44,7 +44,7 @@ class RadiomicsAgent(BaseAgent):
 
     def __init__(
         self,
-        llm_client: LLMClient,
+        llm_client: Optional[LLMClient],
         prompt_manager: PromptManager,
         radiomics_config: Optional[Dict[str, Any]] = None,
     ):
@@ -146,8 +146,9 @@ Uploaded Files: {files_str}
             {"role": "user", "content": prompt},
         ]
         try:
-            completion = await self.llm_client.achat(messages, temperature=0.1, max_tokens=128)
-            _, content = self.llm_client.extract_think_and_content(completion)
+            _llm = self.llm_for_request()
+            completion = await _llm.achat(messages, temperature=0.1, max_tokens=128)
+            _, content = _llm.extract_think_and_content(completion)
             raw = content.strip()
             if "```json" in raw:
                 raw = raw.split("```json")[1].split("```")[0].strip()
@@ -268,11 +269,12 @@ Output in Simplified Chinese (简体中文), Markdown, with clear sections. Be c
             {"role": "user", "content": user_content},
         ]
         try:
-            completion = await self.llm_client.achat(messages, temperature=0.2, max_tokens=1500)
+            _llm = self.llm_for_request()
+            completion = await _llm.achat(messages, temperature=0.2, max_tokens=1500)
             if not completion or not getattr(completion, "choices", None):
                 return None
-            if hasattr(self.llm_client, "extract_think_and_content"):
-                _, text = self.llm_client.extract_think_and_content(completion)
+            if hasattr(_llm, "extract_think_and_content"):
+                _, text = _llm.extract_think_and_content(completion)
             else:
                 block = completion.choices[0]
                 msg = getattr(block, "message", None)
@@ -293,7 +295,7 @@ Output in Simplified Chinese (简体中文), Markdown, with clear sections. Be c
             {"role": "user", "content": query},
         ]
         try:
-            async for chunk in self.llm_client.astream(messages):
+            async for chunk in self.llm_for_request().astream(messages):
                 if chunk.choices and chunk.choices[0].delta.content:
                     c = chunk.choices[0].delta.content
                     if c:

@@ -18,6 +18,34 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Kimi / Moonshot 等网关：部分模型仅接受固定 sampling（如 temperature 必须为 1），或不接受 top_p / 惩罚项自定义
+_STRICT_VENDOR_SAMPLING_MARKERS = ("kimi", "moonshot")
+
+
+def _model_id_requires_sampling_smooth(model_id: str) -> bool:
+    m = (model_id or "").strip().lower()
+    return any(marker in m for marker in _STRICT_VENDOR_SAMPLING_MARKERS)
+
+
+def _smooth_chat_completion_params(model_id: str, params: Dict[str, Any]) -> None:
+    """
+    按模型厂商约束剔除不兼容字段，避免 400 invalid_request_error。
+    仅作用于 Kimi/Moonshot 等标记模型；DeepSeek / GLM 等保持原样。
+    """
+    if not _model_id_requires_sampling_smooth(model_id):
+        return
+    removed: list[str] = []
+    for key in ("temperature", "top_p", "presence_penalty", "frequency_penalty"):
+        if key in params:
+            params.pop(key, None)
+            removed.append(key)
+    if removed:
+        logger.info(
+            "[LLMClient] 参数抹平 model=%s 已剔除（由网关使用默认）: %s",
+            model_id,
+            ", ".join(removed),
+        )
+
 
 class LLMClient:
     """
@@ -109,6 +137,7 @@ class LLMClient:
             "stream": stream
         }
         params.update(kwargs)
+        _smooth_chat_completion_params(params["model"], params)
         logger.info("🚀 [Model Router] 通道: %s | 模型: %s", getattr(self, "_provider", "Unknown"), params["model"])
         completion = self._sync_client.chat.completions.create(**params)
         
@@ -177,6 +206,7 @@ class LLMClient:
             "stream": stream
         }
         params.update(kwargs)
+        _smooth_chat_completion_params(params["model"], params)
         logger.info("🚀 [Model Router] 通道: %s | 模型: %s", getattr(self, "_provider", "Unknown"), params["model"])
         completion = await self._async_client.chat.completions.create(**params)
         
@@ -243,6 +273,7 @@ class LLMClient:
             "stream": True
         }
         params.update(kwargs)
+        _smooth_chat_completion_params(params["model"], params)
         logger.info("🚀 [Model Router] 通道: %s | 模型: %s", getattr(self, "_provider", "Unknown"), params["model"])
         # 🔥 Task 2: 收集流式响应并记录完整 JSON
         collected_content = []
@@ -353,33 +384,27 @@ class LLMClient:
 
 def _resolve_provider_for_model(model_name: str) -> tuple:
     """
-    根据 model_name 解析使用的通道；qwen 系列走 DashScope，其余走 SiliconFlow。
+    根据注册表中的 model id 解析网关（仅 MODEL_ROUTING_TABLE 登记项）。
     每次请求独立解析，保证并发下不串线（无全局可变状态）。
     Returns:
         (base_url, api_key, provider_label)
     """
-    name = (model_name or "").strip().lower()
-    raw = (model_name or "").strip()
-    # 百炼兼容 id 多为 qwen3.5-plus 等（无 org/model 斜杠）；硅基上的 Qwen/Qwen3.5-... 须走 SiliconFlow
-    if "qwen" in name and "/" not in raw:
-        api_key = os.getenv("DASHSCOPE_API_KEY")
-        if not api_key or not str(api_key).strip():
-            raise ValueError(
-                "使用 Qwen 模型需配置 DASHSCOPE_API_KEY 环境变量。"
-                "请在 .env 中添加: DASHSCOPE_API_KEY=your_dashscope_api_key"
-            )
-        base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        logger.info("🚀 [Model Router] 目标URL: %s | 模型: %s", base_url, model_name)
-        return (base_url, api_key.strip(), "DashScope")
-    api_key = os.getenv("SILICONFLOW_API_KEY")
-    if not api_key or not str(api_key).strip():
-        raise ValueError(
-            "使用当前模型需配置 SILICONFLOW_API_KEY 环境变量。"
-            "请在 .env 中添加: SILICONFLOW_API_KEY=your_siliconflow_api_key"
-        )
-    base_url = "https://api.siliconflow.cn/v1"
-    logger.info("🚀 [Model Router] 目标URL: %s | 模型: %s", base_url, model_name)
-    return (base_url, api_key.strip(), "SiliconFlow")
+    # --- Qwen / 阿里云 DashScope（暂停；恢复时取消下方注释并配置 DASHSCOPE_API_KEY）---
+    # name = (model_name or "").strip().lower()
+    # raw = (model_name or "").strip()
+    # if "qwen" in name and "/" not in raw:
+    #     api_key = os.getenv("DASHSCOPE_API_KEY")
+    #     if not api_key or not str(api_key).strip():
+    #         raise ValueError(
+    #             "使用 Qwen 模型需配置 DASHSCOPE_API_KEY 环境变量。"
+    #             "请在 .env 中添加: DASHSCOPE_API_KEY=your_dashscope_api_key"
+    #         )
+    #     base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    #     logger.info("🚀 [Model Router] 目标URL: %s | 模型: %s", base_url, model_name)
+    #     return (base_url, api_key.strip(), "DashScope")
+    from gibh_agent.core.llm_cloud_providers import resolve_provider_tuple
+
+    return resolve_provider_tuple(model_name)
 
 
 class LLMClientFactory:
@@ -388,7 +413,7 @@ class LLMClientFactory:
     @staticmethod
     def create_for_model(model_name: str, **kwargs) -> LLMClient:
         """
-        双通道智能路由：根据 model_name 选择 DashScope 或 SiliconFlow，
+        按注册表 model id 解析网关并实例化客户端（见 llm_cloud_providers.get_client_config / resolve_provider_tuple）。
         在方法内局部实例化客户端，并发请求下不会串线。
         """
         base_url, api_key, provider = _resolve_provider_for_model(model_name)
@@ -403,47 +428,6 @@ class LLMClientFactory:
             provider=provider,
         )
 
-    @staticmethod
-    def create_default() -> LLMClient:
-        """
-        🔥 TASK 1: 创建默认LLM客户端，统一使用硅基流动DeepSeek API
-        
-        优先级：
-        1. SILICONFLOW_API_KEY 环境变量（硅基流动）
-        2. 如果未设置，抛出错误（不再回退到本地LLM）
-        
-        Returns:
-            LLMClient 实例（硅基流动DeepSeek API）
-        """
-        # 🔥 TASK 1: 统一使用硅基流动API
-        api_key = os.getenv("SILICONFLOW_API_KEY")
-        if not api_key:
-            error_msg = (
-                "❌ [LLMClientFactory] SILICONFLOW_API_KEY 环境变量未设置！\n"
-                "本项目统一使用硅基流动DeepSeek API，请设置环境变量：\n"
-                "  export SILICONFLOW_API_KEY='your_api_key_here'\n"
-                "或在 .env 文件中添加：\n"
-                "  SILICONFLOW_API_KEY=your_api_key_here"
-            )
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-        
-        # 使用硅基流动API
-        base_url = "https://api.siliconflow.cn/v1"
-        model = os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-R1")
-        
-        logger.info(f"🔗 [LLMClientFactory] 创建硅基流动LLM客户端: {base_url} (model: {model})")
-        logger.info(f"   API Key: {'***' + api_key[-4:] if len(api_key) > 4 else '***'}")
-        
-        return LLMClient(
-            base_url=base_url,
-            api_key=api_key,
-            model=model,
-            temperature=0.7,
-            max_tokens=4096,
-            timeout=None  # 不强制超时，允许无限期等待
-        )
-    
     @staticmethod
     def create_from_config(config: Dict[str, Any]) -> LLMClient:
         """
@@ -461,7 +445,8 @@ class LLMClientFactory:
             model=config.get("model", "gpt-3.5-turbo"),
             temperature=config.get("temperature", 0.7),
             max_tokens=config.get("max_tokens", 2048),
-            timeout=config.get("timeout")  # None = 无限期等待
+            timeout=config.get("timeout"),  # None = 无限期等待
+            provider=config.get("provider"),
         )
     
     @staticmethod
@@ -477,29 +462,28 @@ class LLMClientFactory:
     
     @staticmethod
     def create_cloud_deepseek(api_key: str = None, model: str = "deepseek-chat") -> LLMClient:
-        """创建 DeepSeek 云端客户端"""
-        if api_key is None:
-            api_key = os.getenv("DEEPSEEK_API_KEY", "")
-        return LLMClient(
-            base_url="https://api.deepseek.com/v1",
-            api_key=api_key,
-            model=model
+        """创建 DeepSeek 云端客户端（model 必须在 MODEL_ROUTING_TABLE 中登记）。"""
+        from gibh_agent.core.llm_cloud_providers import get_client_config
+
+        cfg = get_client_config(model, api_key_override=api_key)
+        return LLMClientFactory.create_from_config(
+            {
+                "base_url": cfg["base_url"],
+                "api_key": cfg["api_key"],
+                "model": cfg["model"],
+                "temperature": 0.7,
+                "max_tokens": 4096,
+                "timeout": None,
+                "provider": cfg["provider"],
+            }
         )
-    
+
     @staticmethod
     def create_cloud_siliconflow(api_key: str = None, model: str = None) -> LLMClient:
-        """创建 SiliconFlow 云端客户端（硅基流动）"""
-        if api_key is None:
-            api_key = os.getenv("SILICONFLOW_API_KEY", "")
-        if model is None:
-            # 默认使用 DeepSeek-R1（支持思考过程流式输出），可通过环境变量 SILICONFLOW_MODEL 覆盖
-            model = os.getenv("SILICONFLOW_MODEL", "deepseek-ai/DeepSeek-R1")
-        return LLMClient(
-            base_url="https://api.siliconflow.cn/v1",
-            api_key=api_key,
-            model=model,
-            temperature=0.7,
-            max_tokens=4096,
-            timeout=None  # 不强制超时，允许无限期等待
+        """已弃用：SiliconFlow 不再维护。请使用 LLMClientFactory.create_for_model(...) 与官方直连模型 id。"""
+        raise RuntimeError(
+            "SiliconFlow（硅基流动）已从本仓库移除。"
+            "请改用 MODEL_ROUTING_TABLE 中的官方模型 id，并配置 DEEPSEEK_API_KEY / ZHIPU_API_KEY / MOONSHOT_API_KEY 之一；"
+            "示例：LLMClientFactory.create_for_model('deepseek-chat')。"
         )
 

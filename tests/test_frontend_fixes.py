@@ -79,7 +79,9 @@ def test_llm_client_config():
         from gibh_agent.core.llm_client import LLMClientFactory
         
         # 测试创建默认客户端
-        client = LLMClientFactory.create_default()
+        from gibh_agent.core.llm_cloud_providers import get_default_chat_model
+
+        client = LLMClientFactory.create_for_model(get_default_chat_model())
         
         if client:
             print(f"✅ LLM客户端创建成功")

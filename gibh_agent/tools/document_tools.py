@@ -9,6 +9,7 @@ import uuid
 from typing import Any, Dict, Optional
 
 from gibh_agent.core.llm_client import LLMClientFactory
+from gibh_agent.core.llm_cloud_providers import get_default_chat_model
 from gibh_agent.core.tool_registry import registry
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ def _strip_code_fence(content: str) -> str:
 
 
 def _llm_text(system: str, user: str, max_tokens: int = 4096) -> str:
-    client = LLMClientFactory.create_default()
+    client = LLMClientFactory.create_for_model(get_default_chat_model())
     completion = client.chat(
         messages=[
             {"role": "system", "content": system},
