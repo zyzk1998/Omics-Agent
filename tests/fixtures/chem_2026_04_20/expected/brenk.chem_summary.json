@@ -1,0 +1,14 @@
+{
+  "tool": "brenk",
+  "canonical_smiles": "CC(=O)Oc1ccccc1C(=O)O",
+  "result": {
+    "has_brenk_alert": true,
+    "hit_count": 1,
+    "hits": [
+      {
+        "description": "phenol_ester"
+      }
+    ],
+    "catalog": "FilterCatalog.BRENK"
+  }
+}

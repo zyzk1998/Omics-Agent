@@ -1,7 +1,7 @@
 {
   "name": "gibh-desktop-app",
-  "version": "0.11.0",
-  "description": "GIBH-AGENT-V2 Electron thin-client (V0.11)",
+  "version": "0.12.0",
+  "description": "GIBH-AGENT-V2 Electron thin-client (V0.12)",
   "author": "GIBH Omics Agent",
   "main": "main.js",
   "private": true,

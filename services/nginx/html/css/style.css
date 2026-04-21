@@ -817,6 +817,8 @@
     #data-assets-pane,
     #file-management-pane,
     #chat-pane,
+    #input-wrapper-bottom,
+    .chat-input-area,
     #dropOverlay,
     #lightbox,
     #debug-sidebar,
@@ -855,12 +857,24 @@
         padding: 10px 14px 20px !important;
     }
 
-    #workspace-header .workspace-actions {
+    #workspace-header {
         display: none !important;
     }
 
     #workspace-placeholder {
         display: none !important;
+    }
+
+    /* 打印封面：与 main.css .workspace-print-header 一致，保证首屏即有正式标题 */
+    .workspace-print-header {
+        display: block !important;
+        visibility: visible !important;
+    }
+
+    #active-workspace-content {
+        margin-top: 0 !important;
+        padding-top: 0 !important;
+        page-break-before: auto;
     }
 
     #active-workspace-content,
@@ -923,6 +937,11 @@
     .skill-mm-native-csv-table tr {
         page-break-inside: avoid;
         page-break-after: auto;
+    }
+
+    figure {
+        page-break-inside: avoid;
+        break-inside: avoid;
     }
 
     /* 8) 打印时隐藏操作按钮与外链（保留正文与表格） */

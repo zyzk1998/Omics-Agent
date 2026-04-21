@@ -1,0 +1,11 @@
+{
+  "tool": "morgan_fp",
+  "canonical_smiles": "CC(=O)Oc1ccccc1C(=O)O",
+  "result": {
+    "radius": 2,
+    "n_bits": 2048,
+    "fp_sha256_preview": "1ed58113c50cbba3394109d3f0fb5872965aa2ce60125f78",
+    "density": 0.01171875,
+    "num_on_bits": 24
+  }
+}

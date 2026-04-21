@@ -67,7 +67,7 @@ async def _app_lifespan(app: FastAPI):
         try:
             from gibh_agent.mcp_client import hpc_mcp_manager
 
-            url = os.getenv("HPC_MCP_URL", "http://192.168.32.31:8001/mcp")
+            url = os.getenv("HPC_MCP_URL", "http://127.0.0.1:8001/mcp")
             transport = os.getenv("HPC_MCP_TRANSPORT", "streamableHttp")
             await hpc_mcp_manager.connect(url, transport)
         except Exception as e:
@@ -2466,8 +2466,65 @@ def _build_agent_message_content(state_snapshot_for_db: Optional[Dict[str, Any]]
         "reasoning": _as_text(snap.get("reasoning")),
         "process_log": list(snap.get("process_log") or []),
         "tool_calls": tool_calls,
+        "tool_output_memory": _as_text(snap.get("tool_output_memory")),
         "state_snapshot": snap,
     }
+
+
+def _extract_tool_output_memory_from_agent_content(content: Any) -> Optional[str]:
+    """从已入库的 agent 消息 JSON 中取出 tool_output_memory（与 orchestrator state_snapshot 一致）。"""
+    if not isinstance(content, dict):
+        return None
+    root = content.get("tool_output_memory")
+    if isinstance(root, str) and root.strip():
+        return root.strip()
+    snap = content.get("state_snapshot")
+    if isinstance(snap, dict):
+        mem = snap.get("tool_output_memory")
+        if isinstance(mem, str) and mem.strip():
+            return mem.strip()
+    return None
+
+
+def _augment_history_with_db_tool_memory(
+    session_id: Optional[str],
+    history: List[Dict[str, Any]],
+    db: Optional[Session],
+) -> List[Dict[str, Any]]:
+    """
+    若前端 history 未携带上一轮工具结构化摘要，则从本会话最近一条 agent 消息中补一条 role=system。
+    与技能快车道写入的 tool_output_memory 对齐，避免多轮追问「无法读取文件」。
+    """
+    if not session_id or db is None:
+        return list(history or [])
+    try:
+        from gibh_agent.db.models import Message as MessageModel
+
+        row = (
+            db.query(MessageModel)
+            .filter(MessageModel.session_id == session_id, MessageModel.role == "agent")
+            .order_by(MessageModel.id.desc())
+            .first()
+        )
+        if not row or not isinstance(row.content, dict):
+            return list(history or [])
+        mem = _extract_tool_output_memory_from_agent_content(row.content)
+        if not mem:
+            return list(history or [])
+        blob = "\n".join(
+            str(h.get("content") or h.get("message") or "")
+            for h in (history or [])
+            if isinstance(h, dict)
+        )
+        if mem in blob or len(mem) < 16:
+            return list(history or [])
+        out = list(history or [])
+        out.append({"role": "system", "content": mem})
+        logger.info("[Chat] 已从 DB 注入 tool_output_memory（约 %s 字符）", len(mem))
+        return out
+    except Exception as e:
+        logger.warning("⚠️ [Chat] DB 工具记忆注入失败: %s", e, exc_info=True)
+        return list(history or [])
 
 
 @app.post("/api/chat")
@@ -2537,6 +2594,14 @@ async def chat_endpoint(
             }
         )
     
+    # 首轮流式对话完成后异步生成智能标题（入库前消息条数为 0 = 本会话第一条用户消息）
+    msg_count_before = 0
+    try:
+        msg_count_before = db.query(MessageModel).filter(MessageModel.session_id == req.session_id).count()
+    except Exception:
+        pass
+    trigger_smart_title = bool(req.stream) and msg_count_before == 0
+
     # Phase 4: 用户消息入库（大模型生成前）
     try:
         db.add(MessageModel(session_id=req.session_id, role="user", content={"text": req.message or ""}))
@@ -2659,10 +2724,13 @@ async def chat_endpoint(
                             "🔧 [ChatEndpoint] compute_scheduler 已启用：统一走 AgentOrchestrator + DeepReAct（不再使用 HPC 直连短路）"
                         )
                     orchestrator = AgentOrchestrator(agent, upload_dir=str(UPLOAD_DIR))
+                    _hist_merged = _augment_history_with_db_tool_memory(
+                        req.session_id, req.history or [], db
+                    )
                     async for event in orchestrator.stream_process(
                         query=req.message,
                         files=uploaded_files,
-                        history=req.history or [],
+                        history=_hist_merged,
                         session_id=req.session_id or "default",
                         test_dataset_id=req.test_dataset_id,
                         workflow_data=req.workflow_data,
@@ -2734,6 +2802,20 @@ async def chat_endpoint(
                     except Exception as persist_err:
                         logger.error("❌ [Chat] Agent 消息入库失败: %s", persist_err, exc_info=True)
                         db.rollback()
+                    # 首轮用户消息 + 主流式已结束：异步生成会话标题（不阻塞上文 token；LLM 在线程池）
+                    if trigger_smart_title:
+                        try:
+                            from gibh_agent.core.session_title_generator import run_session_title_job
+
+                            asyncio.create_task(
+                                run_session_title_job(req.session_id, req.message or "", owner_id)
+                            )
+                        except Exception as title_sched_err:
+                            logger.warning("⚠️ [SessionTitle] 调度失败: %s", title_sched_err)
+                        try:
+                            yield f"event: session_title_refresh\ndata: {json.dumps({'session_id': req.session_id, 'pending': True}, ensure_ascii=False)}\n\n"
+                        except Exception:
+                            pass
                     # 恢复各 agent 原有 LLM 客户端
                     if original_llm_clients and agent and hasattr(agent, "agents"):
                         for name, a in agent.agents.items():
@@ -2957,9 +3039,12 @@ async def chat_endpoint(
             pass  # 日志写入失败不影响主流程
         # #endregion
         try:
+            _hist_sync = _augment_history_with_db_tool_memory(
+                req.session_id, req.history or [], db
+            )
             result = await agent.process_query(
                 query=req.message,
-                history=req.history or [],
+                history=_hist_sync,
                 uploaded_files=uploaded_files,
                 test_dataset_id=req.test_dataset_id,
                 workflow_data=req.workflow_data,

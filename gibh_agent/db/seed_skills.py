@@ -9,6 +9,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from gibh_agent.db.chem_skill_prompt_templates import CHEM_PROMPTS_BY_SKILL_NAME
 from gibh_agent.db.models import Skill as SkillModel
 
 CORE_OMICS_SKILLS = [
@@ -548,18 +549,65 @@ END
     {"name": "分子胃肠道吸收能力评估工具", "sub_category": "预测与建模", "description": "估算分子在胃肠道的吸收能力。"},
     {"name": "分子官能团识别工具", "sub_category": "数据分析", "description": "识别分子中的常见官能团 (functional groups)。"},
     {"name": "化学元素查询", "sub_category": "信息检索", "description": "查询指定化学元素的详细信息。"},
-    {"name": "分子相似性评估工具", "sub_category": "数据分析", "description": "计算两个分子的 Tanimoto 相似度。"},
-    {"name": "分子假阳性片段检测工具", "sub_category": "数据分析", "description": "使用 PAINS filter 检查分子中是否含有可能导致假阳性的片段。"},
+    {
+        "name": "分子相似性评估工具",
+        "sub_category": "分子计算",
+        "description": "双分子 Morgan 指纹 Tanimoto 相似度（2048-bit）；支持 SMILES 文本或文件。",
+        "prompt_template": PLACEHOLDER_PROMPT,
+    },
+    {
+        "name": "分子假阳性片段检测工具",
+        "sub_category": "药物筛选",
+        "description": "PAINS 泛测定干扰片段检测（RDKit FilterCatalog）。",
+        "prompt_template": PLACEHOLDER_PROMPT,
+    },
     {"name": "分子图像生成工具", "sub_category": "数据可视化", "description": "根据 SMILES 生成分子结构图像 (PNG)，上传到 MinIO 并返回文件 URL。"},
     {"name": "分子Kekulization 转换工具", "sub_category": "数据处理", "description": "对分子进行 Kekulization 转换，将芳香键转为交替单/双键。"},
     {"name": "分子芳香性感知操作工具", "sub_category": "数据处理", "description": "对分子进行芳香性感知操作。"},
     {"name": "分子Pattern Fingerprint生成工具", "sub_category": "数据处理", "description": "生成分子的 Pattern Fingerprint。"},
-    {"name": "分子Morgan Fingerprint生成工具", "sub_category": "数据处理", "description": "生成分子的 Morgan Fingerprint（局部化学环境编码的比特向量）。"},
-    {"name": "Brenk filter分子毒性检查工具", "sub_category": "预测与建模", "description": "使用 Brenk filter 检查分子是否含有潜在毒性或不良片段。"},
-    {"name": "分子BBB评估工具", "sub_category": "预测与建模", "description": "估算分子是否可能穿过血脑屏障 (BBB)。"},
-    {"name": "分子量计算工具", "sub_category": "数据分析", "description": "根据 SMILES 表达式计算分子量。"},
-    {"name": "Tanimoto 距离矩阵计算工具", "sub_category": "数据分析", "description": "基于分子指纹 (Morgan Fingerprint) 计算 Tanimoto 距离矩阵。"},
+    {
+        "name": "分子Morgan Fingerprint生成工具",
+        "sub_category": "分子计算",
+        "description": "Morgan（ECFP 类）指纹摘要：开位数与哈希预览；附 2D 结构图。",
+        "prompt_template": PLACEHOLDER_PROMPT,
+    },
+    {
+        "name": "Brenk filter分子毒性检查工具",
+        "sub_category": "药物筛选",
+        "description": "Brenk 不良片段筛查（RDKit BRENK 目录或 SMARTS 兜底）。",
+        "prompt_template": PLACEHOLDER_PROMPT,
+    },
+    {
+        "name": "分子BBB评估工具",
+        "sub_category": "药物筛选",
+        "description": "血脑屏障渗透启发式评估（理化描述符组合，非临床 PBPK）。",
+        "prompt_template": PLACEHOLDER_PROMPT,
+    },
+    {
+        "name": "分子量计算工具",
+        "sub_category": "分子计算",
+        "description": "平均分子量与精确分子量（RDKit Descriptors）。",
+        "prompt_template": PLACEHOLDER_PROMPT,
+    },
+    {
+        "name": "Tanimoto 距离矩阵计算工具",
+        "sub_category": "分子计算",
+        "description": "规划中的多分子矩阵能力；当前请使用「分子相似性评估工具」做双分子 Tanimoto。",
+        "prompt_template": PLACEHOLDER_PROMPT,
+    },
     {"name": "CP2K", "sub_category": "预测与建模", "description": "量子化学与固体物理模拟软件包，主要用于原子级别的分子动力学模拟。"},
+    {
+        "name": "高通量药物相似性检索",
+        "sub_category": "药物筛选",
+        "description": "对接 PubChem/ChEMBL 等的结构相似性检索与 HTML 报告（需 worker-pyskills + 第三方脚本；联网）。",
+        "prompt_template": """[Skill_Route: drug_similarity_search]
+您好。请提供查询分子的 **SMILES**，或上传含一行 SMILES 的文件；我将发起 **高通量相似性检索**。
+
+**可选**：在后续参数中约定 **top_n**、**similarity_threshold**、目标数据库列表等（由 SkillAgent 从对话解析）。
+
+（助手侧：**file_path** 必填若已上传附件；否则 **smiles_text**。）
+""",
+    },
     {
         "name": "DRTtools",
         "sub_category": "电化学",
@@ -579,6 +627,13 @@ END
 """,
     },
 ]
+
+# 六个 RDKit 原子技能：车道暗号与业务 Prompt 单一来源（见 chem_skill_prompt_templates.py）
+for _chem in ADDITIONAL_CHEMISTRY_SKILLS:
+    _nm = _chem.get("name")
+    if _nm in CHEM_PROMPTS_BY_SKILL_NAME:
+        _chem["prompt_template"] = CHEM_PROMPTS_BY_SKILL_NAME[_nm]
+
 for skill in ADDITIONAL_CHEMISTRY_SKILLS:
     skill["main_category"] = "化学"
     if "prompt_template" not in skill:

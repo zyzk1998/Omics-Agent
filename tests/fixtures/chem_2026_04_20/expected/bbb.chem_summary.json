@@ -1,0 +1,17 @@
+{
+  "tool": "bbb",
+  "canonical_smiles": "CC(=O)Oc1ccccc1C(=O)O",
+  "result": {
+    "MW": 180.15899999999996,
+    "MolLogP": 1.3101,
+    "TPSA": 63.60000000000001,
+    "HBD": 1,
+    "NumRotatableBonds": 2,
+    "bbb_heuristic_score": 1.0,
+    "summary_label": "可能利于 CNS 暴露（启发式）",
+    "notes": [
+      "未触发明显红旗（启发式）"
+    ],
+    "disclaimer": "此为基于理化描述符的筛选启发式，非实验或 PBPK 预测。"
+  }
+}

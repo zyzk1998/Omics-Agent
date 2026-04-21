@@ -17,6 +17,7 @@ from gibh_agent.core.llm_client import LLMClient
 from gibh_agent.core.openai_tools import tool_names_to_openai_tools
 from gibh_agent.core.stream_utils import THINK_CLOSE, THINK_OPEN, stream_from_llm_chunks
 from gibh_agent.core.tool_registry import registry
+from gibh_agent.core.tool_output_memory import build_tool_output_memory_text
 from gibh_agent.core.utils import sanitize_for_json
 
 logger = logging.getLogger(__name__)
@@ -761,9 +762,17 @@ class SkillAgent:
             self._pending_done_tool = {"tool_name": tool_name, "tool_result": tr}
             # 独立事件：避免仅靠 done 合并时丢字段；前端可提前渲染右栏
             yield self._emit("skill_tool_result", {"tool_name": tool_name, "tool_result": tr})
+            mem = ""
+            try:
+                mem = build_tool_output_memory_text(tool_name, tr)
+            except Exception as mem_exc:  # noqa: BLE001
+                logger.warning("工具输出记忆注入构建失败（忽略）: %s", mem_exc, exc_info=True)
+            ux = "✅ **技能执行成功，请在右侧工作台查看详细报告。**"
+            full_text = f"{ux}\n\n{mem}" if mem else ux
             yield self._emit(
                 "message",
                 {
-                    "content": "✅ **技能执行成功，请在右侧工作台查看详细报告。**",
+                    "content": full_text,
+                    **({"tool_output_memory": mem} if mem else {}),
                 },
             )

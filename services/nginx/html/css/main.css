@@ -472,6 +472,34 @@
                 background: #fff;
             }
             #workspace-header .workspace-title { font-size: 14px; font-weight: 600; color: #111827; }
+            /* 标题与刷新合并：整块可点，刷新图标在标题右侧 */
+            #workspace-header .workspace-title-refresh-btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                margin: 0;
+                padding: 6px 10px;
+                background: transparent;
+                border: none;
+                border-radius: 6px;
+                cursor: pointer;
+                font: inherit;
+                color: #111827;
+                max-width: min(52vw, 320px);
+            }
+            #workspace-header .workspace-title-refresh-btn:hover { background-color: #f3f4f6; }
+            #workspace-header .workspace-title-refresh-btn .workspace-title-text {
+                font-size: 14px;
+                font-weight: 600;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                text-align: left;
+            }
+            #workspace-header .workspace-title-refresh-btn .workspace-refresh-icon {
+                flex-shrink: 0;
+                color: #4b5563;
+            }
             #workspace-header .workspace-actions { display: flex; align-items: center; gap: 8px; }
             .execution-instance-highlight {
                 outline: 3px solid #3b82f6;
@@ -2656,4 +2684,80 @@
             @keyframes demo-coach-pulse {
                 0%, 100% { box-shadow: 0 0 0 0 rgba(77, 107, 254, 0.35); }
                 50% { box-shadow: 0 0 0 10px rgba(77, 107, 254, 0); }
+            }
+
+            /* ========== 工作台：打印封面（屏幕隐藏，仅 PDF/打印可见）========== */
+            .workspace-print-header {
+                display: none !important;
+            }
+            .workspace-title-refresh-btn .workspace-refresh-icon {
+                flex-shrink: 0;
+                vertical-align: middle;
+            }
+
+            /* ========== 打印媒体：破除 flex/100vh 白页 + 报告封面（与 style.css 协同）========== */
+            @media print {
+                @page {
+                    margin: 12mm 14mm;
+                    size: auto;
+                }
+                /* 强制剥离视口锁、滚动容器与绝对定位，避免打印引擎空白首页 */
+                html,
+                body,
+                #app,
+                .main-layout,
+                .three-pane-row,
+                #workspace-pane,
+                .workspace-container,
+                .workspace-scroll,
+                .report-content {
+                    position: relative !important;
+                    height: auto !important;
+                    min-height: 0 !important;
+                    max-height: none !important;
+                    display: block !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    overflow: visible !important;
+                    flex: none !important;
+                }
+                #sidebar-pane,
+                #chat-pane,
+                .input-toolbar,
+                .toolbar,
+                .btn-return-chat,
+                .return-chat-toolbar-host {
+                    display: none !important;
+                }
+                #workspace-pane {
+                    width: 100% !important;
+                    page-break-before: avoid !important;
+                }
+                .workspace-print-header {
+                    display: block !important;
+                    visibility: visible !important;
+                    page-break-after: avoid;
+                    break-after: avoid-page;
+                    margin: 0 0 14pt 0 !important;
+                    padding: 0 0 12pt 0 !important;
+                    border-bottom: 2px solid #1f2937 !important;
+                }
+                .workspace-print-header__title {
+                    font-size: 20pt !important;
+                    font-weight: 700 !important;
+                    color: #111 !important;
+                    margin: 0 0 8pt 0 !important;
+                }
+                .workspace-print-header__meta {
+                    display: flex !important;
+                    justify-content: space-between !important;
+                    font-size: 9pt !important;
+                    color: #4b5563 !important;
+                }
+                img,
+                table,
+                figure {
+                    page-break-inside: avoid;
+                    break-inside: avoid;
+                }
             }

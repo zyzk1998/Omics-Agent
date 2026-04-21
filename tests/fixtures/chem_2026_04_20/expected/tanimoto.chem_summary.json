@@ -1,0 +1,10 @@
+{
+  "tool": "tanimoto",
+  "result": {
+    "smiles_a": "CC(=O)Oc1ccccc1C(=O)O",
+    "smiles_b": "Cn1cnc2c1c(=O)[nH]c(=O)n2C",
+    "tanimoto_similarity": 0.085106,
+    "tanimoto_distance": 0.914894,
+    "fingerprint": "Morgan r=2, 2048-bit"
+  }
+}

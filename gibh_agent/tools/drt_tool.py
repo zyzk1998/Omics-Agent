@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+from html import escape
 import subprocess
 import sys
 import uuid
@@ -138,18 +139,41 @@ def _public_urls_from_artifacts(artifacts: Dict[str, List[str]]) -> Tuple[List[s
 
 
 def _markdown_for_drt(image_urls: List[str], json_url: Optional[str]) -> str:
-    lines = [
+    """组装技能右栏 Markdown：同一行资源链接 + 固定视口内的 HTML 图片预览（禁止裸 ``![](...)``）。"""
+    chunks: List[str] = [
         "### DRT（弛豫时间分布）分析结果",
         "",
-        "- 以下为 **DRT 分布图** 与 **Nyquist 拟合对比**（同源 `/results/` 静态资源）。",
+        "以下为 **DRT 分布图** 与 **Nyquist 拟合对比**（同源 `/results/` 静态资源）。",
+        "",
     ]
+    link_parts: List[str] = []
     if json_url:
-        lines.append(f"- 数值摘要 JSON：[下载/打开]({json_url})（`drt_summary.json`）。")
-        lines.append("")
-    for u in image_urls:
-        lines.append(f"![]({u})")
-        lines.append("")
-    return "\n".join(lines).strip()
+        link_parts.append(f"数值摘要 JSON：[下载/打开]({json_url})（`drt_summary.json`）")
+    labels = ("DRT 分布图", "Nyquist 拟合对比")
+    for idx, u in enumerate(image_urls):
+        lab = labels[idx] if idx < len(labels) else f"结果图 {idx + 1}"
+        link_parts.append(f"{lab}：[下载]({u})")
+    if link_parts:
+        chunks.append("- " + " · ".join(link_parts))
+        chunks.append("")
+
+    for image_url in image_urls:
+        src = escape(image_url, quote=True)
+        chunks.append(
+            '<div style="max-height: 450px; width: 100%; overflow: hidden; '
+            'border: 1px solid #e5e7eb; border-radius: 8px; display: flex; '
+            "justify-content: center; align-items: center; background-color: #f8fafc; "
+            f'margin-top: 16px;">\n'
+            f'    <img src="{src}" alt="DRT Analysis Plot" '
+            'style="max-width: 100%; max-height: 450px; object-fit: contain; cursor: zoom-in;" '
+            'onclick="window.open(this.src, \'_blank\')" />\n'
+            "</div>\n"
+            '<p style="text-align: center; font-size: 12px; color: #6b7280; margin-top: 8px;">'
+            "点击图片可放大查看原图</p>"
+        )
+        chunks.append("")
+
+    return "\n".join(chunks).strip()
 
 
 @registry.register(

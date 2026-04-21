@@ -70,6 +70,8 @@ services:
       - PYTHONPATH=/app
       # BepiPred-3.0：镜像内 /opt/bepipred3-venv（不受 .:/app 挂载覆盖）；本地可覆盖为 third_party/.../.venv/bin/python
       - BEPIPRED3_PYTHON=${BEPIPRED3_PYTHON:-/opt/bepipred3-venv/bin/python}
+      # chem_*（run_chem_tool.py）子进程解释器：镜像内置 /opt/chem-rdkit-venv（必含 rdkit-pypi）；勿与主进程的 sys.executable 混淆
+      - CHEM_RDKIT_PYTHON=${CHEM_RDKIT_PYTHON:-/opt/chem-rdkit-venv/bin/python}
       # entrypoint 运行时补齐 venv 时与构建使用相同 PyTorch 源（GPU 主机请在 .env 设 cu121/cu124）
       - BEPIPRED_TORCH_INDEX=${BEPIPRED_TORCH_INDEX:-https://download.pytorch.org/whl/cpu}
       # 设为 0 可关闭启动时自动 pip 安装 BepiPred venv

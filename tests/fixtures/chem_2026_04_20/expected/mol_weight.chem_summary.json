@@ -1,0 +1,8 @@
+{
+  "tool": "mol_weight",
+  "canonical_smiles": "CC(=O)Oc1ccccc1C(=O)O",
+  "result": {
+    "exact_molecular_weight": 180.042259,
+    "average_molecular_weight": 180.159
+  }
+}

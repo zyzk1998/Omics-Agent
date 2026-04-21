@@ -234,7 +234,6 @@
             <div class="header-right">
                 <a href="/downloads/" class="icon-btn icon-btn-text" id="link-download-desktop" title="打开下载页：Windows 安装向导 / Linux AppImage">安装桌面版</a>
                 <button type="button" class="icon-btn" onclick="toggleDebugSidebar()" title="调试面板"><i class="bi bi-bug"></i></button>
-                <button type="button" class="icon-btn" title="分享"><i class="bi bi-share"></i></button>
                 <button type="button" class="icon-btn icon-btn-text" id="btn-expand-workspace" title="展开/收起工作台">展开工作台</button>
             </div>
         </header>
@@ -330,14 +329,23 @@
             <!-- 右栏：工作台（执行详情与报告） -->
             <aside id="workspace-pane">
                 <header id="workspace-header">
-                    <span id="workspace-task-title" class="workspace-title">分析报告</span>
+                    <button type="button" id="btn-workspace-title-refresh" class="workspace-title-refresh-btn" title="刷新工作台内容" onclick="refreshWorkspaceContent()">
+                        <span id="workspace-task-title" class="workspace-title workspace-title-text">分析报告</span>
+                        <svg class="workspace-refresh-icon" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    </button>
                     <div class="workspace-actions">
+                        <button type="button" class="header-action-btn header-action-btn--expert" id="btn-workspace-expert-report" title="基于当前会话工具结果生成专家 Markdown 报告">✨ 生成专家分析报告</button>
                         <button type="button" class="header-action-btn" id="btn-workspace-print" title="打印/下载报告">🖨️ 打印/下载报告</button>
-                        <button type="button" class="header-action-btn" id="btn-workspace-expand-all" title="查看所有运行结果">查看所有运行结果</button>
                         <button type="button" class="icon-btn" id="btn-workspace-close" title="关闭工作台">✕</button>
                     </div>
                 </header>
                 <div class="workspace-scroll">
+                    <div id="workspace-print-header" class="workspace-print-header" aria-hidden="true">
+                        <h1 class="workspace-print-header__title">Omics Agent 智能分析报告</h1>
+                        <div class="workspace-print-header__meta">
+                            <span>生成时间：<span id="workspace-print-time"></span></span>
+                        </div>
+                    </div>
                     <div id="workspace-placeholder">在此处查看任务执行详情与分析报告</div>
                     <div id="active-workspace-content"></div>
                 </div>
@@ -1473,13 +1481,32 @@
             ];
 
             /* 技能收藏状态 100% 来自后端 GET /api/skills 的 saved 字段与 UserSavedSkill 表，不使用 localStorage。*/
-            /** 已实现/已对接后端的技能置顶（与 API ORDER BY 双保险；合并特色区后仍再排一次） */
+            /** 技能广场条目时间戳（与后端排序一致：同「已接入」档位内 created_at 越新越靠前） */
+            function skillPlazaCreatedTs(skill) {
+                var t = skill && skill.created_at;
+                if (!t) return 0;
+                var ms = Date.parse(String(t));
+                return isNaN(ms) ? 0 : ms;
+            }
+            /** 已实现/已对接后端的技能置顶（同档内再按 created_at 降序，与 GET /api/skills 及 PATCH 刷新时间戳一致） */
             function sortSkillsPinImplemented(items) {
                 return (items || []).slice().sort(function(a, b) {
                     var ia = (a && (a.is_implemented === true || a.is_implemented === 1)) ? 1 : 0;
                     var ib = (b && (b.is_implemented === true || b.is_implemented === 1)) ? 1 : 0;
                     if (ib !== ia) return ib - ia;
-                    return 0;
+                    return skillPlazaCreatedTs(b) - skillPlazaCreatedTs(a);
+                });
+            }
+            /** 与 seed_skills.PLACEHOLDER_PROMPT 全文一致的技能不在橱窗展示（DB 仍保留；后端 GET /api/skills 已过滤，此处兜底旧缓存） */
+            function filterPlaceholderSkillsForPlaza(items) {
+                var phNorm = '您好。我希望使用本项分析能力完成具体的科研或数据处理任务。请说明您的研究目标、数据类型与物种背景；我将据此给出可执行的分析建议与参数说明。';
+                phNorm = phNorm.replace(/\s+/g, ' ').trim();
+                return (items || []).filter(function(s) {
+                    if (!s) return false;
+                    var pt = s.prompt_template;
+                    if (pt == null || pt === '') return true;
+                    var a = String(pt).replace(/\s+/g, ' ').trim();
+                    return a !== phNorm;
                 });
             }
             function fetchSkills(mainCat, page) {
@@ -1542,6 +1569,7 @@
                                 }
                             }
                         }
+                        items = filterPlaceholderSkillsForPlaza(items);
                         if (!grid) return;
                         if (items.length === 0) {
                             grid.innerHTML = '';
@@ -1550,7 +1578,7 @@
                         } else {
                             window._lastSkillsItems = items;
                             if (emptyEl) emptyEl.style.display = 'none';
-                            var skillCardIcons = { '转录组学': '🧬', '空间组学': '🗺️', '代谢组学': '🧪', '医学影像组学': '🩻', '基因组学': '🧬', '表观遗传组学': '📊', '蛋白质组学': '🔗', '轨迹推断': '📈', '动态插件': '⚡', '用户上传': '📦', '电化学': '🔋' };
+                            var skillCardIcons = { '转录组学': '🧬', '空间组学': '🗺️', '代谢组学': '🧪', '医学影像组学': '🩻', '基因组学': '🧬', '表观遗传组学': '📊', '蛋白质组学': '🔗', '轨迹推断': '📈', '动态插件': '⚡', '用户上传': '📦', '电化学': '🔋', '药物筛选': '💊', '分子计算': '⚗️' };
                             grid.innerHTML = items.map(function(s) {
                                 try {
                                     var name = (s.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1567,10 +1595,21 @@
                                     var catBadges = '';
                                     if (mainCat) catBadges += '<span class="cat-badge">' + mainCat + '</span>';
                                     if (subCat) catBadges += '<span class="cat-badge">' + subCat + '</span>';
-                                    var tagSub = (subCat || '数据分析').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                                    var implOk = (s.is_implemented === true || s.is_implemented === 1);
-                                    var flowTag = implOk ? '动态工作流·已接入' : '动态工作流·规划中';
-                                    var tagsHtml = '<span class="tag">' + flowTag.replace(/</g, '&lt;') + '</span><span class="tag">' + tagSub + '</span>';
+                                    var escTag = function(t) {
+                                        return String(t == null ? '' : t).replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                                    };
+                                    var tagsHtml = '';
+                                    if (Array.isArray(s.tags) && s.tags.length) {
+                                        tagsHtml = s.tags.slice(0, 4).map(function(tg) {
+                                            return '<span class="tag">' + escTag(tg) + '</span>';
+                                        }).join('');
+                                    } else {
+                                        var mcEsc = escTag(s.main_category || '');
+                                        var scEsc = escTag(s.sub_category || '');
+                                        if (mcEsc) tagsHtml += '<span class="tag">' + mcEsc + '</span>';
+                                        if (scEsc && scEsc !== mcEsc) tagsHtml += '<span class="tag">' + scEsc + '</span>';
+                                        if (!tagsHtml) tagsHtml = '<span class="tag">未分类</span>';
+                                    }
                                     var isSaved = !!(s.saved === true);
                                     var isDyn = !!(s.is_dynamic_plugin === true);
                                     var addBtnTitle = isSaved ? '已收藏' : '添加到我的工具';
@@ -1581,7 +1620,6 @@
                                         ? '<span class="icon-btn icon-btn--disabled" title="动态插件暂不支持收藏" style="opacity:0.45;cursor:not-allowed;pointer-events:none;">' + addBtnSvg + '</span>'
                                         : '<button type="button" class="icon-btn btn-skill-bookmark" title="' + addBtnTitle + '" data-skill-id="' + s.id + '" data-saved="' + (isSaved ? '1' : '0') + '">' + addBtnSvg + '</button>';
                                     var footerActionsHtml = bookmarkBlock +
-                                        '<button type="button" class="icon-btn" title="分享"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg></button>' +
                                         '<button type="button" class="icon-btn" title="复制"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>';
                                     return '<div class="' + cardClass + '" data-skill-id="' + s.id + '">' +
                                         '<div class="skill-card-header">' +
@@ -1844,6 +1882,12 @@
                     showToast('请先登录或注册，再使用技能发起对话', 'warning');
                     return;
                 }
+                /** 当前聊天状态机中的会话 ID（与历史列表第一条无关） */
+                function getActiveSessionIdFromState() {
+                    return (typeof currentSessionId !== 'undefined' && currentSessionId)
+                        ? String(currentSessionId).trim()
+                        : '';
+                }
                 if (skill && skill.name === DRUG_SIM_DUAL_SKILL_NAME) {
                     openDrugSimilarityModeModal(skill, function(mode) {
                         var injectDrug = function() {
@@ -1858,29 +1902,39 @@
                             }
                         };
                         if (useMode === 'continue') {
-                            var sid = getLastActiveSessionId();
-                            if (!sid) {
-                                if (typeof showToast === 'function') showToast('当前无活跃会话', 'warning');
+                            var sidAct = getActiveSessionIdFromState();
+                            if (!sidAct) {
+                                if (typeof showToast === 'function') {
+                                    showToast('当前无活跃会话，请选择新建会话后再使用「在当前会话继续」。', 'warning');
+                                }
                                 return;
                             }
-                            loadSessionAndRestore(sid, '', function() { injectDrug(); });
+                            if (typeof switchToChatView === 'function') switchToChatView();
+                            else if (typeof showChatView === 'function') showChatView();
+                            injectDrug();
                             return;
                         }
-                        showChatView();
+                        if (typeof clearChatAndReset === 'function') clearChatAndReset();
+                        else if (typeof showChatView === 'function') showChatView();
                         injectDrug();
                     });
                     return;
                 }
                 if (useMode === 'continue') {
-                    var sid2 = getLastActiveSessionId();
-                    if (!sid2) {
-                        if (typeof showToast === 'function') showToast('当前无活跃会话', 'warning');
+                    var sidCont = getActiveSessionIdFromState();
+                    if (!sidCont) {
+                        if (typeof showToast === 'function') {
+                            showToast('当前无活跃会话，请选择新建会话后再使用「在当前会话继续」。', 'warning');
+                        }
                         return;
                     }
-                    loadSessionAndRestore(sid2, '', function() { applySkillPromptToChat(skill); });
+                    if (typeof switchToChatView === 'function') switchToChatView();
+                    else if (typeof showChatView === 'function') showChatView();
+                    applySkillPromptToChat(skill);
                     return;
                 }
-                showChatView();
+                if (typeof clearChatAndReset === 'function') clearChatAndReset();
+                else if (typeof showChatView === 'function') showChatView();
                 applySkillPromptToChat(skill);
             }
 
@@ -4758,6 +4812,25 @@
                     if (!wp.classList.contains('workspace-active')) wp.style.width = '';
                     this.textContent = wp.classList.contains('workspace-active') ? '收起工作台' : '展开工作台';
                 };
+                var btnExpertReport = document.getElementById('btn-workspace-expert-report');
+                if (btnExpertReport) {
+                    btnExpertReport.onclick = function () {
+                        try {
+                            if (typeof currentSessionId === 'undefined' || !currentSessionId) {
+                                if (typeof showToast === 'function') showToast('当前无活跃会话，请先发起对话或新建会话。', 'warning');
+                                else alert('当前无活跃会话，请先发起对话或新建会话。');
+                                return;
+                            }
+                            var hiddenExpert = '[Skill_Route: generate_expert_report]\n请根据当前会话中的工具计算结果，生成一份深度的专家分析报告。';
+                            if (typeof sendMessage === 'function') {
+                                sendMessage(null, '✨ 正在请求生成专家分析报告…', null, null, false, null, hiddenExpert);
+                            }
+                        } catch (errEr) {
+                            console.error('[btn-workspace-expert-report]', errEr);
+                            alert('请求失败：' + (errEr && errEr.message ? errEr.message : String(errEr)));
+                        }
+                    };
+                }
                 var btnPrint = document.getElementById('btn-workspace-print');
                 if (btnPrint) {
                     btnPrint.onclick = function () {
@@ -4770,34 +4843,6 @@
                         }
                     };
                 }
-                var btnExpandAll = document.getElementById('btn-workspace-expand-all');
-                if (btnExpandAll) btnExpandAll.onclick = function() {
-                    var root = document.getElementById('active-workspace-content');
-                    if (!root) return;
-                    var collapses = root.querySelectorAll('.execution-instance .accordion-collapse, #skill-ws-history-accordion .accordion-collapse');
-                    collapses.forEach(function(c) {
-                        if (!c) return;
-                        c.classList.add('show');
-                        c.style.display = '';
-                        c.setAttribute('aria-expanded', 'true');
-                        var targetId = c.id;
-                        if (targetId) {
-                            var safe = (window.CSS && CSS.escape) ? CSS.escape(targetId) : targetId;
-                            var btn = root.querySelector('[data-bs-target="#' + safe + '"]');
-                            if (btn) {
-                                btn.classList.remove('collapsed');
-                                btn.setAttribute('aria-expanded', 'true');
-                            }
-                        }
-                        // 若 bootstrap 实例存在，用其 show 让动画/状态更一致
-                        try {
-                            if (window.bootstrap && typeof window.bootstrap.Collapse === 'function') {
-                                var inst = window.bootstrap.Collapse.getOrCreateInstance ? window.bootstrap.Collapse.getOrCreateInstance(c, { toggle: false }) : null;
-                                if (inst && inst.show) inst.show();
-                            }
-                        } catch (e) {}
-                    });
-                };
                 var btnClose = document.getElementById('btn-workspace-close');
                 if (btnClose) btnClose.onclick = function() {
                     var wp = document.getElementById('workspace-pane');
@@ -7569,12 +7614,67 @@
                                     } catch (_ms) {}
                                     break;
 
+                                case 'session_title_refresh':
+                                    // 主流结束后服务端已调度异步标题生成；立即拉列表 + 延迟再拉以接住 DB 更新（侧栏先显示截断标题）
+                                    if (typeof fetchSessions === 'function') {
+                                        fetchSessions();
+                                        setTimeout(function() { if (typeof fetchSessions === 'function') fetchSessions(); }, 700);
+                                        setTimeout(function() { if (typeof fetchSessions === 'function') fetchSessions(); }, 2200);
+                                    }
+                                    break;
+
+                                case 'session_title_updated':
+                                    // 可选：若后端单独推送 title，则原地更新侧栏文案
+                                    if (data && data.session_id && data.title != null) {
+                                        var _sid = String(data.session_id);
+                                        var _tit = String(data.title || '').trim();
+                                        if (_tit) {
+                                            var _items = document.querySelectorAll('#sidebar-sessions-list .sidebar-session-item');
+                                            for (var _ii = 0; _ii < _items.length; _ii++) {
+                                                if (_items[_ii].dataset.sessionId === _sid) {
+                                                    var _ts = _items[_ii].querySelector('.item-text');
+                                                    var _disp = _tit.length > 24 ? _tit.slice(0, 24) + '...' : _tit;
+                                                    if (_ts) _ts.textContent = _disp;
+                                                    _items[_ii].title = _tit;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    break;
+
                                 case 'skill_tool_result':
                                     if (data && data.tool_result != null && typeof data.tool_result === 'object' && !Array.isArray(data.tool_result) && data.tool_result.status === 'success') {
                                         try { renderSkillToolWorkspace(data.tool_name, data.tool_result); } catch (e) { console.warn('skill_tool_result', e); }
                                         try { injectSkillToolStdoutIntoProcessLog(data.tool_name, data.tool_result); } catch (e2) { console.warn('injectSkillToolStdoutIntoProcessLog', e2); }
                                     }
                                     break;
+
+                                case 'workspace_update': {
+                                    var mdWs = (data && data.markdown != null) ? String(data.markdown) : '';
+                                    var wpWs = document.getElementById('workspace-pane');
+                                    if (wpWs) wpWs.classList.add('workspace-active');
+                                    var phWs = document.getElementById('workspace-placeholder');
+                                    if (phWs) phWs.style.display = 'none';
+                                    if (typeof setWorkspaceTitle === 'function') setWorkspaceTitle('专家分析报告');
+                                    var rootWs = document.getElementById('active-workspace-content');
+                                    if (!rootWs) break;
+                                    var mountWs = document.getElementById('expert-report-workspace-mount');
+                                    if (!mountWs) {
+                                        mountWs = document.createElement('div');
+                                        mountWs.id = 'expert-report-workspace-mount';
+                                        mountWs.className = 'expert-report-workspace-mount unified-report-container report-content';
+                                        rootWs.insertBefore(mountWs, rootWs.firstChild);
+                                    }
+                                    try {
+                                        mountWs.innerHTML = '<div class="card border-0 shadow-sm"><div class="card-body expert-report-md-body" style="font-size:14px;line-height:1.75;color:#1f2937">' +
+                                            (typeof safeMarkedParse === 'function' ? safeMarkedParse(mdWs) : escapeHtml(mdWs)) +
+                                            '</div></div>';
+                                    } catch (eWs) {
+                                        mountWs.textContent = mdWs;
+                                    }
+                                    break;
+                                }
 
                                 case 'done':
                                     sseStreamTerminalEventReceived = true;
@@ -9519,6 +9619,50 @@
             }
 
             /**
+             * 刷新右侧工作台：重渲染技能报告手风琴、为静态资源加 cache-bust，便于图表/iframe 重载。
+             */
+            function refreshWorkspaceContent() {
+                var root = document.getElementById('active-workspace-content');
+                if (!root || !String(root.innerHTML || '').trim()) {
+                    if (typeof showToast === 'function') showToast('暂无工作台内容可刷新', 'info');
+                    return;
+                }
+                try {
+                    if (window.__skillWorkspaceReportEntries && window.__skillWorkspaceReportEntries.length > 0 && typeof renderSkillWorkspaceHistoryAccordion === 'function') {
+                        renderSkillWorkspaceHistoryAccordion();
+                    }
+                } catch (e) {
+                    console.warn('[refreshWorkspaceContent] re-render', e);
+                }
+                try {
+                    root.querySelectorAll('iframe').forEach(function (ifr) {
+                        var u = ifr.getAttribute('src');
+                        if (!u) return;
+                        var base = u.split('#')[0];
+                        var re = /([?&])_wsts=\d+/;
+                        base = re.test(base) ? base.replace(re, '$1_wsts=' + Date.now()) : base + (base.indexOf('?') >= 0 ? '&' : '?') + '_wsts=' + Date.now();
+                        ifr.src = base;
+                    });
+                } catch (e2) {
+                    console.warn('[refreshWorkspaceContent] iframe', e2);
+                }
+                try {
+                    root.querySelectorAll('img').forEach(function (img) {
+                        var u = img.getAttribute('src');
+                        if (!u || u.indexOf('data:') === 0) return;
+                        var base = u.split('#')[0];
+                        var re = /([?&])_wsts=\d+/;
+                        base = re.test(base) ? base.replace(re, '$1_wsts=' + Date.now()) : base + (base.indexOf('?') >= 0 ? '&' : '?') + '_wsts=' + Date.now();
+                        img.src = base;
+                    });
+                } catch (e3) {
+                    console.warn('[refreshWorkspaceContent] img', e3);
+                }
+                if (typeof showToast === 'function') showToast('工作台已刷新', 'success');
+            }
+            window.refreshWorkspaceContent = refreshWorkspaceContent;
+
+            /**
              * 工作台打印：仅触发 window.print()；显示/隐藏、flex 解锁、iframe 与 CSV 分页由 style.css @media print 统一处理。
              */
             window.handlePrintWorkspace = function () {
@@ -9528,6 +9672,10 @@
                     else alert('请先展开右侧工作台');
                     return;
                 }
+                try {
+                    var tEl = document.getElementById('workspace-print-time');
+                    if (tEl) tEl.textContent = new Date().toLocaleString();
+                } catch (_e) {}
                 try {
                     window.print();
                 } catch (e) {

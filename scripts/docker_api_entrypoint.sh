@@ -47,4 +47,17 @@ if [ "$needs_bepipred_bootstrap" = "1" ]; then
   fi
 fi
 
+# chem_*（RDKit）：镜像层应含 /opt/chem-rdkit-venv；须 numpy<2 + 与 Dockerfile 一致的 Draw 自检（缺 libXrender 或 NumPy2 时会失败）
+if [ ! -x /opt/chem-rdkit-venv/bin/python ] || \
+   ! /opt/chem-rdkit-venv/bin/python -c "import numpy as np; assert np.__version__.startswith('1.'); from rdkit.Chem import AllChem, Descriptors, Draw" >/dev/null 2>&1; then
+  echo "[entrypoint] chem-rdkit：venv 缺失或 RDKit/Draw/numpy 自检失败，尝试运行时重建…"
+  rm -rf /opt/chem-rdkit-venv
+  python3 -m venv /opt/chem-rdkit-venv
+  /opt/chem-rdkit-venv/bin/pip install -U pip
+  /opt/chem-rdkit-venv/bin/pip install 'numpy>=1.24.0,<2'
+  /opt/chem-rdkit-venv/bin/pip install --no-cache-dir 'rdkit-pypi>=2022.3.1'
+  chown -R appuser:appuser /opt/chem-rdkit-venv
+  echo "[entrypoint] chem-rdkit：/opt/chem-rdkit-venv 已就绪。"
+fi
+
 exec gosu appuser "$@"

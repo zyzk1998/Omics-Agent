@@ -832,6 +832,18 @@ class AgentOrchestrator:
                 state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
                 yield self._format_sse("state_snapshot", state_snapshot)
                 return
+            if tool_name_sk == "generate_expert_report":
+                async for _sse_chunk in self._stream_generate_expert_report(
+                    state_snapshot,
+                    llm_client,
+                    model_name,
+                    kwargs.get("session_id"),
+                    db,
+                    _query_str,
+                ):
+                    yield _sse_chunk
+                    await asyncio.sleep(0.01)
+                return
             from gibh_agent.agents.skill_agent import SkillAgent
 
             def _skill_format_sse(event_type: str, data: Dict[str, Any]) -> str:
@@ -3144,6 +3156,154 @@ class AgentOrchestrator:
             )
         return f"event: {event_type}\ndata: {json_data}\n\n"
 
+    def _fetch_last_tool_output_memory(self, session_id: Optional[str], db: Any) -> str:
+        """从本会话最近一条 agent 入库消息读取 tool_output_memory / 技能结果，供专家报告使用。"""
+        if not session_id or db is None:
+            return ""
+        try:
+            from gibh_agent.db.models import Message as MessageModel
+
+            row = (
+                db.query(MessageModel)
+                .filter(MessageModel.session_id == session_id, MessageModel.role == "agent")
+                .order_by(MessageModel.id.desc())
+                .first()
+            )
+            if not row or not isinstance(row.content, dict):
+                return ""
+            c = row.content
+            mem = c.get("tool_output_memory")
+            if isinstance(mem, str) and mem.strip():
+                return mem.strip()
+            snap = c.get("state_snapshot")
+            if isinstance(snap, dict):
+                mem = snap.get("tool_output_memory")
+                if isinstance(mem, str) and mem.strip():
+                    return mem.strip()
+                st = snap.get("skill_last_tool")
+                if isinstance(st, dict) and st.get("tool_result") is not None:
+                    try:
+                        return json.dumps(st.get("tool_result"), ensure_ascii=False, indent=2)[:200000]
+                    except Exception:
+                        return str(st.get("tool_result"))[:200000]
+        except Exception as e:
+            logger.warning("⚠️ [ExpertReport] 读取 tool_output_memory 失败: %s", e)
+        return ""
+
+    async def _stream_generate_expert_report(
+        self,
+        state_snapshot: Dict[str, Any],
+        llm_client: Any,
+        model_name: str,
+        session_id: Optional[str],
+        db: Any,
+        user_query: str,
+    ) -> AsyncIterator[str]:
+        """Skill_Route: generate_expert_report — 仅下发 workspace_update + 短提示，正文不进聊天主气泡。"""
+        from .stream_utils import stream_from_llm_chunks
+
+        mem = self._fetch_last_tool_output_memory(session_id, db)
+        if not mem.strip():
+            yield self._emit_sse(
+                state_snapshot,
+                "message",
+                {
+                    "content": "未找到可解读的工具输出：请先在**同一会话**中成功运行技能，再生成专家报告。",
+                },
+            )
+            yield self._emit_sse(state_snapshot, "done", {"status": "error"})
+            state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+            yield self._format_sse("state_snapshot", state_snapshot)
+            return
+
+        yield self._emit_sse(
+            state_snapshot,
+            "status",
+            {"content": "正在生成专家分析报告（右侧工作台）…", "state": "running"},
+        )
+        system = (
+            "你是资深计算生物学与化学信息学专家。请根据用户提供的**工具结构化输出**，"
+            "撰写一份专业、可打印的 **Markdown 分析报告**。\n"
+            "要求：\n"
+            "1) 使用二级/三级标题组织：摘要、数据与方法要点、主要发现、结论与建议、局限性（如适用）。\n"
+            "2) 对数值、阈值、命中列表做条理化归纳；勿编造未在上下文中出现的数据。\n"
+            "3) 全文使用专业、中性中文；不要使用夸张或口语化感叹。\n"
+            "4) 直接输出 Markdown 正文，不要外层代码围栏。"
+        )
+        user_block = (
+            "【用户说明】\n"
+            f"{(user_query or '').strip()}\n\n"
+            "【工具输出上下文】\n"
+            f"{mem}"
+        )
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_block},
+        ]
+        buf: List[str] = []
+        try:
+            async for event_type, data in stream_from_llm_chunks(
+                llm_client.astream(
+                    messages,
+                    temperature=0.35,
+                    max_tokens=8192,
+                    model=model_name,
+                ),
+                model_name=model_name,
+            ):
+                if event_type == "message":
+                    ch = data.get("content") or ""
+                    if ch:
+                        buf.append(ch)
+                        acc = "".join(buf)
+                        yield self._emit_sse(
+                            state_snapshot,
+                            "workspace_update",
+                            {"markdown": acc, "partial": True},
+                        )
+        except Exception as e:
+            logger.exception("❌ [ExpertReport] 流式生成失败: %s", e)
+            yield self._emit_sse(
+                state_snapshot,
+                "message",
+                {"content": f"专家报告生成失败：{e}"},
+            )
+            yield self._emit_sse(state_snapshot, "done", {"status": "error"})
+            state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+            yield self._format_sse("state_snapshot", state_snapshot)
+            return
+
+        final_md = "".join(buf).strip()
+        if not final_md:
+            yield self._emit_sse(
+                state_snapshot,
+                "message",
+                {"content": "模型未返回报告正文，请稍后重试。"},
+            )
+            yield self._emit_sse(state_snapshot, "done", {"status": "error"})
+            state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+            yield self._format_sse("state_snapshot", state_snapshot)
+            return
+
+        yield self._emit_sse(
+            state_snapshot,
+            "workspace_update",
+            {"markdown": final_md, "partial": False},
+        )
+        yield self._emit_sse(
+            state_snapshot,
+            "message",
+            {"content": "✅ 专家分析报告已生成，请在**右侧工作台**查看与打印。"},
+        )
+        yield self._emit_sse(state_snapshot, "status", {"content": "专家报告就绪", "state": "completed"})
+        await asyncio.sleep(0.01)
+        yield self._emit_sse(state_snapshot, "done", {"status": "success"})
+        state_snapshot["text"] = self._sanitize_snapshot_text(
+            (state_snapshot.get("text") or "")
+            + "\n【专家分析报告已写入右侧工作台】"
+        )
+        yield self._format_sse("state_snapshot", state_snapshot)
+
     @staticmethod
     def _sanitize_snapshot_text(text: str) -> str:
         """清洗 state_snapshot 文本：剔除 <<>>...<<>> 与 <think>...</think> 标签（含跨行）。"""
@@ -3925,6 +4085,13 @@ class AgentOrchestrator:
             }
         elif event_type == "message":
             state_snapshot["text"] = (state_snapshot.get("text") or "") + (data.get("content") or "")
+            tom = data.get("tool_output_memory")
+            if isinstance(tom, str) and tom.strip():
+                state_snapshot["tool_output_memory"] = tom.strip()
+        elif event_type == "workspace_update" and isinstance(data, dict):
+            md = data.get("markdown")
+            if isinstance(md, str) and md.strip():
+                state_snapshot["expert_report_markdown"] = md.strip()
         elif event_type == "status" and data:
             # 🔥 约束二：process_log 与前端 state 一致（running/completed/error/start 等），保证图标/动画一致
             # 技能快车道 [AgenticLog] 细粒度事件不入库：否则快照每条 token 一行，历史还原会出现数千条 JSON

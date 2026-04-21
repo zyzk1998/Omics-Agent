@@ -31,6 +31,11 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     gosu \
     bedtools \
+    libxrender1 \
+    libxext6 \
+    libfontconfig1 \
+    libxft2 \
+    libcairo2 \
     && rm -rf /var/lib/apt/lists/*
 
 # 配置 pip 使用国内镜像源（清华大学镜像，速度更快）
@@ -45,6 +50,17 @@ COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip && \
     pip install -r requirements.txt
+
+# RDKit 化学原子工具（chem_*）：独立 venv；须固定 numpy<2（与仓库 requirements 一致，避免 rdInfoTheory _ARRAY_API / NumPy 2 ABI 崩溃）
+# 系统库 libxrender 等：MolToImage / Draw 依赖 libXrender.so.1（无头容器亦需安装）
+RUN python3 -m venv /opt/chem-rdkit-venv && \
+    /opt/chem-rdkit-venv/bin/pip install -U pip && \
+    /opt/chem-rdkit-venv/bin/pip install 'numpy>=1.24.0,<2' && \
+    /opt/chem-rdkit-venv/bin/pip install --no-cache-dir 'rdkit-pypi>=2022.3.1' && \
+    /opt/chem-rdkit-venv/bin/python -c \
+    "import numpy as np; import rdkit; from rdkit.Chem import AllChem, DataStructs, Descriptors, Draw; print('chem-rdkit-venv ok', rdkit.__version__, 'numpy', np.__version__)"
+
+ENV CHEM_RDKIT_PYTHON=/opt/chem-rdkit-venv/bin/python
 
 # BepiPred-3.0 独立 venv（必须放在 /opt，避免 compose 挂载 .:/app 覆盖 /app 下 .venv）
 # 默认 CPU 版 torch；GPU 构建示例：--build-arg BEPIPRED_TORCH_INDEX=https://download.pytorch.org/whl/cu121
@@ -71,7 +87,7 @@ RUN groupadd -r appuser && \
 
 # 创建必要的目录并设置权限
 RUN mkdir -p /app/uploads /app/results /app/data /home/appuser/.cache /home/appuser/.config && \
-    chown -R appuser:appuser /app /home/appuser /opt/bepipred3-venv
+    chown -R appuser:appuser /app /home/appuser /opt/bepipred3-venv /opt/chem-rdkit-venv
 
 # 入口脚本：权限修复 +（可选）运行时补齐 BepiPred venv
 RUN chmod +x /entrypoint.sh

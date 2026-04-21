@@ -68,6 +68,10 @@ sqlalchemy>=2.0.0
 pymysql>=1.1.0
 cryptography>=41.0.0
 
+# 药物化学 RDKit 原子工具（chem_*，子进程 run_chem_tool.py；镜像内需预装）
+# PyPI 当前分发线为 2022.x（与 conda-forge RDKit 版本号不同）；勿写仓库中不存在的下界以免 pip 求解失败
+rdkit-pypi>=2022.3.1
+
 # Phase 2: 鉴权 - 密码哈希与 JWT（pwdlib 替代 passlib，兼容最新 bcrypt，无 72 字节自检 Bug）
 pwdlib[bcrypt]
 python-jose[cryptography]>=3.3.0

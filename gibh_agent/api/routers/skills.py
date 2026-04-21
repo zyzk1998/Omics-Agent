@@ -15,7 +15,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from gibh_agent.core.skill_plaza_utils import infer_skill_implemented_from_prompt
+from gibh_agent.core.skill_plaza_utils import (
+    infer_skill_implemented_from_prompt,
+    is_prompt_placeholder_only,
+)
 from gibh_agent.core.deps import (
     get_current_user,
     get_current_owner_id,
@@ -79,8 +82,8 @@ def list_skills_public(
         return q
 
     q = _query()
-    total = q.count()
-    if total == 0 and not saved_only:
+    _count_all = q.count()
+    if _count_all == 0 and not saved_only:
         try:
             from gibh_agent.db.seed_skills import run_upsert_system_skills
 
@@ -90,7 +93,7 @@ def list_skills_public(
             db.rollback()
             logger.warning("[Skills] 按需补种失败: %s", e)
         q = _query()
-        total = q.count()
+        _count_all = q.count()
 
     all_rows = q.order_by(SkillModel.id.asc()).all()
     tuples = []
@@ -102,7 +105,13 @@ def list_skills_public(
     tuples.sort(key=lambda x: (not x[0], -x[1]))
     sorted_rows = [t[2] for t in tuples]
 
+    # 橱窗隐藏「仅占位文案」技能（与 seed PLACEHOLDER 一致）；DB 仍保留便于后续补模板。
+    # 「我的」收藏夹不过滤，以便用户对历史收藏的占位技能取消收藏。
+    if not saved_only:
+        sorted_rows = [r for r in sorted_rows if not is_prompt_placeholder_only(r.prompt_template)]
+
     offset_db = (page - 1) * size
+    total = len(sorted_rows)
     page_rows = sorted_rows[offset_db : offset_db + size]
 
     saved_ids: set = set()

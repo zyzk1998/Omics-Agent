@@ -1,0 +1,9 @@
+{
+  "tool": "pains",
+  "canonical_smiles": "CC(=O)Oc1ccccc1C(=O)O",
+  "result": {
+    "has_pains_hit": false,
+    "hit_count": 0,
+    "hits": []
+  }
+}
