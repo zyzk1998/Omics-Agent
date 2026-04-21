@@ -33,22 +33,17 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------------------------
-# Step 2 — 官方 micro.mamba.pm 安装脚本（非 mambaforge 预装镜像）
+# Step 2 — micromamba 静态二进制（GitHub Release，避免 install.sh 行为/网络导致未写入 BIN_FOLDER）
 # -----------------------------------------------------------------------------
-# 非交互下 install.sh 读取环境变量：BIN_FOLDER 决定二进制路径；INIT/CONDA_FORGE 关闭交互与默认 conda-forge 写入
-# （频道改由 Step 3 的 .condarc 统一为清华源）。
-# VERSION 可选固定 micromamba-releases 标签，保证可复现构建。
+# 标签与 https://github.com/mamba-org/micromamba-releases/releases 一致；多架构可扩展 micromamba-linux-aarch64 等。
 ARG MICROMAMBA_VERSION=2.4.0-0
-ENV HOME=/root \
-    BIN_FOLDER=/usr/local/bin \
-    INIT_YES=no \
-    CONDA_FORGE_YES=no \
-    VERSION=${MICROMAMBA_VERSION}
+ENV HOME=/root
 
 RUN set -eux; \
     mkdir -p /usr/local/bin; \
-    curl -Ls https://micro.mamba.pm/install.sh | bash; \
-    test -x /usr/local/bin/micromamba; \
+    curl -fSL "https://github.com/mamba-org/micromamba-releases/releases/download/${MICROMAMBA_VERSION}/micromamba-linux-64" \
+      -o /usr/local/bin/micromamba; \
+    chmod +x /usr/local/bin/micromamba; \
     /usr/local/bin/micromamba --version
 
 # -----------------------------------------------------------------------------

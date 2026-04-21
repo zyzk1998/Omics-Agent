@@ -156,7 +156,7 @@ services:
       context: ./workers/worker-pyskills
       # 必须启用 BuildKit，否则 Dockerfile 中 RUN --mount=type=cache 无法解析。示例：
       #   DOCKER_BUILDKIT=1 docker compose build worker-pyskills
-      # micromamba 版本见 workers/worker-pyskills/Dockerfile 的 MICROMAMBA_VERSION（对应 install.sh 的 VERSION）
+      # micromamba 版本见 workers/worker-pyskills/Dockerfile 的 MICROMAMBA_VERSION（GitHub micromamba-releases 标签）
       args:
         MICROMAMBA_VERSION: ${MICROMAMBA_VERSION:-2.4.0-0}
     container_name: worker-pyskills
