@@ -32,6 +32,7 @@
         <div class="back"><a href="/">← 返回首页</a></div>
         <h1>下载桌面客户端</h1>
         <p class="ver-line" id="ver-line">版本 —</p>
+        <p class="ver-line" id="ver-sub" style="margin-top:-1rem;font-size:0.88rem;display:none;"></p>
 
         <div class="card">
             <div class="card-h">本版更新说明（V0.12）</div>
@@ -44,7 +45,7 @@
 
         <div class="card">
             <div class="card-h">Windows（64 位）</div>
-            <p class="dl-hint">链接由 <code>client-release.json</code> 中的文件名决定；页面会检测文件是否已放到本站 <code>/downloads/</code>。若长期「暂不可下载」，请在 x64 Windows 上进入仓库 <code>gibh-desktop-app</code> 执行 <code>npm run dist</code>，将生成的 <code>Omics Agent Setup 0.12.0.exe</code> 上传到服务器同目录（Linux 上交叉编 NSIS 需 Wine，见 electron-builder 文档）。</p>
+            <p class="dl-hint">链接由 <code>client-release.json</code> 的 <code>winSetupFile</code> 决定。当前 Windows 提供 <strong>V0.11</strong> 安装包；若需替换，将对应 <code>.exe</code> 放到本站 <code>/downloads/</code> 并更新 JSON。</p>
             <a id="win-dl" class="btn" href="#" download>下载 Windows 安装包</a>
             <p id="win-missing" class="note">暂无可用的安装包，请稍后再试。</p>
         </div>
@@ -76,8 +77,9 @@
                 version: '0.12.0',
                 displayVersion: 'V0.12',
                 productName: 'Omics Agent',
-                winSetupFile: 'Omics Agent Setup 0.12.0.exe',
-                linuxAppImageFile: 'Omics Agent-0.12.0.AppImage'
+                winSetupFile: 'Omics Agent Setup 0.11.0.exe',
+                linuxAppImageFile: 'Omics Agent-0.12.0.AppImage',
+                platformNote: 'Windows 安装包当前为 V0.11；Linux AppImage 为 V0.12。'
             };
 
             function setVersion(meta) {
@@ -85,6 +87,16 @@
                 var dv = meta.displayVersion || ('V' + meta.version);
                 var v = meta.version || '';
                 verLine.textContent = '当前版本 ' + dv + '（' + v + '）';
+                var sub = document.getElementById('ver-sub');
+                if (sub) {
+                    if (meta.platformNote) {
+                        sub.style.display = 'block';
+                        sub.textContent = meta.platformNote;
+                    } else {
+                        sub.style.display = 'none';
+                        sub.textContent = '';
+                    }
+                }
             }
 
             function run(meta) {

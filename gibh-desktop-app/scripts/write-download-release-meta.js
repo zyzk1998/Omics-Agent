@@ -103,6 +103,24 @@ const payload = {
   updatedAt: new Date().toISOString(),
 };
 
+/** 若站点已手动固定 Windows 安装包文件名（如暂提供旧版 exe），保留 winSetupFile / platformNote，避免 npm run sync 覆盖 */
+let effectiveWin = winSetupFile;
+let effectiveLinux = linuxAppImageFile;
+try {
+  if (fs.existsSync(outPath)) {
+    const prev = JSON.parse(fs.readFileSync(outPath, 'utf8'));
+    if (prev && prev.winPinned === true && prev.winSetupFile) {
+      payload.winSetupFile = prev.winSetupFile;
+      payload.winPinned = true;
+      if (prev.platformNote) payload.platformNote = prev.platformNote;
+      effectiveWin = payload.winSetupFile;
+      console.log('保留 winPinned：Windows 安装包文件名为', effectiveWin);
+    }
+  }
+} catch (e) {
+  console.warn('读取旧 client-release.json 合并失败，使用计算值', e.message);
+}
+
 const downloadsDir = path.dirname(outPath);
 fs.mkdirSync(downloadsDir, { recursive: true });
 fs.writeFileSync(outPath, JSON.stringify(payload, null, 2), 'utf8');
@@ -117,6 +135,6 @@ if (fs.existsSync(iconSrc)) {
   console.warn('未找到', iconSrc, '：跳过 client-app-icon.png');
 }
 
-ensureArtifactInDownloads(winSetupFile, downloadsDir);
-ensureArtifactInDownloads(linuxAppImageFile, downloadsDir);
-removeStaleArtifacts(downloadsDir, productName, winSetupFile, linuxAppImageFile);
+ensureArtifactInDownloads(effectiveWin, downloadsDir);
+ensureArtifactInDownloads(effectiveLinux, downloadsDir);
+removeStaleArtifacts(downloadsDir, productName, effectiveWin, effectiveLinux);
