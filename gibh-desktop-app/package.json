@@ -12,7 +12,9 @@
     "sync:download-page": "node scripts/write-download-release-meta.js",
     "dist": "npm run icons:win && electron-builder && npm run sync:download-page",
     "dist:linux": "electron-builder --linux && npm run sync:download-page",
-    "dist:web": "npm run icons:win && electron-builder --linux --win portable && npm run sync:download-page"
+    "dist:win": "npm run icons:win && electron-builder --win --x64 && npm run sync:download-page",
+    "dist:web": "npm run icons:win && electron-builder --linux --win portable && npm run sync:download-page",
+    "publish:to-server": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/publish-omics-client-from-windows.ps1"
   },
   "devDependencies": {
     "electron": "^28.3.3",

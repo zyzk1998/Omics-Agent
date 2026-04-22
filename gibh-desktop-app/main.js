@@ -9,7 +9,7 @@ if (process.platform === 'win32') {
   app.setAppUserModelId('com.gibh.agent.demo');
 }
 
-/** 窗口与安装包图标：gibh-desktop-app/app-icon.png（圆角白底+主体，四角透明；sync_desktop_app_icon.sh 同步到站点；npm run icons:win 用 ico-codec 生成 PNG-in-ICO → build/icon.ico） */
+/** 仅客户端：gibh-desktop-app/app-icon.png（瘦客户端/任务栏/安装包，与 Web 的 static/favicon.png 解耦；npm run icons:win → build/icon.ico；write-download-release-meta 同步 downloads/client-app-icon.png） */
 function getWindowIconPath() {
   const p = path.join(__dirname, 'app-icon.png');
   return fs.existsSync(p) ? p : undefined;

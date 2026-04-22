@@ -5,9 +5,9 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Omics Agent</title>
         <!-- 标准 Favicon -->
-        <link rel="icon" type="image/png" href="/static/favicon.png?v=10">
+        <link rel="icon" type="image/png" href="/static/favicon.png?v=13">
         <!-- 苹果设备 Touch Icon (提升在 iOS 上的书签显示效果) -->
-        <link rel="apple-touch-icon" href="/static/favicon.png?v=10">
+        <link rel="apple-touch-icon" href="/static/favicon.png?v=13">
         <!-- 核心库 -->
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
@@ -47,7 +47,7 @@
             <aside id="sidebar-pane">
                 <div class="sidebar-fixed-top">
                     <div class="sidebar-logo-row" id="sidebarLogoRow" title="点击折叠/展开侧栏">
-                        <img src="/static/favicon.png?v=10" alt="Omics Agent" class="sidebar-logo" width="28" height="28" decoding="async" fetchpriority="high">
+                        <img src="/static/favicon.png?v=13" alt="Omics Agent" class="sidebar-logo" width="28" height="28" decoding="async" fetchpriority="high">
                         <span class="sidebar-title">Omics Agent</span>
                         <button type="button" class="sidebar-toggle-btn" id="sidebarToggleBtn" aria-label="折叠侧栏"><svg class="sidebar-pane-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button>
                     </div>
@@ -241,7 +241,7 @@
         <div id="empty-state-wrapper">
             <div id="chat-hero-section" class="chat-hero-section">
             <div id="hero-branding" class="hero-branding">
-                <img src="/static/favicon.png?v=10" alt="Omics Agent" class="hero-logo" width="64" height="32" decoding="async">
+                <img src="/static/favicon.png?v=13" alt="Omics Agent" class="hero-logo" width="56" height="56" decoding="async">
                 <h1 class="hero-title">Omics Agent</h1>
             </div>
             <div class="hero-feature-cards" role="navigation" aria-label="快捷入口">
@@ -334,7 +334,6 @@
                         <svg class="workspace-refresh-icon" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                     </button>
                     <div class="workspace-actions">
-                        <button type="button" class="header-action-btn header-action-btn--expert" id="btn-workspace-expert-report" title="基于当前会话工具结果生成专家 Markdown 报告">✨ 生成专家分析报告</button>
                         <button type="button" class="header-action-btn" id="btn-workspace-print" title="打印/下载报告">🖨️ 打印/下载报告</button>
                         <button type="button" class="icon-btn" id="btn-workspace-close" title="关闭工作台">✕</button>
                     </div>
@@ -1509,6 +1508,15 @@
                     return a !== phNorm;
                 });
             }
+            /** 与后端 MULTIMODAL_PLAZA_HIDDEN_SUBCATEGORIES 一致：暂缓上线的多模态子类不进橱窗（种子仍在 DB）。「我的」不关此过滤。 */
+            function filterDeferredMultimodalSkillsForPlaza(items) {
+                var hiddenSub = { '基因组学': 1, '表观遗传组学': 1, '蛋白质组学': 1 };
+                return (items || []).filter(function(s) {
+                    if (!s) return false;
+                    if (String(s.main_category || '').trim() !== '多模态组学') return true;
+                    return !hiddenSub[String(s.sub_category || '').trim()];
+                });
+            }
             function fetchSkills(mainCat, page) {
                 skillsCurrentMain = (mainCat != null && mainCat !== undefined) ? (mainCat || '') : skillsCurrentMain;
                 skillsCurrentPage = page || 1;
@@ -1570,6 +1578,7 @@
                             }
                         }
                         items = filterPlaceholderSkillsForPlaza(items);
+                        if (!isMyTab) items = filterDeferredMultimodalSkillsForPlaza(items);
                         if (!grid) return;
                         if (items.length === 0) {
                             grid.innerHTML = '';
@@ -4812,25 +4821,6 @@
                     if (!wp.classList.contains('workspace-active')) wp.style.width = '';
                     this.textContent = wp.classList.contains('workspace-active') ? '收起工作台' : '展开工作台';
                 };
-                var btnExpertReport = document.getElementById('btn-workspace-expert-report');
-                if (btnExpertReport) {
-                    btnExpertReport.onclick = function () {
-                        try {
-                            if (typeof currentSessionId === 'undefined' || !currentSessionId) {
-                                if (typeof showToast === 'function') showToast('当前无活跃会话，请先发起对话或新建会话。', 'warning');
-                                else alert('当前无活跃会话，请先发起对话或新建会话。');
-                                return;
-                            }
-                            var hiddenExpert = '[Skill_Route: generate_expert_report]\n请根据当前会话中的工具计算结果，生成一份深度的专家分析报告。';
-                            if (typeof sendMessage === 'function') {
-                                sendMessage(null, '✨ 正在请求生成专家分析报告…', null, null, false, null, hiddenExpert);
-                            }
-                        } catch (errEr) {
-                            console.error('[btn-workspace-expert-report]', errEr);
-                            alert('请求失败：' + (errEr && errEr.message ? errEr.message : String(errEr)));
-                        }
-                    };
-                }
                 var btnPrint = document.getElementById('btn-workspace-print');
                 if (btnPrint) {
                     btnPrint.onclick = function () {

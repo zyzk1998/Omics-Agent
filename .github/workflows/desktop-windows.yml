@@ -1,0 +1,35 @@
+# 在 GitHub 云端 Windows Runner 上打出 NSIS 安装包，产物为 Artifact（无需本地 Windows）。
+# 发布后：下载 Artifact 中的 .exe，或在自建 Runner / SSH 后续步骤里上传到 Nginx 静态目录。
+name: Desktop client — Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "desktop-v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: gibh-desktop-app/package-lock.json
+
+      - name: Install & build (NSIS)
+        working-directory: gibh-desktop-app
+        run: |
+          npm ci
+          npm run icons:win
+          npx electron-builder --win --x64
+
+      - uses: actions/upload-artifact@v4
+        name: Upload Setup exe
+        with:
+          name: omics-agent-windows-setup-${{ github.sha }}
+          path: gibh-desktop-app/dist-out/*.exe
+          if-no-files-found: error
