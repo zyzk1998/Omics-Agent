@@ -4,6 +4,15 @@ const path = require('path');
 const fs = require('fs');
 const { app, BrowserWindow, ipcMain } = require('electron');
 
+// ---------------------------------------------------------------------------
+// 【打包发行前必改】生产环境（app.isPackaged === true）默认打开的 Omics Web 根地址。
+// 下一行常量即为总指挥填写真实 Linux 站点（示例：http://192.168.x.x:8018）的唯一位置。
+// 开发环境仍用 DEV_SERVER_URL；任意环境均可被环境变量 OMICS_AGENT_WEB_URL 覆盖。
+// ---------------------------------------------------------------------------
+const PROD_SERVER_URL = 'http://127.0.0.1:8018';
+
+const DEV_SERVER_URL = 'http://127.0.0.1:8018';
+
 /** Windows 任务栏 / 开始菜单分组图标与安装包一致，需与 package.json 的 appId 相同 */
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.gibh.agent.demo');
@@ -16,11 +25,22 @@ function getWindowIconPath() {
 }
 
 function getWebBase() {
-  const raw =
+  const envUrl =
     process.env.OMICS_AGENT_WEB_URL && String(process.env.OMICS_AGENT_WEB_URL).trim()
       ? String(process.env.OMICS_AGENT_WEB_URL).trim().replace(/\/$/, '')
-      : 'http://127.0.0.1:8018';
-  return raw;
+      : '';
+  if (envUrl) {
+    console.log('[Omics Agent] Web 基址 ← 环境变量 OMICS_AGENT_WEB_URL:', envUrl);
+    return envUrl;
+  }
+  if (app.isPackaged) {
+    const u = PROD_SERVER_URL.replace(/\/$/, '');
+    console.log('[Omics Agent] Web 基址 ← 生产打包（main.js 常量 PROD_SERVER_URL）:', u);
+    return u;
+  }
+  const u = DEV_SERVER_URL.replace(/\/$/, '');
+  console.log('[Omics Agent] Web 基址 ← 开发模式（常量 DEV_SERVER_URL）:', u);
+  return u;
 }
 
 function loadRemote(win) {
