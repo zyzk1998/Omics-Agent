@@ -8,6 +8,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -18,6 +19,7 @@ try:
     from mcp import ClientSession
     from mcp.client.sse import sse_client
     from mcp.client.streamable_http import streamable_http_client
+    from mcp.shared._httpx_utils import create_mcp_http_client
 except ImportError as e:  # pragma: no cover
     raise RuntimeError("mcp SDK is required in mcp-gateway image") from e
 
@@ -50,6 +52,43 @@ def _format_connection_exception(exc: BaseException) -> str:
     if curx is not None and curx is not exc.__cause__:
         parts.append(f"context {type(curx).__name__}: {curx!s}")
     return " || ".join(parts)
+
+
+def _read_file_secret(env_var: str) -> str:
+    """从环境变量指向的文件读取密钥（Docker secret / 挂载文件），失败返回空串。"""
+    path = (os.getenv(env_var) or "").strip()
+    if not path:
+        return ""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError as e:
+        logger.warning("[mcp-gateway] cannot read %s=%r: %s", env_var, path, e)
+        return ""
+
+
+def resolve_hpc_mcp_upstream_headers() -> Optional[Dict[str, str]]:
+    """
+    上游 HPC MCP 若启用 HTTP 鉴权，需由网关注入请求头（主 API 不经手官方 mcp 传输层）。
+
+    优先级：
+    - HPC_MCP_AUTHORIZATION：完整的 Authorization 头值（如 ``Bearer xxx`` 或网关要求的其它 scheme）
+    - HPC_MCP_AUTH_TOKEN / HPC_MCP_BEARER_TOKEN / HPC_MCP_API_KEY：自动加 ``Bearer `` 前缀
+    - * _FILE 变体：自文件读取（不含引号与换行）
+    """
+    direct = (os.getenv("HPC_MCP_AUTHORIZATION") or "").strip()
+    if not direct:
+        direct = _read_file_secret("HPC_MCP_AUTHORIZATION_FILE")
+    if direct:
+        return {"Authorization": direct}
+
+    for key in ("HPC_MCP_AUTH_TOKEN", "HPC_MCP_BEARER_TOKEN", "HPC_MCP_API_KEY"):
+        raw = (os.getenv(key) or "").strip()
+        if not raw:
+            raw = _read_file_secret(f"{key}_FILE")
+        if raw:
+            return {"Authorization": f"Bearer {raw}"}
+    return None
 
 
 def _normalize_transport(transport: str) -> str:
@@ -122,6 +161,8 @@ class GatewayState:
             "tools": [t["name"] for t in self._tools],
             "tool_details": list(self._tools),
             "last_error": self._last_error,
+            # 布尔位供前后端排障：不泄露密钥
+            "upstream_auth_configured": resolve_hpc_mcp_upstream_headers() is not None,
         }
 
     def _tool_to_payload(self, tool: Any) -> Optional[Dict[str, Any]]:
@@ -187,26 +228,29 @@ class GatewayState:
         nt = _normalize_transport(self.transport)
         url = self.url
         logger.info("[mcp-gateway] connecting url=%s transport=%s", url, nt)
+        try:
+            host = (urlparse(url).hostname or "").lower()
+            if host in ("127.0.0.1", "localhost", "::1"):
+                logger.warning(
+                    "[mcp-gateway] HPC_MCP_URL 使用回环主机名 (%s)。在 Docker 容器内这会指向容器自身而非宿主机；"
+                    "若 MCP 监听在宿主机，请改为 http://host.docker.internal:<端口>/...，并确认 compose 中 mcp-gateway 含 "
+                    "extra_hosts: host.docker.internal:host-gateway（见 docker-compose.yml）。",
+                    url,
+                )
+        except Exception:  # noqa: BLE001
+            pass
 
         try:
-            if nt == "streamablehttp":
-                cm = streamable_http_client(url)
-            elif nt == "sse":
-                cm = sse_client(
-                    url,
-                    timeout=float(os.getenv("HPC_MCP_SSE_TIMEOUT", "30")),
-                    sse_read_timeout=float(os.getenv("HPC_MCP_SSE_READ_TIMEOUT", "300")),
+            up_headers = resolve_hpc_mcp_upstream_headers()
+            if up_headers:
+                logger.info(
+                    "[mcp-gateway] upstream Authorization: configured (scheme=%s)",
+                    (up_headers.get("Authorization") or "").split()[0] if up_headers.get("Authorization") else "?",
                 )
             else:
-                self._last_error = f"不支持的 transport: {self.transport}"
-                logger.warning("[mcp-gateway] %s", self._last_error)
-                return
+                logger.info("[mcp-gateway] upstream Authorization: not configured (HPC_MCP_AUTH_* unset)")
 
-            async with cm as streams:
-                if nt == "streamablehttp":
-                    read_stream, write_stream, _ = streams
-                else:
-                    read_stream, write_stream = streams
+            async def _run_mcp_session(read_stream: Any, write_stream: Any) -> None:
                 async with ClientSession(read_stream, write_stream) as session:
                     await asyncio.wait_for(session.initialize(), timeout=30.0)
                     listed = await asyncio.wait_for(session.list_tools(), timeout=60.0)
@@ -219,6 +263,30 @@ class GatewayState:
                         await asyncio.Event().wait()
                     except asyncio.CancelledError:
                         raise
+
+            if nt == "streamablehttp":
+                if up_headers:
+                    async with create_mcp_http_client(headers=up_headers) as http_client:
+                        async with streamable_http_client(url, http_client=http_client) as streams:
+                            read_stream, write_stream, _ = streams
+                            await _run_mcp_session(read_stream, write_stream)
+                else:
+                    async with streamable_http_client(url) as streams:
+                        read_stream, write_stream, _ = streams
+                        await _run_mcp_session(read_stream, write_stream)
+            elif nt == "sse":
+                async with sse_client(
+                    url,
+                    headers=up_headers,
+                    timeout=float(os.getenv("HPC_MCP_SSE_TIMEOUT", "30")),
+                    sse_read_timeout=float(os.getenv("HPC_MCP_SSE_READ_TIMEOUT", "300")),
+                ) as streams:
+                    read_stream, write_stream = streams
+                    await _run_mcp_session(read_stream, write_stream)
+            else:
+                self._last_error = f"不支持的 transport: {self.transport}"
+                logger.warning("[mcp-gateway] %s", self._last_error)
+                return
         except asyncio.CancelledError:
             logger.info("[mcp-gateway] connection task cancelled")
             raise
@@ -295,6 +363,17 @@ class GatewayState:
             suffix += " | hint=dns_resolution_failed"
         elif "certificate" in el or "ssl" in el or "tls" in el:
             suffix += " | hint=tls_or_cert"
+        elif (
+            "401" in err
+            or "403" in err
+            or "unauthorized" in el
+            or "forbidden" in el
+            or "client error '401" in el
+            or "client error '403" in el
+        ):
+            suffix += " | hint=upstream_http_auth_failed"
+            if resolve_hpc_mcp_upstream_headers() is None:
+                suffix += " | note=set_HPC_MCP_AUTH_TOKEN_or_HPC_MCP_AUTHORIZATION_on_mcp_gateway"
         detail = detail + suffix
         max_len = int(os.getenv("HPC_MCP_503_DETAIL_MAX", "2500"))
         if len(detail) > max_len:

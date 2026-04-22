@@ -102,7 +102,8 @@ services:
       - MCP_GATEWAY_URL=${MCP_GATEWAY_URL:-http://mcp-gateway:8002}
       # HPC 直连默认调 execute_hpc_command；若远端提供 hpc_mcp_chat 可改为该名
       - HPC_ORCH_CHAT_TOOL=${HPC_ORCH_CHAT_TOOL:-execute_hpc_command}
-      - HPC_MCP_URL=${HPC_MCP_URL:-http://127.0.0.1:8001/mcp}
+      # 容器内 127.0.0.1 不是宿主机：默认经 host.docker.internal 访问宿主机 MCP（须配合 mcp-gateway.extra_hosts）
+      - HPC_MCP_URL=${HPC_MCP_URL:-http://host.docker.internal:8001/mcp}
       - HPC_MCP_TRANSPORT=${HPC_MCP_TRANSPORT:-streamableHttp}
       # Task 产线减负（QueryRewriter 旁路 + 关键词意图命中则跳过意图 LLM）；见 docs/TASK_PRODUCTION_LINE_SLIMMING_ANALYSIS.md
       - GIBH_LITE_TASK_MODE=${GIBH_LITE_TASK_MODE:-0}
@@ -140,10 +141,16 @@ services:
     restart: always
     environment:
       - TZ=Asia/Shanghai
-      - HPC_MCP_URL=${HPC_MCP_URL:-http://127.0.0.1:8001/mcp}
+      - HPC_MCP_URL=${HPC_MCP_URL:-http://host.docker.internal:8001/mcp}
       - HPC_MCP_TRANSPORT=${HPC_MCP_TRANSPORT:-streamableHttp}
+      # 上游 HCP MCP 若要求 Bearer / 自定义 Authorization，必须在网关进程注入（见 services/mcp-gateway/main.py）
+      - HPC_MCP_AUTHORIZATION=${HPC_MCP_AUTHORIZATION:-}
+      - HPC_MCP_AUTH_TOKEN=${HPC_MCP_AUTH_TOKEN:-}
     ports:
       - "8002:8002"
+    # Linux 容器访问「宿主机」上的 MCP：解析 host.docker.internal → 主机网关（Compose v2 / Docker 20.10+）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - gibh-network
 

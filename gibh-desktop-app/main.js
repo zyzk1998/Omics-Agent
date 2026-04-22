@@ -2,16 +2,32 @@
 
 const path = require('path');
 const fs = require('fs');
+
+(function loadProdEnvFiles() {
+  try {
+    const dotenv = require('dotenv');
+    const candidates = [
+      path.join(__dirname, '..', '.env'),
+      path.join(__dirname, '..', 'dist-pack.env'),
+    ];
+    for (const envPath of candidates) {
+      if (fs.existsSync(envPath)) {
+        dotenv.config({ path: envPath });
+        console.log('[Omics Agent] 已加载环境文件:', envPath);
+        break;
+      }
+    }
+  } catch (e) {
+    console.warn('[Omics Agent] 加载 .env 失败（可忽略）:', e && e.message);
+  }
+})();
+
 const { app, BrowserWindow, ipcMain } = require('electron');
 
-// ---------------------------------------------------------------------------
-// 【打包发行前必改】生产环境（app.isPackaged === true）默认打开的 Omics Web 根地址。
-// 下一行常量即为总指挥填写真实 Linux 站点（示例：http://192.168.x.x:8018）的唯一位置。
-// 开发环境仍用 DEV_SERVER_URL；任意环境均可被环境变量 OMICS_AGENT_WEB_URL 覆盖。
-// ---------------------------------------------------------------------------
-const PROD_SERVER_URL = 'http://127.0.0.1:8018';
-
+/** 开发模式默认；生产在 app.isPackaged 下使用 process.env.PROD_SERVER_URL（见仓库根 .env / 打包生成的 dist-pack.env） */
 const DEV_SERVER_URL = 'http://127.0.0.1:8018';
+
+const PROD_SERVER_URL_DEFAULT = 'http://127.0.0.1:8018';
 
 /** Windows 任务栏 / 开始菜单分组图标与安装包一致，需与 package.json 的 appId 相同 */
 if (process.platform === 'win32') {
@@ -34,8 +50,9 @@ function getWebBase() {
     return envUrl;
   }
   if (app.isPackaged) {
-    const u = PROD_SERVER_URL.replace(/\/$/, '');
-    console.log('[Omics Agent] Web 基址 ← 生产打包（main.js 常量 PROD_SERVER_URL）:', u);
+    const raw = process.env.PROD_SERVER_URL || PROD_SERVER_URL_DEFAULT;
+    const u = String(raw).trim().replace(/\/$/, '');
+    console.log('[Omics Agent] Web 基址 ← 生产（process.env.PROD_SERVER_URL）:', u);
     return u;
   }
   const u = DEV_SERVER_URL.replace(/\/$/, '');

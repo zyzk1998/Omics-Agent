@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from gibh_agent.core.skill_plaza_utils import (
     infer_skill_implemented_from_prompt,
+    is_multimodal_skill_hidden_from_plaza,
     is_prompt_placeholder_only,
 )
 from gibh_agent.core.deps import (
@@ -106,9 +107,15 @@ def list_skills_public(
     sorted_rows = [t[2] for t in tuples]
 
     # 橱窗隐藏「仅占位文案」技能（与 seed PLACEHOLDER 一致）；DB 仍保留便于后续补模板。
-    # 「我的」收藏夹不过滤，以便用户对历史收藏的占位技能取消收藏。
+    # 橱窗隐藏多模态组学下暂未落地的子类（基因组/表观/蛋白）；DB 种子保留。
+    # 「我的」收藏夹不过滤，以便用户对历史收藏的占位或暂缓展示技能取消收藏。
     if not saved_only:
-        sorted_rows = [r for r in sorted_rows if not is_prompt_placeholder_only(r.prompt_template)]
+        sorted_rows = [
+            r
+            for r in sorted_rows
+            if not is_prompt_placeholder_only(r.prompt_template)
+            and not is_multimodal_skill_hidden_from_plaza(r.main_category, r.sub_category)
+        ]
 
     offset_db = (page - 1) * size
     total = len(sorted_rows)

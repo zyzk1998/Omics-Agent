@@ -425,7 +425,11 @@ def list_skills_public(
         except Exception as _e:
             logger.debug("加载动态插件列表跳过: %s", _e)
 
-    from gibh_agent.core.skill_plaza_utils import infer_skill_implemented_from_prompt
+    from gibh_agent.core.skill_plaza_utils import (
+        infer_skill_implemented_from_prompt,
+        is_multimodal_skill_hidden_from_plaza,
+        is_prompt_placeholder_only,
+    )
 
     all_rows = q.order_by(SkillModel.id.asc()).all()
     tuples = []
@@ -436,6 +440,15 @@ def list_skills_public(
         tuples.append((impl, ts, r))
     tuples.sort(key=lambda x: (not x[0], -x[1]))
     sorted_rows = [t[2] for t in tuples]
+
+    # 与 gibh_agent.api.routers.skills 对齐：橱窗不展示占位-only 与暂缓的多模态子类；「我的」不过滤
+    if not saved_only:
+        sorted_rows = [
+            r
+            for r in sorted_rows
+            if not is_prompt_placeholder_only(r.prompt_template)
+            and not is_multimodal_skill_hidden_from_plaza(r.main_category, r.sub_category)
+        ]
 
     if D > 0:
         if page == 1:
@@ -473,7 +486,8 @@ def list_skills_public(
         for dit in dyn_items:
             dit["is_implemented"] = infer_skill_implemented_from_prompt((dit.get("prompt_template") or ""))
         items = dyn_items + items
-    total = total + D
+    # total 必须与过滤后的 sorted_rows 一致（含占位 / 暂缓子类剔除）
+    total = len(sorted_rows) + D
     return {"items": items, "total": total}
 
 

@@ -7,14 +7,18 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "pack": "electron-builder --dir",
+    "pack": "node scripts/prepare-pack-env.js && electron-builder --dir",
     "icons:win": "node scripts/gen-win-icon.js",
     "sync:download-page": "node scripts/write-download-release-meta.js",
-    "dist": "npm run icons:win && electron-builder && npm run sync:download-page",
-    "dist:linux": "electron-builder --linux && npm run sync:download-page",
-    "dist:win": "npm run icons:win && electron-builder --win --x64 && npm run sync:download-page",
-    "dist:web": "npm run icons:win && electron-builder --linux --win portable && npm run sync:download-page",
+    "prepare-pack-env": "node scripts/prepare-pack-env.js",
+    "dist": "npm run prepare-pack-env && npm run icons:win && electron-builder && npm run sync:download-page",
+    "dist:linux": "npm run prepare-pack-env && electron-builder --linux && npm run sync:download-page",
+    "dist:win": "npm run prepare-pack-env && npm run icons:win && electron-builder --win --x64 && npm run sync:download-page",
+    "dist:web": "npm run prepare-pack-env && npm run icons:win && electron-builder --linux --win portable && npm run sync:download-page",
     "publish:to-server": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/publish-omics-client-from-windows.ps1"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "electron": "^28.3.3",
@@ -34,7 +38,14 @@
       "main.js",
       "package.json",
       "app-icon.png",
-      "offline.html"
+      "offline.html",
+      "node_modules/dotenv/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "dist-pack.env",
+        "to": "."
+      }
     ],
     "win": {
       "artifactName": "${productName} Setup ${version}.${ext}",

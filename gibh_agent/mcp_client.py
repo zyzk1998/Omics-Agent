@@ -207,6 +207,8 @@ class HPCMCPManager:
             "registered": list(self._registered_names),
             "last_error": self._last_error,
             "mcp_available": True,
+            # 来自 mcp-gateway /status：上游 MCP 是否已配置鉴权头（排障用，不含密钥）
+            "upstream_auth_configured": gw_status.get("upstream_auth_configured"),
             "gateway_status": gw_status,
         }
 

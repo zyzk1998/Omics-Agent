@@ -66,6 +66,9 @@ docker-compose.local.yml
 gibh-desktop-app/config.local.json
 .gibh_local.env
 
+# Electron：打包脚本从仓库根 .env 生成的单变量文件（勿提交）
+gibh-desktop-app/dist-pack.env
+
 # 测试数据目录（大文件，不提交）
 test_data/
 test_data_run/
