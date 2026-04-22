@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>无法连接 Omics Agent</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+      margin: 0;
+      padding: 2rem;
+      background: #f4f6f8;
+      color: #1f2937;
+      line-height: 1.6;
+    }
+    h1 { font-size: 1.25rem; margin: 0 0 1rem; }
+    .card {
+      max-width: 36rem;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    }
+    code { background: #f3f4f6; padding: .15rem .4rem; border-radius: 4px; font-size: .9rem; word-break: break-all; }
+    button {
+      margin-top: 1rem;
+      padding: .55rem 1.2rem;
+      border: none;
+      border-radius: 8px;
+      background: #2563eb;
+      color: #fff;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.05); }
+    .hint { font-size: .9rem; color: #6b7280; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>无法加载 Omics Agent 页面</h1>
+    <p>客户端需要从网络加载 Web 界面。当前地址不可达或已被拒绝连接。</p>
+    <p><strong>尝试访问：</strong> <code id="target-url"></code></p>
+    <p><strong>错误码：</strong> <span id="err-code"></span></p>
+    <button type="button" id="btn-retry">重试连接</button>
+    <div class="hint">
+      <p><strong>排查：</strong></p>
+      <ul>
+        <li>确认内网 / 服务器上的 Omics Agent 站点已部署且本机可访问。</li>
+        <li>启动前设置环境变量 <code>OMICS_AGENT_WEB_URL</code> 为实际站点根地址（例如 <code>http://192.168.x.x:端口</code>），勿留空。</li>
+        <li>防火墙或代理是否拦截浏览器访问同一 URL。</li>
+      </ul>
+      <p>调试：设置环境变量 <code>OMICS_AGENT_DEBUG=1</code> 后重启客户端可打开开发者工具。</p>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var q = new URLSearchParams(window.location.search);
+      var u = q.get('u');
+      var c = q.get('c');
+      document.getElementById('target-url').textContent = u ? decodeURIComponent(u) : '（未知）';
+      document.getElementById('err-code').textContent = c || '—';
+
+      document.getElementById('btn-retry').onclick = function () {
+        try {
+          var ipc = window.require && window.require('electron').ipcRenderer;
+          if (ipc) ipc.send('omics-retry-load');
+        } catch (e) {}
+      };
+    })();
+  </script>
+</body>
+</html>

@@ -33,11 +33,12 @@
     "files": [
       "main.js",
       "package.json",
-      "app-icon.png"
+      "app-icon.png",
+      "offline.html"
     ],
     "win": {
       "artifactName": "${productName} Setup ${version}.${ext}",
-      "icon": "icon.ico",
+      "icon": "build/icon.ico",
       "sign": null,
       "signAndEditExecutable": false,
       "target": [
@@ -57,9 +58,9 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Omics Agent",
-      "installerIcon": "icon.ico",
-      "uninstallerIcon": "icon.ico",
-      "installerHeaderIcon": "icon.ico"
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
     },
     "linux": {
       "artifactName": "${productName}-${version}.${ext}",
