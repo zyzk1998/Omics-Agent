@@ -64,8 +64,7 @@ git pull
 Set-Location $DesktopDir
 Write-Host "==> npm ci ..." -ForegroundColor Cyan
 npm ci
-Write-Host "==> 生成 icon.ico 并打 Windows 安装包 ..." -ForegroundColor Cyan
-npm run icons:win
+Write-Host "==> 打 Windows 安装包（使用仓库内 build/icon.ico，不重新生成） ..." -ForegroundColor Cyan
 npx electron-builder --win --x64
 if ($LASTEXITCODE -ne 0) {
     throw "electron-builder 失败，退出码 $LASTEXITCODE"

@@ -32,8 +32,9 @@
         <p class="ver-line" id="ver-line">版本 —</p>
 
         <div class="card">
-            <div class="card-h">本版更新说明（V0.12）</div>
+            <div class="card-h">本版更新说明（V0.12.2）</div>
             <ul class="changelog">
+                <li><strong>Windows 安装包（本次更新）</strong>：在桌面版里打印或下载工作台报告时，预览与正式打印效果已与网页版一致——报告内容会正常显示，不再出现整页空白；报告里的配色、底纹和化学结构式等也会按原样出现在纸上或 PDF 中。</li>
                 <li>与服务端能力对齐：化学信息学（RDKit）相关工具与技能扩展，便于在对话中完成分子表示、性质与结构类任务。</li>
                 <li>编排与对话体验优化：会话标题生成、工具输出记忆等，减少长对话中的重复与迷失。</li>
                 <li>技能广场与技能接口、前端控制台若干体验与样式改进。</li>
@@ -70,11 +71,11 @@
             var verLine = document.getElementById('ver-line');
 
             var staticFallback = {
-                version: '0.12.0',
-                displayVersion: 'V0.12',
+                version: '0.12.2',
+                displayVersion: 'V0.12.2',
                 productName: 'Omics Agent',
-                winSetupFile: 'Omics Agent Setup 0.12.0.exe',
-                linuxAppImageFile: 'Omics Agent-0.12.0.AppImage'
+                winSetupFile: 'Omics Agent Setup 0.12.2.exe',
+                linuxAppImageFile: 'Omics Agent-0.12.2.AppImage'
             };
 
             function setVersion(meta) {

@@ -200,6 +200,10 @@ tests/_chroma_tools/
 # 第三方嵌套 git / 本地 venv（体积大；部署用 scripts/Dockerfile 拉取）
 third_party/
 
+# Docker 内 electron-builder 缓存（见 scripts/dist-win-via-docker.sh）
+gibh-desktop-app/.cache/
+gibh-desktop-app/.docker-home/
+
 # Electron 瘦客户端构建产物（electron-builder dist-out）
 gibh-desktop-app/dist-out/
 # 勿将安装包留在 app 根目录提交；应放到 services/nginx/html/downloads/
@@ -213,5 +217,9 @@ gibh-desktop-app/*.AppImage
 services/nginx/html/downloads/*.exe
 services/nginx/html/downloads/*.AppImage
 services/nginx/html/downloads/*.blockmap
+# electron-updater 元数据（构建后由 sync 写入；勿提交以免与真实 sha 不一致）
+services/nginx/html/downloads/latest.yml
+services/nginx/html/downloads/latest-linux.yml
+services/nginx/html/downloads/latest-mac.yml
 services/nginx/html/downloads/*.zip
 services/nginx/html/downloads/*.dmg

@@ -10,6 +10,7 @@
  * 在 Windows 上执行 npm run dist / npm run dist:win 后，完整 NSIS .exe（约数十 MB）会出现在 dist-out。
  * 在 Linux 上仅 npm run dist 只会打当前平台产物（多为 AppImage）；Linux 下打的 Windows .exe 若异常偏小（几百 KB），为不完整构建，勿同步到 downloads。
  * 安装包 EXE 内嵌图标来自构建时的 build/icon.ico；网页上的 client-app-icon.png 仅影响站点展示，不能单独替换资源管理器里 exe 的图标。
+ * 4) 将 dist-out 中的 latest.yml / latest-linux.yml（若存在）复制到 downloads/，供 electron-updater（generic）拉取元数据。
  */
 const fs = require('fs');
 const path = require('path');
@@ -27,9 +28,13 @@ function expandTemplate(tpl, productName, version, ext) {
 }
 
 function displayFromSemver(version) {
-  const parts = String(version).split('.');
-  if (parts.length >= 2) return 'V' + parts[0] + '.' + parts[1];
-  return 'V' + version;
+  const parts = String(version)
+    .split('.')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length >= 3) return 'V' + parts[0] + '.' + parts[1] + '.' + parts[2];
+  if (parts.length === 2) return 'V' + parts[0] + '.' + parts[1];
+  return 'V' + String(version).trim();
 }
 
 function escapeRe(s) {
@@ -54,6 +59,20 @@ function ensureArtifactInDownloads(filename, downloadsDir) {
   }
   console.warn('未找到', filename, '：请先在对应平台执行 npm run dist / npm run dist:linux，或将文件放入 dist-out/ 后再运行本脚本。');
   return false;
+}
+
+/** electron-updater generic：与安装包同目录的 yml 元数据 */
+function copyAutoUpdateMetadataToDownloads(downloadsDir) {
+  const names = ['latest.yml', 'latest-linux.yml', 'latest-mac.yml'];
+  for (const name of names) {
+    const src = path.join(distOutDir, name);
+    const dest = path.join(downloadsDir, name);
+    if (fs.existsSync(src)) {
+      fs.mkdirSync(downloadsDir, { recursive: true });
+      fs.copyFileSync(src, dest);
+      console.log('已复制到 downloads/', name, '（自动更新元数据）');
+    }
+  }
 }
 
 function removeStaleArtifacts(downloadsDir, productName, winSetupFile, linuxAppImageFile) {
@@ -143,4 +162,5 @@ if (fs.existsSync(iconSrc)) {
 
 ensureArtifactInDownloads(effectiveWin, downloadsDir);
 ensureArtifactInDownloads(effectiveLinux, downloadsDir);
+copyAutoUpdateMetadataToDownloads(downloadsDir);
 removeStaleArtifacts(downloadsDir, productName, effectiveWin, effectiveLinux);

@@ -3,7 +3,7 @@
 # 无需在服务器上「拉仓库再打包」，只需把 .exe 传到仓库所在机器（或直接在仓库根执行）。
 #
 # 用法：
-#   ./scripts/publish-windows-installer.sh /path/to/Omics\ Agent\ Setup\ 0.12.0.exe
+#   ./scripts/publish-windows-installer.sh /path/to/Omics\ Agent\ Setup\ 0.12.2.exe
 #   ./scripts/publish-windows-installer.sh ~/Downloads/setup.exe   # 任意文件名，会按 package.json 重命名为规范名
 #
 # 依赖：仓库根目录执行；需 node（用于 npm run sync:download-page）。
@@ -16,8 +16,8 @@ MIN_BYTES=$((5 * 1024 * 1024))
 if [[ -z "$SRC" ]]; then
   echo "用法: $0 <安装包.exe 的路径>" >&2
   echo "示例（路径含空格务必加引号）:" >&2
-  echo "  $0 \"\$HOME/Downloads/Omics Agent Setup 0.12.0.exe\"" >&2
-  echo "  $0 ./dist-out/Omics\\\\ Agent\\\\ Setup\\\\ 0.12.0.exe" >&2
+  echo "  $0 \"\$HOME/Downloads/Omics Agent Setup 0.12.2.exe\"" >&2
+  echo "  $0 ./dist-out/Omics\\\\ Agent\\\\ Setup\\\\ 0.12.2.exe" >&2
   exit 1
 fi
 if [[ ! -f "$SRC" ]]; then

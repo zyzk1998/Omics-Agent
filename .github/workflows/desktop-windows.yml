@@ -24,7 +24,6 @@ jobs:
         working-directory: gibh-desktop-app
         run: |
           npm ci
-          npm run icons:win
           npx electron-builder --win --x64
 
       - uses: actions/upload-artifact@v4
