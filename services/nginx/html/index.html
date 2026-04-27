@@ -35,6 +35,16 @@
             <h4>释放文件以上传</h4>
         </div>
 
+        <!-- 桌面客户端：electron-updater 状态条（仅 Electron 显示） -->
+        <div id="desktop-update-banner" role="status" aria-live="polite" style="display:none;position:fixed;top:0;left:0;right:0;z-index:10040;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 14px;background:linear-gradient(90deg,#0f172a,#1e40af);color:#f1f5f9;font-size:13px;line-height:1.4;box-shadow:0 2px 10px rgba(0,0,0,.25);box-sizing:border-box;">
+            <span id="desktop-update-banner-text" style="flex:1 1 160px;min-width:0;"></span>
+            <div id="desktop-update-banner-progress-wrap" style="display:none;flex:1 1 120px;max-width:220px;height:7px;background:rgba(255,255,255,.22);border-radius:4px;overflow:hidden;">
+                <div id="desktop-update-banner-progress-bar" style="height:100%;width:0%;background:#38bdf8;border-radius:4px;transition:width .15s ease-out;"></div>
+            </div>
+            <button type="button" id="desktop-update-restart-btn" style="display:none;white-space:nowrap;padding:6px 12px;border-radius:6px;border:none;background:#22c55e;color:#052e16;font-weight:600;cursor:pointer;font-size:12px;">立即重启并完成更新</button>
+            <button type="button" id="desktop-update-dismiss-btn" style="white-space:nowrap;padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.35);background:transparent;color:#e2e8f0;cursor:pointer;font-size:12px;">关闭提示</button>
+        </div>
+
         <!-- 🔍 图片灯箱 -->
         <div id="lightbox" class="lightbox" onclick="closeLightbox()">
             <span class="lightbox-close">&times;</span>
@@ -1756,6 +1766,100 @@
                 setTimeout(function() { el.style.opacity = '0'; setTimeout(function() { el.remove(); }, 300); }, 2600);
             }
 
+            /** 桌面客户端：订阅主进程 autoUpdater 广播，展示进度与重启安装 */
+            window.initDesktopAutoUpdateUi = function () {
+                if (window.__desktopAutoUpdateBound) return;
+                var isElectron = false;
+                try {
+                    isElectron = typeof process !== 'undefined' && process.versions && !!process.versions.electron;
+                } catch (_e) { isElectron = false; }
+                if (!isElectron) return;
+                var ipc = null;
+                try {
+                    ipc = require('electron').ipcRenderer;
+                } catch (_e2) { return; }
+                window.__desktopAutoUpdateBound = true;
+
+                var banner = document.getElementById('desktop-update-banner');
+                var textEl = document.getElementById('desktop-update-banner-text');
+                var progWrap = document.getElementById('desktop-update-banner-progress-wrap');
+                var progBar = document.getElementById('desktop-update-banner-progress-bar');
+                var restartBtn = document.getElementById('desktop-update-restart-btn');
+                var dismissBtn = document.getElementById('desktop-update-dismiss-btn');
+
+                function showBanner() {
+                    if (!banner) return;
+                    banner.style.display = 'flex';
+                }
+                function hideBanner() {
+                    if (!banner) return;
+                    banner.style.display = 'none';
+                    if (progWrap) progWrap.style.display = 'none';
+                    if (progBar) progBar.style.width = '0%';
+                    if (restartBtn) restartBtn.style.display = 'none';
+                }
+                function setText(t) {
+                    if (textEl) textEl.textContent = t || '';
+                }
+
+                if (dismissBtn) {
+                    dismissBtn.onclick = function () { hideBanner(); };
+                }
+                if (restartBtn) {
+                    restartBtn.onclick = function () {
+                        try { ipc.send('app-install-update'); } catch (e3) { console.warn('[desktop-update]', e3); }
+                    };
+                }
+
+                function onChecking() {
+                    showBanner();
+                    setText('正在检查是否有新版本…');
+                    if (progWrap) progWrap.style.display = 'none';
+                    if (restartBtn) restartBtn.style.display = 'none';
+                }
+                function onAvailable(info) {
+                    showBanner();
+                    var v = (info && info.version) ? String(info.version) : '';
+                    setText(v ? ('发现新版本 ' + v + '，正在后台下载…') : '发现新版本，正在后台下载…');
+                    if (progWrap) progWrap.style.display = 'block';
+                    if (progBar) progBar.style.width = '0%';
+                    if (restartBtn) restartBtn.style.display = 'none';
+                }
+                function onProgress(p) {
+                    showBanner();
+                    if (progWrap) progWrap.style.display = 'block';
+                    var pct = (p && typeof p.percent === 'number') ? Math.min(100, Math.max(0, p.percent)) : 0;
+                    if (progBar) progBar.style.width = pct + '%';
+                    setText('正在下载新版本… ' + Math.round(pct) + '%');
+                }
+                function onDownloaded(info) {
+                    showBanner();
+                    var v = (info && info.version) ? String(info.version) : '';
+                    setText(v ? ('新版本 ' + v + ' 已下载完成，重启后即可生效。') : '新版本已下载完成，重启后即可生效。');
+                    if (progWrap) progWrap.style.display = 'block';
+                    if (progBar) progBar.style.width = '100%';
+                    if (restartBtn) restartBtn.style.display = 'inline-block';
+                }
+                function onNotAvailable() {
+                    hideBanner();
+                    if (typeof showToast === 'function') showToast('当前客户端已是最新版本', 'info');
+                }
+                function onError(payload) {
+                    showBanner();
+                    var msg = (payload && payload.message) ? String(payload.message) : '检查更新时出现问题';
+                    setText('更新检查失败：' + msg);
+                    if (progWrap) progWrap.style.display = 'none';
+                    if (restartBtn) restartBtn.style.display = 'none';
+                }
+
+                ipc.on('app-auto-update-checking', function () { onChecking(); });
+                ipc.on('app-auto-update-available', function (_e, info) { onAvailable(info); });
+                ipc.on('app-auto-update-not-available', function () { onNotAvailable(); });
+                ipc.on('app-auto-update-error', function (_e, payload) { onError(payload); });
+                ipc.on('app-auto-update-download-progress', function (_e, p) { onProgress(p); });
+                ipc.on('app-auto-update-downloaded', function (_e, info) { onDownloaded(info); });
+            };
+
             function toggleSkillBookmark(skillId, btnElement) {
                 if (!btnElement || !skillId) return;
                 if (String(skillId).indexOf('dyn_') === 0) { showToast('动态插件暂不支持收藏'); return; }
@@ -3065,6 +3169,38 @@
                             使用推荐参数
                         </button>
                         <span class="text-muted small ms-2">点击按钮切换参数值</span>
+                    </div>
+                    <div class="table-responsive" style="margin-top: 12px;">
+                        <table class="table table-sm table-bordered table-striped mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>步骤名</th>
+                                    <th>底层调用的算子/工具名</th>
+                                    <th>参数名</th>
+                                    <th>默认值</th>
+                                    <th>推荐值</th>
+                                    <th>推荐理由</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${Object.entries(recommendation.params || {}).map(([paramName, paramRec]) => {
+                                    const rec = paramRec || {};
+                                    const stepName = rec.step_name || rec.stepName || rec.step || '未知步骤';
+                                    const toolName = rec.tool_name || rec.toolName || rec.tool || '未知工具';
+                                    const defVal = rec.default !== undefined && rec.default !== null ? rec.default : '';
+                                    const recVal = rec.value !== undefined && rec.value !== null ? rec.value : '';
+                                    const reason = rec.reason || '基于数据特征推荐';
+                                    return `<tr>
+                                        <td>${escapeHtml(String(stepName))}</td>
+                                        <td>${escapeHtml(String(toolName))}</td>
+                                        <td><code>${escapeHtml(String(paramName))}</code></td>
+                                        <td>${escapeHtml(String(defVal))}</td>
+                                        <td><code>${escapeHtml(String(recVal))}</code></td>
+                                        <td>${escapeHtml(String(reason))}</td>
+                                    </tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>
                     </div>`;
                 }
 
@@ -4524,6 +4660,7 @@
                 filtered.forEach(function(entry) {
                     var state = (entry.state || 'running') + '';
                     var content = entry.content || '';
+                    var reasoningContent = entry.reasoning_content || '';
                     var stepIconChar = '○', stepIconClass = 'icon-pending';
                     if (state === 'done' || state === 'completed') { stepIconChar = '✓'; stepIconClass = 'icon-success'; }
                     else if (state === 'error') { stepIconChar = '✕'; stepIconClass = 'icon-error'; }
@@ -4535,7 +4672,11 @@
                     var sublabel = (state === 'active' || state === 'running' || state === 'start' || state === 'analyzing' || state === 'thinking' || state === 'loading') ? '执行中...' : (state === 'done' || state === 'completed') ? '' : (state === 'error' ? '失败' : '排队中');
                     var item = document.createElement('div');
                     item.className = 'checklist-item';
-                    item.innerHTML = '<span class="checklist-icon ' + stepIconClass + '">' + stepIconChar + '</span><div class="checklist-content"><div class="checklist-title">' + (content.replace(/</g, '&lt;').replace(/>/g, '&gt;')) + '</div>' + (sublabel ? '<div class="checklist-subtitle">' + sublabel + '</div>' : '') + '</div>';
+                    var reasoningHtml = '';
+                    if (typeof reasoningContent === 'string' && reasoningContent.trim()) {
+                        reasoningHtml = '<details class="process-reasoning-details" style="margin-top:8px;"><summary>思考过程</summary><pre style="white-space:pre-wrap;margin:6px 0 0;">' + reasoningContent.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre></details>';
+                    }
+                    item.innerHTML = '<span class="checklist-icon ' + stepIconClass + '">' + stepIconChar + '</span><div class="checklist-content"><div class="checklist-title">' + (content.replace(/</g, '&lt;').replace(/>/g, '&gt;')) + '</div>' + (sublabel ? '<div class="checklist-subtitle">' + sublabel + '</div>' : '') + reasoningHtml + '</div>';
                     list.appendChild(item);
                 });
                 logZone.appendChild(container);
@@ -4770,6 +4911,7 @@
             window.onload = function() {
                 // 任务1：有 Token 时不再生成 guest_uuid；先恢复侧栏登录态再拉取数据
                 if (!window.GUEST_UUID) initAuthState();
+                if (typeof window.initDesktopAutoUpdateUi === 'function') window.initDesktopAutoUpdateUi();
                 if (typeof updateSidebarUser === 'function') updateSidebarUser();
                 if (typeof window.syncImmersiveDemoEntryVisibility === 'function') window.syncImmersiveDemoEntryVisibility();
                 var btnImmersive = document.getElementById('btnImmersiveSpatiotemporalDemo');
@@ -6869,65 +7011,121 @@
                             throw new Error('DOM 结构错误：messageContent 为空');
                         }
                         
-                        // 添加初始步骤
-                        addProcessStep('正在接收请求...', 'active');
-                        
-                        // Part 2 任务1 + Task2 状态同步：中栏 checklist 在 done/error 时先把上一项图标替换为 ✓/✕
-                        function addProcessStep(text, status = 'active') {
+                        const activeExecutionLogs = [];
+
+                        function normalizeLogState(status) {
+                            if (status === 'completed' || status === 'done' || status === 'success') return 'done';
+                            if (status === 'error') return 'error';
+                            if (status === 'waiting') return 'pending';
+                            return (status === 'active' || status === 'running') ? 'active' : (status || 'active');
+                        }
+
+                        function renderExecutionLogs() {
                             if (!processStepsDiv) return;
-                            if (status === 'active' || status === 'running') {
-                                var prevRun = processStepsDiv.lastElementChild;
-                                if (prevRun && prevRun.classList.contains('checklist-item')) {
-                                    var iconPr = prevRun.querySelector('.checklist-icon');
-                                    if (iconPr && iconPr.classList.contains('icon-running')) {
-                                        iconPr.className = 'checklist-icon icon-success';
-                                        iconPr.textContent = '\u2713';
-                                        var subPr = prevRun.querySelector('.checklist-subtitle');
-                                        if (subPr) subPr.textContent = '';
-                                    }
+                            processStepsDiv.innerHTML = '';
+                            activeExecutionLogs.forEach(function(entry) {
+                                var st = normalizeLogState(entry.state || 'active');
+                                var stepIconChar = '○';
+                                var stepIconClass = 'pending';
+                                if (st === 'done') {
+                                    stepIconChar = '✓';
+                                    stepIconClass = 'success';
+                                } else if (st === 'error') {
+                                    stepIconChar = '✕';
+                                    stepIconClass = 'error';
+                                } else if (st === 'active' || st === 'running') {
+                                    stepIconChar = '↻';
+                                    stepIconClass = 'running';
                                 }
-                            }
-                            var stepIconChar = '○';
-                            var stepIconClass = 'pending';
-                            if (status === 'done' || status === 'completed') {
-                                stepIconChar = '✓';
-                                stepIconClass = 'success';
-                            } else if (status === 'error') {
-                                stepIconChar = '✕';
-                                stepIconClass = 'error';
-                            } else if (status === 'active' || status === 'running') {
-                                stepIconChar = '↻';
-                                stepIconClass = 'running';
-                            } else {
-                                stepIconClass = 'pending';
-                            }
-                            var isSuccessStatus = ['success', 'completed', 'done', 'warning'].includes((status || '').toLowerCase());
-                            if (isSuccessStatus || status === 'error') {
-                                var prev = processStepsDiv.lastElementChild;
-                                if (prev && prev.classList.contains('checklist-item')) {
-                                    var iconEl = prev.querySelector('.checklist-icon');
-                                    if (iconEl) {
-                                        iconEl.className = 'checklist-icon ' + (status === 'error' ? 'icon-error' : 'icon-success');
-                                        iconEl.textContent = status === 'error' ? '✕' : '✓';
-                                    }
+                                var sublabel = (st === 'active' || st === 'running') ? '执行中...' : (st === 'done') ? '' : (st === 'error' ? '失败' : '排队中');
+                                const stepDiv = document.createElement('div');
+                                stepDiv.className = 'checklist-item';
+                                var reasoningHtml = '';
+                                if (entry.reasoning_content && String(entry.reasoning_content).trim()) {
+                                    reasoningHtml = '<details class="process-reasoning-details" style="margin-top:8px;"><summary>思考过程</summary><pre style="white-space:pre-wrap;margin:6px 0 0;">' + escapeHtml(String(entry.reasoning_content)) + '</pre></details>';
                                 }
-                            }
-                            processStepCount++;
-                            var sublabel = (status === 'active' || status === 'running') ? '执行中...' : (status === 'done' || status === 'completed') ? '' : (status === 'error' ? '失败' : '排队中');
-                            const stepDiv = document.createElement('div');
-                            stepDiv.className = 'checklist-item';
-                            stepDiv.innerHTML = `
-                                <span class="checklist-icon icon-${stepIconClass}">${stepIconChar}</span>
-                                <div class="checklist-content">
-                                    <div class="checklist-title">${escapeHtml(text)}</div>
-                                    ${sublabel ? '<div class="checklist-subtitle">' + escapeHtml(sublabel) + '</div>' : ''}
-                                </div>
-                            `;
-                            processStepsDiv.appendChild(stepDiv);
+                                stepDiv.innerHTML = `
+                                    <span class="checklist-icon icon-${stepIconClass}">${stepIconChar}</span>
+                                    <div class="checklist-content">
+                                        <div class="checklist-title">${escapeHtml(String(entry.content || '处理中...'))}</div>
+                                        ${sublabel ? '<div class="checklist-subtitle">' + escapeHtml(sublabel) + '</div>' : ''}
+                                        ${reasoningHtml}
+                                    </div>
+                                `;
+                                processStepsDiv.appendChild(stepDiv);
+                            });
+                            processStepCount = activeExecutionLogs.length;
                             const countSpan = processLogContainer.querySelector('.step-count');
                             if (countSpan) countSpan.textContent = processStepCount;
                             processStepsDiv.scrollTop = processStepsDiv.scrollHeight;
                         }
+
+                        function addProcessStep(text, status = 'active') {
+                            var normalized = normalizeLogState(status || 'active');
+                            var prev = activeExecutionLogs.length > 0 ? activeExecutionLogs[activeExecutionLogs.length - 1] : null;
+                            if (prev && (normalized === 'active' || normalized === 'running') && (prev.state === 'active' || prev.state === 'running')) {
+                                prev.state = 'done';
+                            }
+                            activeExecutionLogs.push({
+                                content: String(text || '处理中...'),
+                                state: normalized,
+                                reasoning_content: ''
+                            });
+                            renderExecutionLogs();
+                        }
+
+                        function appendReasoningToActiveLog(deltaText) {
+                            if (!deltaText) return;
+                            if (activeExecutionLogs.length === 0) {
+                                addProcessStep('正在生成专家解读报告...', 'active');
+                            }
+                            var last = activeExecutionLogs[activeExecutionLogs.length - 1];
+                            if (!last) return;
+                            // 若当前最后一条不是执行中，复用 chat/单脚本思路：为思考流创建独立“生成报告”活跃条目
+                            if (normalizeLogState(last.state) !== 'active') {
+                                addProcessStep('正在生成专家解读报告...', 'active');
+                                last = activeExecutionLogs[activeExecutionLogs.length - 1];
+                                if (!last) return;
+                            }
+                            last.reasoning_content = String(last.reasoning_content || '') + String(deltaText);
+                            renderExecutionLogs();
+                        }
+
+                        // 将思考过程同步流式展示到当前消息文本框（text-zone）
+                        function appendReasoningToTextZone(deltaText) {
+                            if (!deltaText) return;
+                            var textZone = window.currentMessageZones?.textZone || aiContentDiv;
+                            if (!textZone) return;
+                            var box = textZone.querySelector('.stream-thinking-box');
+                            if (!box) {
+                                box = document.createElement('details');
+                                box.className = 'stream-thinking-box';
+                                box.setAttribute('open', '');
+                                box.style.margin = '8px 0';
+                                box.style.padding = '8px 10px';
+                                box.style.border = '1px solid #dbeafe';
+                                box.style.borderRadius = '8px';
+                                box.style.background = '#f8fbff';
+                                box.innerHTML = '<summary style="cursor:pointer;color:#2563eb;font-size:13px;">思考过程（流式）</summary><pre style="white-space:pre-wrap;margin:8px 0 0;font-size:12px;line-height:1.6;color:#334155;"></pre>';
+                                textZone.insertBefore(box, textZone.firstChild);
+                            }
+                            var pre = box.querySelector('pre');
+                            if (!pre) return;
+                            pre.appendChild(document.createTextNode(String(deltaText)));
+                            pre.scrollTop = pre.scrollHeight;
+                        }
+
+                        function finalizeReasoningTextZone() {
+                            var textZone = window.currentMessageZones?.textZone || aiContentDiv;
+                            if (!textZone) return;
+                            var box = textZone.querySelector('.stream-thinking-box');
+                            if (!box) return;
+                            var summary = box.querySelector('summary');
+                            if (summary) summary.textContent = '思考过程（完成）';
+                        }
+
+                        // 添加初始步骤（必须在 activeExecutionLogs 初始化后）
+                        addProcessStep('正在接收请求...', 'active');
                         
                         // 仅清空文本占位区，严禁清空 message-content 或 reasoning-zone（思考框永久保留）
                         if (aiContentDiv && !aiContentDiv.closest('.reasoning-zone')) {
@@ -6942,6 +7140,14 @@
                         // 🔥 状态变量（在正确的作用域内）
                         let messageBuffer = '';
                         let thoughtBuffer = '';
+                        // 专家报告（workspace_update）专用：原始流与净化后正文缓冲（状态驱动）
+                        let workspaceRawBuffer = '';
+                        let workspaceCleanBuffer = '';
+                        // 流式标签状态机：支持 <think>/<redacted_reasoning> 标签跨 chunk 截断
+                        let reasoningStreamState = {
+                            inThinking: false,
+                            pendingTag: ''
+                        };
                         /** 是否已收到 SSE 终态事件（done / error），用于流结束兜底与乱序 message_saved */
                         let sseStreamTerminalEventReceived = false;
 
@@ -7445,33 +7651,31 @@
                                     }
                                     thoughtBuffer += thoughtText;
                                     if (thoughtText) console.log('💭 思考过程:', thoughtText.length > 80 ? thoughtText.substring(0, 80) + '...' : thoughtText);
-                                    // 🔥 全局统一：一律走 .reasoning-zone + appendChild 增量打字机，严禁 innerHTML 覆盖
-                                    var el = window.currentThoughtContainer;
-                                    if (!el) {
-                                        try { el = ensureThoughtBlock(); } catch (e) { console.error('❌ [thought] ensureThoughtBlock 异常:', e); }
-                                    }
-                                    if (!el) {
-                                        console.error('❌ [thought] ensureThoughtBlock 返回 null，思考内容无法渲染');
-                                        break;
-                                    }
-                                    if (!thoughtText) break;
-                                    try {
-                                        el.appendChild(document.createTextNode(thoughtText));
-                                        el.scrollTop = el.scrollHeight;
-                                        var thoughtDetails = el.closest('.agent-thought-block');
-                                        if (thoughtDetails && thoughtDetails.tagName === 'DETAILS') thoughtDetails.setAttribute('open', '');
-                                    } catch (e) {
-                                        console.error('❌ [thought] 追加文本到 DOM 失败:', e);
-                                    }
+                                    // 统一走执行记录状态绑定：reasoning_content -> renderExecutionLogs
+                                    appendReasoningToActiveLog(thoughtText);
+                                    appendReasoningToTextZone(thoughtText);
                                     break;
                                     
                                 case 'message':
                                     if (typeof finalizeThoughtBlock === 'function') finalizeThoughtBlock();
                                     var rawContent = data.content || '';
-                                    messageBuffer += (typeof rawContent === 'string' ? rawContent : '');
-                                    // 🔥 防泄漏：彻底清洗 <think> 与 <thinking> 后再写入 .text-zone
-                                    var cleaned = String(messageBuffer || '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
-                                    if (typeof updateChatBubble === 'function') updateChatBubble(cleaned);
+                                    var rawReasoning = (data && data.reasoning_content != null) ? String(data.reasoning_content) : '';
+                                    if (rawReasoning) {
+                                        thoughtBuffer += rawReasoning;
+                                        appendReasoningToActiveLog(rawReasoning);
+                                        appendReasoningToTextZone(rawReasoning);
+                                    }
+                                    var delta = (typeof rawContent === 'string' ? rawContent : String(rawContent || ''));
+                                    var parsedDelta = consumeThinkTaggedDelta(delta);
+                                    if (parsedDelta.thoughtDelta) {
+                                        thoughtBuffer += parsedDelta.thoughtDelta;
+                                        appendReasoningToActiveLog(parsedDelta.thoughtDelta);
+                                        appendReasoningToTextZone(parsedDelta.thoughtDelta);
+                                    }
+                                    if (parsedDelta.answerDelta) {
+                                        messageBuffer += parsedDelta.answerDelta;
+                                        if (typeof updateChatBubble === 'function') updateChatBubble(messageBuffer);
+                                    }
                                     break;
                                     
                                 case 'diagnosis':
@@ -7642,6 +7846,29 @@
 
                                 case 'workspace_update': {
                                     var mdWs = (data && data.markdown != null) ? String(data.markdown) : '';
+                                    var wsReasoning = (data && data.reasoning_content != null) ? String(data.reasoning_content) : '';
+                                    if (wsReasoning) {
+                                        thoughtBuffer += wsReasoning;
+                                        appendReasoningToActiveLog(wsReasoning);
+                                        appendReasoningToTextZone(wsReasoning);
+                                    }
+                                    // 复用 chat 成功模式：按“增量 delta”分流，不直接用全量 markdown 覆盖
+                                    var wsDelta = mdWs;
+                                    if (workspaceRawBuffer && mdWs.indexOf(workspaceRawBuffer) === 0) {
+                                        wsDelta = mdWs.slice(workspaceRawBuffer.length);
+                                    }
+                                    workspaceRawBuffer = mdWs;
+                                    var wsParsed = consumeThinkTaggedDelta(wsDelta);
+                                    if (wsParsed && wsParsed.thoughtDelta) {
+                                        thoughtBuffer += wsParsed.thoughtDelta;
+                                        appendReasoningToActiveLog(wsParsed.thoughtDelta);
+                                        appendReasoningToTextZone(wsParsed.thoughtDelta);
+                                    }
+                                    if (wsParsed && wsParsed.answerDelta) {
+                                        workspaceCleanBuffer += wsParsed.answerDelta;
+                                    }
+                                    // 核弹级兜底：最终渲染前强制剔除任何 think 片段（含未闭合）
+                                    mdWs = stripThinkForReport(workspaceCleanBuffer || '');
                                     var wpWs = document.getElementById('workspace-pane');
                                     if (wpWs) wpWs.classList.add('workspace-active');
                                     var phWs = document.getElementById('workspace-placeholder');
@@ -7670,6 +7897,7 @@
                                     sseStreamTerminalEventReceived = true;
                                     try {
                                         if (typeof finalizeThoughtBlock === 'function') finalizeThoughtBlock();
+                                        finalizeReasoningTextZone();
                                         hideWaitingBubble();
                                         handleDoneEvent(data);
                                     } catch (eDone) {
@@ -7689,6 +7917,7 @@
                                 case 'error':
                                     sseStreamTerminalEventReceived = true;
                                     try {
+                                        finalizeReasoningTextZone();
                                         handleErrorEvent(data);
                                     } catch (eErr) {
                                         console.error('[SSE] error 分支处理异常:', eErr);
@@ -7803,39 +8032,18 @@
                         function updateProcessLog(content, state) {
                             // 映射技术状态到用户友好文本
                             const userFriendlyText = mapStatusToUserFriendly(content, state);
-                            
-                            // 🔥 TASK 2: Log de-duplication - Update instead of append if identical（中栏已改为 checklist-item）
-                            const processStepsDiv = document.querySelector('.process-steps');
-                            if (processStepsDiv) {
-                                const lastStep = processStepsDiv.lastElementChild;
-                                if (lastStep && lastStep.classList.contains('checklist-item')) {
-                                    const lastText = (lastStep.querySelector('.checklist-title') || {}).textContent || '';
-                                    if (lastText === userFriendlyText) {
-                                        console.log(`🔄 [ProcessLog] 重复消息，更新最后一步: ${userFriendlyText}`);
-                                        if (state === 'running') {
-                                            var iconEl = lastStep.querySelector('.checklist-icon');
-                                            if (iconEl) {
-                                                iconEl.className = 'checklist-icon icon-running';
-                                                iconEl.textContent = '↻';
-                                            }
-                                        }
-                                        return;
-                                    }
-                                }
+
+                            // 结构化去重：同内容时只更新状态，不新增行
+                            var lastEntry = activeExecutionLogs.length > 0 ? activeExecutionLogs[activeExecutionLogs.length - 1] : null;
+                            if (lastEntry && String(lastEntry.content || '') === String(userFriendlyText)) {
+                                lastEntry.state = normalizeLogState(state || 'active');
+                                renderExecutionLogs();
+                                console.log(`🔄 [ProcessLog] 重复消息，更新最后一步: ${userFriendlyText}`);
+                                return;
                             }
-                            
-                            // 确定步骤状态
-                            let stepStatus = 'active';
-                            if (state === 'completed' || state === 'done' || state === 'success') {
-                                stepStatus = 'done';
-                            } else if (state === 'error') {
-                                stepStatus = 'error';
-                            } else if (state === 'waiting') {
-                                stepStatus = 'pending';
-                            }
-                            
+
                             // 添加步骤到执行记录
-                            addProcessStep(userFriendlyText, stepStatus);
+                            addProcessStep(userFriendlyText, normalizeLogState(state || 'active'));
                             console.log(`✅ [ProcessLog] ${userFriendlyText} (${state})`);
                         }
                         
@@ -8037,6 +8245,69 @@
                                 console.error('❌ [SSE] Markdown 解析错误:', e);
                                 textZoneRef.innerHTML = escapeHtml(cleaned);
                             }
+                        }
+
+                        function consumeThinkTaggedDelta(deltaText) {
+                            const result = { thoughtDelta: '', answerDelta: '' };
+                            if (!deltaText) return result;
+                            const openingTags = ['<think>', '<redacted_reasoning>'];
+                            const closingTags = ['</think>', '</redacted_reasoning>'];
+                            const allTags = openingTags.concat(closingTags);
+                            let stream = reasoningStreamState.pendingTag + String(deltaText);
+                            reasoningStreamState.pendingTag = '';
+                            let cursor = 0;
+                            while (cursor < stream.length) {
+                                let nearestIdx = -1;
+                                let nearestTag = '';
+                                for (let i = 0; i < allTags.length; i++) {
+                                    const tag = allTags[i];
+                                    const idx = stream.indexOf(tag, cursor);
+                                    if (idx !== -1 && (nearestIdx === -1 || idx < nearestIdx)) {
+                                        nearestIdx = idx;
+                                        nearestTag = tag;
+                                    }
+                                }
+                                if (nearestIdx === -1) {
+                                    const tail = stream.slice(cursor);
+                                    if (reasoningStreamState.inThinking) result.thoughtDelta += tail;
+                                    else result.answerDelta += tail;
+                                    break;
+                                }
+                                const normal = stream.slice(cursor, nearestIdx);
+                                if (normal) {
+                                    if (reasoningStreamState.inThinking) result.thoughtDelta += normal;
+                                    else result.answerDelta += normal;
+                                }
+                                reasoningStreamState.inThinking = openingTags.indexOf(nearestTag) !== -1;
+                                cursor = nearestIdx + nearestTag.length;
+                            }
+                            // 尾部可能是被截断的标签起始，保留到下一个 chunk
+                            const maxTagLen = 24; // '</redacted_reasoning>'.length
+                            const tailWindow = stream.slice(Math.max(0, stream.length - maxTagLen));
+                            for (let cut = 1; cut < maxTagLen && cut <= tailWindow.length; cut++) {
+                                const suffix = tailWindow.slice(-cut);
+                                const hasPrefixHit = allTags.some(function(tag) { return tag.indexOf(suffix) === 0; });
+                                if (hasPrefixHit) {
+                                    reasoningStreamState.pendingTag = suffix;
+                                    if (reasoningStreamState.inThinking) {
+                                        result.thoughtDelta = result.thoughtDelta.slice(0, Math.max(0, result.thoughtDelta.length - suffix.length));
+                                    } else {
+                                        result.answerDelta = result.answerDelta.slice(0, Math.max(0, result.answerDelta.length - suffix.length));
+                                    }
+                                    break;
+                                }
+                            }
+                            return result;
+                        }
+
+                        // 右侧报告最终入口“核弹级”清洗：无论是否闭合，一律清除思考标签及内容
+                        function stripThinkForReport(text) {
+                            var s = String(text || '');
+                            // 先移除完整标签块
+                            s = s.replace(/<(?:think|redacted_reasoning)>[\s\S]*?<\/(?:think|redacted_reasoning)>/gi, '');
+                            // 再移除未闭合起始标签后的所有内容（流中断/分片期间兜底）
+                            s = s.replace(/<(?:think|redacted_reasoning)>[\s\S]*$/gi, '');
+                            return s;
                         }
                         
                         // 数据驱动报告渲染：挂载到右栏 #active-workspace-content，无则回退到聊天气泡
@@ -9233,6 +9504,11 @@
                                 // 🔥 DISPATCH: 如果有数据，分发事件
                                 if (dataLines.length > 0) {
                                     const jsonData = dataLines.join('\n'); // 合并多行 data
+                                    if (jsonData.trim() === '[DONE]') {
+                                        sseStreamTerminalEventReceived = true;
+                                        if (typeof finalizeThoughtBlock === 'function') finalizeThoughtBlock();
+                                        continue;
+                                    }
                                     try {
                                         const data = JSON.parse(jsonData);
                                         const shouldStop = handleServerEvent(eventType, data);
@@ -9247,6 +9523,12 @@
                                     }
                                 }
                             }
+                        }
+
+                        // 读取结束后 flush decoder 尾部字节，避免 UTF-8 多字节字符在末尾被截断
+                        const decoderTail = decoder.decode();
+                        if (decoderTail) {
+                            buffer += decoderTail;
                         }
                         
                         // 🔥 处理剩余缓冲区（最后一个不完整的事件）
@@ -9267,11 +9549,16 @@
                             
                             if (dataLines.length > 0) {
                                 const jsonData = dataLines.join('\n');
+                                if (jsonData.trim() === '[DONE]') {
+                                    sseStreamTerminalEventReceived = true;
+                                    if (typeof finalizeThoughtBlock === 'function') finalizeThoughtBlock();
+                                } else {
                                 try {
                                     const data = JSON.parse(jsonData);
                                     handleServerEvent(eventType, data);
                                 } catch (e) {
                                     console.error('❌ 剩余缓冲区 JSON 解析错误:', e);
+                                }
                                 }
                             }
                         }
@@ -9653,7 +9940,8 @@
             window.refreshWorkspaceContent = refreshWorkspaceContent;
 
             /**
-             * 工作台打印：仅触发 window.print()；显示/隐藏、flex 解锁、iframe 与 CSV 分页由 style.css @media print 统一处理。
+             * 工作台打印：Electron（UA 嗅探 + 安全 IPC）走主进程 webContents.print；浏览器为 window.print()。
+             * 显示/隐藏、flex 解锁、iframe 与 CSV 分页由 style.css @media print 统一处理。
              */
             window.handlePrintWorkspace = function () {
                 var wp = document.getElementById('workspace-pane');
@@ -9666,6 +9954,31 @@
                     var tEl = document.getElementById('workspace-print-time');
                     if (tEl) tEl.textContent = new Date().toLocaleString();
                 } catch (_e) {}
+                var ua = (typeof navigator !== 'undefined' && navigator.userAgent) ? navigator.userAgent : '';
+                var isElectron = /electron/i.test(ua);
+                if (isElectron) {
+                    try {
+                        if (window.electronAPI && typeof window.electronAPI.send === 'function') {
+                            window.electronAPI.send('app-print-report');
+                        } else if (typeof window.require !== 'undefined') {
+                            var _electron = window.require('electron');
+                            var ipcRenderer = _electron && _electron.ipcRenderer;
+                            if (ipcRenderer && typeof ipcRenderer.send === 'function') {
+                                ipcRenderer.send('app-print-report');
+                            } else {
+                                console.error('无法获取 IPC 通道，回退到普通打印');
+                                window.print();
+                            }
+                        } else {
+                            console.error('无法获取 IPC 通道，回退到普通打印');
+                            window.print();
+                        }
+                    } catch (err) {
+                        console.error('IPC 打印触发异常:', err);
+                        window.print();
+                    }
+                    return;
+                }
                 try {
                     window.print();
                 } catch (e) {
@@ -11157,6 +11470,38 @@
                                     ${useRecommendedParams ? '切换回默认参数' : '使用推荐参数'}
                                 </button>
                                 <span class="text-muted small ms-2">点击按钮切换参数值</span>
+                            </div>
+                            <div class="table-responsive" style="margin-top: 12px;">
+                                <table class="table table-sm table-bordered table-striped mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>步骤名</th>
+                                            <th>底层调用的算子/工具名</th>
+                                            <th>参数名</th>
+                                            <th>默认值</th>
+                                            <th>推荐值</th>
+                                            <th>推荐理由</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${Object.entries(recommendation.params || {}).map(([paramName, paramRec]) => {
+                                            const rec = paramRec || {};
+                                            const stepName = rec.step_name || rec.stepName || rec.step || '未知步骤';
+                                            const toolName = rec.tool_name || rec.toolName || rec.tool || '未知工具';
+                                            const defVal = rec.default !== undefined && rec.default !== null ? rec.default : '';
+                                            const recVal = rec.value !== undefined && rec.value !== null ? rec.value : '';
+                                            const reason = rec.reason || '基于数据特征推荐';
+                                            return `<tr>
+                                                <td>${escapeHtml(String(stepName))}</td>
+                                                <td>${escapeHtml(String(toolName))}</td>
+                                                <td><code>${escapeHtml(String(paramName))}</code></td>
+                                                <td>${escapeHtml(String(defVal))}</td>
+                                                <td><code>${escapeHtml(String(recVal))}</code></td>
+                                                <td>${escapeHtml(String(reason))}</td>
+                                            </tr>`;
+                                        }).join('')}
+                                    </tbody>
+                                </table>
                             </div>
                         ` : ''}
                     </div>`;

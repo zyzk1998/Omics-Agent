@@ -840,6 +840,7 @@ class AgentOrchestrator:
                     kwargs.get("session_id"),
                     db,
                     _query_str,
+                    enabled_mcps=enabled_mcps,
                 ):
                     yield _sse_chunk
                     await asyncio.sleep(0.01)
@@ -3198,6 +3199,7 @@ class AgentOrchestrator:
         session_id: Optional[str],
         db: Any,
         user_query: str,
+        enabled_mcps: Optional[List[str]] = None,
     ) -> AsyncIterator[str]:
         """Skill_Route: generate_expert_report — 仅下发 workspace_update + 短提示，正文不进聊天主气泡。"""
         from .stream_utils import stream_from_llm_chunks
@@ -3236,6 +3238,106 @@ class AgentOrchestrator:
             "【工具输出上下文】\n"
             f"{mem}"
         )
+        retrieval_context = ""
+        try:
+            import inspect
+            from gibh_agent.core.openai_tools import apply_hpc_mcp_tool_policy, tool_names_to_openai_tools
+            from gibh_agent.core.tool_registry import ToolRegistry
+            def _assistant_msg_to_openai_dict(msg: Any) -> Dict[str, Any]:
+                out: Dict[str, Any] = {"role": "assistant", "content": getattr(msg, "content", None) or ""}
+                tcs = getattr(msg, "tool_calls", None)
+                if not tcs:
+                    return out
+                tool_calls = []
+                for tc in tcs:
+                    fn = getattr(tc, "function", None)
+                    tool_calls.append(
+                        {
+                            "id": getattr(tc, "id", ""),
+                            "type": "function",
+                            "function": {
+                                "name": getattr(fn, "name", "") if fn is not None else "",
+                                "arguments": getattr(fn, "arguments", "{}") if fn is not None else "{}",
+                            },
+                        }
+                    )
+                out["tool_calls"] = tool_calls
+                return out
+            enabled = [str(x).strip() for x in (enabled_mcps or []) if str(x).strip()]
+            retrieval_tool_names: List[str] = []
+            if "web_search" in enabled:
+                retrieval_tool_names.append("mcp_web_search")
+            if "authority_db" in enabled:
+                retrieval_tool_names.append("mcp_ncbi_search")
+            retrieval_tool_names = apply_hpc_mcp_tool_policy(retrieval_tool_names, enabled)
+            retrieval_tools = tool_names_to_openai_tools(retrieval_tool_names) if retrieval_tool_names else []
+            if retrieval_tools:
+                registry = ToolRegistry()
+                pre_messages: List[Dict[str, Any]] = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是生物医学检索助手。请先调用可用检索工具，围绕 Top 3 关键标志物收集疾病机制证据。"
+                            "返回紧凑的中文证据摘要，包含可追溯来源（标题+URL/PMID）。禁止编造来源。"
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"用户问题：{(user_query or '').strip()}\n\n上下文：{mem[:4000]}",
+                    },
+                ]
+                for _ in range(6):
+                    pre_comp = await llm_client.achat(
+                        pre_messages,
+                        model="deepseek-chat",
+                        tools=retrieval_tools,
+                        tool_choice="auto",
+                        temperature=0.2,
+                        max_tokens=2048,
+                    )
+                    ch = getattr(pre_comp, "choices", None) or []
+                    if not ch:
+                        break
+                    msg = ch[0].message
+                    tcalls = getattr(msg, "tool_calls", None)
+                    if not tcalls:
+                        retrieval_context = (getattr(msg, "content", "") or "").strip()
+                        break
+                    pre_messages.append(_assistant_msg_to_openai_dict(msg))
+                    for tc in tcalls:
+                        fn = getattr(tc, "function", None)
+                        name = getattr(fn, "name", "") if fn is not None else ""
+                        args_raw = getattr(fn, "arguments", "{}") if fn is not None else "{}"
+                        try:
+                            args = json.loads(args_raw or "{}")
+                        except Exception:
+                            args = {}
+                        tool_fn = registry.get_tool(name) if name else None
+                        if not tool_fn:
+                            payload = {"status": "error", "error": f"未知工具: {name}"}
+                        else:
+                            try:
+                                if inspect.iscoroutinefunction(tool_fn):
+                                    payload = await tool_fn(**args)
+                                else:
+                                    payload = tool_fn(**args)
+                            except Exception as tool_exc:
+                                payload = {"status": "error", "error": str(tool_exc), "message": str(tool_exc)}
+                        pre_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": getattr(tc, "id", ""),
+                                "content": json.dumps(payload, ensure_ascii=False),
+                            }
+                        )
+        except Exception as _pre_e:
+            logger.warning("⚠️ [ExpertReport] 前置检索失败，将继续无检索生成: %s", _pre_e)
+
+        if retrieval_context:
+            user_block += (
+                "\n\n【前置检索证据（请优先基于这些真实来源写作）】\n"
+                + retrieval_context
+            )
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user_block},
@@ -3260,6 +3362,14 @@ class AgentOrchestrator:
                             state_snapshot,
                             "workspace_update",
                             {"markdown": acc, "partial": True},
+                        )
+                elif event_type == "thought":
+                    t = data.get("content") or ""
+                    if t:
+                        yield self._emit_sse(
+                            state_snapshot,
+                            "workspace_update",
+                            {"reasoning_content": t, "partial": True},
                         )
         except Exception as e:
             logger.exception("❌ [ExpertReport] 流式生成失败: %s", e)

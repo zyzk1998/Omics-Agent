@@ -10,6 +10,12 @@ from ..core.llm_client import LLMClient
 from ..core.prompt_manager import PromptManager, DATA_DIAGNOSIS_PROMPT
 from ..core.data_diagnostician import DataDiagnostician
 from ..core.stream_utils import strip_suggestions_from_text
+from ..core.openai_tools import (
+    apply_hpc_mcp_tool_policy,
+    hpc_chat_system_suffix,
+    tool_names_to_openai_tools,
+)
+from ..core.tool_registry import ToolRegistry
 from ..core.diagnosis_param_whitelist import (
     build_diagnosis_whitelist_prompt,
     collect_param_whitelist_for_diagnosis,
@@ -419,12 +425,20 @@ class BaseAgent(ABC):
         return f"""
 
 【极其重要的参数推荐规则】
-如果你输出「### 💡 参数推荐」下的 Markdown 表格，表格第一列「参数名」**必须绝对、一字不差地**等于下列某一个字符串（与前端输入框绑定键一致，区分大小写，通常为 snake_case；**禁止**使用中文标题、Title Case 展示名如 Min Genes、或自行改写）：
+如果你输出「### 💡 参数推荐」下的 Markdown 表格，必须使用 6 列顺序：
+| 步骤名 | 底层调用的算子/工具名 | 参数名 | 默认值 | 推荐值 | 推荐理由 |
+标准 One-Shot 示例（照此结构，不可删列）：
+| 步骤名 | 底层调用的算子/工具名 | 参数名 | 默认值 | 推荐值 | 推荐理由 |
+|---|---|---|---|---|---|
+| 数据预处理 | KNN Imputation | missing_thresh | 0.5 | 0.3 | 理由... |
+你的 Markdown 输出必须严格按照上述 6 列表格结构生成，绝不能遗漏步骤名和工具名列！
+其中第 3 列「参数名」**必须绝对、一字不差地**等于下列某一个字符串（与前端输入框绑定键一致，区分大小写，通常为 snake_case；**禁止**使用中文标题、Title Case 展示名如 Min Genes、或自行改写）：
 {shown}
 
 绝对不要捏造列表中不存在的参数名。不要擅自转换为其它格式。
 若某类参数不在上述列表中，说明前端未开放该字段，**请勿在表格中推荐**；可仅在正文段落中提及。
-表格第一列参数名**禁止**用 Markdown 加粗（**）或反引号（`）包裹，仅写裸参数字符串。
+每一行都必须填写「步骤名」与「底层调用的算子/工具名」；若无法判断可分别写“未知步骤”“未知工具”，但不可留空。
+第 3 列参数名**禁止**用 Markdown 加粗（**）或反引号（`）包裹，仅写裸参数字符串。
 """
 
     def _extract_editable_params(
@@ -733,7 +747,9 @@ Format:
 - **数据质量**: [质量评估]
 
 ### 💡 参数推荐
-Create a Markdown table with parameter recommendations; first column must be exact param keys allowed for this workflow (see system rules).
+Create a Markdown table with 6 columns in this exact order:
+| 步骤名 | 底层调用的算子/工具名 | 参数名 | 默认值 | 推荐值 | 推荐理由 |
+The 3rd column (参数名) must use exact allowed param keys for this workflow (see system rules).
 
 Use Simplified Chinese for all content."""
             
@@ -1957,7 +1973,157 @@ Use Simplified Chinese for all content."""
                 logger.info(f"✅ [AnalysisSummary] 关键指标已提取，包含数据，准备发送给LLM")
             
             try:
+                import inspect
+                import json
+                import re
                 llm_client_to_use = self.llm_for_request()
+                enabled_mcps_raw = self.context.get("enabled_mcps") or []
+                if isinstance(enabled_mcps_raw, str):
+                    try:
+                        enabled_mcps_raw = json.loads(enabled_mcps_raw)
+                    except Exception:
+                        enabled_mcps_raw = []
+                enabled_mcps = [str(x).strip() for x in (enabled_mcps_raw or []) if str(x).strip()]
+                tool_names: List[str] = []
+                if "web_search" in enabled_mcps:
+                    tool_names.append("mcp_web_search")
+                if "authority_db" in enabled_mcps:
+                    tool_names.append("mcp_ncbi_search")
+                tool_names = apply_hpc_mcp_tool_policy(tool_names, enabled_mcps)
+                report_tools = tool_names_to_openai_tools(tool_names) if tool_names else []
+                registry = ToolRegistry()
+                used_tool_names: List[str] = []
+
+                token_and_retrieval_constraints = """
+7. **Token 控制约束（强制）**：
+   - 你的 `<think>` 必须精简，只保留关键推理链路，禁止重复表述。
+   - 只聚焦 Top 3 标志物（代谢物/基因）做机制深挖，其余结果简述。
+
+8. **检索约束（条件触发）**：
+   - 若上下文已提供检索得到的真实资料，请基于该资料验证机制并引用，严禁编造文献。
+   - 若上下文未提供检索资料，请不要输出任何“参考文献占位文本”。
+
+9. **参考文献格式约束（条件触发）**：
+   - 仅当上下文明确给出检索资料时，在末尾输出 `### 参考文献 (References)` 并按 APA 列出真实来源。
+   - 若没有检索资料，完全忽略参考文献章节。
+"""
+                if report_tools:
+                    messages[0]["content"] += (
+                        "\n\n【可用检索工具】本轮可调用："
+                        + ", ".join(tool_names)
+                        + "。请在报告前先完成必要检索。"
+                        + hpc_chat_system_suffix(enabled_mcps)
+                    )
+                messages[1]["content"] = messages[1]["content"] + "\n\n" + token_and_retrieval_constraints
+
+                def _assistant_msg_to_openai_dict(msg: Any) -> Dict[str, Any]:
+                    out: Dict[str, Any] = {"role": "assistant", "content": getattr(msg, "content", None) or ""}
+                    tcs = getattr(msg, "tool_calls", None)
+                    if not tcs:
+                        return out
+                    tool_calls = []
+                    for tc in tcs:
+                        fn = getattr(tc, "function", None)
+                        tool_calls.append(
+                            {
+                                "id": getattr(tc, "id", ""),
+                                "type": "function",
+                                "function": {
+                                    "name": getattr(fn, "name", "") if fn is not None else "",
+                                    "arguments": getattr(fn, "arguments", "{}") if fn is not None else "{}",
+                                },
+                            }
+                        )
+                    out["tool_calls"] = tool_calls
+                    return out
+
+                async def _achat_with_tool_loop(run_messages: List[Dict[str, Any]], run_max_tokens: int, model_override: Optional[str] = None) -> Any:
+                    nonlocal used_tool_names
+                    if not report_tools:
+                        return await llm_client_to_use.achat(run_messages, temperature=0.3, max_tokens=run_max_tokens, model=model_override) if model_override else await llm_client_to_use.achat(run_messages, temperature=0.3, max_tokens=run_max_tokens)
+                    local_messages = list(run_messages)
+                    max_rounds = 8
+                    forced_search_nudge_sent = False
+                    for _ in range(max_rounds):
+                        completion = await llm_client_to_use.achat(
+                            local_messages,
+                            tools=report_tools,
+                            tool_choice="auto",
+                            temperature=0.3,
+                            max_tokens=run_max_tokens,
+                            model=model_override,
+                        )
+                        ch = getattr(completion, "choices", None) or []
+                        if not ch:
+                            raise RuntimeError("LLM 返回空 choices")
+                        msg = ch[0].message
+                        tcalls = getattr(msg, "tool_calls", None)
+                        if tcalls:
+                            local_messages.append(_assistant_msg_to_openai_dict(msg))
+                            for tc in tcalls:
+                                fn = getattr(tc, "function", None)
+                                name = getattr(fn, "name", "") if fn is not None else ""
+                                args_raw = getattr(fn, "arguments", "{}") if fn is not None else "{}"
+                                if not name:
+                                    continue
+                                try:
+                                    args = json.loads(args_raw or "{}")
+                                except Exception:
+                                    args = {}
+                                tool_fn = registry.get_tool(name)
+                                if not tool_fn:
+                                    payload = {"status": "error", "error": f"未知工具: {name}"}
+                                else:
+                                    try:
+                                        if inspect.iscoroutinefunction(tool_fn):
+                                            payload = await tool_fn(**args)
+                                        else:
+                                            payload = tool_fn(**args)
+                                    except Exception as tool_exc:
+                                        payload = {"status": "error", "error": str(tool_exc), "message": str(tool_exc)}
+                                if name not in used_tool_names:
+                                    used_tool_names.append(name)
+                                local_messages.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": getattr(tc, "id", ""),
+                                        "content": json.dumps(payload, ensure_ascii=False),
+                                    }
+                                )
+                            continue
+                        if report_tools and not used_tool_names and not forced_search_nudge_sent:
+                            forced_search_nudge_sent = True
+                            local_messages.append(
+                                {"role": "assistant", "content": getattr(msg, "content", "") or ""}
+                            )
+                            local_messages.append(
+                                {
+                                    "role": "user",
+                                    "content": "请先调用至少一个检索工具（mcp_web_search 或 mcp_ncbi_search）验证 Top 3 标志物机制，再输出最终报告。",
+                                }
+                            )
+                            continue
+                        return completion
+                    raise RuntimeError("报告生成工具调用轮次超限")
+
+                retrieval_context_text = ""
+                if report_tools:
+                    retrieval_messages = [
+                        {
+                            "role": "system",
+                            "content": "你是生物医学检索助手。先调用可用检索工具，返回 Top 3 标志物相关的机制证据与来源（标题+URL/PMID）。禁止编造。"
+                        },
+                        {
+                            "role": "user",
+                            "content": f"请基于这些指标做前置检索：{key_findings_json}\n任务目标：{workflow_name}"
+                        }
+                    ]
+                    try:
+                        retrieval_completion = await _achat_with_tool_loop(retrieval_messages, 2048, model_override="deepseek-chat")
+                        retrieval_context_text = ((retrieval_completion.choices[0].message.content if retrieval_completion and getattr(retrieval_completion, "choices", None) else "") or "").strip()
+                    except Exception as _retrieval_err:
+                        logger.warning("⚠️ [AnalysisSummary] 前置检索失败，降级为无检索上下文: %s", _retrieval_err)
+
                 # 🔥 修复：检查prompt总长度，避免超过API限制
                 system_message_length = len(messages[0]["content"]) if messages else 0
                 user_message_length = len(messages[1]["content"]) if len(messages) > 1 else 0
@@ -2057,7 +2223,7 @@ Use Simplified Chinese for all content."""
 
 现在生成全面的分析报告（遵循上述结构，详细且专业，包含深度生物学机制解读）："""
                     
-                    messages[1]["content"] = prompt
+                    messages[1]["content"] = prompt + "\n\n" + token_and_retrieval_constraints
                     
                     # 重新计算长度
                     system_message_length = len(messages[0]["content"])
@@ -2074,8 +2240,10 @@ Use Simplified Chinese for all content."""
                         self.context["report_suggestions"] = sug
                     return cleaned
 
-                logger.info(f"📞 [AnalysisSummary] 开始LLM调用，max_tokens=2500...")
-                completion = await llm_client_to_use.achat(messages, temperature=0.3, max_tokens=2500)  # 🔥 TASK 2: Increase tokens for comprehensive report
+                if retrieval_context_text:
+                    messages[1]["content"] = messages[1]["content"] + "\n\n【前置检索资料】\n" + retrieval_context_text
+                logger.info(f"📞 [AnalysisSummary] 开始LLM调用，max_tokens=8192...")
+                completion = await llm_client_to_use.achat(messages, temperature=0.3, max_tokens=8192)
                 logger.info(f"✅ [AnalysisSummary] LLM调用完成，开始解析响应...")
                 original_content = completion.choices[0].message.content or ""
                 logger.info(f"🔍 [AnalysisSummary] 原始内容长度: {len(original_content)}")
@@ -2116,7 +2284,7 @@ Minimum 500 words. Be scientific and detailed."""
                         {"role": "user", "content": retry_prompt}
                     ]
                     
-                    retry_completion = await llm_client_to_use.achat(retry_messages, temperature=0.3, max_tokens=2000)
+                    retry_completion = await llm_client_to_use.achat(retry_messages, temperature=0.3, max_tokens=4096)
                     retry_think, retry_response = llm_client_to_use.extract_think_and_content(retry_completion)
                     
                     # 🔥 FEATURE: Return original content with tags for frontend parsing
@@ -2434,17 +2602,30 @@ Evaluate and return ONLY the JSON object:"""
                 if re.match(r'^\|[\s:---]+\|', line):
                     continue
                 
-                # 解析表格行：| 参数名 | 默认值 | **推荐值** | 推荐理由 |
+                # 解析表格行，兼容两种格式：
+                # 新版 6 列：| 步骤名 | 底层调用的算子/工具名 | 参数名 | 默认值 | 推荐值 | 推荐理由 |
+                # 旧版 4 列：| 参数名 | 默认值 | 推荐值 | 推荐理由 |
                 cells = [cell.strip() for cell in line.split('|')[1:-1]]  # 去掉首尾空元素
-                
+
                 if len(cells) >= 4:
-                    param_name = cells[0].strip()
+                    step_name = "未知步骤"
+                    tool_name = "未知工具"
+                    if len(cells) >= 6:
+                        step_name = cells[0].strip() or "未知步骤"
+                        tool_name = cells[1].strip() or "未知工具"
+                        param_name = cells[2].strip()
+                        default_value = cells[3].strip()
+                        recommended_value = cells[4].strip()
+                        reason = cells[5].strip()
+                    else:
+                        param_name = cells[0].strip()
+                        default_value = cells[1].strip()
+                        recommended_value = cells[2].strip()
+                        reason = cells[3].strip()
+
                     # 第一列：去掉反引号与加粗，避免一键应用 name 匹配失败
                     param_name = re.sub(r"^[`\s]+|[`\s]+$", "", param_name)
                     param_name = re.sub(r"\*\*|\*", "", param_name).strip()
-                    default_value = cells[1].strip()
-                    recommended_value = cells[2].strip()
-                    reason = cells[3].strip()
 
                     if allowed_param_names and param_name not in allowed_param_names:
                         logger.debug(
@@ -2468,6 +2649,8 @@ Evaluate and return ONLY the JSON object:"""
                         pass
                     
                     params[param_name] = {
+                        "step_name": step_name,
+                        "tool_name": tool_name,
                         "default": default_value,
                         "value": recommended_value,
                         "reason": reason
