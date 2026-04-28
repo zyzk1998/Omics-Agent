@@ -252,10 +252,10 @@
             .sidebar-sub-list { padding-left: 0; margin-top: 4px; }
             .sidebar-sessions-list, .sidebar-assets-list { margin-top: 4px; }
             .sidebar-session-item, .sidebar-asset-item { position: relative; display: flex; align-items: center; gap: 6px; min-height: 36px; margin: 2px 0; padding: 8px 12px 8px 52px; border-radius: 8px; cursor: pointer; font-size: 13px; overflow: visible; box-sizing: border-box; }
-            #sidebar-assets-list { padding-left: 24px; }
-            #sidebar-assets-list .sidebar-asset-item { padding-left: 36px; }
-            #sidebar-assets-list .sidebar-asset-item .item-text { padding-left: 28px; }
-            .asset-modality-group summary { padding-left: 60px; }
+            #sidebar-assets-list { padding-left: 0; }
+            #sidebar-assets-list .sidebar-asset-item { padding-left: 12px; }
+            #sidebar-assets-list .sidebar-asset-item .item-text { padding-left: 0; }
+            .asset-modality-group summary { padding-left: 12px; }
             .sidebar-session-item .item-text, .sidebar-asset-item .item-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .sidebar-session-item:hover, .sidebar-asset-item:hover { background: #f3f4f6; }
             .sidebar-session-item.active-session { background: #f3f4f6; }
@@ -293,12 +293,117 @@
             .popover-item.danger:hover { background: #fef2f2; }
             .asset-modality-group { margin-top: 4px; padding-left: 0; }
             /* 与历史会话子项统一：行高与间距一致，hover 背景色块高度一致 */
-            .asset-modality-group summary { list-style: none; min-height: 36px; margin: 2px 0; padding: 8px 12px 8px 52px; cursor: pointer; font-weight: 500; font-size: 13px; color: #4b5563; border-radius: 8px; display: flex; align-items: center; gap: 8px; box-sizing: border-box; transition: background 0.2s ease; }
+            .asset-modality-group summary { list-style: none; min-height: 36px; margin: 2px 0; padding: 8px 12px; cursor: pointer; font-weight: 500; font-size: 13px; color: #4b5563; border-radius: 8px; display: flex; align-items: center; gap: 8px; box-sizing: border-box; transition: background 0.2s ease; }
             .asset-modality-group summary::-webkit-details-marker, .asset-modality-group summary::marker { display: none !important; }
             .asset-modality-group summary:hover { background: #f3f4f6; }
             .asset-modality-group .asset-modality-icon-wrap { width: 20px; min-width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
             .asset-modality-group .asset-modality-icon-wrap svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.5; }
             .asset-modality-files { padding-left: 0; margin-top: 4px; }
+            /* 1. 恢复与全局菜单一致的容器基准 (左边距 16px, 间距 12px) */
+            #sidebar-pane #sidebar-section-assets > summary.sidebar-item,
+            #sidebar-pane #sidebar-assets-list .asset-modality-group summary,
+            #sidebar-pane #sidebar-assets-list .sidebar-asset-item {
+                display: flex !important;
+                align-items: center !important;
+                padding: 10px 16px !important;
+                margin: 4px 8px !important;
+                width: calc(100% - 16px) !important;
+                gap: 12px !important;
+                box-sizing: border-box !important;
+            }
+
+            /* 2. 恢复与全局一致的图标尺寸 (24px) */
+            #sidebar-pane #sidebar-section-assets > summary.sidebar-item .sidebar-icon-wrap,
+            #sidebar-pane #sidebar-assets-list .asset-modality-group summary .asset-modality-icon-wrap {
+                width: 24px !important;
+                min-width: 24px !important;
+                max-width: 24px !important;
+                height: 24px !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                display: flex !important;
+                justify-content: center !important;
+                align-items: center !important;
+            }
+
+            /* 3. 文件名补偿取消 (直接对齐上方分类的图标边界) */
+            #sidebar-pane #sidebar-assets-list .sidebar-asset-item .item-text {
+                padding-left: 8px !important;
+                margin: 0 !important;
+            }
+
+            /* 4. 彻底消除 Wrapper 层面的内部挤压 */
+            #sidebar-pane #sidebar-section-assets .details-content-wrapper,
+            #sidebar-pane #sidebar-assets-list {
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+            .hpc-summary-head {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                width: 100%;
+            }
+            .hpc-summary-head .hpc-sync-btn {
+                margin-left: auto;
+                width: 24px;
+                height: 24px;
+                min-width: 24px;
+            }
+            .hpc-add-path-btn {
+                border: none;
+                background: transparent;
+                color: #6b7280;
+                font-size: 12px;
+                padding: 4px 16px;
+                cursor: pointer;
+                text-align: left;
+            }
+            .hpc-add-path-btn:hover { color: #374151; }
+            .hpc-add-path-wrap { padding: 0 16px 8px 16px; }
+            .hpc-add-path-input {
+                width: 100%;
+                height: 30px;
+                border: 1px solid #d1d5db;
+                border-radius: 6px;
+                padding: 0 8px;
+                font-size: 12px;
+                color: #374151;
+                background: #fff;
+            }
+            .hpc-add-path-input.is-error {
+                border-color: #ef4444;
+                background: #fef2f2;
+            }
+            .hpc-add-path-error {
+                min-height: 16px;
+                margin-top: 4px;
+                font-size: 12px;
+                color: #ef4444;
+            }
+            .hpc-add-path-actions {
+                display: flex;
+                gap: 8px;
+                margin-top: 6px;
+            }
+            .hpc-add-path-confirm,
+            .hpc-add-path-cancel {
+                height: 26px;
+                padding: 0 10px;
+                border-radius: 6px;
+                font-size: 12px;
+                cursor: pointer;
+                border: 1px solid #d1d5db;
+                background: #fff;
+                color: #374151;
+            }
+            .hpc-add-path-confirm {
+                background: #4d6bfe;
+                border-color: #4d6bfe;
+                color: #fff;
+            }
+            .hpc-add-path-confirm:hover { background: #4338ca; border-color: #4338ca; }
+            .hpc-add-path-cancel:hover { background: #f3f4f6; }
             .sidebar-assets-header { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px; }
             .sidebar-assets-header .sidebar-item-label { flex: 1; }
             .sidebar-asset-refresh-btn { flex-shrink: 0; margin-left: auto; width: 26px; height: 26px; padding: 0; border: none; border-radius: 6px; background: #f3f4f6; color: #6b7280; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; transition: background 0.2s, color 0.2s; }

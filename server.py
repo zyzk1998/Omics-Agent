@@ -46,6 +46,7 @@ from gibh_agent.core.file_handlers.structure_normalizer import normalize_session
 from gibh_agent.core.file_handlers.universal_normalizer import normalize_session_directory as universal_unpack
 from gibh_agent.core.file_handlers.modality_sniffer import detect_dominant_modality, paths_for_response
 from gibh_agent.core.utils import sanitize_for_json
+from gibh_agent.core.workspace_context import set_workspace_context, get_workspace_context
 
 # 配置日志
 logging.basicConfig(
@@ -85,6 +86,7 @@ async def _app_lifespan(app: FastAPI):
 
 # 创建 FastAPI 应用
 app = FastAPI(title="GIBH-AGENT-V2 Test Server", lifespan=_app_lifespan)
+app.state.workspace_context = {}
 
 
 @app.exception_handler(Exception)
@@ -1018,6 +1020,10 @@ class ChatRequest(BaseModel):
     mode: Optional[str] = "standard"  # LLM API 深度思考开关：standard | flagship（经 OpenAI SDK extra_body.thinking 下发）
 
 
+class WorkspaceInitRequest(BaseModel):
+    workspace_path: str
+
+
 def _normalize_chat_api_mode(req: ChatRequest) -> str:
     """将请求规范为 standard | flagship，用于 LLMClient ContextVar。"""
     raw = (getattr(req, "mode", None) or "").strip().lower()
@@ -1103,6 +1109,29 @@ async def api_health_check():
         "agent_initialized": agent is not None,
         "tool_retriever_initialized": tool_retriever is not None
     }
+
+
+@app.post("/api/workspace/init")
+async def init_workspace(payload: WorkspaceInitRequest):
+    """初始化本地工作区并确保存在 result/ 子目录。"""
+    raw_path = str(payload.workspace_path or "").strip()
+    if not raw_path:
+        raise HTTPException(status_code=400, detail="workspace_path 不能为空")
+
+    resolved = Path(raw_path).expanduser().resolve()
+    if not resolved.is_absolute():
+        raise HTTPException(status_code=400, detail="workspace_path 必须是绝对路径")
+    if not resolved.exists() or not resolved.is_dir():
+        raise HTTPException(status_code=400, detail="workspace_path 不存在或不是目录")
+
+    result_dir = resolved / "result"
+    result_dir.mkdir(parents=True, exist_ok=True)
+
+    workspace_info = set_workspace_context(str(resolved))
+    workspace_info["updated_at"] = datetime.now().isoformat()
+    app.state.workspace_context = workspace_info
+    logger.info("✅ [Workspace] initialized: %s", workspace_info["workspace_path"])
+    return {"status": "success", "workspace": workspace_info}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -2769,6 +2798,7 @@ async def chat_endpoint(
                     _hist_merged = _augment_history_with_db_tool_memory(
                         req.session_id, req.history or [], db
                     )
+                    _workspace_ctx = getattr(app.state, "workspace_context", None) or get_workspace_context()
                     async for event in orchestrator.stream_process(
                         query=req.message,
                         files=uploaded_files,
@@ -2783,6 +2813,7 @@ async def chat_endpoint(
                         target_domain=req.target_domain,
                         enabled_mcps=req.enabled_mcps or [],
                         thinking_mode=_effective_thinking,
+                        workspace_context=_workspace_ctx,
                     ):
                         if isinstance(event, str) and "event: state_snapshot" in event:
                             for line in event.split("\n"):

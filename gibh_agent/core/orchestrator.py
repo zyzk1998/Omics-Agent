@@ -32,6 +32,7 @@ from .llm_json_extract import extract_json_object_from_llm_text
 from .llm_cloud_providers import chat_mode_skip_openai_tools, validate_and_resolve_model_name
 from .semantic_router import RouteKind, RouterInput, SemanticRouter
 from .stream_utils import stream_with_suggestions
+from .workspace_context import build_workspace_system_instruction, get_workspace_context
 from .workflows import WorkflowRegistry
 from .file_handlers.universal_normalizer import _is_archive
 
@@ -46,6 +47,8 @@ _CHAT_MODE_PUBLIC_API_TOOLS: Tuple[str, ...] = (
     "query_uniprot_protein",
     "query_reactome_pathway",
     "query_alphafold_db",
+    "list_local_directory",
+    "read_local_file",
 )
 
 
@@ -1157,6 +1160,7 @@ class AgentOrchestrator:
                         model_name=model_name,
                         enabled_mcps=enabled_mcps,
                         session_key=_deep_key,
+                        workspace_context=kwargs.get("workspace_context"),
                     ):
                         yield sse_chunk
                 else:
@@ -1170,6 +1174,7 @@ class AgentOrchestrator:
                         enabled_mcps=enabled_mcps,
                         schema_cache_key=f"{_deep_key}::hpc_openai",
                         semantic_clarify_rationale=_semantic_clarify_rationale,
+                        workspace_context=kwargs.get("workspace_context"),
                     ):
                         yield sse_chunk
             except Exception as chat_exc:
@@ -3676,6 +3681,7 @@ class AgentOrchestrator:
         model_name: str,
         enabled_mcps: List[str],
         session_key: str,
+        workspace_context: Optional[Dict[str, Any]] = None,
     ) -> AsyncIterator[str]:
         """DeepReAct：多轮工具 + HITL 挂起；messages 由 _DEEP_REACT_SESSIONS 按 session_key 续传。"""
         import copy as _copy
@@ -3728,6 +3734,8 @@ class AgentOrchestrator:
                 "\n\n【NCBI 权威检索】你已启用 'mcp_ncbi_search'：可对 PubMed 文献与 NCBI Gene 做精准检索。"
                 "用户问文献、PMID、基因符号、基因功能时，应调用该工具（database 可选 pubmed / gene / auto），再结合返回摘要中文作答。"
             )
+        _workspace_ctx = workspace_context or get_workspace_context()
+        chat_system += build_workspace_system_instruction(_workspace_ctx)
         chat_system += hpc_chat_system_suffix(enabled_mcps)
         chat_system += (
             "\n\n【深度推理 / 人机协同】"
@@ -3886,6 +3894,7 @@ class AgentOrchestrator:
         enabled_mcps: List[str],
         schema_cache_key: str = "default::hpc_openai",
         semantic_clarify_rationale: Optional[str] = None,
+        workspace_context: Optional[Dict[str, Any]] = None,
     ) -> AsyncIterator[str]:
         """聊天模式：可选 OpenAI tools（如 mcp_web_search），再流式输出最终回复。"""
         from gibh_agent.core.openai_tools import (
@@ -3962,6 +3971,8 @@ class AgentOrchestrator:
                 "\n\n【NCBI 权威检索】你已启用 'mcp_ncbi_search'：可对 PubMed 文献与 NCBI Gene 做精准检索。"
                 "用户问文献、PMID、基因符号、基因功能时，应调用该工具（database 可选 pubmed / gene / auto），再结合返回摘要中文作答。"
             )
+        _workspace_ctx = workspace_context or get_workspace_context()
+        chat_system += build_workspace_system_instruction(_workspace_ctx)
         chat_system += hpc_chat_system_suffix(enabled_mcps)
 
         user_content = query

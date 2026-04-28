@@ -1,0 +1,77 @@
+%% =============================================================================
+%% 文本分析（讲稿用）：这张图在说什么
+%%
+%% 【1. 三层空间】
+%%   · 最外侧三个椭圆：用户、LLM 厂商、宿主机上的 HPC MCP —— 都不在 compose 的「容器生命周期」
+%%     里，但与本系统有稳定接口契约（HTTP/SSE、REST、MCP）。
+%%   · 中间虚线大框：docker-compose 在 gibh-network 上拉起的进程集合，共享同一虚拟网络，
+%%     日志与版本随 compose 一起升降级；框内即「内部 Docker」。
+%%
+%% 【2. 主请求链（同步）】
+%%   用户 → Nginx：典型生产入口（静态页、反代、TLS 可在这一跳终止）。
+%%   Nginx → api-server：把业务流量转到 FastAPI/Gunicorn 工作进程。
+%%   api-server → MySQL / Redis / 挂载卷：分别对应「结构化状态」「队列与缓存」「大文件落盘」，
+%%     与 compose 中 environment 与 volumes 一致。
+%%
+%% 【3. 异步与重活】
+%%   api-server → Redis：投递 Celery 任务，避免长计算占满 HTTP worker。
+%%   Celery worker → Redis：拉取任务；→ 挂载卷：读输入写结果；→ mcp-gateway：与 API 同源配置，
+%%     可在后台任务里触发超算侧工具而不阻塞用户连接。
+%%
+%% 【4. 算力外溢】
+%%   api-server → worker-pyskills：重算法（RDKit/ViennaRNA 等）走独立微服务，主 API 进程只做编排。
+%%   worker-pyskills ↔ 挂载卷：与 API 共享 uploads，避免把大依赖打进主镜像。
+%%   api-server / mcp-gateway → HPC MCP：网关进程负责 streamable-http 等到宿主机 MCP，对应
+%%     compose 中 host.docker.internal 与 MCP_GATEWAY_URL。
+%%
+%% 【5. 与你原图的对应关系】
+%%   原图「web→Redis 任务分发」≈ 本图 api-server→Redis「投递异步任务」。
+%%   原图「Celery→向量库检索」≈ 本仓库把检索/工具编排收进 api-server 编排链 + 可选向量存储；
+%%     若汇报需要单独画出向量库，可在 skills 子区增加一节「向量索引服务」节点再连实线。
+%%   原图「工具沙盒↔本地存储」≈ worker-pyskills↔挂载卷「共享卷读写」。
+%% =============================================================================
+
+flowchart TB
+  User(("用户\n浏览器 / 桌面端"))
+  LLM(("LLM 云 API\nOpenAI 兼容"))
+  HPC(("HPC MCP\n宿主机进程"))
+
+  subgraph Docker["「本地 Docker · Compose」运行时边界 · gibh-network"]
+    direction TB
+
+    NX["Nginx\n可选入口 80 / 8018"]
+    API["api-server\nGunicorn + Uvicorn :8028"]
+
+    RD[("Redis\nBroker / 缓存")]
+    MY[("MySQL\n持久化 :3306")]
+    Vol["宿主机挂载\nuploads · results · data"]
+
+    CW["Celery worker\n异步消费"]
+    PS["worker-pyskills\n算法微服务"]
+    MG["mcp-gateway\n:8002"]
+  end
+
+  User -->|"HTTP(S) 页面、上传、SSE"| NX
+  NX -->|"反向代理到业务端口"| API
+
+  API -->|"ORM 读写会话与业务表"| MY
+  API -->|"入队 Celery / 会话缓存"| RD
+  API -->|"上传与结果文件落盘"| Vol
+
+  CW -->|"拉取并 ACK 任务"| RD
+  CW -->|"读输入写回产物"| Vol
+  CW -->|"后台经网关调超算工具"| MG
+
+  API -->|"PYSKILLS_BASE_URL\n子服务调用"| PS
+  PS <-->|"共享卷读写入参/出参"| Vol
+
+  API -->|"MCP_GATEWAY_URL"| MG
+  MG -->|"HPC_MCP_URL\nstreamable-http"| HPC
+
+  API -->|"Chat / Embeddings\n密钥在环境变量"| LLM
+
+  %% 大框视觉强调（与「框外角色」形成对比）
+  style Docker fill:#0c1222,stroke:#7c3aed,stroke-width:3px,color:#e9d5ff
+  style User fill:#1e293b,stroke:#94a3b8,color:#f8fafc
+  style LLM fill:#1e293b,stroke:#5eead4,color:#f8fafc
+  style HPC fill:#1e293b,stroke:#fdba74,color:#f8fafc

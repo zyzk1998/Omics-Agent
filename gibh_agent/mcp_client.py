@@ -331,6 +331,10 @@ class HPCMCPManager:
                 "message": f"Tool Execution Failed: unexpected error ({type(e).__name__}: {e}).",
             }
 
+    async def call_tool(self, mcp_tool_name: str, arguments: Optional[dict] = None) -> Dict[str, Any]:
+        """公开的 MCP 工具调用入口，供 API 路由按工具名转发。"""
+        return await self._invoke_remote((mcp_tool_name or "").strip(), arguments or {})
+
     async def connect(self, url: str, transport: str = "streamableHttp") -> None:
         """通知网关重连超算 MCP，并轮询 /status + /tools 注册本地代理工具。"""
         self._clear_registered_tools()

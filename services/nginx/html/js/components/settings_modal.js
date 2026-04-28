@@ -369,6 +369,9 @@ function bindHpcMcpSwitch() {
             if (hpcInp.checked) {
                 triggerHpcMcpBackendReconnect();
             }
+            if (typeof window.fetchAssets === 'function') {
+                window.fetchAssets();
+            }
         });
     }
 }
@@ -451,6 +454,9 @@ function initSettingsModalBindings() {
         btnSettingsConfirm.onclick = function () {
             if (readEnabledMcpKeys().indexOf(HPC_OPEN_MCP_KEY) >= 0) {
                 triggerHpcMcpBackendReconnect();
+            }
+            if (typeof window.fetchAssets === 'function') {
+                window.fetchAssets();
             }
             closeSettingsModal();
         };

@@ -273,6 +273,23 @@ if (!globalThis.__OMICS_IPC_REGISTERED__) {
       console.error('[app-install-update]', e);
     }
   });
+  ipcMain.handle('app-select-workspace-folder', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const targetWin = win && !win.isDestroyed() ? win : BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showOpenDialog(targetWin || undefined, {
+      title: '选择本地项目目录',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return { canceled: true };
+    }
+    const selectedPath = result.filePaths[0];
+    return {
+      canceled: false,
+      workspace_path: selectedPath,
+      workspace_name: path.basename(selectedPath),
+    };
+  });
 }
 
 app.whenReady().then(() => {

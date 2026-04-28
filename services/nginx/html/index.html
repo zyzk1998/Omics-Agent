@@ -90,6 +90,8 @@
                             <button type="button" id="sidebar-asset-refresh-btn" class="sidebar-asset-refresh-btn" title="刷新并重新分类：同步上传数据，将未分类文件归入对应类别" aria-label="刷新数据资产"><i class="bi bi-arrow-clockwise"></i></button>
                         </summary>
                         <div class="details-content-wrapper">
+                            <button type="button" id="btn-open-local-project" class="sidebar-item" style="margin: 8px 8px 6px; width: calc(100% - 16px); border: 1px solid #2563eb; background: linear-gradient(90deg, #eff6ff, #dbeafe); color: #1d4ed8; font-weight: 600;" title="选择本地项目目录并初始化工作区">📁 打开本地项目</button>
+                            <input type="file" id="local-project-folder-input" webkitdirectory directory style="display:none;">
                             <div id="sidebar-assets-list" class="sidebar-sub-list"></div>
                         </div>
                     </details>
@@ -1764,6 +1766,101 @@
                 el.textContent = msg;
                 document.body.appendChild(el);
                 setTimeout(function() { el.style.opacity = '0'; setTimeout(function() { el.remove(); }, 300); }, 2600);
+            }
+
+            window.__workspaceSelection = window.__workspaceSelection || null;
+            function cacheWorkspaceSelection(selection) {
+                window.__workspaceSelection = selection || null;
+                try {
+                    if (selection) localStorage.setItem('workspaceSelection', JSON.stringify(selection));
+                } catch (_e) {}
+            }
+            function getCachedWorkspaceSelection() {
+                if (window.__workspaceSelection) return window.__workspaceSelection;
+                try {
+                    var raw = localStorage.getItem('workspaceSelection');
+                    var parsed = raw ? JSON.parse(raw) : null;
+                    if (parsed && typeof parsed === 'object') {
+                        window.__workspaceSelection = parsed;
+                        return parsed;
+                    }
+                } catch (_e) {}
+                return null;
+            }
+            async function postWorkspaceInit(workspacePath) {
+                var res = await fetch('/api/workspace/init', {
+                    method: 'POST',
+                    headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ workspace_path: workspacePath }),
+                });
+                var data = await res.json();
+                if (!res.ok || !data || data.status !== 'success') {
+                    throw new Error((data && (data.detail || data.message)) || ('HTTP ' + res.status));
+                }
+                return data.workspace || null;
+            }
+            async function openLocalProjectWorkspace() {
+                var selection = null;
+                var isElectron = false;
+                try {
+                    isElectron = typeof process !== 'undefined' && process.versions && !!process.versions.electron;
+                } catch (_e) { isElectron = false; }
+
+                if (isElectron) {
+                    try {
+                        var ipc = require('electron').ipcRenderer;
+                        if (ipc && typeof ipc.invoke === 'function') {
+                            var picked = await ipc.invoke('app-select-workspace-folder');
+                            if (picked && !picked.canceled && picked.workspace_path) {
+                                selection = {
+                                    workspace_name: picked.workspace_name || '本地项目',
+                                    workspace_path: picked.workspace_path,
+                                    source: 'electron-dialog',
+                                };
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[workspace] electron pick failed', e);
+                    }
+                }
+
+                if (!selection) {
+                    var inputEl = document.getElementById('local-project-folder-input');
+                    if (!inputEl) return;
+                    var pickedByWeb = await new Promise(function(resolve) {
+                        inputEl.value = '';
+                        inputEl.onchange = function() {
+                            var files = Array.from(inputEl.files || []);
+                            if (!files.length) return resolve(null);
+                            var rel = files[0].webkitRelativePath || files[0].name || '';
+                            var rootName = rel.split('/')[0] || '本地目录';
+                            resolve({
+                                workspace_name: rootName,
+                                workspace_path: '',
+                                source: 'web-input',
+                            });
+                        };
+                        inputEl.click();
+                    });
+                    selection = pickedByWeb;
+                }
+
+                if (!selection) return;
+                cacheWorkspaceSelection(selection);
+                if (!selection.workspace_path) {
+                    showToast('当前 Web 选择器无法读取绝对路径；请使用桌面版或手动输入路径', 'warning');
+                    return;
+                }
+                var workspace = await postWorkspaceInit(selection.workspace_path);
+                if (workspace) {
+                    selection.workspace_name = workspace.workspace_name || selection.workspace_name;
+                    selection.workspace_path = workspace.workspace_path || selection.workspace_path;
+                    selection.result_path = workspace.result_path || '';
+                    selection.source = selection.source || 'workspace-init';
+                    cacheWorkspaceSelection(selection);
+                    if (typeof fetchAssets === 'function') fetchAssets();
+                }
+                showToast('工作区已初始化：' + ((workspace && workspace.workspace_name) || selection.workspace_name), 'success');
             }
 
             /** 桌面客户端：订阅主进程 autoUpdater 广播，展示进度与重启安装 */
@@ -3844,6 +3941,265 @@
                 proteomics: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>',
                 uncategorized: '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h3l2 3h9a2 2 0 012 2z"/></svg>'
             };
+            function isHpcMcpEnabled() {
+                try {
+                    if (typeof window.getEnabledMcpsFromStorage === 'function') {
+                        var keys = window.getEnabledMcpsFromStorage() || [];
+                        return Array.isArray(keys) && keys.indexOf('compute_scheduler') >= 0;
+                    }
+                    var raw = localStorage.getItem('enabled_mcps');
+                    var parsed = raw ? JSON.parse(raw) : [];
+                    return Array.isArray(parsed) && parsed.indexOf('compute_scheduler') >= 0;
+                } catch (e) {
+                    return false;
+                }
+            }
+            function getAddedHpcFiles() {
+                try {
+                    var raw = localStorage.getItem('addedHpcFiles');
+                    var parsed = raw ? JSON.parse(raw) : [];
+                    if (!Array.isArray(parsed)) return [];
+                    return parsed.map(function(x) { return String(x || '').trim(); }).filter(Boolean);
+                } catch (e) {
+                    return [];
+                }
+            }
+            function setAddedHpcFiles(paths) {
+                var uniq = [];
+                var seen = {};
+                (paths || []).forEach(function(p) {
+                    var s = String(p || '').trim();
+                    if (!s || seen[s]) return;
+                    seen[s] = true;
+                    uniq.push(s);
+                });
+                localStorage.setItem('addedHpcFiles', JSON.stringify(uniq));
+            }
+            function getHpcSidebarState() {
+                if (!window.__hpcSidebarState) {
+                    window.__hpcSidebarState = { syncing: false, syncedFiles: [] };
+                }
+                return window.__hpcSidebarState;
+            }
+            async function syncHpcFiles() {
+                var state = getHpcSidebarState();
+                if (state.syncing) return;
+                state.syncing = true;
+                if (typeof fetchAssets === 'function') fetchAssets();
+                try {
+                    console.log('[HPC Sync] 开始请求后端...');
+                    var res = await fetch('/api/config/mcp/hpc-files/sync', {
+                        method: 'POST',
+                        headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ command: 'ls -1' }),
+                    });
+                    var data = await res.json();
+                    console.log('[HPC Sync] 后端原始返回:', data);
+                    if (!res.ok || data.status !== 'success') {
+                        throw new Error((data && (data.message || data.detail)) || ('HTTP ' + res.status));
+                    }
+                    state.syncedFiles = Array.isArray(data.files) ? data.files : [];
+                } catch (e) {
+                    console.error('[HPC Sync] 接口请求失败:', e);
+                    alert('HPC 同步失败：' + (e && e.message ? e.message : e));
+                    if (typeof showToast === 'function') showToast('超算文件同步失败：' + (e.message || e));
+                } finally {
+                    state.syncing = false;
+                    if (typeof fetchAssets === 'function') fetchAssets();
+                }
+            }
+            async function validateHpcPath(filePath) {
+                var p = String(filePath || '').trim();
+                if (!p) return { ok: false, message: '路径不能为空' };
+                try {
+                    var res = await fetch('/api/config/mcp/hpc-files/check', {
+                        method: 'POST',
+                        headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ file_path: p }),
+                    });
+                    var data = await res.json();
+                    if (!res.ok || data.status !== 'success') {
+                        return { ok: false, message: (data && (data.message || data.detail)) || ('HTTP ' + res.status) };
+                    }
+                    if (!data.exists) return { ok: false, message: '未找到该路径或权限不足' };
+                    return { ok: true };
+                } catch (e) {
+                    return { ok: false, message: '未找到该路径或权限不足' };
+                }
+            }
+            function renderHpcAssetsPlaceholder(containerEl) {
+                if (!containerEl) return;
+                var isHpcConnected = isHpcMcpEnabled();
+                var state = getHpcSidebarState();
+                var details = document.createElement('details');
+                details.className = 'asset-modality-group hpc-assets-group';
+                var summary = document.createElement('summary');
+                var summaryHead = document.createElement('div');
+                summaryHead.className = 'hpc-summary-head';
+                var iconWrap = document.createElement('span');
+                iconWrap.className = 'asset-modality-icon-wrap';
+                iconWrap.textContent = '☁️';
+                summaryHead.appendChild(iconWrap);
+                var titleEl = document.createElement('span');
+                var baseFiles = Array.isArray(state.syncedFiles) ? state.syncedFiles : [];
+                var mergedCount = (isHpcConnected ? baseFiles : []).concat(getAddedHpcFiles()).filter(Boolean).length;
+                titleEl.textContent = isHpcConnected ? ('超算资产 (' + mergedCount + ')') : '超算资产 (未连接)';
+                summaryHead.appendChild(titleEl);
+                var syncBtn = document.createElement('button');
+                syncBtn.type = 'button';
+                syncBtn.className = 'sidebar-asset-refresh-btn hpc-sync-btn' + (state.syncing ? ' spinning' : '');
+                syncBtn.title = '同步超算文件';
+                syncBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i>';
+                syncBtn.onclick = function(ev) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    syncHpcFiles();
+                };
+                summaryHead.appendChild(syncBtn);
+                summary.appendChild(summaryHead);
+                if (!isHpcConnected) summary.style.color = '#9ca3af';
+                details.appendChild(summary);
+
+                var fileList = document.createElement('div');
+                fileList.className = 'asset-modality-files';
+                fileList.innerHTML = '';
+                if (isHpcConnected) {
+                    var base = Array.isArray(state.syncedFiles) ? state.syncedFiles : [];
+                    var files = base.concat(getAddedHpcFiles()).filter(Boolean);
+                    var seen = {};
+                    files.forEach(function(name) {
+                        if (seen[name]) return;
+                        seen[name] = true;
+                        var item = document.createElement('div');
+                        item.className = 'sidebar-asset-item';
+                        var textSpan = document.createElement('span');
+                        textSpan.className = 'item-text';
+                        textSpan.textContent = name;
+                        item.appendChild(textSpan);
+                        fileList.appendChild(item);
+                    });
+                    var addPathBtn = document.createElement('button');
+                    addPathBtn.type = 'button';
+                    addPathBtn.className = 'hpc-add-path-btn';
+                    addPathBtn.textContent = '+ 添加文件路径';
+                    fileList.appendChild(addPathBtn);
+
+                    var addWrap = document.createElement('div');
+                    addWrap.className = 'hpc-add-path-wrap';
+                    addWrap.style.display = 'none';
+                    var input = document.createElement('input');
+                    input.type = 'text';
+                    input.className = 'hpc-add-path-input';
+                    input.placeholder = '/home/user/data/new_sample.fq';
+                    addWrap.appendChild(input);
+                    var err = document.createElement('div');
+                    err.className = 'hpc-add-path-error';
+                    addWrap.appendChild(err);
+                    var actionRow = document.createElement('div');
+                    actionRow.className = 'hpc-add-path-actions';
+                    var confirmBtn = document.createElement('button');
+                    confirmBtn.type = 'button';
+                    confirmBtn.className = 'hpc-add-path-confirm';
+                    confirmBtn.textContent = '确认';
+                    var cancelBtn = document.createElement('button');
+                    cancelBtn.type = 'button';
+                    cancelBtn.className = 'hpc-add-path-cancel';
+                    cancelBtn.textContent = '取消';
+                    actionRow.appendChild(confirmBtn);
+                    actionRow.appendChild(cancelBtn);
+                    addWrap.appendChild(actionRow);
+                    fileList.appendChild(addWrap);
+
+                    addPathBtn.onclick = function(ev) {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        addWrap.style.display = addWrap.style.display === 'none' ? 'block' : 'none';
+                        if (addWrap.style.display === 'block') setTimeout(function() { input.focus(); }, 0);
+                    };
+                    var submitAddPath = async function() {
+                        var pathVal = (input.value || '').trim();
+                        input.classList.remove('is-error');
+                        err.textContent = '';
+                        var check = await validateHpcPath(pathVal);
+                        if (!check.ok) {
+                            input.classList.add('is-error');
+                            err.textContent = check.message || '未找到该路径或权限不足';
+                            return;
+                        }
+                        var current = getAddedHpcFiles();
+                        if (current.indexOf(pathVal) < 0) current.push(pathVal);
+                        setAddedHpcFiles(current);
+                        if (typeof fetchAssets === 'function') fetchAssets();
+                    };
+                    var resetAddPath = function() {
+                        input.value = '';
+                        input.classList.remove('is-error');
+                        err.textContent = '';
+                        addWrap.style.display = 'none';
+                    };
+                    confirmBtn.onclick = function(ev) {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        submitAddPath();
+                    };
+                    cancelBtn.onclick = function(ev) {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        resetAddPath();
+                    };
+                    input.addEventListener('keydown', async function(ev) {
+                        if (ev.key === 'Enter') {
+                            ev.preventDefault();
+                            submitAddPath();
+                            return;
+                        }
+                        if (ev.key === 'Escape') {
+                            ev.preventDefault();
+                            resetAddPath();
+                        }
+                    });
+                } else {
+                    var hintItem = document.createElement('div');
+                    hintItem.className = 'sidebar-asset-item';
+                    var hintText = document.createElement('span');
+                    hintText.className = 'item-text';
+                    hintText.style.color = '#999';
+                    hintText.style.fontStyle = 'italic';
+                    hintText.textContent = '请先在系统设置中开启 HPC 连接';
+                    hintItem.appendChild(hintText);
+                    fileList.appendChild(hintItem);
+                }
+                details.appendChild(fileList);
+                containerEl.appendChild(details);
+            }
+            function renderLocalWorkspacePlaceholder(containerEl) {
+                if (!containerEl) return;
+                var workspace = getCachedWorkspaceSelection();
+                if (!workspace || !workspace.workspace_name) return;
+                var details = document.createElement('details');
+                details.className = 'asset-modality-group local-workspace-group';
+                details.open = true;
+                var summary = document.createElement('summary');
+                var iconWrap = document.createElement('span');
+                iconWrap.className = 'asset-modality-icon-wrap';
+                iconWrap.textContent = '💻';
+                summary.appendChild(iconWrap);
+                summary.appendChild(document.createTextNode('本地项目: ' + workspace.workspace_name));
+                details.appendChild(summary);
+
+                var fileList = document.createElement('div');
+                fileList.className = 'asset-modality-files';
+                var item = document.createElement('div');
+                item.className = 'sidebar-asset-item';
+                var text = document.createElement('span');
+                text.className = 'item-text';
+                text.style.color = 'green';
+                text.textContent = '✓ 已挂载: 准备就绪';
+                item.appendChild(text);
+                fileList.appendChild(item);
+                details.appendChild(fileList);
+                containerEl.appendChild(details);
+            }
             function fetchAssets() {
                 fetch('/api/assets', { method: 'GET', headers: getAuthHeaders() })
                     .then(function(r) { return r.ok ? r.json() : r.text().then(function(t) { try { return Promise.reject(JSON.parse(t)); } catch (e) { return Promise.reject({ detail: t || ('HTTP ' + r.status) }); } }); })
@@ -3940,6 +4296,8 @@
                             details.appendChild(fileList);
                             el.appendChild(details);
                         });
+                        renderLocalWorkspacePlaceholder(el);
+                        renderHpcAssetsPlaceholder(el);
                         var fileMgmtEntry = document.createElement('div');
                         fileMgmtEntry.className = 'sidebar-item';
                         fileMgmtEntry.id = 'btn-file-management';
@@ -3954,6 +4312,7 @@
                     })
                     .catch(function(e) { console.warn('[fetchAssets]', e); var el = document.getElementById('sidebar-assets-list'); if (el && e && e.detail) { el.innerHTML = ''; var h = document.createElement('div'); h.className = 'empty-sidebar-hint'; h.textContent = e.detail; el.appendChild(h); } });
             }
+            window.fetchAssets = fetchAssets;
             // 数据资产栏刷新并重新分类：调用后端 reclassify 后刷新列表，将未分类文件归入对应类别
             function refreshAndReclassifyAssets(ev) {
                 if (ev) { ev.preventDefault(); ev.stopPropagation(); }
@@ -3978,6 +4337,14 @@
             }
             document.addEventListener('click', function(e) {
                 if (e.target && e.target.closest && e.target.closest('#sidebar-asset-refresh-btn')) refreshAndReclassifyAssets(e);
+                if (e.target && e.target.closest && e.target.closest('#btn-open-local-project')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openLocalProjectWorkspace().catch(function(err) {
+                        console.warn('[workspace-init]', err);
+                        showToast('初始化工作区失败：' + (err && err.message ? err.message : err), 'danger');
+                    });
+                }
             });
             // 任务3：点击数据资产挂载为输入框上方附件标签，不清空当前对话
             function ensureAssetTagsRow() {

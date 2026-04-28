@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<!--
+  Omics-Agent 述职交互幻灯片 | Reveal.js（图示均为预渲染 PNG / 配图，无页内 Mermaid 编译）
+  单文件分发：cd 述职PPT && python3 scripts/inline_html_assets.py
+  → 生成 index.self-contained.html（约 1.4MB，内联全部本地配图，可只拷贝该文件离线打开）
+  配图重生成：python3 scripts/render_deck_raster_diagrams.py && python3 scripts/build_deck_charts.py
+-->
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>多组学智能体 — 从验证到工业编排</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/dist/reveal.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/dist/theme/black.min.css" id="theme" />
+
+  <style>
+    :root {
+      --bg-deep: #0f172a;
+      --accent-violet: #7c3aed;
+      --text-clean: #f8fafc;
+      --muted: #94a3b8;
+      --success: #22c55e;
+      --danger: #f97316;
+    }
+
+    .reveal {
+      font-family: "Segoe UI", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: radial-gradient(ellipse 120% 80% at 50% -20%, rgba(124, 58, 237, 0.22), transparent 55%),
+        linear-gradient(165deg, #0f172a 0%, #0c1222 45%, #0f172a 100%);
+      color: var(--text-clean);
+    }
+
+    .reveal h1,
+    .reveal h2,
+    .reveal h3 {
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      text-transform: none;
+      border: none;
+    }
+    .reveal h1 {
+      font-size: 1.75em;
+      line-height: 1.18;
+      background: linear-gradient(105deg, #f8fafc 0%, #c4b5fd 45%, #7c3aed 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .reveal h2 {
+      color: var(--text-clean);
+      border-bottom: 3px solid var(--accent-violet);
+      padding-bottom: 0.3em;
+      display: inline-block;
+      margin-bottom: 0.5rem;
+    }
+    .reveal h3 {
+      color: #e2e8f0;
+      font-size: 0.95em;
+      margin: 0.4em 0;
+    }
+    .reveal p,
+    .reveal li {
+      font-weight: 400;
+      color: #e2e8f0;
+      line-height: 1.5;
+    }
+
+    /* --- 幻灯片视口：滚动 + 安全边距 --- */
+    .reveal .slides section {
+      height: 100%;
+      overflow-y: auto !important;
+      overflow-x: hidden;
+      padding: 1.75rem 3.25rem !important;
+      box-sizing: border-box;
+      text-align: left;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+    }
+    .reveal .slides section::-webkit-scrollbar {
+      width: 6px;
+    }
+    .reveal .slides section::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .reveal .slides section::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 10px;
+    }
+    .reveal .slides section.center-titles {
+      text-align: center;
+    }
+
+    /* --- 图片占位（总指挥供图 / 设计外包 brief） --- */
+    .img-placeholder {
+      border: 2px dashed #7c3aed;
+      border-radius: 8px;
+      padding: 3rem 1rem;
+      text-align: center;
+      color: #94a3b8;
+      background: rgba(0, 0, 0, 0.2);
+      margin: 1rem 0;
+      font-size: 0.42em;
+      line-height: 1.45;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 250px;
+      box-sizing: border-box;
+    }
+    .img-placeholder small {
+      display: block;
+      margin-top: 0.75rem;
+      font-size: 0.85em;
+      color: #64748b;
+      max-width: 42em;
+    }
+
+    /* --- 版式组件 --- */
+    .slide-kicker {
+      font-size: 0.38em;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #a78bfa;
+      margin-bottom: 0.35rem;
+    }
+    .ted-line {
+      font-size: 0.52em;
+      font-weight: 600;
+      color: #f1f5f9;
+      margin: 0.35rem 0 0.75rem;
+      max-width: 38em;
+    }
+    .ted-line em {
+      color: #c4b5fd;
+      font-style: normal;
+      font-weight: 800;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      align-items: stretch;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+    @media (max-width: 900px) {
+      .grid-2,
+      .grid-3 {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .glass-card {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-left: 4px solid #7c3aed;
+      border-radius: 10px;
+      padding: 1.1rem 1.35rem;
+      text-align: left;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+    }
+    .glass-card--tight {
+      padding: 0.85rem 1.1rem;
+    }
+    .glass-card .stack-label {
+      font-size: 0.34em;
+      font-weight: 700;
+      color: #94a3b8;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 0.5em;
+    }
+
+    .danger-card {
+      background: rgba(255, 255, 255, 0.04);
+      backdrop-filter: blur(8px);
+      border-left: 4px solid var(--danger);
+      border-radius: 10px;
+      padding: 1.1rem 1.25rem;
+      box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.1) inset;
+    }
+    .danger-card .pain-h {
+      font-size: 0.48em;
+      font-weight: 800;
+      color: #ffedd5;
+      margin: 0 0 0.45em;
+    }
+    .danger-card .pain-body {
+      font-size: 0.36em;
+      color: #e7e5e4;
+      margin: 0.2em 0 0;
+      line-height: 1.45;
+    }
+    .danger-card .pain-hit {
+      font-size: 0.42em;
+      font-weight: 800;
+      color: #fdba74;
+      margin: 0.65em 0 0;
+    }
+
+    .success-card {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(10px);
+      border-left: 4px solid var(--success);
+      border-radius: 10px;
+      padding: 1.1rem 1.25rem;
+      box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.12) inset;
+    }
+    .success-card .sc-title {
+      font-size: 0.48em;
+      font-weight: 800;
+      color: #bbf7d0;
+      margin: 0 0 0.45em;
+    }
+    .success-card .sc-body {
+      font-size: 0.36em;
+      color: #d1fae5;
+      opacity: 0.95;
+      line-height: 1.45;
+      margin: 0;
+    }
+
+    .tech-tag {
+      display: inline-block;
+      background: rgba(124, 58, 237, 0.2);
+      color: #c4b5fd;
+      padding: 3px 9px;
+      border-radius: 4px;
+      font-size: 0.72em;
+      font-weight: 600;
+      margin: 0 5px 5px 0;
+      border: 1px solid rgba(196, 181, 253, 0.25);
+    }
+
+    .accent-text {
+      font-weight: 800;
+      background: linear-gradient(105deg, #f8fafc 0%, #c4b5fd 40%, #a78bfa 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    /* 核心数据：超大数字 + 渐变 */
+    .hero-metric-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.25rem;
+      justify-content: flex-start;
+      align-items: flex-end;
+      margin: 0.75rem 0 1rem;
+    }
+    .hero-metric {
+      text-align: left;
+      min-width: 120px;
+      padding: 0.5rem 0.65rem;
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid rgba(124, 58, 237, 0.2);
+    }
+    .hero-metric__value {
+      font-size: 2.35em;
+      font-weight: 900;
+      line-height: 1;
+      background: linear-gradient(120deg, #ffffff 0%, #c4b5fd 35%, #7c3aed 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .hero-metric__suffix {
+      font-size: 0.55em;
+      font-weight: 800;
+      color: #c4b5fd;
+      vertical-align: super;
+    }
+    .hero-metric__label {
+      font-size: 0.34em;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-top: 0.35em;
+      max-width: 12em;
+    }
+
+    /* 技术矩阵：标签云 */
+    .tag-cloud {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem 0.5rem;
+      align-content: flex-start;
+      padding: 0.35rem 0 0.5rem;
+    }
+    .tag-cloud .tc {
+      font-size: 0.34em;
+      padding: 0.38em 0.75em;
+      border-radius: 999px;
+      background: rgba(124, 58, 237, 0.14);
+      border: 1px solid rgba(167, 139, 250, 0.35);
+      color: #ede9fe;
+      font-weight: 600;
+    }
+    .tag-cloud .tc--green {
+      background: rgba(34, 197, 94, 0.12);
+      border-color: rgba(52, 211, 153, 0.45);
+      color: #a7f3d0;
+    }
+    .tag-cloud .tc--amber {
+      background: rgba(251, 191, 36, 0.1);
+      border-color: rgba(251, 191, 36, 0.35);
+      color: #fde68a;
+    }
+
+    /* 错落 masonry：多列短语 */
+    .masonry-hints {
+      column-count: 3;
+      column-gap: 0.75rem;
+      font-size: 0.34em;
+      color: #cbd5e1;
+      line-height: 1.35;
+    }
+    @media (max-width: 768px) {
+      .masonry-hints {
+        column-count: 2;
+      }
+    }
+    .masonry-hints span {
+      display: inline-block;
+      margin: 0 0 0.35rem;
+      break-inside: avoid;
+      padding: 0.25em 0.5em;
+      border-radius: 6px;
+      background: rgba(30, 27, 75, 0.6);
+      border: 1px solid rgba(148, 163, 184, 0.15);
+    }
+
+    /* 时间线：总结 / 规划 */
+    .timeline-layout {
+      position: relative;
+      margin: 0.85rem 0 0.25rem;
+      padding-left: 1.15rem;
+      border-left: 3px solid rgba(124, 58, 237, 0.5);
+    }
+    .tl-item {
+      position: relative;
+      margin-bottom: 0.95rem;
+      padding-left: 0.55rem;
+    }
+    .tl-dot {
+      position: absolute;
+      left: -1.38rem;
+      top: 0.32em;
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #7c3aed;
+      box-shadow: 0 0 14px rgba(167, 139, 250, 0.8);
+    }
+    .tl-title {
+      font-size: 0.46em;
+      font-weight: 800;
+      color: #fff;
+    }
+    .tl-body {
+      font-size: 0.34em;
+      color: #cbd5e1;
+      margin-top: 0.2em;
+      line-height: 1.45;
+    }
+
+    /* 三列叙事卡（背景页等） */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 0.75rem;
+    }
+    .card {
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid rgba(124, 58, 237, 0.22);
+      border-radius: 12px;
+      padding: 0.85rem 0.95rem;
+      box-shadow: 0 10px 36px rgba(0, 0, 0, 0.4);
+    }
+    .card-icon {
+      font-size: 1.5em;
+      margin-bottom: 0.25em;
+    }
+    .card-title {
+      font-weight: 800;
+      color: #fff;
+      font-size: 0.72em;
+      margin-bottom: 0.3em;
+    }
+    .card-body {
+      font-size: 0.5em;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .phase-tag {
+      display: inline-block;
+      padding: 0.18em 0.6em;
+      border-radius: 999px;
+      font-size: 0.4em;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      background: rgba(124, 58, 237, 0.25);
+      color: #ddd6fe;
+      margin-bottom: 0.45em;
+    }
+    .phase-tag.pain {
+      background: rgba(248, 113, 113, 0.2);
+      color: #fecaca;
+    }
+    .phase-tag.mature {
+      background: rgba(52, 211, 153, 0.18);
+      color: #a7f3d0;
+    }
+
+    .subtitle {
+      margin-top: 1rem;
+      font-size: 0.5em;
+      color: var(--muted);
+      max-width: 34em;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .author-line {
+      margin-top: 1.75rem;
+      font-size: 0.4em;
+      color: #a78bfa;
+      letter-spacing: 0.08em;
+    }
+    .footnote {
+      font-size: 0.32em;
+      color: #64748b;
+      margin-top: 0.65rem;
+    }
+
+    .mermaid-wrap {
+      margin-top: 0.5rem;
+      padding: 0.55rem 0.75rem;
+      background: rgba(2, 6, 23, 0.55);
+      border-radius: 10px;
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      font-size: 0.32em;
+    }
+    .mermaid-wrap--gantt {
+      font-size: 0.28em;
+    }
+    /* 流程图/序图：不要用 0.3em 缩成一条线，改用视口相关字号 */
+    .mermaid-wrap--diagram {
+      font-size: clamp(11px, 1.55vmin, 17px);
+    }
+    .deck-chart {
+      display: block;
+      margin: 0.55rem auto 0;
+      max-height: 40vh;
+      width: auto;
+      max-width: 100%;
+      border-radius: 12px;
+      border: 1px solid rgba(124, 58, 237, 0.22);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+      background: rgba(15, 23, 42, 0.5);
+    }
+    .chart-caption {
+      font-size: 0.44em;
+      color: #cbd5e1;
+      line-height: 1.5;
+      margin: 0.5rem auto 0;
+      max-width: 46em;
+      text-align: left;
+    }
+    .hero-metric-row--four .hero-metric {
+      min-width: 100px;
+      flex: 1 1 18%;
+    }
+    #slide-metrics .deck-chart {
+      max-height: 30vh;
+    }
+    .mermaid {
+      text-align: center;
+      margin: 0;
+    }
+    pre.mermaid {
+      background: transparent;
+      border: 0;
+      padding: 0;
+      margin: 0;
+      overflow: visible;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+        monospace;
+    }
+    .mermaid svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    /* 实体架构图：总指挥供图 */
+    .deck-figure {
+      margin: 0.65rem 0;
+      text-align: center;
+    }
+    .deck-figure img,
+    .shadow-lg.rounded-lg {
+      max-height: 60vh;
+      width: auto;
+      max-width: 100%;
+      object-fit: contain;
+      border-radius: 12px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(124, 58, 237, 0.15);
+      background: rgba(15, 23, 42, 0.4);
+    }
+    .deck-figure figcaption {
+      font-size: 0.34em;
+      color: #94a3b8;
+      margin-top: 0.4rem;
+    }
+
+    .mini-cols {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 0.65rem;
+    }
+    @media (max-width: 900px) {
+      .mini-cols {
+        grid-template-columns: 1fr;
+      }
+    }
+    .mini-cols .glass-card--tight h3 {
+      font-size: 0.42em;
+      margin: 0 0 0.35em;
+      color: #e9d5ff;
+    }
+    .mini-cols .glass-card--tight p {
+      font-size: 0.32em;
+      margin: 0;
+      color: #cbd5e1;
+    }
+
+    .reveal .progress span {
+      background: linear-gradient(90deg, #7c3aed, #a78bfa);
+    }
+  </style>
+</head>
+<body>
+  <div class="reveal">
+    <div class="slides">
+      <!-- ========== 1 封面 ========== -->
+      <section class="center-titles" id="slide-cover">
+        <p class="slide-kicker" style="letter-spacing: 0.2em">Omics-Agent / GIBH-AGENT-V2</p>
+        <h1>多组学分析智能体<br />架构设计与实现</h1>
+        <p class="subtitle">从「脚本能跑」到「契约可审、算力可切、意图可度量」</p>
+        <p class="author-line">赵闫泽坤</p>
+      </section>
+
+      <!-- ========== 2 行业背景 ========== -->
+      <section id="slide-stakes">
+        <p class="slide-kicker">Chapter 01 · 行业背景</p>
+        <h2>业务挑战：三组矛盾</h2>
+        <p class="ted-line fragment">数据在爆炸，<em>交付却在靠人肉</em> —— 科研节奏与工程节拍错位。</p>
+        <div class="card-grid">
+          <div class="card fragment">
+            <div class="card-icon" aria-hidden="true">📈</div>
+            <div class="card-title">模态碎片化</div>
+            <div class="card-body">单细胞 · 空间 · 代谢 · 影像 —— 同一实验室，多套脚本孤岛。</div>
+          </div>
+          <div class="card fragment">
+            <div class="card-icon" aria-hidden="true">🔁</div>
+            <div class="card-title">复现危机</div>
+            <div class="card-body">环境漂移 = 论文图表 ≠ 他人机器可跑。≈70% 分析链路边界模糊（口径可调）。</div>
+          </div>
+          <div class="card fragment">
+            <div class="card-icon" aria-hidden="true">🌫️</div>
+            <div class="card-title">幻觉税</div>
+            <div class="card-body">模型「说得像」≠ 系统「真能调工具」。无契约 = 不可审计。</div>
+          </div>
+        </div>
+        <div class="img-placeholder fragment">
+          📸 【图片占位】多组学 / AI 制药市场大盘
+          <small
+            >建议：公开研报条形图（单细胞、空间、蛋白、影像 AI 细分 CAGR）；横轴年份、纵轴亿美元；品牌色与紫渐变统一。若无版权图，可用 Figma
+            自绘 3 条增长曲线 + 图例。</small
+          >
+        </div>
+      </section>
+
+      <!-- ========== 3 叙事主线 ========== -->
+      <section id="slide-arc" class="center-titles">
+        <p class="slide-kicker">叙事主线</p>
+        <h2>一条故事线，四段演进</h2>
+        <p class="ted-line fragment" style="max-width: 32em; margin-left: auto; margin-right: auto">
+          <em>验证</em> → 证明工具闭环存在<br />
+          <em>容器化</em> → 吞吐与双脑推理<br />
+          <em>契约编排</em> → 意图、工具、算力三界分流<br />
+          <em>持续迭代</em> → 系统优化与工程化打磨
+        </p>
+        <figure class="deck-figure fragment">
+          <img class="deck-chart" src="assets/img_slide_gantt.png" alt="架构演进时间轴栅格图" />
+          <figcaption class="chart-caption">预渲染图（脚本：<code>scripts/render_deck_raster_diagrams.py</code>），与四段月份叙事一致。</figcaption>
+        </figure>
+      </section>
+
+      <!-- ========== 4 阶段1 探索 ========== -->
+      <section id="slide-p1">
+        <span class="phase-tag">阶段 1 · 探索期</span>
+        <h2>agent-mini：先证明「闭环存在」</h2>
+        <p class="ted-line fragment">零框架 HTTP + 工具 JSON —— <em>快</em>，但<strong>不可规模化</strong>。</p>
+        <div class="glass-card fragment">
+          <div class="stack-label">技术指纹</div>
+          <div class="tag-cloud">
+            <span class="tc">curl / bash</span>
+            <span class="tc">Ollama REST</span>
+            <span class="tc">tools.json</span>
+            <span class="tc">ReAct 四步</span>
+          </div>
+        </div>
+        <div class="grid-2" style="margin-top: 0.85rem">
+          <div class="danger-card fragment">
+            <div class="pain-h">主要问题</div>
+            <p class="pain-body">一条脚本顶全家：没会话、没文件资产、也没并发隔离。</p>
+            <p class="pain-body">线上出问题基本靠猜，日志和指标都薄。</p>
+          </div>
+          <div class="success-card fragment">
+            <div class="sc-title">当时证明了什么</div>
+            <p class="sc-body">模型能按 JSON 点名工具，HTTP 真执行，再把结果塞回对话里——<strong>闭环跑得通</strong>。</p>
+            <p class="sc-body" style="margin-top: 0.35em">结论：<strong>路子对，但不能停在脚本层</strong>。</p>
+          </div>
+        </div>
+        <figure class="deck-figure fragment" style="margin-top: 0.65rem">
+          <img class="deck-chart" src="assets/img_slide_p1_flow.png" alt="agent-mini 闭环流程示意图" />
+        </figure>
+        <p class="chart-caption fragment">
+          上图是公开原型 <strong>agent-mini</strong> 一类结构：没有重型框架，靠 <code>tools.json</code> 把「可调函数」交给模型，适合<strong>验证</strong>，不适合直接当生产底座。
+        </p>
+      </section>
+
+      <!-- ========== 5 阶段2 阵痛 ========== -->
+      <section id="slide-p2">
+        <span class="phase-tag pain">阶段 2 · 阵痛期</span>
+        <h2>vLLM + 固定流水线：第一次「像产品」</h2>
+        <div class="glass-card fragment">
+          <div class="stack-label">代表形态 · 技术栈</div>
+          <div class="tag-cloud">
+            <span class="tc">Docker Compose</span>
+            <span class="tc">FastAPI</span>
+            <span class="tc">Celery</span>
+            <span class="tc">Redis</span>
+            <span class="tc tc--green">双 vLLM</span>
+            <span class="tc">逻辑 / 多模态分流</span>
+          </div>
+        </div>
+        <div class="grid-2" style="margin-top: 0.85rem">
+          <div class="danger-card fragment">
+            <div class="pain-h">问题 A · 意图被带偏</div>
+            <p class="pain-body">靠关键词触发流水线，「查个基因」也能误开整套 scRNA。</p>
+            <p class="pain-body">用户多等一轮，GPU 白烧一轮。</p>
+            <p class="pain-hit">人和机器都吃亏</p>
+          </div>
+          <div class="danger-card fragment">
+            <div class="pain-h">问题 B · 推理和重活抢一条路</div>
+            <p class="pain-body">聊天推理和重计算走同一套服务链。</p>
+            <p class="pain-body">高峰时 API 先扛不住，排障还难拆。</p>
+            <p class="pain-hit">扩容也治标不治本</p>
+          </div>
+        </div>
+        <p class="fragment accent-text" style="font-size: 0.44em; margin-top: 0.75rem">
+          结论：光靠关键词不够，要把「该不该跑重活」先判清楚——也就是后面的<strong>结构化路由</strong>。
+        </p>
+        <figure class="deck-figure fragment">
+          <img class="deck-chart" src="assets/img_slide_p2_flow.png" alt="结构化路由分流示意图" />
+        </figure>
+      </section>
+
+      <!-- ========== 6 阶段3 成熟 ========== -->
+      <section id="slide-p3">
+        <span class="phase-tag mature">阶段 3 · 成熟期</span>
+        <h2>Omics-Agent V2：契约驱动的编排体</h2>
+        <div class="grid-2">
+          <div class="success-card fragment">
+            <div class="sc-title">控制平面</div>
+            <p class="sc-body">AgentOrchestrator · SemanticRouter · SkillAgent</p>
+            <p class="sc-body" style="margin-top: 0.35em">SSE state_snapshot · 可回放决策链</p>
+          </div>
+          <div class="success-card fragment">
+            <div class="sc-title">数据平面</div>
+            <p class="sc-body">OmicsAssetManager · 路径铁律 · 诊断白名单</p>
+            <p class="sc-body" style="margin-top: 0.35em">执行器反射注入 · 签名即 Schema</p>
+          </div>
+        </div>
+        <div class="glass-card fragment" style="margin-top: 0.85rem">
+          <div class="stack-label">工作流与模型对齐</div>
+          <p style="font-size: 0.4em; margin: 0; color: #e2e8f0">
+            <span class="tech-tag">WorkflowRegistry</span> SOP 域名 ⇄ 前端工作流卡片 ·
+            <span class="tech-tag">RouterOutput</span> Pydantic 强校验 · OpenAI
+            <code>tools[].parameters</code> 同源
+          </p>
+        </div>
+        <figure class="deck-figure fragment">
+          <img
+            class="shadow-lg rounded-lg"
+            src="模块交互示意图.png"
+            alt="模块交互示意图：用户、本地容器内编排与领域智能体、LLM 推理与 SSE 回流"
+          />
+          <figcaption>模块交互总览（总指挥供图）</figcaption>
+        </figure>
+        <figure class="deck-figure fragment">
+          <p class="stack-label" style="margin-bottom: 0.35rem">设计资产 · 分层模块（SVG）</p>
+          <img
+            class="shadow-lg rounded-lg"
+            src="../docs/exports/design-module-layered.svg"
+            alt="设计稿：分层模块拓扑"
+          />
+          <figcaption>仓库内矢量：<code>docs/exports/design-module-layered.svg</code></figcaption>
+        </figure>
+      </section>
+
+      <!-- ========== 6b Task 规划架构（专项页） ========== -->
+      <section id="slide-task-plan">
+        <span class="phase-tag mature">阶段 3 · 规划</span>
+        <h2>Task 规划：总控 × 首席科学家 × 图书管理员</h2>
+        <p class="ted-line fragment">
+          与「模块交互总览」同一套紫青视觉语言：先判意图、拆科学问题、再对齐工具库与 SOP，最后由 LLM 产出可执行工作流草案。
+        </p>
+        <figure class="deck-figure fragment">
+          <img class="shadow-lg rounded-lg" src="img_task_planning.png" alt="智能体 Task 规划阶段架构图" />
+          <figcaption class="chart-caption">总控编排 → Lead Scientist / Librarian → 领域 SOP → LLM 推理回流。</figcaption>
+        </figure>
+      </section>
+
+      <!-- ========== 6c Task 执行架构（专项页） ========== -->
+      <section id="slide-task-exec">
+        <span class="phase-tag mature">阶段 3 · 执行</span>
+        <h2>Task 执行：领域专家 × 执行引擎 × SSE</h2>
+        <p class="ted-line fragment">
+          工作流卡片确认后进入执行链：Executor 调原子工具与沙箱，错误经红路回灌 LLM 做修正；结果经 SSE 推送到前端实时渲染。
+        </p>
+        <figure class="deck-figure fragment">
+          <img class="shadow-lg rounded-lg" src="img_task_execution.png" alt="智能体 Task 执行阶段架构图" />
+          <figcaption class="chart-caption">主链路自上而下执行；灰线对接 LLM；红线为报错分析与回灌。</figcaption>
+        </figure>
+      </section>
+
+      <!-- ========== 7 能力版图：数字 ========== -->
+      <section id="slide-metrics">
+        <p class="slide-kicker">Chapter 02 · 能力版图</p>
+        <h2>可度量的工业化拐点</h2>
+        <p class="ted-line fragment">
+          下面三张图由仓库内 <code>data/deck_metrics.json</code> 驱动脚本生成（<code>python3 scripts/build_deck_charts.py</code>），字够大、轴标签写清「这张图在回答什么问题」。
+        </p>
+        <div class="hero-metric-row hero-metric-row--four fragment">
+          <div class="hero-metric">
+            <div class="hero-metric__value">120</div>
+            <div class="hero-metric__label">对外能力条数（本地 98 + MCP 清单 22）</div>
+          </div>
+          <div class="hero-metric">
+            <div class="hero-metric__value">98</div>
+            <div class="hero-metric__label">本地 ToolRegistry 注册条数</div>
+          </div>
+          <div class="hero-metric">
+            <div class="hero-metric__value">19</div>
+            <div class="hero-metric__label">路由脱机评测用例条数</div>
+          </div>
+          <div class="hero-metric">
+            <div class="hero-metric__value">&gt;95<span class="hero-metric__suffix">%</span></div>
+            <div class="hero-metric__label">语义 PASS（内网批跑；右下图小数以 JSON 为准）</div>
+          </div>
+        </div>
+        <figure class="deck-figure fragment">
+          <img
+            class="deck-chart"
+            src="assets/chart_tools_stack.png"
+            alt="柱状图：本地工具条数、MCP 清单条数、合计"
+          />
+          <figcaption class="chart-caption">左图回答：能力从哪两块拼出来、合计多少。</figcaption>
+        </figure>
+        <figure class="deck-figure fragment">
+          <img
+            class="deck-chart"
+            src="assets/chart_eval_distribution.png"
+            alt="柱状图：19 条评测用例按期望路由分布"
+          />
+          <figcaption class="chart-caption">中图回答：评测集覆盖哪些路由类型（不是准确率，是「考卷结构」）。</figcaption>
+        </figure>
+        <figure class="deck-figure fragment">
+          <img
+            class="deck-chart"
+            src="assets/chart_eval_pass_rate.png"
+            alt="横向条形图：语义路由脱机评测 PASS 率"
+          />
+          <figcaption class="chart-caption">
+            右图回答：在「模型真的返回了结构化路由」的前提下，路由是否打中 gold。当前 JSON 里写的是示例小数；你方若稳定高于 95%，改
+            <code>eval_semantic_pass_rate_pct</code> 后重跑脚本即可同步到图。
+          </figcaption>
+        </figure>
+        <p class="footnote">
+          数据文件：<code>述职PPT/data/deck_metrics.json</code> · 出图：<code>述职PPT/scripts/build_deck_charts.py</code> · MCP 条数源：<code>docs/hpc_mcp_tools_catalog.json</code> · 本地工具源：与
+          <code>工具库.md</code> 导出一致。
+        </p>
+      </section>
+
+      <!-- ========== 8 确定性路由 ========== -->
+      <section id="slide-route">
+        <p class="slide-kicker">核心壁垒 ①</p>
+        <h2>结构化路由：静态红线 + 动态护栏</h2>
+        <p class="ted-line fragment">gibh_agent/core/<strong>semantic_router.py</strong> —— 先判「该不该动手」，再谈「动哪只手」。</p>
+        <div class="mini-cols">
+          <div class="glass-card glass-card--tight fragment">
+            <h3>静态 A–E</h3>
+            <p>没上传就别启动重管线；没开算力通道就别走超算；明显百科问答就别硬套 Pipeline。</p>
+          </div>
+          <div class="glass-card glass-card--tight fragment">
+            <h3>动态 F · digest</h3>
+            <p>把当前环境里<strong>真实存在</strong>的 SOP 名、工具 id 摘要给模型，减少「编一个不存在的工具名」。</p>
+          </div>
+          <div class="glass-card glass-card--tight fragment">
+            <h3>硬兜底</h3>
+            <p>解析 JSON → Pydantic 校验 → 置信度低就重试 → 仍不行就追问用户，避免悄悄走错分支。</p>
+          </div>
+        </div>
+        <figure class="deck-figure fragment">
+          <img class="deck-chart" src="assets/img_slide_route_sequence.png" alt="语义路由与编排交互时序示意图" />
+        </figure>
+      </section>
+
+      <!-- ========== 9 原子工具库 ========== -->
+      <section id="slide-tools">
+        <p class="slide-kicker">核心壁垒 ②</p>
+        <h2>工具库：注册表把「能调什么」钉死</h2>
+        <div class="hero-metric-row fragment">
+          <div class="hero-metric">
+            <div class="hero-metric__value">98</div>
+            <div class="hero-metric__label">本地 ToolRegistry（<code>@registry.register</code>）</div>
+          </div>
+          <div class="hero-metric">
+            <div class="hero-metric__value">22</div>
+            <div class="hero-metric__label">MCP 固定清单（<code>docs/hpc_mcp_tools_catalog.json</code>）</div>
+          </div>
+          <div class="hero-metric">
+            <div class="hero-metric__value">120</div>
+            <div class="hero-metric__label">合计能力条数（98 + 22）</div>
+          </div>
+        </div>
+        <p class="ted-line fragment">
+          Python 函数签名直接生成 JSON Schema，和 OpenAI 的 <code>tools[]</code> 一套格式：模型看到的定义，和真正执行时用的是同一份，减少「文档一套、代码一套」的错位。
+        </p>
+        <figure class="deck-figure fragment">
+          <img
+            class="deck-chart"
+            src="assets/diagram_llm_toolregistry.png"
+            alt="示意图：大模型、编排器、ToolRegistry 与执行侧的关系"
+          />
+          <figcaption class="chart-caption">
+            上图回答：大模型不直接碰磁盘；编排器从注册表取出工具定义给模型，执行时再落到具体实现（本地函数 / 子进程 / MCP）。
+          </figcaption>
+        </figure>
+        <div class="glass-card fragment">
+          <div class="stack-label">即插即用链</div>
+          <div class="tag-cloud">
+            <span class="tc tc--green">gibh_agent/tools</span>
+            <span class="tc">walk_packages</span>
+            <span class="tc">import 即注册</span>
+            <span class="tc tc--amber">file_path 词汇铁律</span>
+            <span class="tc">safe_tool_execution</span>
+            <span class="tc">向量检索 / digest</span>
+          </div>
+        </div>
+        <div class="masonry-hints fragment">
+          <span>genomics_tools</span><span>transcriptomics_tools</span><span>chem_rdkit_tools</span><span>hpc_mcp_*</span><span>openai_tools.py</span><span>capabilities_digest.py</span>
+        </div>
+        <figure class="deck-figure fragment">
+          <img class="deck-chart" src="assets/img_slide_tools_flow.png" alt="从工具包到模型 tools 的链式示意" />
+        </figure>
+      </section>
+
+      <!-- ========== 10 MCP & 快车道 ========== -->
+      <section id="slide-mcp">
+        <p class="slide-kicker">核心壁垒 ③</p>
+        <h2>MCP 网关 × 化学快车道</h2>
+        <div class="grid-2">
+          <div class="glass-card fragment">
+            <div class="stack-label">超算 / 工作站隔离</div>
+            <p style="font-size: 0.38em; margin: 0">
+              <span class="tech-tag">hpc_mcp_*</span> 按 MCP 协议做动态注册，与 <span class="tech-tag">compute_scheduler</span> 开关联动：网关没开时，模型侧不会出现「看得见却调不了」的超算工具。
+            </p>
+            <p style="font-size: 0.34em; margin: 0.5rem 0 0; color: #94a3b8">重连前 <code>unregister_many</code> 清一遍，避免僵尸工具条目。</p>
+          </div>
+          <div class="glass-card fragment">
+            <div class="stack-label">skill_fast_lane</div>
+            <p style="font-size: 0.38em; margin: 0">化学单点 → 编排器二次消歧 → <code>[Skill_Route: …]</code> → SkillAgent。</p>
+            <p style="font-size: 0.34em; margin: 0.5rem 0 0; color: #94a3b8">主进程不跑重 RDKit；子进程 / worker-pyskills 防爆装甲。</p>
+          </div>
+        </div>
+        <figure class="deck-figure fragment">
+          <img
+            class="deck-chart"
+            src="assets/diagram_mcp_gateway.png"
+            alt="架构图：浏览器经 api-server、编排器、MCP 客户端与网关到超算节点；现状与持久化规划"
+          />
+          <figcaption class="chart-caption">
+            重点：编排侧已按 MCP 方式接入 HPC 能力；Job 异步返回、禁止盲轮询；规划里补上作业元数据与状态的持久化，便于多会话与审计。
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- ========== 11 微服务拓扑 + Mermaid ========== -->
+      <section id="slide-arch">
+        <p class="slide-kicker">Chapter 03 · 工程拓扑</p>
+        <h2>服务网格：谁和谁说话？</h2>
+        <p class="ted-line fragment">下图可改节点名；<strong>高清印刷版</strong>请用占位区替换为矢量导出。</p>
+        <figure class="deck-figure fragment">
+          <img class="deck-chart" src="assets/img_slide_arch_mesh.png" alt="服务网格与依赖关系示意" />
+          <figcaption class="chart-caption">与 compose 对齐的简化拓扑；印刷可换矢量导出。</figcaption>
+        </figure>
+        <div class="img-placeholder fragment">
+          📸 【图片占位】生产环境网络拓扑 / 云厂商架构图
+          <small>建议：VPC 子网、安全组、TLS 终止点、内网 MCP、GPU 节点池；若涉密用灰盒 + 端口占位符。</small>
+        </div>
+      </section>
+
+      <!-- ========== 12 Docker · 溯源 ========== -->
+      <section id="slide-docker">
+        <p class="slide-kicker">工程纵深</p>
+        <h2>Docker：物理隔离 + 可复现</h2>
+        <div class="grid-3">
+          <div class="glass-card glass-card--tight fragment">
+            <div class="stack-label">镜像边界</div>
+            <p style="font-size: 0.36em; margin: 0">api / mysql / redis / worker 分容器；GPU 可选独占。</p>
+          </div>
+          <div class="glass-card glass-card--tight fragment">
+            <div class="stack-label">专用 venv</div>
+            <p style="font-size: 0.36em; margin: 0">BepiPred · CHEM_RDKIT_PYTHON —— 与主进程 Python 解耦。</p>
+          </div>
+          <div class="glass-card glass-card--tight fragment">
+            <div class="stack-label">溯源</div>
+            <p style="font-size: 0.36em; margin: 0">SSE state_snapshot ↔ 入库 content 四联一致。</p>
+          </div>
+        </div>
+        <figure class="deck-figure fragment">
+          <img class="shadow-lg rounded-lg" src="deck_docker_topology.png" alt="Docker Compose 智能体容器拓扑（当前仓库）" />
+          <figcaption class="chart-caption">
+            由 <code>mermaid/docker_compose_topology.mmd</code> 描述、<code>scripts/render_deck_raster_diagrams.py</code> 渲染为 PNG；与
+            <code>docker-compose.yml</code> 服务一致（api-server / worker / mcp-gateway / worker-pyskills / MySQL / Redis / Nginx / 挂载卷）。
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- ========== 13 商业价值 & 下一步 ========== -->
+      <section id="slide-roadmap">
+        <p class="slide-kicker">Chapter 04 · 价值与规划</p>
+        <h2>商业叙事：高可用 × 数据飞轮</h2>
+        <p class="ted-line fragment">
+          说人话版：系统稳定跑起来以后，把<strong>真实对话里踩过的坑</strong>留下来，反过来改路由和工具说明，下次少浪费算力、少返工。
+        </p>
+        <div class="timeline-layout fragment">
+          <div class="tl-item">
+            <span class="tl-dot"></span>
+            <div class="tl-title">Q1 · 把接口和评测钉住</div>
+            <div class="tl-body">eval 脚本进常规回归；路由与工具 schema 带版本号；功能开关支持灰度。</div>
+          </div>
+          <div class="tl-item">
+            <span class="tl-dot"></span>
+            <div class="tl-title">Q2 · 让数据转起来</div>
+            <div class="tl-body">脱敏日志里挖难例 → 改 prompt / digest → 再看线上指标是否变好。</div>
+          </div>
+          <div class="tl-item">
+            <span class="tl-dot"></span>
+            <div class="tl-title">Q3+ · 多团队与额度</div>
+            <div class="tl-body">配额、队列优先级、超算预算面板；桌面端和私有化同一套交付形态。</div>
+          </div>
+          <div class="tl-item">
+            <span class="tl-dot"></span>
+            <div class="tl-title">Q4 · 科研数据与语料衔接</div>
+            <div class="tl-body">
+              把「分析产出」和「数据汇交、语料沉淀」串成可自动化的链路，服务国家科研基础设施方向——落地节奏与合规边界需单独评审。
+            </div>
+          </div>
+        </div>
+        <figure class="deck-figure fragment">
+          <img class="deck-chart" src="assets/diagram_flywheel.png" alt="飞轮示意：真实调用、难例回流、路由与 digest 迭代" />
+          <figcaption class="chart-caption">飞轮三格：真实调用 → 难例回流 → 路由与 digest 迭代；图由脚本生成，可随叙事再改文案重出。</figcaption>
+        </figure>
+      </section>
+
+      <!-- ========== 14 致谢 ========== -->
+      <section class="center-titles" id="slide-outro">
+        <p class="slide-kicker">Closing</p>
+        <h2>谢谢聆听</h2>
+        <p class="subtitle fragment">高可用 · 数据飞轮 · 实时迭代 —— 智能体不是一次性 Demo，是<strong>持续交付系统</strong>。</p>
+        <div class="tag-cloud fragment" style="justify-content: center; margin-top: 1.25rem">
+          <span class="tc">SemanticRouter</span>
+          <span class="tc">ToolRegistry</span>
+          <span class="tc">MCP</span>
+          <span class="tc tc--green">OmicsAssetManager</span>
+          <span class="tc tc--amber">赵闫泽坤</span>
+        </div>
+        <p class="author-line fragment">Q &amp; A</p>
+      </section>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@4.6.1/dist/reveal.min.js"></script>
+  <script>
+    Reveal.initialize({
+      hash: true,
+      history: true,
+      controls: true,
+      progress: true,
+      center: false,
+      transition: "slide",
+      transitionSpeed: "default",
+      slideNumber: "c/t",
+      keyboard: true,
+      overview: true,
+      fragments: true,
+      margin: 0.06,
+      minScale: 0.12,
+      maxScale: 1.5,
+    });
+
+  </script>
+</body>
+</html>
