@@ -3990,7 +3990,7 @@ class AgentOrchestrator:
         tools = await self._merge_openai_tools_with_dynamic_hpc(
             tool_names, enabled_mcps, schema_cache_key
         )
-        # deepseek-reasoner：官方网关对「首轮 chat.completions + tools」常见不兼容/400，闲聊改为纯文本流式（见 llm_cloud_providers.chat_mode_skip_openai_tools）
+        # deepseek-v4-pro：官方网关对「首轮 chat.completions + tools」常见不兼容/400，闲聊改为纯文本流式（见 llm_cloud_providers.chat_mode_skip_openai_tools）
         if (
             tools
             and chat_mode_skip_openai_tools(model_name)

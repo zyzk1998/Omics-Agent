@@ -303,9 +303,9 @@
                             </div>
                             <div class="model-select-wrap" title="模型切换">
                                 <select id="modelSelect" class="ghost-btn model-select-native" title="模型切换" style="appearance: none; outline: none; cursor: pointer;">
-                                    <option value="deepseek-reasoner" selected> DeepSeek Reasoner</option>
-                                    <option value="glm-5.1"> GLM 5.1</option>
-                                    <option value="kimi-k2.5"> Kimi K2.5</option>
+                                    <option value="deepseek-v4-pro" selected> DeepSeek V4 Pro</option>
+                                    <option value="glm-5.1">GLM-5.1</option>
+                                    <option value="kimi-k2.6"> Kimi K2.6</option>
                                 </select>
                                 <span class="model-chevron">▼</span>
                             </div>
@@ -315,8 +315,8 @@
                                 <button type="button" id="modeTrigger" class="ghost-btn model-select-native">标准</button>
                                 <span class="model-chevron" aria-hidden="true">▼</span>
                                 <div id="modeDropdown" class="popover-menu" role="listbox" aria-label="回答模式">
-                                    <button type="button" class="popover-item" data-mode="fast" role="option">标准</button>
-                                    <button type="button" class="popover-item" data-mode="deep" role="option">旗舰</button>
+                                    <button type="button" class="popover-item" data-mode="standard" role="option">标准</button>
+                                    <button type="button" class="popover-item" data-mode="flagship" role="option">旗舰</button>
                                 </div>
                             </div>
                             <button id="sendBtn" class="send-btn" onclick="sendMessage()">
@@ -470,9 +470,9 @@
                     <div class="settings-row">
                         <label class="settings-label">默认模型</label>
                         <select id="setting-default-model" class="settings-control">
-                            <option value="deepseek-reasoner" selected>DeepSeek Reasoner</option>
-                            <option value="glm-5.1">GLM 5.1</option>
-                            <option value="kimi-k2.5">Kimi K2.5</option>
+                            <option value="deepseek-v4-pro" selected>DeepSeek V4 Pro</option>
+                            <option value="glm-5.1">GLM-5.1</option>
+                            <option value="kimi-k2.6">Kimi K2.6</option>
                         </select>
                     </div>
                     <div id="settings-mcp-root" class="settings-mcp-section" data-mcp-layout="v2">
@@ -1384,7 +1384,7 @@
             const dropOverlay = document.getElementById('dropOverlay');
 
             // \u56de\u7b54\u6a21\u5f0f\uff1aDOM \u4e0e\u6a21\u578b\u9009\u62e9\u5668\u540c\u6b3e model-select-wrap + popover-menu
-            window.currentThinkingMode = 'fast';
+            window.currentChatMode = 'standard';
             document.addEventListener('DOMContentLoaded', () => {
                 const wrapper = document.getElementById('modeSelectorWrapper');
                 const trigger = document.getElementById('modeTrigger');
@@ -1393,7 +1393,7 @@
 
                 if (!wrapper || !trigger || !dropdown) return;
 
-                window.currentThinkingMode = 'fast';
+                window.currentChatMode = 'standard';
 
                 trigger.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -1404,8 +1404,8 @@
                     option.addEventListener('click', (e) => {
                         e.stopPropagation();
                         const selectedMode = option.getAttribute('data-mode');
-                        window.currentThinkingMode = selectedMode;
-                        trigger.textContent = selectedMode === 'fast' ? '标准' : '旗舰';
+                        window.currentChatMode = selectedMode || 'standard';
+                        trigger.textContent = selectedMode === 'flagship' ? '旗舰' : '标准';
                         dropdown.classList.remove('show');
                     });
                 });
@@ -1419,7 +1419,7 @@
 
             function getSelectedModel() {
                 var sel = document.getElementById('modelSelect');
-                return (sel && sel.value) ? sel.value : 'deepseek-reasoner';
+                return (sel && sel.value) ? sel.value : 'deepseek-v4-pro';
             }
             // 多模态组学分析：点击子项注入高质量组学 Prompt 模板（步骤可动态规划）
             var OMICS_PROMPT_TEMPLATES = {
@@ -6896,6 +6896,8 @@
                 if (currentSkillDomain) window._pendingSkillTargetDomain = null;
                 if (typeof ensureChatHistoryFromDomIfEmpty === 'function') ensureChatHistoryFromDomIfEmpty();
                 var apiHistoryPayload = typeof buildApiHistoryFromChatHistory === 'function' ? buildApiHistoryFromChatHistory(chatHistory, 8) : (chatHistory || []);
+                var _modelSelEl = document.getElementById('modelSelect');
+                var _pickedModel = (_modelSelEl && _modelSelEl.value) ? _modelSelEl.value : (typeof getSelectedModel === 'function' ? getSelectedModel() : 'deepseek-v4-pro');
                 const payload = { 
                     message: finalMessage, 
                     history: apiHistoryPayload, 
@@ -6904,17 +6906,15 @@
                     tool_params: toolParams,
                     workflow_data: workflowData,
                     use_history_files: useHistoryFiles,
-                    model_name: (typeof getSelectedModel === 'function' ? getSelectedModel() : 'deepseek-reasoner'),
+                    model_name: _pickedModel,
                     stream: true,  // 🔥 启用 SSE 流式传输
                     session_id: currentSessionId || undefined,  // Phase 5: 持久化会话
                     target_domain: currentSkillDomain,  // 确定性意图硬路由：仅技能广场点击时非 null，闲聊为 null
                     enabled_mcps: (typeof window.getEnabledMcpsFromStorage === 'function' ? window.getEnabledMcpsFromStorage() : [])
                 };
-                if (window.currentThinkingMode === 'deep') {
-                    payload.thinking_mode = 'deep';
-                } else {
-                    payload.thinking_mode = 'fast';
-                }
+                var _cm = (typeof window.currentChatMode !== 'undefined' && window.currentChatMode === 'flagship') ? 'flagship' : 'standard';
+                payload.mode = _cm;
+                payload.thinking_mode = (_cm === 'flagship') ? 'deep' : 'fast';
                 
                 // 🔥 CRITICAL: 详细日志，确保文件被正确传递
                 console.log('📤 [sendMessage] 发送 /api/chat 请求');
@@ -7012,6 +7012,63 @@
                         }
                         
                         const activeExecutionLogs = [];
+                        /** 与当次请求 payload.mode 一致；标准模式不展示/不累计“思考”类执行步骤，避免幽灵条与卡死 */
+                        const sseApiMode = (payload && payload.mode === 'flagship') ? 'flagship' : 'standard';
+
+                        function sweepIncompleteExecutionStepsToDone() {
+                            try {
+                                activeExecutionLogs.forEach(function (entry) {
+                                    var st = normalizeLogState(entry.state || 'active');
+                                    if (st !== 'done' && st !== 'error') {
+                                        entry.state = 'done';
+                                    }
+                                });
+                                if (sseApiMode === 'standard') {
+                                    for (var ri = activeExecutionLogs.length - 1; ri >= 0; ri--) {
+                                        var ct = String(activeExecutionLogs[ri].content || '').toLowerCase();
+                                        if (/思考|thinking|深度思考|推理链|reasoning|\bcot\b|chain[- ]?of[- ]?thought/.test(ct)) {
+                                            activeExecutionLogs.splice(ri, 1);
+                                        }
+                                    }
+                                }
+                                renderExecutionLogs();
+                            } catch (_swE) {}
+                        }
+
+                        /** 思考文本写入当前 AI 气泡：dataset.reasoningContent + reasoning-zone 内持久 <details>（不靠临时流式节点） */
+                        function persistReasoningToMessageObject() {
+                            try {
+                                var txt = String(typeof thoughtBuffer !== 'undefined' ? thoughtBuffer : '').trim();
+                                var row = document.querySelector('#chatContent .message-row.ai:last-of-type');
+                                if (row && txt) {
+                                    row.dataset.reasoningContent = txt;
+                                }
+                                if (!txt || !row) return;
+                                var rz = row.querySelector('.reasoning-zone') || row.querySelector('.reasoning-container');
+                                if (!rz) return;
+                                var oldP = rz.querySelector('details.thought-process-persistent');
+                                if (oldP) oldP.remove();
+                                var det = document.createElement('details');
+                                det.className = 'thought-process thought-process-persistent';
+                                det.open = false;
+                                var sum = document.createElement('summary');
+                                sum.textContent = '思考过程';
+                                var pre = document.createElement('pre');
+                                pre.style.whiteSpace = 'pre-wrap';
+                                pre.style.marginTop = '6px';
+                                pre.style.fontSize = '12px';
+                                pre.style.lineHeight = '1.6';
+                                pre.textContent = txt;
+                                det.appendChild(sum);
+                                det.appendChild(pre);
+                                rz.insertBefore(det, rz.firstChild);
+                                var tz = row.querySelector('.text-zone') || (window.currentMessageZones && window.currentMessageZones.textZone);
+                                if (tz) {
+                                    var sb = tz.querySelector('.stream-thinking-box');
+                                    if (sb) sb.remove();
+                                }
+                            } catch (_pe) {}
+                        }
 
                         function normalizeLogState(status) {
                             if (status === 'completed' || status === 'done' || status === 'success') return 'done';
@@ -7497,6 +7554,9 @@
                                     sub.setAttribute('data-agentic-substep-id', String(payload.substep_id));
                                 }
                                 var kind = payload.kind || '';
+                                if (kind === 'thought' && sseApiMode === 'standard') {
+                                    return;
+                                }
                                 var badge = document.createElement('span');
                                 badge.className = 'agent-substep__badge';
                                 if (kind === 'thought') {
@@ -7641,6 +7701,9 @@
                                 }
                                     
                                 case 'thought':
+                                    if (sseApiMode !== 'flagship') {
+                                        break;
+                                    }
                                     var thoughtText = '';
                                     if (data != null) {
                                         if (typeof data === 'string') thoughtText = data;
@@ -7660,14 +7723,14 @@
                                     if (typeof finalizeThoughtBlock === 'function') finalizeThoughtBlock();
                                     var rawContent = data.content || '';
                                     var rawReasoning = (data && data.reasoning_content != null) ? String(data.reasoning_content) : '';
-                                    if (rawReasoning) {
+                                    if (sseApiMode === 'flagship' && rawReasoning) {
                                         thoughtBuffer += rawReasoning;
                                         appendReasoningToActiveLog(rawReasoning);
                                         appendReasoningToTextZone(rawReasoning);
                                     }
                                     var delta = (typeof rawContent === 'string' ? rawContent : String(rawContent || ''));
                                     var parsedDelta = consumeThinkTaggedDelta(delta);
-                                    if (parsedDelta.thoughtDelta) {
+                                    if (sseApiMode === 'flagship' && parsedDelta.thoughtDelta) {
                                         thoughtBuffer += parsedDelta.thoughtDelta;
                                         appendReasoningToActiveLog(parsedDelta.thoughtDelta);
                                         appendReasoningToTextZone(parsedDelta.thoughtDelta);
@@ -7847,7 +7910,7 @@
                                 case 'workspace_update': {
                                     var mdWs = (data && data.markdown != null) ? String(data.markdown) : '';
                                     var wsReasoning = (data && data.reasoning_content != null) ? String(data.reasoning_content) : '';
-                                    if (wsReasoning) {
+                                    if (sseApiMode === 'flagship' && wsReasoning) {
                                         thoughtBuffer += wsReasoning;
                                         appendReasoningToActiveLog(wsReasoning);
                                         appendReasoningToTextZone(wsReasoning);
@@ -7859,7 +7922,7 @@
                                     }
                                     workspaceRawBuffer = mdWs;
                                     var wsParsed = consumeThinkTaggedDelta(wsDelta);
-                                    if (wsParsed && wsParsed.thoughtDelta) {
+                                    if (sseApiMode === 'flagship' && wsParsed && wsParsed.thoughtDelta) {
                                         thoughtBuffer += wsParsed.thoughtDelta;
                                         appendReasoningToActiveLog(wsParsed.thoughtDelta);
                                         appendReasoningToTextZone(wsParsed.thoughtDelta);
@@ -8032,6 +8095,12 @@
                         function updateProcessLog(content, state) {
                             // 映射技术状态到用户友好文本
                             const userFriendlyText = mapStatusToUserFriendly(content, state);
+                            if (sseApiMode === 'standard') {
+                                var _blk = String(userFriendlyText || '').toLowerCase();
+                                if (/思考|thinking|推理|深度思考|\bcot\b/.test(_blk)) {
+                                    return;
+                                }
+                            }
 
                             // 结构化去重：同内容时只更新状态，不新增行
                             var lastEntry = activeExecutionLogs.length > 0 ? activeExecutionLogs[activeExecutionLogs.length - 1] : null;
@@ -8235,7 +8304,16 @@
                                 console.error('❌ [SSE] textZone 不存在，无法更新聊天气泡');
                                 return;
                             }
-                            var cleaned = (typeof text === 'string' ? text : '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+                            var cleaned = typeof text === 'string' ? text : '';
+                            // 仅移除**成对且非贪婪**的真推理块；禁止 /<tag>[\s\S]*$/ 误杀正文
+                            cleaned = cleaned.replace(/<think>[\s\S]*?<\/redacted_thinking>/gi, '');
+                            cleaned = cleaned.replace(/<redacted_reasoning>[\s\S]*?<\/redacted_reasoning>/gi, '');
+                            cleaned = cleaned.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
+                            // 正文里字面提及「<think>」且全串无闭合结束标签时，转义尖括号而非截断
+                            if (cleaned.indexOf('<think>') !== -1 && cleaned.indexOf('</think>') === -1) {
+                                cleaned = cleaned.replace(/<think>/gi, '&lt;redacted_thinking&gt;');
+                            }
+                            cleaned = cleaned.trim();
                             var spinner = textZoneRef.querySelector('.spinner-border');
                             if (spinner) spinner.remove();
                             try {
@@ -8256,6 +8334,17 @@
                             let stream = reasoningStreamState.pendingTag + String(deltaText);
                             reasoningStreamState.pendingTag = '';
                             let cursor = 0;
+                            /** 当前缓冲内 open 之后是否存在配对闭合（跨 chunk 则仅在有闭合时才进入 thinking） */
+                            function findClosingAfter(openTag, fromPos) {
+                                const closeTag = openTag === '<think>' ? '</think>' : '</redacted_reasoning>';
+                                const idx = stream.indexOf(closeTag, fromPos);
+                                return idx;
+                            }
+                            /** 无闭合时：正文里描述标签本身的转述（非真推理块）— 转义起始标签，不进入 thinking */
+                            function looksLikeLiteralThinkCitation(fromAfterOpen) {
+                                const head = fromAfterOpen.slice(0, 480);
+                                return /标签|转述|举例|字面|提及|英文|Markdown|内容\)|内的内容/i.test(head);
+                            }
                             while (cursor < stream.length) {
                                 let nearestIdx = -1;
                                 let nearestTag = '';
@@ -8277,6 +8366,18 @@
                                 if (normal) {
                                     if (reasoningStreamState.inThinking) result.thoughtDelta += normal;
                                     else result.answerDelta += normal;
+                                }
+                                if (openingTags.indexOf(nearestTag) !== -1 && !reasoningStreamState.inThinking) {
+                                    const afterOpen = nearestIdx + nearestTag.length;
+                                    const closePos = findClosingAfter(nearestTag, afterOpen);
+                                    if (closePos === -1) {
+                                        if (looksLikeLiteralThinkCitation(stream.slice(afterOpen))) {
+                                            result.answerDelta += nearestTag.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                                            cursor = afterOpen;
+                                            reasoningStreamState.inThinking = false;
+                                            continue;
+                                        }
+                                    }
                                 }
                                 reasoningStreamState.inThinking = openingTags.indexOf(nearestTag) !== -1;
                                 cursor = nearestIdx + nearestTag.length;
@@ -8300,13 +8401,16 @@
                             return result;
                         }
 
-                        // 右侧报告最终入口“核弹级”清洗：无论是否闭合，一律清除思考标签及内容
+                        // 右侧报告：只移除非贪婪**成对**标签；禁止未闭合时截断全文
                         function stripThinkForReport(text) {
                             var s = String(text || '');
-                            // 先移除完整标签块
-                            s = s.replace(/<(?:think|redacted_reasoning)>[\s\S]*?<\/(?:think|redacted_reasoning)>/gi, '');
-                            // 再移除未闭合起始标签后的所有内容（流中断/分片期间兜底）
-                            s = s.replace(/<(?:think|redacted_reasoning)>[\s\S]*$/gi, '');
+                            s = s.replace(/<think>[\s\S]*?<\/redacted_thinking>/gi, '');
+                            s = s.replace(/<redacted_reasoning>[\s\S]*?<\/redacted_reasoning>/gi, '');
+                            s = s.replace(/<think>[\s\S]*?<\/think>/gi, '');
+                            s = s.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+                            if (s.indexOf('<think>') !== -1 && s.indexOf('</think>') === -1) {
+                                s = s.replace(/<think>/gi, '&lt;redacted_thinking&gt;');
+                            }
                             return s;
                         }
                         
@@ -9063,6 +9167,8 @@
                         // 🔥 REQUIREMENT 1: 处理完成事件 - 彻底移除 Thinking spinner；统一计时器：优先用后端下发的 duration
                         function handleDoneEvent(data) {
                             try {
+                            sweepIncompleteExecutionStepsToDone();
+                            persistReasoningToMessageObject();
                             clearInterval(timerInterval);
                             const duration = (data && (data.duration != null || data.total_duration != null))
                                 ? (Number(data.duration ?? data.total_duration)).toFixed(1)
@@ -9416,6 +9522,8 @@
                         
                         function handleErrorEvent(data) {
                             clearInterval(timerInterval);
+                            try { sweepIncompleteExecutionStepsToDone(); } catch (_es) {}
+                            try { persistReasoningToMessageObject(); } catch (_ep) {}
                             
                             // 🔥 TASK: 增强错误日志输出到控制台
                             // 优先展示后端可读 message（含合并后的技术摘要）；code 型 error 仅作补充
@@ -9506,6 +9614,8 @@
                                     const jsonData = dataLines.join('\n'); // 合并多行 data
                                     if (jsonData.trim() === '[DONE]') {
                                         sseStreamTerminalEventReceived = true;
+                                        try { sweepIncompleteExecutionStepsToDone(); } catch (_d1) {}
+                                        try { persistReasoningToMessageObject(); } catch (_d1b) {}
                                         if (typeof finalizeThoughtBlock === 'function') finalizeThoughtBlock();
                                         continue;
                                     }
@@ -9551,6 +9661,8 @@
                                 const jsonData = dataLines.join('\n');
                                 if (jsonData.trim() === '[DONE]') {
                                     sseStreamTerminalEventReceived = true;
+                                    try { sweepIncompleteExecutionStepsToDone(); } catch (_d2) {}
+                                    try { persistReasoningToMessageObject(); } catch (_d2b) {}
                                     if (typeof finalizeThoughtBlock === 'function') finalizeThoughtBlock();
                                 } else {
                                 try {
@@ -9565,6 +9677,8 @@
 
                         if (!sseStreamTerminalEventReceived) {
                             console.warn('[SSE] 流已关闭但未收到 done/error，执行 UI 兜底（可能为分包/尾包未解析）');
+                            try { sweepIncompleteExecutionStepsToDone(); } catch (_fc) {}
+                            try { persistReasoningToMessageObject(); } catch (_fcb) {}
                             try { addProcessStep('完成（连接已关闭）', 'done'); } catch (_ap) {}
                             sseUiHardUnlock('reader-closed-without-terminal-event');
                         }

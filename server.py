@@ -1011,10 +1011,24 @@ class ChatRequest(BaseModel):
     stream: Optional[bool] = False  # 🔥 SSE 流式传输开关
     session_id: Optional[str] = None  # 🔥 BUG FIX: 添加 session_id 字段
     user_id: Optional[str] = "guest"  # 🔥 BUG FIX: 添加 user_id 字段，默认为 guest
-    model_name: Optional[str] = "deepseek-ai/DeepSeek-R1"  # 与前端 #modelSelect 一致；无斜杠的 qwen* 走 DashScope，其余走 SiliconFlow
+    model_name: Optional[str] = "deepseek-v4-pro"  # 与前端 #modelSelect 一致，须在 llm_cloud_providers.MODEL_ROUTING_TABLE 登记
     target_domain: Optional[str] = None  # 🔥 快车道硬路由：技能广场点击时传入 'rna'|'metabolomics'|'radiomics'|'spatial'，跳过意图识别
     enabled_mcps: Optional[List[str]] = None  # 🔌 前端 MCP 开关：如 ["web_search"]，与系统设置联动
     thinking_mode: Optional[str] = "fast"  # 聊天模式：fast | deep（DeepReAct + 会话挂起续传）
+    mode: Optional[str] = "standard"  # LLM API 深度思考开关：standard | flagship（经 OpenAI SDK extra_body.thinking 下发）
+
+
+def _normalize_chat_api_mode(req: ChatRequest) -> str:
+    """将请求规范为 standard | flagship，用于 LLMClient ContextVar。"""
+    raw = (getattr(req, "mode", None) or "").strip().lower()
+    if raw == "flagship":
+        return "flagship"
+    if raw == "standard":
+        return "standard"
+    tm = (getattr(req, "thinking_mode", None) or "fast").strip().lower()
+    if tm == "deep":
+        return "flagship"
+    return "standard"
 
 
 # 日志缓冲区（保留用于未来扩展）
@@ -2714,14 +2728,28 @@ async def chat_endpoint(
                 original_llm_clients = {}
                 override_llm = None
                 state_snapshot_for_db = None  # 🔥 有状态应用切片：从流中解析 event: state_snapshot 作为入库 content
+                _api_mode_token = None
                 # Phase 4: 第一个事件下发 session_id，供前端持久化
                 yield f"event: session\ndata: {json.dumps({'session_id': req.session_id}, ensure_ascii=False)}\n\n"
                 try:
-                    # 🔥 动态模型路由：前端 model_name 传入 stream_process，每次请求在调用处传入，避免单例竞态
-                    model_name = (getattr(req, "model_name", None) or "").strip() or "deepseek-ai/DeepSeek-R1"
+                    from gibh_agent.core.llm_client import (
+                        LLMClientFactory,
+                        reset_llm_api_mode,
+                        set_llm_api_mode,
+                    )
+                    from gibh_agent.core.llm_cloud_providers import get_default_chat_model, validate_and_resolve_model_name
+
+                    _api_mode_token = set_llm_api_mode(_normalize_chat_api_mode(req))
+                    # 🔥 动态模型路由：以**当次请求体** model_name 为最高优先级，覆盖会话内历史/记忆所隐含的旧模型
+                    _raw_model = (getattr(req, "model_name", None) or "").strip()
+                    try:
+                        model_name = validate_and_resolve_model_name(_raw_model or None)
+                    except ValueError as _m_err:
+                        logger.warning("⚠️ [ChatEndpoint] model_name=%r 无法解析，回落默认: %s", _raw_model, _m_err)
+                        model_name = validate_and_resolve_model_name(None)
+                    logger.info("🔀 [ChatEndpoint] 本轮 LLM（请求体优先）: %s", model_name)
                     if model_name and agent and hasattr(agent, "agents") and agent.agents:
                         try:
-                            from gibh_agent.core.llm_client import LLMClientFactory
                             override_llm = LLMClientFactory.create_for_model(model_name)
                             for name, a in agent.agents.items():
                                 if hasattr(a, "llm_client") and a.llm_client is not None:
@@ -2836,6 +2864,13 @@ async def chat_endpoint(
                             if name in original_llm_clients:
                                 a.llm_client = original_llm_clients[name]
                         logger.debug("🔀 [ChatEndpoint] 已恢复默认模型")
+                    if _api_mode_token is not None:
+                        try:
+                            from gibh_agent.core.llm_client import reset_llm_api_mode
+
+                            reset_llm_api_mode(_api_mode_token)
+                        except Exception:
+                            pass
             
             return StreamingResponse(
                 generate_sse(),
@@ -3056,15 +3091,21 @@ async def chat_endpoint(
             _hist_sync = _augment_history_with_db_tool_memory(
                 req.session_id, req.history or [], db
             )
-            result = await agent.process_query(
-                query=req.message,
-                history=_hist_sync,
-                uploaded_files=uploaded_files,
-                test_dataset_id=req.test_dataset_id,
-                workflow_data=req.workflow_data,
-                user_id=req.user_id,
-                session_id=req.session_id
-            )
+            from gibh_agent.core.llm_client import reset_llm_api_mode, set_llm_api_mode
+
+            _sync_mode_tok = set_llm_api_mode(_normalize_chat_api_mode(req))
+            try:
+                result = await agent.process_query(
+                    query=req.message,
+                    history=_hist_sync,
+                    uploaded_files=uploaded_files,
+                    test_dataset_id=req.test_dataset_id,
+                    workflow_data=req.workflow_data,
+                    user_id=req.user_id,
+                    session_id=req.session_id,
+                )
+            finally:
+                reset_llm_api_mode(_sync_mode_tok)
         except Exception as process_err:
             # #region debug log
             try:

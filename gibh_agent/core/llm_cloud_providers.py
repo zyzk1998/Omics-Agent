@@ -14,9 +14,18 @@ from __future__ import annotations
 
 import logging
 import os
+from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+class ProviderKind(str, Enum):
+    """厂商枚举（与 MODEL_ROUTING_TABLE 中 provider 字段一致：kimi ↔ Moonshot 网关）。"""
+
+    DEEPSEEK = "deepseek"
+    GLM = "glm"
+    KIMI = "kimi"  # Moonshot OpenAPI，密钥环境变量 MOONSHOT_API_KEY
 
 # 未设置或填写已弃用厂商名时，默认走 DeepSeek 官方（硅基流动 SiliconFlow 已从本仓库运维路径移除）
 _DEFAULT_CLOUD_PROVIDER_ID = "deepseek"
@@ -28,7 +37,7 @@ PROVIDERS: Dict[str, Dict[str, str]] = {
         "base_url": "https://api.deepseek.com/v1",
         "api_key_env": "DEEPSEEK_API_KEY",
         "model_env": "DEEPSEEK_MODEL",
-        "default_model": "deepseek-reasoner",
+        "default_model": "deepseek-v4-pro",
         "label": "DeepSeek",
     },
     "glm": {
@@ -42,26 +51,61 @@ PROVIDERS: Dict[str, Dict[str, str]] = {
         "base_url": "https://api.moonshot.cn/v1",
         "api_key_env": "MOONSHOT_API_KEY",
         "model_env": "KIMI_MODEL",
-        "default_model": "kimi-k2.5",
+        "default_model": "kimi-k2.6",
         "label": "MoonshotKimi",
     },
 }
 
 # ---------------------------------------------------------------------------
 # 手术点 1：绝对权威的模型 → 厂商 → 密钥环境变量（显式登记，拒绝猜测）
-# 前端 services/nginx/html/index.html 下拉 value 须与本表 key 完全一致（如 deepseek-reasoner），
+# 前端 services/nginx/html/index.html 下拉 value 须与本表 key 完全一致（如 deepseek-v4-pro），
 # 不要使用硅基目录名如 deepseek-ai/DeepSeek-R1（已移除）；否则 validate_and_resolve_model_name 抛 unsupported_model。
 # ---------------------------------------------------------------------------
 MODEL_ROUTING_TABLE: Dict[str, Dict[str, str]] = {
     # DeepSeek 官方
-    "deepseek-reasoner": {"provider": "deepseek", "env_key": "DEEPSEEK_API_KEY"},
-    "deepseek-chat": {"provider": "deepseek", "env_key": "DEEPSEEK_API_KEY"},
-    # 智谱 GLM 官方
-    "glm-5.1": {"provider": "glm", "env_key": "ZHIPU_API_KEY"},
-    # Kimi / Moonshot 官方
-    "kimi-k2.5": {"provider": "kimi", "env_key": "MOONSHOT_API_KEY"},
+    "deepseek-v4-pro": {"provider": ProviderKind.DEEPSEEK.value, "env_key": "DEEPSEEK_API_KEY"},
+    "deepseek-chat": {"provider": ProviderKind.DEEPSEEK.value, "env_key": "DEEPSEEK_API_KEY"},
+    # 智谱 GLM 官方（默认 glm-5.1；历史请求 model 名 glm-5 经 MODEL_ID_ALIASES 归一）
+    "glm-5.1": {"provider": ProviderKind.GLM.value, "env_key": "ZHIPU_API_KEY"},
+    # Kimi / Moonshot 官方（MOONSHOT_API_KEY）
+    "kimi-k2.6": {"provider": ProviderKind.KIMI.value, "env_key": "MOONSHOT_API_KEY"},
     # 以下曾为硅基流动目录型 id，已随 SiliconFlow 弃用从注册表移除；请改用左侧官方直连 id。
 }
+
+# 旧版前端 / .env 中的模型 id → 当前注册表规范 id（避免启动期 assert_default_model_configurable 失败）
+MODEL_ID_ALIASES: Dict[str, str] = {
+    "deepseek-reasoner": "deepseek-v4-pro",
+    "kimi-k2.5": "kimi-k2.6",
+    "glm-5": "glm-5.1",
+}
+
+
+def coerce_to_registered_model_id(raw: Optional[str]) -> str:
+    """
+    将环境变量或请求中的模型名规范为 MODEL_ROUTING_TABLE 中的键。
+    - 显式别名（旧 id）→ 新 id
+    - 任意 kimi-* / moonshot-*：视为 Moonshot 通道，规范为 kimi-k2.6，始终使用 MOONSHOT_API_KEY
+    """
+    s = (raw or "").strip()
+    if not s:
+        return s
+    if s in MODEL_ROUTING_TABLE:
+        return s
+    for reg_id in MODEL_ROUTING_TABLE:
+        if reg_id.lower() == s.lower():
+            return reg_id
+    low = s.lower()
+    if low in MODEL_ID_ALIASES:
+        return MODEL_ID_ALIASES[low]
+    if s in MODEL_ID_ALIASES:
+        return MODEL_ID_ALIASES[s]
+    if low.startswith("kimi-") or low.startswith("moonshot-"):
+        logger.info(
+            "🔄 [ModelRegistry] Kimi/Moonshot 模型 id %r 未单独登记，已规范为 kimi-k2.6（密钥仍用 MOONSHOT_API_KEY）",
+            s,
+        )
+        return "kimi-k2.6"
+    return s
 
 
 def list_registered_models() -> List[str]:
@@ -74,7 +118,7 @@ def chat_mode_skip_openai_tools(model_id: Optional[str]) -> bool:
     故对这些 model id 跳过 tools，仅走纯文本流式（需联网时请改用 deepseek-chat 等）。
     """
     mid = (model_id or "").strip()
-    return mid == "deepseek-reasoner"
+    return mid == "deepseek-v4-pro"
 
 
 def normalize_provider_id(raw: Optional[str]) -> str:
@@ -104,17 +148,19 @@ def get_default_chat_model() -> str:
     """
     direct = (os.getenv("DEFAULT_CHAT_MODEL") or "").strip()
     if direct:
+        direct = coerce_to_registered_model_id(direct)
         if direct not in MODEL_ROUTING_TABLE:
             raise ValueError(
-                f"环境变量 DEFAULT_CHAT_MODEL={direct!r} 未在 MODEL_ROUTING_TABLE 中登记。"
+                f"环境变量 DEFAULT_CHAT_MODEL 经规范后仍为未登记 id: {direct!r}。"
                 f"已登记: {', '.join(list_registered_models())}"
             )
         return direct
     pid = get_active_provider_id()
     mid = (os.getenv(PROVIDERS[pid]["model_env"]) or "").strip() or PROVIDERS[pid]["default_model"]
+    mid = coerce_to_registered_model_id(mid)
     if mid not in MODEL_ROUTING_TABLE:
         raise ValueError(
-            f"当前 LLM_CLOUD_PROVIDER={pid} 的默认模型 {mid!r} 未在 MODEL_ROUTING_TABLE 中登记。"
+            f"当前 LLM_CLOUD_PROVIDER={pid} 的默认模型（经规范后）{mid!r} 未在 MODEL_ROUTING_TABLE 中登记。"
             f"请设置 DEFAULT_CHAT_MODEL 为已登记 id，或扩展 MODEL_ROUTING_TABLE / 修正 {PROVIDERS[pid]['model_env']}。"
         )
     return mid
@@ -125,7 +171,7 @@ def validate_and_resolve_model_name(raw: Optional[str]) -> str:
     编排器入口：将请求中的 model_name 规范为注册表中的绝对 id；非法则抛错（由上层转 SSE）。
     raw 为空则使用 get_default_chat_model()。
     """
-    s = (raw or "").strip()
+    s = coerce_to_registered_model_id((raw or "").strip())
     if not s:
         return get_default_chat_model()
     if s not in MODEL_ROUTING_TABLE:
@@ -146,7 +192,7 @@ def get_client_config(model_id: str, api_key_override: Optional[str] = None) -> 
     Returns:
         dict: base_url, api_key, model（与请求体一致）, provider（日志标签）, provider_id, env_key
     """
-    mid = (model_id or "").strip()
+    mid = coerce_to_registered_model_id((model_id or "").strip())
     if mid not in MODEL_ROUTING_TABLE:
         raise ValueError(
             f"不支持的模型: {mid!r}。已登记: {', '.join(list_registered_models())}"

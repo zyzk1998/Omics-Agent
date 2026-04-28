@@ -103,7 +103,16 @@ class GIBHAgent:
             # 云端：不在此绑定固定 LLMClient；领域智能体与路由在请求内按 model_name 经注册表按需创建（见 MODEL_ROUTING_TABLE）。
             from gibh_agent.core.llm_cloud_providers import assert_default_model_configurable
 
-            assert_default_model_configurable()
+            try:
+                assert_default_model_configurable()
+            except Exception as cloud_cfg_err:
+                logger.error(
+                    "❌ 云端 LLM 默认模型自检失败（常见原因：DEFAULT_CHAT_MODEL / DEEPSEEK_MODEL / GLM_MODEL / KIMI_MODEL 仍为旧 id，"
+                    "或缺少 DEEPSEEK_API_KEY / ZHIPU_API_KEY / MOONSHOT_API_KEY）。详情: %s",
+                    cloud_cfg_err,
+                    exc_info=True,
+                )
+                raise
             clients["logic"] = None
             clients["vision"] = None
         

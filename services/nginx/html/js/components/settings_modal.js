@@ -69,20 +69,28 @@ function closeSettingsModal() {
 
 function migrateLegacyDefaultModel() {
     var dm = localStorage.getItem('default_model');
+    // 智谱：仅保留官方 model id glm-5.1（API 请求体 model 字段，见 docs.bigmodel.cn）
+    if (dm === 'glm-5' || dm === 'Pro/zai-org/GLM-5') {
+        localStorage.setItem('default_model', 'glm-5.1');
+        return;
+    }
+    if (dm === 'kimi-k2.5' || dm === 'Pro/moonshotai/Kimi-K2.5') {
+        localStorage.setItem('default_model', 'kimi-k2.6');
+        return;
+    }
     var legacy = {
         'deepseek-ai/DeepSeek-R1': 1,
-        'Pro/zai-org/GLM-5': 1,
-        'Pro/moonshotai/Kimi-K2.5': 1,
-        'Qwen/Qwen3.5-397B-A17B': 1
+        'Qwen/Qwen3.5-397B-A17B': 1,
+        'deepseek-reasoner': 1
     };
     if (!dm || legacy[dm]) {
-        localStorage.setItem('default_model', 'deepseek-reasoner');
+        localStorage.setItem('default_model', 'deepseek-v4-pro');
     }
 }
 
 function applyDefaultModelFromStorage() {
     migrateLegacyDefaultModel();
-    var stored = localStorage.getItem('default_model') || 'deepseek-reasoner';
+    var stored = localStorage.getItem('default_model') || 'deepseek-v4-pro';
     var sel = document.getElementById('modelSelect');
     if (!sel) return;
     var opts = [].slice.call(sel.options || []);
@@ -246,7 +254,7 @@ function openSettingsModal() {
     var defaultModel = document.getElementById('setting-default-model');
     if (defaultModel) {
         migrateLegacyDefaultModel();
-        defaultModel.value = localStorage.getItem('default_model') || 'deepseek-reasoner';
+        defaultModel.value = localStorage.getItem('default_model') || 'deepseek-v4-pro';
     }
     syncMcpSwitchesFromStorage();
     updateHpcContextBadge();

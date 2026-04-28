@@ -7,7 +7,7 @@
   python3 eval_semantic_router.py
 
 依赖: 已按 .env 中 LLM_CLOUD_PROVIDER 配置对应 *_API_KEY（见 LLM_CLOUD_SWITCHING.txt）。
-可选: export EVAL_ROUTER_MODEL='deepseek-reasoner' 覆盖 create_for_model 所用模型 id。
+可选: export EVAL_ROUTER_MODEL='deepseek-v4-pro' 覆盖 create_for_model 所用模型 id。
 
 重要: SemanticRouter 在 LLM 失败 / 解析失败 / 低置信重试耗尽时统一返回 clarify 且 confidence=0.0（兜底）。
 脚本将 confidence==0.0 判为「未发生真实路由推理」，记为 SKIP，避免把 403 欠费误判成「clarify 判对」。

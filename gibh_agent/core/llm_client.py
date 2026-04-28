@@ -3,6 +3,7 @@
 支持本地（vLLM/Ollama）和云端（DeepSeek-V3/SiliconFlow）无缝切换
 使用 OpenAI SDK 标准接口
 """
+from contextvars import ContextVar, Token
 from typing import Optional, AsyncIterator, Dict, Any
 from openai import OpenAI, AsyncOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
@@ -18,8 +19,50 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# 与前端 ChatRequest.mode 对齐：standard | flagship（请求级 ContextVar，由 /api/chat SSE 入口设置）
+_llm_api_mode: ContextVar[str] = ContextVar("llm_api_mode", default="standard")
+
+# 须在 JSON 根级传 thinking，且 OpenAI SDK 须走 extra_body 的云端模型 id（见各厂商文档）
+_THINKING_TOGGLE_MODEL_IDS = frozenset({"deepseek-v4-pro", "kimi-k2.6", "glm-5.1"})
+
 # Kimi / Moonshot 等网关：部分模型仅接受固定 sampling（如 temperature 必须为 1），或不接受 top_p / 惩罚项自定义
 _STRICT_VENDOR_SAMPLING_MARKERS = ("kimi", "moonshot")
+
+
+def set_llm_api_mode(mode: Optional[str]) -> Token:
+    """设置当前异步上下文下的 API 模式（standard | flagship）。返回 reset 用 token。"""
+    return _llm_api_mode.set((mode or "standard").strip().lower())
+
+
+def reset_llm_api_mode(token: Token) -> None:
+    _llm_api_mode.reset(token)
+
+
+def _normalized_llm_api_mode() -> str:
+    try:
+        raw = (_llm_api_mode.get() or "standard").strip().lower()
+    except (LookupError, RuntimeError) as ex:
+        logger.warning("[LLMClient] ContextVar llm_api_mode 读取异常，回退 standard: %s", ex)
+        raw = "standard"
+    if raw in ("flagship", "deep"):
+        return "flagship"
+    return "standard"
+
+
+def _inject_vendor_thinking_extra_body(model_id: str, params: Dict[str, Any]) -> None:
+    """对支持的云端模型按 mode 注入 extra_body.thinking；旗舰开启 thinking 时去掉 temperature/top_p。"""
+    mid = (model_id or "").strip().lower()
+    if mid not in _THINKING_TOGGLE_MODEL_IDS:
+        return
+    mode = _normalized_llm_api_mode()
+    thinking_payload = {"type": "enabled"} if mode == "flagship" else {"type": "disabled"}
+    extra = dict(params.get("extra_body") or {})
+    extra["thinking"] = thinking_payload
+    params["extra_body"] = extra
+    # 旗舰 + thinking enabled：厂商侧常与采样参数互斥；同时清理 kwargs 合并残留的 temperature/top_p
+    if thinking_payload["type"] == "enabled":
+        for k in ("temperature", "top_p"):
+            params.pop(k, None)
 
 
 def _model_id_requires_sampling_smooth(model_id: str) -> bool:
@@ -138,6 +181,7 @@ class LLMClient:
         }
         params.update(kwargs)
         _smooth_chat_completion_params(params["model"], params)
+        _inject_vendor_thinking_extra_body(params["model"], params)
         logger.info("🚀 [Model Router] 通道: %s | 模型: %s", getattr(self, "_provider", "Unknown"), params["model"])
         completion = self._sync_client.chat.completions.create(**params)
         
@@ -207,6 +251,7 @@ class LLMClient:
         }
         params.update(kwargs)
         _smooth_chat_completion_params(params["model"], params)
+        _inject_vendor_thinking_extra_body(params["model"], params)
         logger.info("🚀 [Model Router] 通道: %s | 模型: %s", getattr(self, "_provider", "Unknown"), params["model"])
         completion = await self._async_client.chat.completions.create(**params)
         
@@ -274,6 +319,7 @@ class LLMClient:
         }
         params.update(kwargs)
         _smooth_chat_completion_params(params["model"], params)
+        _inject_vendor_thinking_extra_body(params["model"], params)
         logger.info("🚀 [Model Router] 通道: %s | 模型: %s", getattr(self, "_provider", "Unknown"), params["model"])
         # 🔥 Task 2: 收集流式响应并记录完整 JSON
         collected_content = []

@@ -117,7 +117,7 @@ async def main() -> int:
         "query": "你好，请用一句话回复。",
         "files": [],
         "history": [],
-        "model_name": "deepseek-reasoner",
+        "model_name": "deepseek-v4-pro",
         "session_id": "debug-orchestrator-local",
         "user_id": "debug-user",
         "owner_id": None,

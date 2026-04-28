@@ -223,3 +223,6 @@ services/nginx/html/downloads/latest-linux.yml
 services/nginx/html/downloads/latest-mac.yml
 services/nginx/html/downloads/*.zip
 services/nginx/html/downloads/*.dmg
+
+# 本地连通性测试脚本（可能包含私有 API Key）
+测试模型api.py
