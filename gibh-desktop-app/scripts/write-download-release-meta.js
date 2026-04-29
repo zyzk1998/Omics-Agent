@@ -10,7 +10,8 @@
  * 在 Windows 上执行 npm run dist / npm run dist:win 后，完整 NSIS .exe（约数十 MB）会出现在 dist-out。
  * 在 Linux 上仅 npm run dist 只会打当前平台产物（多为 AppImage）；Linux 下打的 Windows .exe 若异常偏小（几百 KB），为不完整构建，勿同步到 downloads。
  * 安装包 EXE 内嵌图标来自构建时的 build/icon.ico；网页上的 client-app-icon.png 仅影响站点展示，不能单独替换资源管理器里 exe 的图标。
- * 4) 将 dist-out 中的 latest.yml / latest-linux.yml（若存在）复制到 downloads/，供 electron-updater（generic）拉取元数据。
+ * 4) 将 dist-out 中的 latest.yml、latest-linux.yml 及同目录 .blockmap 复制到 services/nginx/html/downloads/，
+ *    供 electron-updater（generic provider）拉取元数据；缺 yml 时客户端更新检查必失败。
  */
 const fs = require('fs');
 const path = require('path');
@@ -61,17 +62,47 @@ function ensureArtifactInDownloads(filename, downloadsDir) {
   return false;
 }
 
-/** electron-updater generic：与安装包同目录的 yml 元数据 */
+/** electron-updater generic：与安装包同目录的 yml 元数据 + 差分 blockmap */
 function copyAutoUpdateMetadataToDownloads(downloadsDir) {
-  const names = ['latest.yml', 'latest-linux.yml', 'latest-mac.yml'];
-  for (const name of names) {
+  const ymlNames = ['latest.yml', 'latest-linux.yml', 'latest-mac.yml'];
+  let ymlCount = 0;
+  for (const name of ymlNames) {
     const src = path.join(distOutDir, name);
     const dest = path.join(downloadsDir, name);
     if (fs.existsSync(src)) {
       fs.mkdirSync(downloadsDir, { recursive: true });
       fs.copyFileSync(src, dest);
+      ymlCount += 1;
       console.log('已复制到 downloads/', name, '（自动更新元数据）');
     }
+  }
+  if (ymlCount === 0) {
+    console.warn(
+      '[sync] dist-out 中未找到 latest.yml / latest-linux.yml：请在打完对应平台安装包后再运行本脚本，并把 yml 一并部署到 Nginx /downloads/；否则桌面端 electron-updater 无法检查更新。'
+    );
+  }
+
+  let blockmapCount = 0;
+  let entryNames;
+  try {
+    entryNames = fs.readdirSync(distOutDir);
+  } catch (e) {
+    return;
+  }
+  for (const name of entryNames) {
+    if (!name.endsWith('.blockmap')) continue;
+    const src = path.join(distOutDir, name);
+    const dest = path.join(downloadsDir, name);
+    try {
+      fs.copyFileSync(src, dest);
+      blockmapCount += 1;
+      console.log('已复制到 downloads/', name, '（差分更新 blockmap）');
+    } catch (e) {
+      console.warn('复制 blockmap 失败', name, e && e.message);
+    }
+  }
+  if (blockmapCount === 0 && ymlCount > 0) {
+    console.warn('[sync] 未找到 .blockmap：全量安装包仍可用，差分更新可能退化为全量下载。');
   }
 }
 

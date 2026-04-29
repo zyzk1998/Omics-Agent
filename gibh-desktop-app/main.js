@@ -1,7 +1,13 @@
 'use strict';
+/**
+ * 自动更新：electron-updater 的 generic 根地址内嵌自 package.json → build.publish[0].url。
+ * 发版前请将该行中的 YOUR_SERVER_URL 换成公网可解析的域名或 IP（勿提交真实内网段入公开仓库时遵守团队 Git 规范）。
+ * 也可在环境变量中设置 OMICS_AUTO_UPDATE_BASE_URL（指向 …/downloads/）或 OMICS_AGENT_WEB_URL（将自动追加 /downloads/），优先级高于内嵌 URL。
+ */
 
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 
 (function loadProdEnvFiles() {
   try {
@@ -23,6 +29,18 @@ const fs = require('fs');
 })();
 
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+let localSidecarProcess = null;
+
+/** 打包后 extraResources 将仓库 services/nginx/html 拷至 resources/bundled-web-ui（与 electron-builder 配置一致）；当前默认仍 loadURL 远程站点，快照供运维比对或后续改为本地加载方案 */
+function logBundledWebUiSnapshotIfPresent() {
+  if (!app.isPackaged) return;
+  try {
+    const snap = path.join(process.resourcesPath, 'bundled-web-ui');
+    if (fs.existsSync(snap)) {
+      console.log('[Omics Agent] 安装包内附带前端静态快照目录:', snap);
+    }
+  } catch (_e) {}
+}
 
 /** 可选：未安装时仍可启动（仅跳过自动更新） */
 let autoUpdater = null;
@@ -63,6 +81,28 @@ function resolveGenericUpdateBaseUrl() {
   return '';
 }
 
+/**
+ * 将 electron-updater / Node 网络错误转换为用户可读文案；不把 net::ERR_* 原文推到 UI。
+ * 完整错误仅在主进程 console 记录。
+ */
+function friendlyAutoUpdateMessage(raw) {
+  const msg = String((raw && raw.message) || raw || '');
+  const lower = msg.toLowerCase();
+  if (/err_name_not_resolved|enotfound|getaddrinfo|name not resolved/i.test(lower)) {
+    return '无法连接更新服务器，请检查网络或稍后再试；也可在官网下载页获取最新安装包。';
+  }
+  if (/etimedout|timeout|econnrefused|enetunreach|ehostunreach/i.test(lower)) {
+    return '连接更新服务器超时，请稍后再试或前往官网下载最新版。';
+  }
+  if (/certificate|ssl|tls|unable to verify/i.test(lower)) {
+    return '更新通道安全校验失败，请联系管理员或手动从官网下载安装包。';
+  }
+  if (/404|not found|status code 404/i.test(lower)) {
+    return '未找到更新描述文件（latest.yml），请确认服务端已发布对应平台的更新元数据。';
+  }
+  return '暂时无法检查更新，您可在官网下载页获取最新安装包。';
+}
+
 function hookAutoUpdaterEventsOnce() {
   if (!autoUpdater || !app.isPackaged) return;
   if (globalThis.__OMICS_AUTO_UPDATER_EVENTS__) return;
@@ -74,7 +114,7 @@ function hookAutoUpdaterEventsOnce() {
     console.log('[Omics Agent] 自动更新 feed（generic）:', base);
   } else {
     console.log(
-      '[Omics Agent] 未设置 OMICS_AUTO_UPDATE_BASE_URL 且无法从 OMICS_AGENT_WEB_URL 推导 /downloads/，将使用打包时 publish 默认地址（见 package.json build.publish，须替换占位域名）'
+      '[Omics Agent] 未设置 OMICS_AUTO_UPDATE_BASE_URL / OMICS_AGENT_WEB_URL，将使用 electron-builder 打包时写入的 generic URL（见 gibh-desktop-app/package.json → build.publish[0].url，须将 YOUR_SERVER_URL 替换为真实域名或 IP）'
     );
   }
 
@@ -97,9 +137,10 @@ function hookAutoUpdaterEventsOnce() {
   });
 
   autoUpdater.on('error', (err) => {
+    const raw = (err && err.message) || String(err);
+    console.warn('[Omics Agent] autoUpdater error（详情仅日志）:', raw, err && err.stack);
     broadcastAutoUpdate('app-auto-update-error', {
-      message: (err && err.message) || String(err),
-      stack: (err && err.stack) || '',
+      userMessage: friendlyAutoUpdateMessage(err),
     });
   });
 
@@ -127,9 +168,9 @@ function scheduleAutoUpdateCheck() {
     autoUpdater
       .checkForUpdatesAndNotify()
       .catch((err) => {
-        console.error('[Omics Agent] checkForUpdatesAndNotify', err);
+        console.warn('[Omics Agent] checkForUpdatesAndNotify', err && err.message, err && err.stack);
         broadcastAutoUpdate('app-auto-update-error', {
-          message: (err && err.message) || String(err),
+          userMessage: friendlyAutoUpdateMessage(err),
         });
       });
   }, 5000);
@@ -178,10 +219,58 @@ function getWebBase() {
 }
 
 function loadRemote(win) {
+  logBundledWebUiSnapshotIfPresent();
   const webBase = getWebBase();
   win.loadURL(webBase).catch((err) => {
     console.error('[Omics Agent] loadURL failed:', err && err.message);
   });
+}
+
+function resolvePythonCommand() {
+  const explicit = process.env.OMICS_SIDECAR_PYTHON && String(process.env.OMICS_SIDECAR_PYTHON).trim();
+  if (explicit) return explicit;
+  if (process.platform === 'win32') return 'python';
+  return 'python3';
+}
+
+function startLocalSidecar() {
+  if (localSidecarProcess && !localSidecarProcess.killed) return;
+  const scriptPath = path.join(__dirname, 'local_sidecar', 'local_server.py');
+  if (!fs.existsSync(scriptPath)) {
+    console.error('[Omics Agent] Local Sidecar 启动失败，脚本不存在:', scriptPath);
+    return;
+  }
+  const pythonCmd = resolvePythonCommand();
+  localSidecarProcess = spawn(pythonCmd, [scriptPath], {
+    cwd: path.join(__dirname, 'local_sidecar'),
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  console.log('[Omics Agent] Local Sidecar 启动命令:', pythonCmd, scriptPath);
+
+  localSidecarProcess.stdout.on('data', (buf) => {
+    console.log('[Local Sidecar]', String(buf || '').trim());
+  });
+  localSidecarProcess.stderr.on('data', (buf) => {
+    console.error('[Local Sidecar]', String(buf || '').trim());
+  });
+  localSidecarProcess.on('exit', (code, signal) => {
+    console.log('[Omics Agent] Local Sidecar 已退出:', { code, signal });
+    localSidecarProcess = null;
+  });
+  localSidecarProcess.on('error', (err) => {
+    console.error('[Omics Agent] Local Sidecar 进程异常:', err && err.message);
+  });
+}
+
+function stopLocalSidecar() {
+  if (!localSidecarProcess || localSidecarProcess.killed) return;
+  try {
+    localSidecarProcess.kill('SIGTERM');
+  } catch (e) {
+    console.warn('[Omics Agent] Local Sidecar SIGTERM 失败:', e && e.message);
+  }
+  localSidecarProcess = null;
 }
 
 function createMainWindow() {
@@ -206,7 +295,17 @@ function createMainWindow() {
     win.show();
   });
 
-  loadRemote(win);
+  /** 打包后仍拉取远程页面时，Chromium 磁盘缓存可能导致「看得见旧版 UI」；首屏前清空 session 缓存再 loadURL */
+  win.webContents.session
+    .clearCache()
+    .then(() => {
+      console.log('[Omics Agent] session.clearCache() 已完成（缓解 HTTP 缓存旧静态资源）');
+      loadRemote(win);
+    })
+    .catch((err) => {
+      console.warn('[Omics Agent] session.clearCache() 失败，仍将加载页面:', err && err.message);
+      loadRemote(win);
+    });
 
   if (process.env.OMICS_AGENT_DEBUG === '1' || process.env.OMICS_AGENT_DEBUG === 'true') {
     win.webContents.openDevTools({ mode: 'detach' });
@@ -293,6 +392,7 @@ if (!globalThis.__OMICS_IPC_REGISTERED__) {
 }
 
 app.whenReady().then(() => {
+  startLocalSidecar();
   hookAutoUpdaterEventsOnce();
   createMainWindow();
   scheduleAutoUpdateCheck();
@@ -306,4 +406,8 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createMainWindow();
   }
+});
+
+app.on('will-quit', () => {
+  stopLocalSidecar();
 });

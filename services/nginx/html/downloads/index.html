@@ -23,6 +23,21 @@
         .card-h { font-size: 1rem; font-weight: 600; margin: 0 0 0.75rem; }
         .changelog { font-size: 0.9rem; color: var(--fg); margin: 0; padding-left: 1.15rem; }
         .changelog li { margin: 0.35rem 0; }
+        .changelog-history details {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 0.5rem 0.65rem;
+            margin-bottom: 0.5rem;
+            background: #fafafa;
+        }
+        .changelog-history summary {
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.95rem;
+            list-style: none;
+        }
+        .changelog-history summary::-webkit-details-marker { display: none; }
+        .changelog-history details .changelog { margin-top: 0.5rem; }
     </style>
 </head>
 <body>
@@ -32,15 +47,49 @@
         <p class="ver-line" id="ver-line">版本 —</p>
 
         <div class="card">
-            <div class="card-h">本版更新说明（V0.12.3）</div>
-            <ul class="changelog">
-                <li><strong>【V0.12.3 核心更新】</strong></li>
-                <li>新增：桌面级高权限模式，支持挂载本地项目工作区。</li>
-                <li>新增：右侧资源管理器 (File Explorer)，实时映射本地代码/数据目录。</li>
-                <li>新增：文件「一键引用」功能，点击文件树节点即可快速加入对话上下文。</li>
-                <li>优化：重构主界面 Flexbox 弹性布局，自适应侧边栏收缩，消除 UI 塌陷隐患。</li>
-                <li>安全：增加目录穿越 (Path Traversal) 物理防护墙，锁定智能体读写范围。</li>
-            </ul>
+            <div class="card-h">历史版本记录 (Changelog)</div>
+            <p style="font-size: 0.88rem; color: var(--muted); margin: 0 0 1rem;">以下为近期版本摘要；更早版本请查阅仓库或发行说明。</p>
+
+            <div class="changelog-history">
+                <div style="margin-bottom: 1rem;">
+                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.12.6（当前推荐）</div>
+                    <ul class="changelog">
+                        <li><strong>【V0.12.6】</strong></li>
+                        <li>新增 Local Sidecar 本地中间件（127.0.0.1:8019），将本地工作区挂载与文件树能力下沉到宿主机执行。</li>
+                        <li>新增本地中继工具接口：`/api/tools/read_file` 与 `/api/tools/write_file`，支持前端桥接本地文件读写。</li>
+                        <li>新增 Dual-Track 双轨机制：Web 轨道保持云端 `/app/uploads`、`/app/results` 传统链路；本地轨道走前端 relay + Sidecar。</li>
+                        <li>优化 Electron 生命周期：应用启动自动拉起 Sidecar，退出时自动回收 Python 子进程。</li>
+                    </ul>
+                </div>
+
+                <details>
+                    <summary>V0.12.3</summary>
+                    <ul class="changelog">
+                        <li><strong>【V0.12.3 核心更新】</strong></li>
+                        <li>新增：桌面级高权限模式，支持挂载本地项目工作区。</li>
+                        <li>新增：右侧资源管理器 (File Explorer)，实时映射本地代码/数据目录。</li>
+                        <li>新增：文件「一键引用」功能，点击文件树节点即可快速加入对话上下文。</li>
+                        <li>优化：重构主界面 Flexbox 弹性布局，自适应侧边栏收缩，消除 UI 塌陷隐患。</li>
+                        <li>安全：增加目录穿越 (Path Traversal) 物理防护墙，锁定智能体读写范围。</li>
+                    </ul>
+                </details>
+
+                <details>
+                    <summary>V0.12.2</summary>
+                    <ul class="changelog">
+                        <li>Windows 安装包：工作台报告打印/导出与网页版版式对齐，修复整页空白等问题。</li>
+                        <li>化学信息学（RDKit）相关工具与技能能力对齐服务端。</li>
+                        <li>编排与对话：会话标题、工具输出记忆等体验优化；技能广场与前端若干改进。</li>
+                    </ul>
+                </details>
+                <details>
+                    <summary>V0.12.1</summary>
+                    <ul class="changelog">
+                        <li>（占位）桌面端稳定性与网络重试策略优化。</li>
+                        <li>（占位）与 Web 端 API 协议小版本对齐。</li>
+                    </ul>
+                </details>
+            </div>
         </div>
 
         <div class="card">
@@ -73,11 +122,11 @@
             var verLine = document.getElementById('ver-line');
 
             var staticFallback = {
-                version: '0.12.3',
-                displayVersion: 'V0.12.3',
+                version: '0.12.6',
+                displayVersion: 'V0.12.6',
                 productName: 'Omics Agent',
-                winSetupFile: 'Omics Agent Setup 0.12.3.exe',
-                linuxAppImageFile: 'Omics Agent-0.12.3.AppImage'
+                winSetupFile: 'Omics Agent Setup 0.12.6.exe',
+                linuxAppImageFile: 'Omics Agent-0.12.6.AppImage'
             };
 
             function setVersion(meta) {

@@ -223,6 +223,25 @@
                 </div>
             </div>
 
+            <!-- 超算资产全屏页（HPC FTP 风格，支持悬停一键引用） -->
+            <div id="hpc-ftp-view" class="main-view-pane" style="display: none; flex: 1; min-width: 0; min-height: 0; overflow: hidden; background: #f8fafc;">
+                <div class="hpc-ftp-layout">
+                    <div class="hpc-ftp-header">
+                        <h2 class="hpc-ftp-title"><img src="/static/hpc-asset-icon.png" alt="" class="hpc-asset-icon hpc-asset-icon--title">超算资产</h2>
+                        <div class="hpc-ftp-actions">
+                            <button type="button" class="ghost-btn hpc-ftp-refresh-btn" id="btn-hpc-ftp-refresh">刷新目录</button>
+                            <button type="button" class="ghost-btn hpc-ftp-back-btn" id="btn-hpc-ftp-back-chat">返回聊天</button>
+                        </div>
+                    </div>
+                    <div class="hpc-ftp-body">
+                        <div class="hpc-ftp-breadcrumbs" id="hpc-ftp-breadcrumbs"></div>
+                        <div class="hpc-ftp-list" id="hpc-ftp-list-wrap">
+                            <div class="hpc-ftp-loading">正在拉取超算目录...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- 中栏：对话 + 空状态引导；右侧本地文件树与聊天区同行 flex，避免遮挡 -->
             <div id="chat-main-host" class="chat-main-with-explorer">
             <main id="chat-pane">
@@ -293,9 +312,23 @@
                     <div class="toolbar input-toolbar">
                         <div class="toolbar-left">
                             <input type="file" id="local-project-folder-input" webkitdirectory directory class="file-input-hidden" tabindex="-1" aria-hidden="true" title="">
-                            <button type="button" id="btn-mount-local-project" class="ghost-btn btn-mount-local-project" title="挂载本地项目" aria-label="挂载本地项目">
-                                <svg class="btn-mount-local-project__icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h4l2 3h12a2 2 0 012 2v11z"/></svg>
-                            </button>
+                            <div class="workspace-dropdown-wrapper" style="position: relative;">
+                                <button type="button" id="btn-mount-local-project" class="ghost-btn btn-mount-local-project toolbar-btn workspace-mount-trigger" title="选择或切换本地工作目录" aria-expanded="false" aria-haspopup="true" aria-controls="workspace-dropdown-menu">
+                                    <svg class="btn-mount-local-project__icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h4l2 3h12a2 2 0 012 2v11z"/></svg>
+                                    <span class="workspace-mount-trigger__text">选择工作目录</span>
+                                </button>
+                                <div id="workspace-dropdown-menu" class="workspace-dropdown workspace-dropdown--above hidden" role="menu" aria-hidden="true">
+                                    <button type="button" class="workspace-menu-item workspace-menu-item--action" id="menu-select-new-dir" role="menuitem">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h4l2 3h12a2 2 0 012 2v11z"/></svg>
+                                        <span>选择目录</span>
+                                    </button>
+                                    <div class="workspace-menu-item workspace-menu-item--submenu has-submenu" role="presentation">
+                                        <span class="workspace-submenu-label"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> 最近使用的目录</span>
+                                        <span class="workspace-submenu-chevron" aria-hidden="true">›</span>
+                                        <div class="workspace-submenu" id="recent-workspaces-list" role="menu"></div>
+                                    </div>
+                                </div>
+                            </div>
                             <input type="file" id="fileInput" class="file-input-hidden" onchange="handleFileSelect(this.files)" multiple accept="*">
                             <label for="fileInput" class="ghost-btn file-upload-label" title="上传文件"><i class="bi bi-paperclip"></i></label>
                             <div id="hpc-context-badge" class="context-badge context-badge--by-model hidden" role="status" aria-live="polite">
@@ -807,6 +840,10 @@
                 }
             }
             initAuthState();
+            var LOCAL_SIDECAR_BASE = 'http://127.0.0.1:8019';
+            function localSidecarUrl(pathname) {
+                return LOCAL_SIDECAR_BASE + pathname;
+            }
 
             // Task1: 请求头 100% 来自 localStorage 实时读取，不依赖任何全局变量
             function getAuthHeaders() {
@@ -1797,7 +1834,7 @@
                 return null;
             }
             async function postWorkspaceInit(workspacePath) {
-                var res = await fetch('/api/workspace/init', {
+                var res = await fetch(localSidecarUrl('/api/workspace/init'), {
                     method: 'POST',
                     headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }),
                     body: JSON.stringify({ workspace_path: workspacePath }),
@@ -1835,12 +1872,116 @@
                     }
                 });
             }
+            /** 最近使用的工作区路径（绝对路径），最多 5 条；仅存路径字符串数组 */
+            var RECENT_WORKSPACES_KEY = 'recentWorkspaces';
+            function recordRecentWorkspace(absPath) {
+                var p = String(absPath || '').trim();
+                if (!p) return;
+                var list = [];
+                try {
+                    list = JSON.parse(localStorage.getItem(RECENT_WORKSPACES_KEY) || '[]');
+                    if (!Array.isArray(list)) list = [];
+                } catch (_e) {
+                    list = [];
+                }
+                list = list.filter(function (x) {
+                    return String(x) !== p;
+                });
+                list.unshift(p);
+                if (list.length > 5) list = list.slice(0, 5);
+                try {
+                    localStorage.setItem(RECENT_WORKSPACES_KEY, JSON.stringify(list));
+                } catch (_e2) {}
+            }
+            function renderRecentWorkspacesList() {
+                var host = document.getElementById('recent-workspaces-list');
+                if (!host) return;
+                var list = [];
+                try {
+                    list = JSON.parse(localStorage.getItem(RECENT_WORKSPACES_KEY) || '[]');
+                    if (!Array.isArray(list)) list = [];
+                } catch (_e) {
+                    list = [];
+                }
+                host.innerHTML = '';
+                if (!list.length) {
+                    var empty = document.createElement('div');
+                    empty.className = 'workspace-recent-empty';
+                    empty.textContent = '暂无记录';
+                    host.appendChild(empty);
+                    return;
+                }
+                list.forEach(function (absPath) {
+                    var b = document.createElement('button');
+                    b.type = 'button';
+                    b.className = 'workspace-recent-item recent-workspace-item';
+                    b.setAttribute('role', 'menuitem');
+                    b.dataset.path = absPath;
+                    var disp = String(absPath);
+                    b.title = disp;
+                    b.textContent = disp.length > 56 ? '\u2026' + disp.slice(-52) : disp;
+                    host.appendChild(b);
+                });
+            }
+            function closeWorkspaceMountDropdown() {
+                var menu = document.getElementById('workspace-dropdown-menu');
+                var btn = document.getElementById('btn-mount-local-project');
+                if (menu) {
+                    menu.classList.add('hidden');
+                    menu.setAttribute('aria-hidden', 'true');
+                }
+                if (btn) btn.setAttribute('aria-expanded', 'false');
+            }
+            function toggleWorkspaceMountDropdown() {
+                var menu = document.getElementById('workspace-dropdown-menu');
+                var btn = document.getElementById('btn-mount-local-project');
+                if (!menu) return;
+                var willOpen = menu.classList.contains('hidden');
+                if (willOpen) {
+                    renderRecentWorkspacesList();
+                    menu.classList.remove('hidden');
+                    menu.setAttribute('aria-hidden', 'false');
+                    if (btn) btn.setAttribute('aria-expanded', 'true');
+                } else {
+                    closeWorkspaceMountDropdown();
+                }
+            }
+            function applyWorkspaceInitSuccess(workspace, selection) {
+                if (workspace) {
+                    selection.workspace_name = workspace.workspace_name || selection.workspace_name;
+                    selection.workspace_path = workspace.workspace_path || selection.workspace_path;
+                    selection.result_path = workspace.result_path || '';
+                    selection.source = selection.source || 'workspace-init';
+                    cacheWorkspaceSelection(selection);
+                    if (typeof fetchAssets === 'function') fetchAssets();
+                    var rex = document.getElementById('right-file-explorer');
+                    if (rex) {
+                        rex.style.display = 'flex';
+                        rex.setAttribute('aria-hidden', 'false');
+                    }
+                    if (typeof fetchAndRenderWorkspaceTree === 'function') fetchAndRenderWorkspaceTree();
+                }
+            }
+            async function quickInitWorkspaceFromPath(absPath) {
+                var p = String(absPath || '').trim();
+                if (!p) return;
+                var selection = {
+                    workspace_name: p.split(/[/\\\\]/).filter(Boolean).pop() || '\u672c\u5730\u9879\u76ee',
+                    workspace_path: p,
+                    source: 'recent-workspaces',
+                };
+                var workspace = await postWorkspaceInit(p);
+                applyWorkspaceInitSuccess(workspace, selection);
+                recordRecentWorkspace(p);
+                renderRecentWorkspacesList();
+                showToast('\u5de5\u4f5c\u533a\u5df2\u521d\u59cb\u5316\uff1a' + ((workspace && workspace.workspace_name) || selection.workspace_name), 'success');
+            }
             async function fetchAndRenderWorkspaceTree() {
                 var container = document.getElementById('file-tree-container');
                 if (!container) return;
                 container.innerHTML = '<div class="file-tree-loading">加载中…</div>';
                 try {
-                    var res = await fetch('/api/workspace/tree', { headers: getAuthHeaders() });
+                    var res = await fetch(localSidecarUrl('/api/workspace/tree'), { headers: getAuthHeaders() });
                     var data = await res.json().catch(function() { return {}; });
                     if (!res.ok || !data || data.status !== 'success') {
                         var err = (data && (data.detail || data.message)) || ('HTTP ' + res.status);
@@ -1912,20 +2053,9 @@
                     return;
                 }
                 var workspace = await postWorkspaceInit(selection.workspace_path);
-                if (workspace) {
-                    selection.workspace_name = workspace.workspace_name || selection.workspace_name;
-                    selection.workspace_path = workspace.workspace_path || selection.workspace_path;
-                    selection.result_path = workspace.result_path || '';
-                    selection.source = selection.source || 'workspace-init';
-                    cacheWorkspaceSelection(selection);
-                    if (typeof fetchAssets === 'function') fetchAssets();
-                    var rex = document.getElementById('right-file-explorer');
-                    if (rex) {
-                        rex.style.display = 'flex';
-                        rex.setAttribute('aria-hidden', 'false');
-                    }
-                    if (typeof fetchAndRenderWorkspaceTree === 'function') fetchAndRenderWorkspaceTree();
-                }
+                applyWorkspaceInitSuccess(workspace, selection);
+                recordRecentWorkspace(selection.workspace_path);
+                renderRecentWorkspacesList();
                 showToast('工作区已初始化：' + ((workspace && workspace.workspace_name) || selection.workspace_name), 'success');
             }
 
@@ -2008,11 +2138,12 @@
                     if (typeof showToast === 'function') showToast('当前客户端已是最新版本', 'info');
                 }
                 function onError(payload) {
-                    showBanner();
-                    var msg = (payload && payload.message) ? String(payload.message) : '检查更新时出现问题';
-                    setText('更新检查失败：' + msg);
-                    if (progWrap) progWrap.style.display = 'none';
-                    if (restartBtn) restartBtn.style.display = 'none';
+                    /** 主进程已映射 net::ERR_* 等为 userMessage，此处不再展示原始 Chromium 网络错误 */
+                    hideBanner();
+                    var msg = (payload && payload.userMessage)
+                        ? String(payload.userMessage)
+                        : '暂时无法检查更新，请稍后再试或前往官网下载页。';
+                    if (typeof showToast === 'function') showToast(msg, 'warning');
                 }
 
                 ipc.on('app-auto-update-checking', function () { onChecking(); });
@@ -2215,7 +2346,7 @@
             }
 
             function hideAllMainPanes() {
-                var panes = ['chat-main-host', 'skills-square-pane', 'history-pane', 'data-assets-pane', 'file-management-pane'];
+                var panes = ['chat-main-host', 'skills-square-pane', 'history-pane', 'data-assets-pane', 'file-management-pane', 'hpc-ftp-view'];
                 panes.forEach(function(id) {
                     var el = document.getElementById(id);
                     if (el) el.style.display = 'none';
@@ -2317,6 +2448,21 @@
                 if (rzR) rzR.style.display = 'none';
                 if (typeof renderFileManagementTable === 'function') renderFileManagementTable();
             }
+            async function switchToHpcFtpView() {
+                persistLastChatSessionBeforeLeaving();
+                hideAllMainPanes();
+                var hpcPane = document.getElementById('hpc-ftp-view');
+                var wsPane = document.getElementById('workspace-pane');
+                var rzR = document.getElementById('resizer-right');
+                if (hpcPane) hpcPane.style.display = 'flex';
+                if (wsPane) wsPane.style.display = 'none';
+                if (rzR) rzR.style.display = 'none';
+                if (!window.currentHpcPath) window.currentHpcPath = '.';
+                if (typeof fetchAndRenderHpcTreeView === 'function') {
+                    await fetchAndRenderHpcTreeView();
+                }
+            }
+            window.switchToHpcFtpView = switchToHpcFtpView;
             function switchToDataAssetsView() {
                 syncVolatileReturnSessionFromChatBeforeLeavingToSkillsOrAssets();
                 persistLastChatSessionBeforeLeaving();
@@ -4096,148 +4242,144 @@
             function renderHpcAssetsPlaceholder(containerEl) {
                 if (!containerEl) return;
                 var isHpcConnected = isHpcMcpEnabled();
-                var state = getHpcSidebarState();
-                var details = document.createElement('details');
-                details.className = 'asset-modality-group hpc-assets-group';
-                var summary = document.createElement('summary');
-                var summaryHead = document.createElement('div');
-                summaryHead.className = 'hpc-summary-head';
+                var entry = document.createElement('div');
+                entry.className = 'sidebar-item sidebar-item-unified';
+                entry.id = 'btn-hpc-ftp-view';
+                entry.style.cssText = 'color:#2563eb;justify-content:center;font-weight:600;margin-top:8px;border:1px dashed #93c5fd;background:#eff6ff;';
                 var iconWrap = document.createElement('span');
-                iconWrap.className = 'asset-modality-icon-wrap';
-                iconWrap.textContent = '☁️';
-                summaryHead.appendChild(iconWrap);
-                var titleEl = document.createElement('span');
-                var baseFiles = Array.isArray(state.syncedFiles) ? state.syncedFiles : [];
-                var mergedCount = (isHpcConnected ? baseFiles : []).concat(getAddedHpcFiles()).filter(Boolean).length;
-                titleEl.textContent = isHpcConnected ? ('超算资产 (' + mergedCount + ')') : '超算资产 (未连接)';
-                summaryHead.appendChild(titleEl);
-                var syncBtn = document.createElement('button');
-                syncBtn.type = 'button';
-                syncBtn.className = 'sidebar-asset-refresh-btn hpc-sync-btn' + (state.syncing ? ' spinning' : '');
-                syncBtn.title = '同步超算文件';
-                syncBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i>';
-                syncBtn.onclick = function(ev) {
-                    ev.preventDefault();
-                    ev.stopPropagation();
-                    syncHpcFiles();
-                };
-                summaryHead.appendChild(syncBtn);
-                summary.appendChild(summaryHead);
-                if (!isHpcConnected) summary.style.color = '#9ca3af';
-                details.appendChild(summary);
-
-                var fileList = document.createElement('div');
-                fileList.className = 'asset-modality-files';
-                fileList.innerHTML = '';
-                if (isHpcConnected) {
-                    var base = Array.isArray(state.syncedFiles) ? state.syncedFiles : [];
-                    var files = base.concat(getAddedHpcFiles()).filter(Boolean);
-                    var seen = {};
-                    files.forEach(function(name) {
-                        if (seen[name]) return;
-                        seen[name] = true;
-                        var item = document.createElement('div');
-                        item.className = 'sidebar-asset-item';
-                        var textSpan = document.createElement('span');
-                        textSpan.className = 'item-text';
-                        textSpan.textContent = name;
-                        item.appendChild(textSpan);
-                        fileList.appendChild(item);
-                    });
-                    var addPathBtn = document.createElement('button');
-                    addPathBtn.type = 'button';
-                    addPathBtn.className = 'hpc-add-path-btn';
-                    addPathBtn.textContent = '+ 添加文件路径';
-                    fileList.appendChild(addPathBtn);
-
-                    var addWrap = document.createElement('div');
-                    addWrap.className = 'hpc-add-path-wrap';
-                    addWrap.style.display = 'none';
-                    var input = document.createElement('input');
-                    input.type = 'text';
-                    input.className = 'hpc-add-path-input';
-                    input.placeholder = '/home/user/data/new_sample.fq';
-                    addWrap.appendChild(input);
-                    var err = document.createElement('div');
-                    err.className = 'hpc-add-path-error';
-                    addWrap.appendChild(err);
-                    var actionRow = document.createElement('div');
-                    actionRow.className = 'hpc-add-path-actions';
-                    var confirmBtn = document.createElement('button');
-                    confirmBtn.type = 'button';
-                    confirmBtn.className = 'hpc-add-path-confirm';
-                    confirmBtn.textContent = '确认';
-                    var cancelBtn = document.createElement('button');
-                    cancelBtn.type = 'button';
-                    cancelBtn.className = 'hpc-add-path-cancel';
-                    cancelBtn.textContent = '取消';
-                    actionRow.appendChild(confirmBtn);
-                    actionRow.appendChild(cancelBtn);
-                    addWrap.appendChild(actionRow);
-                    fileList.appendChild(addWrap);
-
-                    addPathBtn.onclick = function(ev) {
-                        ev.preventDefault();
-                        ev.stopPropagation();
-                        addWrap.style.display = addWrap.style.display === 'none' ? 'block' : 'none';
-                        if (addWrap.style.display === 'block') setTimeout(function() { input.focus(); }, 0);
-                    };
-                    var submitAddPath = async function() {
-                        var pathVal = (input.value || '').trim();
-                        input.classList.remove('is-error');
-                        err.textContent = '';
-                        var check = await validateHpcPath(pathVal);
-                        if (!check.ok) {
-                            input.classList.add('is-error');
-                            err.textContent = check.message || '未找到该路径或权限不足';
-                            return;
-                        }
-                        var current = getAddedHpcFiles();
-                        if (current.indexOf(pathVal) < 0) current.push(pathVal);
-                        setAddedHpcFiles(current);
-                        if (typeof fetchAssets === 'function') fetchAssets();
-                    };
-                    var resetAddPath = function() {
-                        input.value = '';
-                        input.classList.remove('is-error');
-                        err.textContent = '';
-                        addWrap.style.display = 'none';
-                    };
-                    confirmBtn.onclick = function(ev) {
-                        ev.preventDefault();
-                        ev.stopPropagation();
-                        submitAddPath();
-                    };
-                    cancelBtn.onclick = function(ev) {
-                        ev.preventDefault();
-                        ev.stopPropagation();
-                        resetAddPath();
-                    };
-                    input.addEventListener('keydown', async function(ev) {
-                        if (ev.key === 'Enter') {
-                            ev.preventDefault();
-                            submitAddPath();
-                            return;
-                        }
-                        if (ev.key === 'Escape') {
-                            ev.preventDefault();
-                            resetAddPath();
-                        }
-                    });
-                } else {
-                    var hintItem = document.createElement('div');
-                    hintItem.className = 'sidebar-asset-item';
-                    var hintText = document.createElement('span');
-                    hintText.className = 'item-text';
-                    hintText.style.color = '#999';
-                    hintText.style.fontStyle = 'italic';
-                    hintText.textContent = '请先在系统设置中开启 HPC 连接';
-                    hintItem.appendChild(hintText);
-                    fileList.appendChild(hintItem);
+                iconWrap.className = 'sidebar-icon-wrap';
+                iconWrap.innerHTML = '<img src="/static/hpc-asset-icon.png" alt="" class="hpc-asset-icon hpc-asset-icon--sidebar">';
+                entry.appendChild(iconWrap);
+                entry.appendChild(document.createTextNode(isHpcConnected ? '超算资产' : '超算资产（未连接）'));
+                if (!isHpcConnected) {
+                    entry.style.opacity = '0.65';
                 }
-                details.appendChild(fileList);
-                containerEl.appendChild(details);
+                entry.onclick = function() {
+                    if (!isHpcConnected) {
+                        if (typeof showToast === 'function') showToast('请先在系统设置中开启 HPC 连接', 'warning');
+                        return;
+                    }
+                    if (typeof switchToHpcFtpView === 'function') switchToHpcFtpView();
+                };
+                containerEl.appendChild(entry);
             }
+
+            window.currentHpcPath = window.currentHpcPath || '.';
+            function joinHpcPath(base, name) {
+                var b = String(base || '.').trim();
+                var n = String(name || '').trim();
+                if (!n) return b || '.';
+                if (b === '.' || b === '') return n;
+                if (b === '/') return '/' + n.replace(/^\/+/, '');
+                return b.replace(/\/+$/, '') + '/' + n.replace(/^\/+/, '');
+            }
+            function renderHpcBreadcrumbs(pathValue) {
+                var host = document.getElementById('hpc-ftp-breadcrumbs');
+                if (!host) return;
+                var p = String(pathValue || '.').trim() || '.';
+                host.innerHTML = '';
+                var parts = [];
+                if (p === '.' || p === '/') {
+                    parts = [p];
+                } else {
+                    parts = p.split('/').filter(Boolean);
+                }
+                var acc = (p.startsWith('/') ? '/' : '');
+                if (parts.length === 1 && (parts[0] === '.' || parts[0] === '/')) {
+                    var one = document.createElement('span');
+                    one.className = 'hpc-breadcrumb-item active';
+                    one.textContent = parts[0];
+                    host.appendChild(one);
+                    return;
+                }
+                if (p.startsWith('/')) {
+                    var root = document.createElement('button');
+                    root.type = 'button';
+                    root.className = 'hpc-breadcrumb-item';
+                    root.dataset.path = '/';
+                    root.textContent = '/';
+                    host.appendChild(root);
+                } else {
+                    var rel = document.createElement('button');
+                    rel.type = 'button';
+                    rel.className = 'hpc-breadcrumb-item';
+                    rel.dataset.path = '.';
+                    rel.textContent = '.';
+                    host.appendChild(rel);
+                }
+                parts.forEach(function(seg, idx) {
+                    var sep = document.createElement('span');
+                    sep.className = 'hpc-breadcrumb-sep';
+                    sep.textContent = '/';
+                    host.appendChild(sep);
+                    acc = acc === '/' ? ('/' + seg) : (acc ? (acc + '/' + seg) : seg);
+                    var item = document.createElement('button');
+                    item.type = 'button';
+                    item.className = 'hpc-breadcrumb-item';
+                    item.dataset.path = acc;
+                    item.textContent = seg;
+                    if (idx === parts.length - 1) item.classList.add('active');
+                    host.appendChild(item);
+                });
+            }
+            function renderHpcListRows(items) {
+                var host = document.getElementById('hpc-ftp-list-wrap');
+                if (!host) return;
+                host.innerHTML = '';
+                if (!items || !items.length) {
+                    host.innerHTML = '<div class="hpc-ftp-empty">当前目录为空。</div>';
+                    return;
+                }
+                items.forEach(function(item) {
+                    var row = document.createElement('div');
+                    row.className = 'hpc-file-row ' + (item.type === 'directory' ? 'hpc-file-row--dir' : 'hpc-file-row--file');
+                    row.dataset.path = item.path || '';
+                    row.dataset.type = item.type || '';
+                    row.innerHTML = '<span class="hpc-file-main"><span class="hpc-file-icon">' + (item.type === 'directory' ? '📁' : '📄') + '</span><span class="hpc-file-name">' + (item.name || '') + '</span></span>';
+                    if (item.type === 'file') {
+                        var addBtn = document.createElement('button');
+                        addBtn.type = 'button';
+                        addBtn.className = 'hpc-add-to-chat-btn';
+                        addBtn.textContent = '添加到对话';
+                        addBtn.dataset.path = item.path || '';
+                        row.appendChild(addBtn);
+                    }
+                    host.appendChild(row);
+                });
+            }
+            async function enterHpcDirectory(nextPath) {
+                window.currentHpcPath = String(nextPath || '.').trim() || '.';
+                await fetchAndRenderHpcTreeView();
+            }
+            async function fetchAndRenderHpcTreeView() {
+                var listHost = document.getElementById('hpc-ftp-list-wrap');
+                if (!listHost) return;
+                listHost.innerHTML = '<div class="hpc-ftp-loading">正在拉取超算目录...</div>';
+                try {
+                    var q = encodeURIComponent(window.currentHpcPath || '.');
+                    var response = await fetch('/api/config/mcp/hpc-files/list?path=' + q, { method: 'GET', headers: getAuthHeaders() });
+                    var raw = await response.text();
+                    var data = null;
+                    try {
+                        data = raw ? JSON.parse(raw) : {};
+                    } catch (_parseErr) {
+                        throw new Error('后端返回非 JSON：' + (raw || '(empty response)').slice(0, 200));
+                    }
+                    if (!response.ok) {
+                        throw new Error((data && (data.message || data.detail)) || ('HTTP ' + response.status));
+                    }
+                    if (!data || data.status !== 'success') {
+                        throw new Error((data && (data.message || data.detail)) || '后端返回状态非 success');
+                    }
+                    window.currentHpcPath = String(data.path || window.currentHpcPath || '.');
+                    renderHpcBreadcrumbs(window.currentHpcPath);
+                    renderHpcListRows(Array.isArray(data.items) ? data.items : []);
+                } catch (error) {
+                    listHost.innerHTML = '<div style="color: red; padding: 20px;">拉取失败，请检查后端日志或 MCP 状态。<br>错误信息: ' + ((error && error.message) ? error.message : String(error)) + '</div>';
+                }
+            }
+            window.enterHpcDirectory = enterHpcDirectory;
+            window.fetchAndRenderHpcTreeView = fetchAndRenderHpcTreeView;
             function renderLocalWorkspacePlaceholder(containerEl) {
                 if (!containerEl) return;
                 var workspace = getCachedWorkspaceSelection();
@@ -4403,13 +4545,84 @@
             }
             document.addEventListener('click', function(e) {
                 if (e.target && e.target.closest && e.target.closest('#sidebar-asset-refresh-btn')) refreshAndReclassifyAssets(e);
-                if (e.target && e.target.closest && e.target.closest('#btn-mount-local-project')) {
+                if (e.target && e.target.closest && e.target.closest('#btn-hpc-ftp-refresh')) {
                     e.preventDefault();
                     e.stopPropagation();
+                    if (typeof fetchAndRenderHpcTreeView === 'function') fetchAndRenderHpcTreeView();
+                }
+                if (e.target && e.target.closest && e.target.closest('#btn-hpc-ftp-back-chat')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (typeof showChatView === 'function') showChatView();
+                }
+                var wrap = document.querySelector('.workspace-dropdown-wrapper');
+                if (wrap && !wrap.contains(e.target)) {
+                    closeWorkspaceMountDropdown();
+                }
+            });
+            document.addEventListener('click', function(e) {
+                var trigger = e.target && e.target.closest && e.target.closest('#btn-mount-local-project');
+                if (trigger) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleWorkspaceMountDropdown();
+                    return;
+                }
+                var pickNew = e.target && e.target.closest && e.target.closest('#menu-select-new-dir');
+                if (pickNew) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeWorkspaceMountDropdown();
                     openLocalProjectWorkspace().catch(function(err) {
                         console.warn('[workspace-init]', err);
                         showToast('初始化工作区失败：' + (err && err.message ? err.message : err), 'danger');
                     });
+                    return;
+                }
+                var recentBtn = e.target && e.target.closest && e.target.closest('.recent-workspace-item');
+                if (recentBtn && recentBtn.dataset && recentBtn.dataset.path) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeWorkspaceMountDropdown();
+                    quickInitWorkspaceFromPath(recentBtn.dataset.path).catch(function(err) {
+                        console.warn('[workspace-recent]', err);
+                        showToast('初始化工作区失败：' + (err && err.message ? err.message : err), 'danger');
+                    });
+                    return;
+                }
+                var hpcBreadcrumb = e.target && e.target.closest && e.target.closest('.hpc-breadcrumb-item');
+                if (hpcBreadcrumb && hpcBreadcrumb.dataset && hpcBreadcrumb.dataset.path) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (typeof enterHpcDirectory === 'function') {
+                        enterHpcDirectory(hpcBreadcrumb.dataset.path);
+                    }
+                    return;
+                }
+                var hpcDirRow = e.target && e.target.closest && e.target.closest('.hpc-file-row--dir');
+                if (hpcDirRow && hpcDirRow.dataset && hpcDirRow.dataset.path) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (typeof enterHpcDirectory === 'function') {
+                        enterHpcDirectory(hpcDirRow.dataset.path);
+                    }
+                    return;
+                }
+                var hpcAddBtn = e.target && e.target.closest && e.target.closest('.hpc-add-to-chat-btn');
+                if (hpcAddBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    var filepath = (hpcAddBtn.dataset && hpcAddBtn.dataset.path) ? String(hpcAddBtn.dataset.path).trim() : '';
+                    if (!filepath) return;
+                    if (typeof showChatView === 'function') showChatView();
+                    var inp = document.getElementById('userInput');
+                    if (inp) {
+                        var mark = '[HPC文件: ' + filepath + ']';
+                        inp.value = inp.value ? (inp.value + '\n' + mark) : mark;
+                        if (typeof autoResize === 'function') autoResize(inp);
+                        if (typeof checkInput === 'function') checkInput();
+                        inp.focus();
+                    }
                 }
             });
             // 任务3：点击数据资产挂载为输入框上方附件标签，不清空当前对话
@@ -7358,6 +7571,17 @@
                     target_domain: currentSkillDomain,  // 确定性意图硬路由：仅技能广场点击时非 null，闲聊为 null
                     enabled_mcps: (typeof window.getEnabledMcpsFromStorage === 'function' ? window.getEnabledMcpsFromStorage() : [])
                 };
+                var _wsSel = (typeof getCachedWorkspaceSelection === 'function') ? getCachedWorkspaceSelection() : null;
+                var _mountedLocalWorkspace = !!(_wsSel && _wsSel.workspace_path);
+                payload.client_track = _mountedLocalWorkspace ? 'local_sidecar' : 'web';
+                payload.local_workspace_mounted = _mountedLocalWorkspace;
+                var _pendingLocalToolResponse = window.__pendingLocalToolResponse || null;
+                if (_pendingLocalToolResponse) {
+                    payload.local_tool_response = _pendingLocalToolResponse;
+                    payload.client_track = 'local_sidecar';
+                    payload.local_workspace_mounted = true;
+                    window.__pendingLocalToolResponse = null;
+                }
                 var _cm = (typeof window.currentChatMode !== 'undefined' && window.currentChatMode === 'flagship') ? 'flagship' : 'standard';
                 payload.mode = _cm;
                 payload.thinking_mode = (_cm === 'flagship') ? 'deep' : 'fast';
@@ -8091,6 +8315,65 @@
                             }
                         }
 
+                        let localRelayTriggered = false;
+                        async function relayLocalToolCall(toolCallPayload) {
+                            if (localRelayTriggered) return;
+                            localRelayTriggered = true;
+                            try {
+                                var toolName = (toolCallPayload && toolCallPayload.tool_name) ? String(toolCallPayload.tool_name) : '';
+                                var args = (toolCallPayload && toolCallPayload.arguments && typeof toolCallPayload.arguments === 'object') ? toolCallPayload.arguments : {};
+                                var endpoint = '';
+                                var relayBody = {};
+                                if (toolName === 'read_local_file') {
+                                    endpoint = '/api/tools/read_file';
+                                    relayBody = {
+                                        file_path: args.file_path || args.path || '',
+                                        max_lines: args.max_lines || 1000
+                                    };
+                                } else if (toolName === 'write_local_file') {
+                                    endpoint = '/api/tools/write_file';
+                                    relayBody = {
+                                        file_path: args.file_path || args.path || '',
+                                        content: args.content || ''
+                                    };
+                                } else {
+                                    throw new Error('不支持的本地工具: ' + toolName);
+                                }
+                                addProcessStep('本地中继执行中：' + toolName, 'running');
+                                var sideRes = await fetch(localSidecarUrl(endpoint), {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify(relayBody)
+                                });
+                                var sideData = await sideRes.json().catch(function() { return {}; });
+                                if (!sideRes.ok || !sideData || sideData.status !== 'success') {
+                                    throw new Error((sideData && (sideData.detail || sideData.message)) || ('HTTP ' + sideRes.status));
+                                }
+                                addProcessStep('本地中继完成，已回传云端继续推理', 'done');
+                                window.__pendingLocalToolResponse = {
+                                    tool_name: toolName,
+                                    tool_call_id: (toolCallPayload && toolCallPayload.tool_call_id) || '',
+                                    arguments: args,
+                                    result: sideData
+                                };
+                                if (typeof sseUiHardUnlock === 'function') sseUiHardUnlock('local-tool-relay');
+                                toggleLoadingState(false);
+                                await sendMessage(
+                                    null,
+                                    '继续',
+                                    null,
+                                    null,
+                                    false,
+                                    null,
+                                    '[LOCAL_TOOL_RESPONSE_CONTINUE]'
+                                );
+                            } catch (relayErr) {
+                                console.error('[Local Relay] 失败:', relayErr);
+                                addProcessStep('本地中继失败: ' + (relayErr && relayErr.message ? relayErr.message : String(relayErr)), 'error');
+                                if (typeof showToast === 'function') showToast('本地中继失败：' + (relayErr && relayErr.message ? relayErr.message : String(relayErr)), 'danger');
+                            }
+                        }
+
                         // 🔥 核心函数：事件分发器 - 将 SSE 事件分发到 UI 更新函数
                         function handleServerEvent(eventType, data) {
                             if (typeof data === 'string') {
@@ -8145,6 +8428,9 @@
                                     }
                                     break;
                                 }
+                                case 'local_tool_call':
+                                    relayLocalToolCall(data);
+                                    return true;
                                     
                                 case 'thought':
                                     if (sseApiMode !== 'flagship') {

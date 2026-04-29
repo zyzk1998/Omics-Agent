@@ -68,6 +68,22 @@ def _lite_task_mode_enabled() -> bool:
     return str(raw).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _build_dual_track_system_instruction(workspace_context: Optional[Dict[str, Any]]) -> str:
+    ctx = workspace_context or {}
+    track = str(ctx.get("execution_track") or "web").strip().lower()
+    local_mounted = bool(ctx.get("local_workspace_mounted"))
+    if track == "web" or not local_mounted:
+        return (
+            "\n\n【Dual-Track 轨道约束】当前请求来自 Web/Cloud 轨道。"
+            "你必须优先使用云端传统文件链路（/app/uploads 与 /app/results）和 cloud_file_tools 思维，不要尝试访问客户端本机路径。"
+            "若用户提供本机盘符路径（如 C:\\\\...），应提示先通过上传流程进入云端再处理。"
+        )
+    return (
+        "\n\n【Dual-Track 轨道约束】当前请求来自 Local Sidecar 轨道。"
+        "涉及本地绝对路径读写时，应通过前端中继本地工具执行，再基于工具返回继续推理。"
+    )
+
+
 class AgentOrchestrator:
     """
     Agent 编排器
@@ -85,6 +101,21 @@ class AgentOrchestrator:
 
     # Phase 2：语义路由接入（默认开，见 _semantic_router_feature_flag）
     ENABLE_SEMANTIC_ROUTER: bool = _semantic_router_feature_flag()
+    # CLI 快速直通车：在进入 LLM 之前做硬拦截（仅允许白名单命令）
+    FAST_LANE_CLI_COMMANDS: Tuple[str, ...] = (
+        "ls",
+        "pestat",
+        "sbatch",
+        "squeue",
+        "sinfo",
+        "scancel",
+        "pwd",
+        "cd",
+    )
+    FAST_LANE_CLI_RE = re.compile(
+        r"^(ls|pestat|sbatch|squeue|sinfo|scancel|pwd|cd)(?:\s+.*)?$",
+        re.IGNORECASE,
+    )
 
     def __init__(self, agent, upload_dir: str = "/app/uploads"):
         """
@@ -144,6 +175,39 @@ class AgentOrchestrator:
         except ValueError as e:
             logger.error("❌ 无法为 model=%s 创建 LLM 客户端: %s", model_name, e)
             return None
+
+    @classmethod
+    def _match_fast_lane_cli_command(cls, query: str) -> Optional[str]:
+        """CLI 快速直通：仅白名单命令命中（原串透传，严禁改写）。"""
+        q = str(query or "").strip()
+        if not q:
+            return None
+        if not cls.FAST_LANE_CLI_RE.match(q):
+            return None
+        return q
+
+    @staticmethod
+    def _flatten_hpc_fast_lane_output(tool_result: Dict[str, Any]) -> str:
+        """
+        将 HPC MCP 返回的 content[] 扁平化为纯文本；保留原始 stdout/stderr 风格，不做语义润色。
+        """
+        content = tool_result.get("content")
+        if isinstance(content, list):
+            lines: List[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    txt = item.get("text") or item.get("content")
+                    if txt is not None:
+                        lines.append(str(txt))
+                elif item is not None:
+                    lines.append(str(item))
+            out = "\n".join([ln for ln in lines if ln is not None]).strip()
+            if out:
+                return out
+        msg = (tool_result.get("message") or "").strip()
+        if msg:
+            return msg
+        return "(no output)"
 
     def _is_public_api_chat_intent(self, query: str) -> bool:
         """
@@ -756,6 +820,71 @@ class AgentOrchestrator:
 
         # 🔥 工作流收藏复用：正则拦截「用户请求复用工作流模板」，跳过 LLM 规划，直接下发 DB 中的 config_json 作为 workflow 事件
         _query_str = (query or "").strip()
+        _fast_lane_cli = self._match_fast_lane_cli_command(_query_str)
+        if _fast_lane_cli:
+            try:
+                from gibh_agent.core.openai_tools import COMPUTE_SCHEDULER_MCP_KEY
+                from gibh_agent.mcp_client import hpc_mcp_manager
+
+                _enabled_set = {str(x).strip() for x in enabled_mcps if x}
+                _hpc_enabled = COMPUTE_SCHEDULER_MCP_KEY in _enabled_set
+                _hpc_connected = bool(hpc_mcp_manager.connected)
+                if _hpc_enabled and _hpc_connected:
+                    logger.info("🚄 [Orchestrator] 命中 CLI 快速直通车: %s", _fast_lane_cli)
+                    yield self._emit_sse(
+                        state_snapshot,
+                        "status",
+                        {"content": f"CLI 快速直通执行中：{_fast_lane_cli}", "state": "running"},
+                    )
+                    await asyncio.sleep(0.01)
+                    _tool_name = (
+                        hpc_mcp_manager.resolve_registry_tool_to_mcp("hpc_mcp_execute_hpc_command")
+                        or "execute_hpc_command"
+                    )
+                    _tool_result = await hpc_mcp_manager.call_tool(
+                        _tool_name,
+                        {"command": _fast_lane_cli},
+                    )
+                    if (_tool_result or {}).get("status") == "success":
+                        _plain = self._flatten_hpc_fast_lane_output(_tool_result)
+                        _md = f"```bash\n$ {_fast_lane_cli}\n{_plain}\n```"
+                        state_snapshot["text"] = _md
+                        yield self._emit_sse(state_snapshot, "message", {"content": _md})
+                        await asyncio.sleep(0.01)
+                        yield self._emit_sse(
+                            state_snapshot,
+                            "status",
+                            {"content": "CLI 快速直通已完成", "state": "completed"},
+                        )
+                        await asyncio.sleep(0.01)
+                        yield self._emit_sse(
+                            state_snapshot,
+                            "done",
+                            {"status": "success", "mode": "hpc_cli_fast_lane"},
+                        )
+                    else:
+                        _err = self._flatten_hpc_fast_lane_output(_tool_result or {})
+                        yield self._emit_sse(
+                            state_snapshot,
+                            "message",
+                            {"content": f"```bash\n$ {_fast_lane_cli}\n{_err}\n```"},
+                        )
+                        await asyncio.sleep(0.01)
+                        yield self._emit_sse(state_snapshot, "done", {"status": "error", "mode": "hpc_cli_fast_lane"})
+                    state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                    yield self._format_sse("state_snapshot", state_snapshot)
+                    return
+                logger.info(
+                    "⏭️ [Orchestrator] CLI 命中但不满足直通条件（enabled=%s connected=%s），回退常规链路",
+                    _hpc_enabled,
+                    _hpc_connected,
+                )
+            except Exception as _cli_fast_lane_e:
+                logger.warning(
+                    "⚠️ [Orchestrator] CLI 快速直通初始化失败，回退常规链路: %s",
+                    _cli_fast_lane_e,
+                    exc_info=True,
+                )
         # SemanticRouter 判为 drug_similarity 快车道且无 [Skill_Route] 时，由编排器补全暗号并直出 SkillAgent
         _semantic_skill_fast_lane_tool: Optional[str] = None
         # SemanticRouter 判为 clarify 时：转入聊天流并附加澄清 system 提示（见 _stream_chat_mode）
@@ -1161,6 +1290,7 @@ class AgentOrchestrator:
                         enabled_mcps=enabled_mcps,
                         session_key=_deep_key,
                         workspace_context=kwargs.get("workspace_context"),
+                        local_tool_response=kwargs.get("local_tool_response"),
                     ):
                         yield sse_chunk
                 else:
@@ -1175,6 +1305,7 @@ class AgentOrchestrator:
                         schema_cache_key=f"{_deep_key}::hpc_openai",
                         semantic_clarify_rationale=_semantic_clarify_rationale,
                         workspace_context=kwargs.get("workspace_context"),
+                        local_tool_response=kwargs.get("local_tool_response"),
                     ):
                         yield sse_chunk
             except Exception as chat_exc:
@@ -3682,6 +3813,7 @@ class AgentOrchestrator:
         enabled_mcps: List[str],
         session_key: str,
         workspace_context: Optional[Dict[str, Any]] = None,
+        local_tool_response: Optional[Dict[str, Any]] = None,
     ) -> AsyncIterator[str]:
         """DeepReAct：多轮工具 + HITL 挂起；messages 由 _DEEP_REACT_SESSIONS 按 session_key 续传。"""
         import copy as _copy
@@ -3736,6 +3868,7 @@ class AgentOrchestrator:
             )
         _workspace_ctx = workspace_context or get_workspace_context()
         chat_system += build_workspace_system_instruction(_workspace_ctx)
+        chat_system += _build_dual_track_system_instruction(_workspace_ctx)
         chat_system += hpc_chat_system_suffix(enabled_mcps)
         chat_system += (
             "\n\n【深度推理 / 人机协同】"
@@ -3763,6 +3896,16 @@ class AgentOrchestrator:
                             messages.append({"role": role, "content": content})
             messages.append({"role": "user", "content": user_content})
             logger.info("🆕 [DeepReAct] 新会话 session_key=%s", session_key)
+        if isinstance(local_tool_response, dict) and local_tool_response:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "前端已完成本地工具调用并回传结果，请继续当前任务，不要重复要求用户手动提供相同文件内容。\n"
+                        f"local_tool_response={json.dumps(local_tool_response, ensure_ascii=False)}"
+                    ),
+                }
+            )
 
         tool_names: List[str] = list(_CHAT_MODE_PUBLIC_API_TOOLS)
         if "web_search" in enabled_mcps:
@@ -3895,6 +4038,7 @@ class AgentOrchestrator:
         schema_cache_key: str = "default::hpc_openai",
         semantic_clarify_rationale: Optional[str] = None,
         workspace_context: Optional[Dict[str, Any]] = None,
+        local_tool_response: Optional[Dict[str, Any]] = None,
     ) -> AsyncIterator[str]:
         """聊天模式：可选 OpenAI tools（如 mcp_web_search），再流式输出最终回复。"""
         from gibh_agent.core.openai_tools import (
@@ -3973,6 +4117,7 @@ class AgentOrchestrator:
             )
         _workspace_ctx = workspace_context or get_workspace_context()
         chat_system += build_workspace_system_instruction(_workspace_ctx)
+        chat_system += _build_dual_track_system_instruction(_workspace_ctx)
         chat_system += hpc_chat_system_suffix(enabled_mcps)
 
         user_content = query
@@ -3989,6 +4134,16 @@ class AgentOrchestrator:
                     if content:
                         messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": user_content})
+        if isinstance(local_tool_response, dict) and local_tool_response:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "以下为前端 relay 的本地工具执行结果，请你继续完成上一轮推理。\n"
+                        f"{json.dumps(local_tool_response, ensure_ascii=False)}"
+                    ),
+                }
+            )
 
         tool_names: List[str] = list(_CHAT_MODE_PUBLIC_API_TOOLS)
         if "web_search" in enabled_mcps:
@@ -4134,6 +4289,33 @@ class AgentOrchestrator:
                     continue
 
                 tool_fn = registry.get_tool(name)
+                _track = str((_workspace_ctx or {}).get("execution_track") or "web").strip().lower()
+                _local_track = _track == "local_sidecar" and bool((_workspace_ctx or {}).get("local_workspace_mounted"))
+                if _local_track and name in ("read_local_file", "write_local_file"):
+                    yield self._emit_sse(
+                        state_snapshot,
+                        "status",
+                        {"content": f"[等待前端中继执行本地工具: {name}]", "state": "waiting"},
+                    )
+                    await asyncio.sleep(0.01)
+                    yield self._emit_sse(
+                        state_snapshot,
+                        "local_tool_call",
+                        {
+                            "tool_name": name,
+                            "tool_call_id": call_id,
+                            "arguments": args,
+                            "relay_target": "http://127.0.0.1:8019",
+                        },
+                    )
+                    await asyncio.sleep(0.01)
+                    yield self._emit_sse(
+                        state_snapshot,
+                        "done",
+                        {"status": "local_tool_required", "tool_name": name, "tool_call_id": call_id},
+                    )
+                    state_snapshot["_chat_tail_handled"] = True
+                    return
                 if name and name.startswith("hpc_mcp_") and "compute_scheduler" not in enabled_mcps:
                     result_payload = {
                         "status": "error",

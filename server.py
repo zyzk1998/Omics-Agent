@@ -47,9 +47,7 @@ from gibh_agent.core.file_handlers.universal_normalizer import normalize_session
 from gibh_agent.core.file_handlers.modality_sniffer import detect_dominant_modality, paths_for_response
 from gibh_agent.core.utils import sanitize_for_json
 from gibh_agent.core.workspace_context import (
-    build_workspace_file_tree,
     get_workspace_context,
-    set_workspace_context,
 )
 
 # 配置日志
@@ -1022,6 +1020,9 @@ class ChatRequest(BaseModel):
     enabled_mcps: Optional[List[str]] = None  # 🔌 前端 MCP 开关：如 ["web_search"]，与系统设置联动
     thinking_mode: Optional[str] = "fast"  # 聊天模式：fast | deep（DeepReAct + 会话挂起续传）
     mode: Optional[str] = "standard"  # LLM API 深度思考开关：standard | flagship（经 OpenAI SDK extra_body.thinking 下发）
+    client_track: Optional[str] = "web"  # dual-track: web | local_sidecar
+    local_workspace_mounted: Optional[bool] = False
+    local_tool_response: Optional[dict] = None  # 前端 relay 回传的本地工具结果
 
 
 class WorkspaceInitRequest(BaseModel):
@@ -1117,45 +1118,20 @@ async def api_health_check():
 
 @app.post("/api/workspace/init")
 async def init_workspace(payload: WorkspaceInitRequest):
-    """初始化本地工作区并确保存在 result/ 子目录。"""
-    raw_path = str(payload.workspace_path or "").strip()
-    if not raw_path:
-        raise HTTPException(status_code=400, detail="workspace_path 不能为空")
-
-    resolved = Path(raw_path).expanduser().resolve()
-    if not resolved.is_absolute():
-        raise HTTPException(status_code=400, detail="workspace_path 必须是绝对路径")
-    if not resolved.exists() or not resolved.is_dir():
-        raise HTTPException(status_code=400, detail="workspace_path 不存在或不是目录")
-
-    result_dir = resolved / "result"
-    result_dir.mkdir(parents=True, exist_ok=True)
-
-    workspace_info = set_workspace_context(str(resolved))
-    workspace_info["updated_at"] = datetime.now().isoformat()
-    app.state.workspace_context = workspace_info
-    logger.info("✅ [Workspace] initialized: %s", workspace_info["workspace_path"])
-    return {"status": "success", "workspace": workspace_info}
+    """已迁移至本地 sidecar（127.0.0.1:8019）。"""
+    raise HTTPException(
+        status_code=410,
+        detail="此接口已迁移到本地 Sidecar：请改用 http://127.0.0.1:8019/api/workspace/init",
+    )
 
 
 @app.get("/api/workspace/tree")
-async def workspace_tree(request: Request):
-    """
-    返回当前挂载工作区的嵌套文件树 JSON（供右侧资源管理器使用）。
-    """
-    ctx = getattr(request.app.state, "workspace_context", None) or {}
-    if not isinstance(ctx, dict) or not str(ctx.get("workspace_path") or "").strip():
-        ctx = get_workspace_context()
-    root_raw = str((ctx or {}).get("workspace_path") or "").strip()
-    if not root_raw:
-        raise HTTPException(status_code=400, detail="未挂载本地工作区")
-
-    root = Path(root_raw).expanduser().resolve()
-    if not root.exists() or not root.is_dir():
-        raise HTTPException(status_code=400, detail="工作区路径不存在或不是目录")
-
-    tree = build_workspace_file_tree(root)
-    return {"status": "success", "workspace_path": str(root), "tree": tree}
+async def workspace_tree():
+    """已迁移至本地 sidecar（127.0.0.1:8019）。"""
+    raise HTTPException(
+        status_code=410,
+        detail="此接口已迁移到本地 Sidecar：请改用 http://127.0.0.1:8019/api/workspace/tree",
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -2611,6 +2587,7 @@ def _augment_history_with_db_tool_memory(
 @app.post("/api/chat")
 async def chat_endpoint(
     req: ChatRequest,
+    request: Request,
     owner_id: str = Depends(get_current_owner_id),
     db: Session = Depends(get_db_session),
 ):
@@ -2822,7 +2799,14 @@ async def chat_endpoint(
                     _hist_merged = _augment_history_with_db_tool_memory(
                         req.session_id, req.history or [], db
                     )
-                    _workspace_ctx = getattr(app.state, "workspace_context", None) or get_workspace_context()
+                    _workspace_ctx = dict(getattr(app.state, "workspace_context", None) or get_workspace_context() or {})
+                    _header_track = (request.headers.get("X-Client-Track") or "").strip().lower()
+                    _payload_track = (req.client_track or "").strip().lower()
+                    _track = _header_track or _payload_track or "web"
+                    if _track not in ("web", "local_sidecar"):
+                        _track = "web"
+                    _workspace_ctx["execution_track"] = _track
+                    _workspace_ctx["local_workspace_mounted"] = bool(req.local_workspace_mounted)
                     async for event in orchestrator.stream_process(
                         query=req.message,
                         files=uploaded_files,
@@ -2838,6 +2822,7 @@ async def chat_endpoint(
                         enabled_mcps=req.enabled_mcps or [],
                         thinking_mode=_effective_thinking,
                         workspace_context=_workspace_ctx,
+                        local_tool_response=req.local_tool_response,
                     ):
                         if isinstance(event, str) and "event: state_snapshot" in event:
                             for line in event.split("\n"):
