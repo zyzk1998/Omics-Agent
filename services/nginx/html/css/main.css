@@ -496,14 +496,104 @@
             #sidebar-pane .sidebar-user:hover { background-color: #f3f4f6; }
             #sidebar-pane .sidebar-user .user-name { font-size: 13px; color: #111827; }
             #sidebar-pane .sidebar-user .btn-upgrade { font-size: 12px; color: #6b7280; }
-            #chat-pane {
-                flex: 1;
+            /* 中栏 + 右侧本地资源管理器：同行 flex，聊天区 min-width:0 防止被挤出视口
+               说明：作为 .three-pane-row 的中间 flex 子项，必须在交叉轴（竖直方向）显式拉满行高，
+               且子项 #chat-pane 设 min-height:0，否则嵌套 column flex 内 flex:1 的空状态区无法吃到剩余高度，
+               会出现「整块缩成内容高度、输入条不贴底」的断层。 */
+            .chat-main-with-explorer {
+                display: flex;
+                flex-direction: row;
+                align-items: stretch;
+                align-self: stretch;
+                flex: 1 1 0%;
                 min-width: 0;
+                min-height: 0;
+                overflow: hidden;
+            }
+            #chat-pane {
+                flex: 1 1 0%;
+                min-width: 0;
+                min-height: 0;
                 display: flex;
                 flex-direction: column;
                 overflow: hidden;
                 position: relative;
             }
+            #right-file-explorer.right-sidebar {
+                width: 260px;
+                min-width: 260px;
+                flex-shrink: 0;
+                display: none;
+                flex-direction: column;
+                background: var(--sidebar-bg);
+                border-left: 1px solid var(--sidebar-border);
+                color: var(--sidebar-text);
+                overflow: hidden;
+            }
+            .right-sidebar-header {
+                flex-shrink: 0;
+                padding: 10px 12px;
+                font-size: 14px;
+                font-weight: 600;
+                border-bottom: 1px solid var(--sidebar-border);
+                background: #fff;
+            }
+            .file-tree-container {
+                flex: 1;
+                min-height: 0;
+                overflow-y: auto;
+                overflow-x: hidden;
+                padding: 8px 6px 12px;
+                font-size: 13px;
+                box-sizing: border-box;
+            }
+            .file-tree-loading,
+            .file-tree-empty,
+            .file-tree-error {
+                padding: 8px;
+                color: #6b7280;
+                font-size: 12px;
+            }
+            .file-tree-error { color: #b91c1c; }
+            .file-tree-folder { margin: 2px 0; }
+            .file-tree-folder > summary.file-tree-summary {
+                list-style: none;
+                cursor: pointer;
+                padding: 4px 4px;
+                border-radius: 6px;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                user-select: none;
+            }
+            .file-tree-folder > summary.file-tree-summary::-webkit-details-marker { display: none; }
+            .file-tree-folder > summary.file-tree-summary::marker { content: none; }
+            .file-tree-folder > summary.file-tree-summary:hover { background: #f3f4f6; }
+            .file-tree-children { padding-left: 14px; border-left: 1px solid #e5e7eb; margin-left: 6px; }
+            .file-tree-file {
+                padding: 4px 6px 4px 4px;
+                margin: 1px 0;
+                border-radius: 6px;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                color: #374151;
+                font-size: 12px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .file-tree-icon { flex-shrink: 0; }
+            .file-tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+            .btn-mount-local-project {
+                padding: 6px 8px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                color: #4b5563;
+            }
+            .btn-mount-local-project:hover { color: #1d4ed8; background: #eff6ff; }
+            .btn-mount-local-project__icon { display: block; vertical-align: middle; }
             #chat-pane .chat-scroll-area {
                 flex: 1;
                 min-height: 0;

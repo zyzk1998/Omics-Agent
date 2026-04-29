@@ -32,12 +32,14 @@
         <p class="ver-line" id="ver-line">版本 —</p>
 
         <div class="card">
-            <div class="card-h">本版更新说明（V0.12.2）</div>
+            <div class="card-h">本版更新说明（V0.12.3）</div>
             <ul class="changelog">
-                <li><strong>Windows 安装包（本次更新）</strong>：在桌面版里打印或下载工作台报告时，预览与正式打印效果已与网页版一致——报告内容会正常显示，不再出现整页空白；报告里的配色、底纹和化学结构式等也会按原样出现在纸上或 PDF 中。</li>
-                <li>与服务端能力对齐：化学信息学（RDKit）相关工具与技能扩展，便于在对话中完成分子表示、性质与结构类任务。</li>
-                <li>编排与对话体验优化：会话标题生成、工具输出记忆等，减少长对话中的重复与迷失。</li>
-                <li>技能广场与技能接口、前端控制台若干体验与样式改进。</li>
+                <li><strong>【V0.12.3 核心更新】</strong></li>
+                <li>新增：桌面级高权限模式，支持挂载本地项目工作区。</li>
+                <li>新增：右侧资源管理器 (File Explorer)，实时映射本地代码/数据目录。</li>
+                <li>新增：文件「一键引用」功能，点击文件树节点即可快速加入对话上下文。</li>
+                <li>优化：重构主界面 Flexbox 弹性布局，自适应侧边栏收缩，消除 UI 塌陷隐患。</li>
+                <li>安全：增加目录穿越 (Path Traversal) 物理防护墙，锁定智能体读写范围。</li>
             </ul>
         </div>
 
@@ -71,11 +73,11 @@
             var verLine = document.getElementById('ver-line');
 
             var staticFallback = {
-                version: '0.12.2',
-                displayVersion: 'V0.12.2',
+                version: '0.12.3',
+                displayVersion: 'V0.12.3',
                 productName: 'Omics Agent',
-                winSetupFile: 'Omics Agent Setup 0.12.2.exe',
-                linuxAppImageFile: 'Omics Agent-0.12.2.AppImage'
+                winSetupFile: 'Omics Agent Setup 0.12.3.exe',
+                linuxAppImageFile: 'Omics Agent-0.12.3.AppImage'
             };
 
             function setVersion(meta) {

@@ -90,8 +90,6 @@
                             <button type="button" id="sidebar-asset-refresh-btn" class="sidebar-asset-refresh-btn" title="刷新并重新分类：同步上传数据，将未分类文件归入对应类别" aria-label="刷新数据资产"><i class="bi bi-arrow-clockwise"></i></button>
                         </summary>
                         <div class="details-content-wrapper">
-                            <button type="button" id="btn-open-local-project" class="sidebar-item" style="margin: 8px 8px 6px; width: calc(100% - 16px); border: 1px solid #2563eb; background: linear-gradient(90deg, #eff6ff, #dbeafe); color: #1d4ed8; font-weight: 600;" title="选择本地项目目录并初始化工作区">📁 打开本地项目</button>
-                            <input type="file" id="local-project-folder-input" webkitdirectory directory style="display:none;">
                             <div id="sidebar-assets-list" class="sidebar-sub-list"></div>
                         </div>
                     </details>
@@ -225,7 +223,8 @@
                 </div>
             </div>
 
-            <!-- 中栏：对话 + 空状态引导 -->
+            <!-- 中栏：对话 + 空状态引导；右侧本地文件树与聊天区同行 flex，避免遮挡 -->
+            <div id="chat-main-host" class="chat-main-with-explorer">
             <main id="chat-pane">
         <header id="chat-pane-header">
             <div class="header-left" style="display: flex; align-items: center; gap: 8px;">
@@ -293,6 +292,10 @@
                     </div>
                     <div class="toolbar input-toolbar">
                         <div class="toolbar-left">
+                            <input type="file" id="local-project-folder-input" webkitdirectory directory class="file-input-hidden" tabindex="-1" aria-hidden="true" title="">
+                            <button type="button" id="btn-mount-local-project" class="ghost-btn btn-mount-local-project" title="挂载本地项目" aria-label="挂载本地项目">
+                                <svg class="btn-mount-local-project__icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h4l2 3h12a2 2 0 012 2v11z"/></svg>
+                            </button>
                             <input type="file" id="fileInput" class="file-input-hidden" onchange="handleFileSelect(this.files)" multiple accept="*">
                             <label for="fileInput" class="ghost-btn file-upload-label" title="上传文件"><i class="bi bi-paperclip"></i></label>
                             <div id="hpc-context-badge" class="context-badge context-badge--by-model hidden" role="status" aria-live="polite">
@@ -335,6 +338,12 @@
             </div>
         </div>
             </main>
+
+            <aside id="right-file-explorer" class="right-sidebar" style="display: none;" aria-hidden="true">
+                <div class="right-sidebar-header">📁 本地项目</div>
+                <div id="file-tree-container" class="file-tree-container"></div>
+            </aside>
+            </div>
 
             <div class="resizer" id="resizer-right"></div>
 
@@ -967,7 +976,7 @@
                 }
             }
             function syncVolatileReturnSessionFromChatBeforeLeavingToSkillsOrAssets() {
-                var cp = document.getElementById('chat-pane');
+                var cp = document.getElementById('chat-main-host') || document.getElementById('chat-pane');
                 var chatVis = false;
                 if (cp) {
                     var d = (cp.style && cp.style.display) ? String(cp.style.display).trim() : '';
@@ -1799,6 +1808,57 @@
                 }
                 return data.workspace || null;
             }
+            function fileTreeEscapeHtml(s) {
+                return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            }
+            function renderWorkspaceTreeNodes(nodes, parentEl) {
+                (nodes || []).forEach(function(node) {
+                    if (!node) return;
+                    if (node.type === 'directory') {
+                        var det = document.createElement('details');
+                        det.className = 'file-tree-folder';
+                        var sum = document.createElement('summary');
+                        sum.className = 'file-tree-summary';
+                        sum.innerHTML = '<span class="file-tree-icon" aria-hidden="true">📁</span><span class="file-tree-name">' + fileTreeEscapeHtml(node.name) + '</span>';
+                        det.appendChild(sum);
+                        var childWrap = document.createElement('div');
+                        childWrap.className = 'file-tree-children';
+                        renderWorkspaceTreeNodes(node.children, childWrap);
+                        det.appendChild(childWrap);
+                        parentEl.appendChild(det);
+                    } else if (node.type === 'file') {
+                        var row = document.createElement('div');
+                        row.className = 'file-tree-file';
+                        row.title = node.path || '';
+                        row.innerHTML = '<span class="file-tree-icon" aria-hidden="true">📄</span><span class="file-tree-name">' + fileTreeEscapeHtml(node.name) + '</span>';
+                        parentEl.appendChild(row);
+                    }
+                });
+            }
+            async function fetchAndRenderWorkspaceTree() {
+                var container = document.getElementById('file-tree-container');
+                if (!container) return;
+                container.innerHTML = '<div class="file-tree-loading">加载中…</div>';
+                try {
+                    var res = await fetch('/api/workspace/tree', { headers: getAuthHeaders() });
+                    var data = await res.json().catch(function() { return {}; });
+                    if (!res.ok || !data || data.status !== 'success') {
+                        var err = (data && (data.detail || data.message)) || ('HTTP ' + res.status);
+                        container.innerHTML = '<div class="file-tree-error">' + fileTreeEscapeHtml(String(err)) + '</div>';
+                        return;
+                    }
+                    container.innerHTML = '';
+                    var tree = data.tree || [];
+                    if (!tree.length) {
+                        container.innerHTML = '<div class="file-tree-empty">（空目录）</div>';
+                        return;
+                    }
+                    renderWorkspaceTreeNodes(tree, container);
+                } catch (e) {
+                    container.innerHTML = '<div class="file-tree-error">' + fileTreeEscapeHtml((e && e.message) ? e.message : String(e)) + '</div>';
+                }
+            }
+            window.fetchAndRenderWorkspaceTree = fetchAndRenderWorkspaceTree;
             async function openLocalProjectWorkspace() {
                 var selection = null;
                 var isElectron = false;
@@ -1859,6 +1919,12 @@
                     selection.source = selection.source || 'workspace-init';
                     cacheWorkspaceSelection(selection);
                     if (typeof fetchAssets === 'function') fetchAssets();
+                    var rex = document.getElementById('right-file-explorer');
+                    if (rex) {
+                        rex.style.display = 'flex';
+                        rex.setAttribute('aria-hidden', 'false');
+                    }
+                    if (typeof fetchAndRenderWorkspaceTree === 'function') fetchAndRenderWorkspaceTree();
                 }
                 showToast('工作区已初始化：' + ((workspace && workspace.workspace_name) || selection.workspace_name), 'success');
             }
@@ -2149,7 +2215,7 @@
             }
 
             function hideAllMainPanes() {
-                var panes = ['chat-pane', 'skills-square-pane', 'history-pane', 'data-assets-pane', 'file-management-pane'];
+                var panes = ['chat-main-host', 'skills-square-pane', 'history-pane', 'data-assets-pane', 'file-management-pane'];
                 panes.forEach(function(id) {
                     var el = document.getElementById(id);
                     if (el) el.style.display = 'none';
@@ -2212,10 +2278,10 @@
                 window._volatileActiveSessionIdToReturn = null;
                 if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
                 hideAllMainPanes();
-                var chatPane = document.getElementById('chat-pane');
+                var chatHost = document.getElementById('chat-main-host');
                 var wsPane = document.getElementById('workspace-pane');
                 var rzR = document.getElementById('resizer-right');
-                if (chatPane) chatPane.style.display = 'flex';
+                if (chatHost) chatHost.style.display = 'flex';
                 if (wsPane) wsPane.style.display = 'flex';
                 if (rzR) rzR.style.display = 'block';
             }
@@ -2223,10 +2289,10 @@
                 window._volatileActiveSessionIdToReturn = null;
                 if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
                 hideAllMainPanes();
-                var chatPane = document.getElementById('chat-pane');
+                var chatHost = document.getElementById('chat-main-host');
                 var wsPane = document.getElementById('workspace-pane');
                 var rzR = document.getElementById('resizer-right');
-                if (chatPane) chatPane.style.display = 'flex';
+                if (chatHost) chatHost.style.display = 'flex';
                 if (wsPane) wsPane.style.display = 'flex';
                 if (rzR) rzR.style.display = 'block';
             }
@@ -4337,7 +4403,7 @@
             }
             document.addEventListener('click', function(e) {
                 if (e.target && e.target.closest && e.target.closest('#sidebar-asset-refresh-btn')) refreshAndReclassifyAssets(e);
-                if (e.target && e.target.closest && e.target.closest('#btn-open-local-project')) {
+                if (e.target && e.target.closest && e.target.closest('#btn-mount-local-project')) {
                     e.preventDefault();
                     e.stopPropagation();
                     openLocalProjectWorkspace().catch(function(err) {
@@ -5279,6 +5345,19 @@
                 // 任务1：有 Token 时不再生成 guest_uuid；先恢复侧栏登录态再拉取数据
                 if (!window.GUEST_UUID) initAuthState();
                 if (typeof window.initDesktopAutoUpdateUi === 'function') window.initDesktopAutoUpdateUi();
+                (function restoreWorkspaceFileExplorer() {
+                    try {
+                        var sel = typeof getCachedWorkspaceSelection === 'function' ? getCachedWorkspaceSelection() : null;
+                        if (sel && sel.workspace_path) {
+                            var rex = document.getElementById('right-file-explorer');
+                            if (rex) {
+                                rex.style.display = 'flex';
+                                rex.setAttribute('aria-hidden', 'false');
+                            }
+                            if (typeof window.fetchAndRenderWorkspaceTree === 'function') window.fetchAndRenderWorkspaceTree();
+                        }
+                    } catch (_r) {}
+                })();
                 if (typeof updateSidebarUser === 'function') updateSidebarUser();
                 if (typeof window.syncImmersiveDemoEntryVisibility === 'function') window.syncImmersiveDemoEntryVisibility();
                 var btnImmersive = document.getElementById('btnImmersiveSpatiotemporalDemo');

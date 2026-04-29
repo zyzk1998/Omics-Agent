@@ -46,7 +46,11 @@ from gibh_agent.core.file_handlers.structure_normalizer import normalize_session
 from gibh_agent.core.file_handlers.universal_normalizer import normalize_session_directory as universal_unpack
 from gibh_agent.core.file_handlers.modality_sniffer import detect_dominant_modality, paths_for_response
 from gibh_agent.core.utils import sanitize_for_json
-from gibh_agent.core.workspace_context import set_workspace_context, get_workspace_context
+from gibh_agent.core.workspace_context import (
+    build_workspace_file_tree,
+    get_workspace_context,
+    set_workspace_context,
+)
 
 # 配置日志
 logging.basicConfig(
@@ -1132,6 +1136,26 @@ async def init_workspace(payload: WorkspaceInitRequest):
     app.state.workspace_context = workspace_info
     logger.info("✅ [Workspace] initialized: %s", workspace_info["workspace_path"])
     return {"status": "success", "workspace": workspace_info}
+
+
+@app.get("/api/workspace/tree")
+async def workspace_tree(request: Request):
+    """
+    返回当前挂载工作区的嵌套文件树 JSON（供右侧资源管理器使用）。
+    """
+    ctx = getattr(request.app.state, "workspace_context", None) or {}
+    if not isinstance(ctx, dict) or not str(ctx.get("workspace_path") or "").strip():
+        ctx = get_workspace_context()
+    root_raw = str((ctx or {}).get("workspace_path") or "").strip()
+    if not root_raw:
+        raise HTTPException(status_code=400, detail="未挂载本地工作区")
+
+    root = Path(root_raw).expanduser().resolve()
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(status_code=400, detail="工作区路径不存在或不是目录")
+
+    tree = build_workspace_file_tree(root)
+    return {"status": "success", "workspace_path": str(root), "tree": tree}
 
 
 @app.get("/", response_class=HTMLResponse)
