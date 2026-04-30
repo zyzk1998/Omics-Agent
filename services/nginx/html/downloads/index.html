@@ -52,15 +52,54 @@
 
             <div class="changelog-history">
                 <div style="margin-bottom: 1rem;">
-                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.12.6（当前推荐）</div>
+                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.13.1（当前推荐）</div>
+                    <ul class="changelog">
+                        <li><strong>【V0.13.1 · 交互与布局精修】</strong></li>
+                        <li>右侧侧边栏新增可折叠切换逻辑：再次点击当前入口可直接收起，贴近 IDE 操作习惯。</li>
+                        <li>侧边栏支持拖拽调宽（最小 250px，最大 50% 视口），提升大屏文件浏览效率。</li>
+                        <li>文件拖拽/右键“添加到对话框”升级为实体附件卡片，并在发送时以结构化路径字段携带。</li>
+                        <li>欢迎页英雄栏与功能卡片间距重构，视觉层级更稳定。</li>
+                    </ul>
+                </div>
+
+                <details>
+                    <summary>V0.12.9</summary>
+                    <ul class="changelog">
+                        <li><strong>【V0.12.9 · Bug 修复】</strong></li>
+                        <li>修复 Windows 安装包误将 Linux 版 Sidecar 一并打入 <code>extraResources</code>，导致安装包体积异常膨胀（约多出七十余兆字节）的问题；现按平台仅打入对应二进制（Windows：<code>local_sidecar.exe</code>；Linux：同名无后缀可执行文件）。</li>
+                        <li>下载页与自动更新元数据同步为本版本瘦身后的 Windows / Linux 安装包。</li>
+                    </ul>
+                </details>
+
+                <details>
+                    <summary>V0.12.8</summary>
+                    <ul class="changelog">
+                        <li><strong>【V0.12.8】</strong></li>
+                        <li>内置 PyInstaller Sidecar，免用户机 Python；<code>npm run dist:*</code> 链式构建。</li>
+                        <li>补充按平台拆分 Sidecar 资源说明（随后发现 Windows 包仍误带 Linux 二进制，已于 V0.12.9 修复）。</li>
+                    </ul>
+                </details>
+
+                <details>
+                    <summary>V0.12.7</summary>
+                    <ul class="changelog">
+                        <li><strong>【V0.12.7】</strong></li>
+                        <li>生产包通过 <code>extraResources</code> 携带 Sidecar；<code>process.resourcesPath</code> 定位资源。</li>
+                        <li>开发态仍可用系统 Python 调试；生产态逐步切换为内置二进制（见 V0.12.8）。</li>
+                        <li>自动更新与挂载工作区相关体验优化见该版本发版说明。</li>
+                    </ul>
+                </details>
+
+                <details>
+                    <summary>V0.12.6</summary>
                     <ul class="changelog">
                         <li><strong>【V0.12.6】</strong></li>
                         <li>新增 Local Sidecar 本地中间件（127.0.0.1:8019），将本地工作区挂载与文件树能力下沉到宿主机执行。</li>
-                        <li>新增本地中继工具接口：`/api/tools/read_file` 与 `/api/tools/write_file`，支持前端桥接本地文件读写。</li>
-                        <li>新增 Dual-Track 双轨机制：Web 轨道保持云端 `/app/uploads`、`/app/results` 传统链路；本地轨道走前端 relay + Sidecar。</li>
+                        <li>新增本地中继工具接口：<code>/api/tools/read_file</code> 与 <code>/api/tools/write_file</code>，支持前端桥接本地文件读写。</li>
+                        <li>新增 Dual-Track 双轨机制：Web 轨道保持云端 <code>/app/uploads</code>、<code>/app/results</code> 传统链路；本地轨道走前端 relay + Sidecar。</li>
                         <li>优化 Electron 生命周期：应用启动自动拉起 Sidecar，退出时自动回收 Python 子进程。</li>
                     </ul>
-                </div>
+                </details>
 
                 <details>
                     <summary>V0.12.3</summary>
@@ -122,11 +161,11 @@
             var verLine = document.getElementById('ver-line');
 
             var staticFallback = {
-                version: '0.12.6',
-                displayVersion: 'V0.12.6',
+                version: '0.13.1',
+                displayVersion: 'V0.13.1',
                 productName: 'Omics Agent',
-                winSetupFile: 'Omics Agent Setup 0.12.6.exe',
-                linuxAppImageFile: 'Omics Agent-0.12.6.AppImage'
+                winSetupFile: 'Omics Agent Setup 0.13.1.exe',
+                linuxAppImageFile: 'Omics Agent-0.13.1.AppImage'
             };
 
             function setVersion(meta) {

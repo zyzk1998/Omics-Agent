@@ -206,6 +206,11 @@ gibh-desktop-app/.docker-home/
 
 # Electron 瘦客户端构建产物（electron-builder dist-out）
 gibh-desktop-app/dist-out/
+gibh-desktop-app/local_sidecar/dist/
+gibh-desktop-app/local_sidecar/build/
+gibh-desktop-app/local_sidecar/*.spec
+gibh-desktop-app/local_sidecar/.cache-win-embed-py/
+gibh-desktop-app/local_sidecar/.wine-sidecar-build/
 # 勿将安装包留在 app 根目录提交；应放到 services/nginx/html/downloads/
 gibh-desktop-app/*.exe
 gibh-desktop-app/*.AppImage

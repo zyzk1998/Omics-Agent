@@ -7,6 +7,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
 const { spawn } = require('child_process');
 
 (function loadProdEnvFiles() {
@@ -29,7 +30,153 @@ const { spawn } = require('child_process');
 })();
 
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+
+/** 禁止多开：第二实例直接退出，避免重复拉起 Sidecar 导致 8019 端口冲突（Windows: Errno 10048） */
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    const wins = BrowserWindow.getAllWindows();
+    if (wins.length && wins[0] && !wins[0].isDestroyed()) {
+      const w = wins[0];
+      if (w.isMinimized()) w.restore();
+      w.show();
+      w.focus();
+    }
+  });
+}
+
 let localSidecarProcess = null;
+
+/** Sidecar 进程 stdout/stderr 环形缓冲上限（字符） */
+const SIDECAR_LOG_CAP = 48000;
+
+/** 同一启动周期内 Sidecar 致命错误只弹一次原生对话框，避免刷屏 */
+let sidecarFatalDialogShown = false;
+
+function appendSidecarLog(buf, chunk, cap) {
+  const s = String(chunk || '');
+  const next = buf + s;
+  if (next.length <= cap) return next;
+  return next.slice(-cap);
+}
+
+function truncateForErrorBox(text, maxLen) {
+  const t = String(text || '').replace(/\r\n/g, '\n').trim();
+  if (t.length <= maxLen) return t;
+  return `${t.slice(0, maxLen)}\n\n…（输出过长已截断）`;
+}
+
+/** Windows Errno 10048 / EADDRINUSE 等：Sidecar 重复绑定 127.0.0.1:8019 */
+function isPortBindConflict(stderrBuf, stdoutBuf) {
+  const s = `${String(stderrBuf || '')}\n${String(stdoutBuf || '')}`;
+  return /10048|EADDRINUSE|address already in use|Only one usage of each socket|error while attempting to bind/i.test(
+    s
+  );
+}
+
+function showSidecarFatalDialog(title, detail) {
+  if (sidecarFatalDialogShown) return;
+  sidecarFatalDialogShown = true;
+  try {
+    dialog.showErrorBox(title, truncateForErrorBox(detail, 7800));
+  } catch (e) {
+    console.error('[Omics Agent] showErrorBox 失败:', e && e.message);
+  }
+}
+
+/**
+ * 跨平台 Python 启动候选：优先 OMICS_SIDECAR_PYTHON；Windows 常见 python / py -3 / python3；类 Unix 常见 python3 / python。
+ * @returns {string[][]} 每个元素为 [command, ...fixedArgs]，再与 scriptPath 拼接为 spawn 参数。
+ */
+function getPythonSpawnCandidates() {
+  const explicit = process.env.OMICS_SIDECAR_PYTHON && String(process.env.OMICS_SIDECAR_PYTHON).trim();
+  if (explicit) return [[explicit]];
+  if (process.platform === 'win32') {
+    return [['python'], ['py', '-3'], ['python3']];
+  }
+  return [['python3'], ['python']];
+}
+
+function formatSidecarSpawnLabel(spec) {
+  return spec.join(' ');
+}
+
+/**
+ * 生产包：PyInstaller 单文件路径（extraResources → resources/local_sidecar/）
+ */
+function resolvePackagedSidecarBinary(resourcesDir) {
+  const base = path.join(resourcesDir, 'local_sidecar');
+  if (process.platform === 'win32') {
+    return path.join(base, 'local_sidecar.exe');
+  }
+  return path.join(base, 'local_sidecar');
+}
+
+/**
+ * Sidecar 子进程日志与异常（开发态 Python 与生产态二进制共用）
+ * @param {import('child_process').ChildProcess} child
+ * @param {string} displayLabel 错误弹窗中展示的命令行说明
+ * @param {{ onENOENT?: () => void }} options Python 多候选时传入 onENOENT；打包二进制勿传
+ */
+function hookSidecarProcess(child, displayLabel, options) {
+  let stdoutBuf = '';
+  let stderrBuf = '';
+  let skipExitDialog = false;
+
+  function attachStream(stream, kind) {
+    if (!stream) return;
+    stream.on('data', (chunk) => {
+      if (kind === 'stdout') {
+        stdoutBuf = appendSidecarLog(stdoutBuf, chunk, SIDECAR_LOG_CAP);
+      } else {
+        stderrBuf = appendSidecarLog(stderrBuf, chunk, SIDECAR_LOG_CAP);
+      }
+      const line = String(chunk || '').trim();
+      if (line) {
+        if (kind === 'stdout') console.log('[Local Sidecar stdout]', line);
+        else console.error('[Local Sidecar stderr]', line);
+      }
+    });
+  }
+  attachStream(child.stdout, 'stdout');
+  attachStream(child.stderr, 'stderr');
+
+  child.on('error', (err) => {
+    if (err && err.code === 'ENOENT' && options && typeof options.onENOENT === 'function') {
+      skipExitDialog = true;
+      console.warn('[Omics Agent] 未找到解释器，尝试下一候选');
+      if (localSidecarProcess === child) localSidecarProcess = null;
+      options.onENOENT();
+      return;
+    }
+    const detail = `命令：${displayLabel}\n${err && err.message ? err.message : String(err)}`;
+    console.error('[Omics Agent] Local Sidecar spawn error:', detail);
+    showSidecarFatalDialog('本地 Sidecar 启动失败', detail);
+    if (localSidecarProcess === child) localSidecarProcess = null;
+  });
+
+  child.on('close', (code, signal) => {
+    console.log('[Omics Agent] Local Sidecar 已关闭:', { code, signal });
+    if (localSidecarProcess === child) localSidecarProcess = null;
+    if (child._omicsIntentionalKill || skipExitDialog) return;
+    const abnormal = code !== 0 && code !== null;
+    if (!abnormal) return;
+    const detail = `命令：${displayLabel}\n退出码：${code}${signal ? `，信号：${signal}` : ''}\n\n--- stderr ---\n${stderrBuf || '(无)'}\n\n--- stdout ---\n${stdoutBuf || '(无)'}`;
+    console.error('[Omics Agent] Local Sidecar 异常退出（完整日志见上）');
+    if (isPortBindConflict(stderrBuf, stdoutBuf)) {
+      showSidecarFatalDialog(
+        '本地 Sidecar 无法绑定端口',
+        `端口 8019 已被占用（常见于已有一个 Omics Agent / Sidecar 在运行，或其它程序占用该端口）。\n\n请只保留一个客户端，或在任务管理器中结束重复的 Omics Agent / local_sidecar 进程后再启动。\n\n--- 技术详情 ---\n${detail}`
+      );
+    } else {
+      showSidecarFatalDialog('本地 Sidecar 异常退出', detail);
+    }
+  });
+
+  localSidecarProcess = child;
+}
 
 /** 打包后 extraResources 将仓库 services/nginx/html 拷至 resources/bundled-web-ui（与 electron-builder 配置一致）；当前默认仍 loadURL 远程站点，快照供运维比对或后续改为本地加载方案 */
 function logBundledWebUiSnapshotIfPresent() {
@@ -226,51 +373,135 @@ function loadRemote(win) {
   });
 }
 
-function resolvePythonCommand() {
-  const explicit = process.env.OMICS_SIDECAR_PYTHON && String(process.env.OMICS_SIDECAR_PYTHON).trim();
-  if (explicit) return explicit;
-  if (process.platform === 'win32') return 'python';
-  return 'python3';
+function trySpawnSidecarCandidate(candidates, index, scriptPath, sidecarCwd, failedENOENTLabels) {
+  if (index >= candidates.length) {
+    const tried = failedENOENTLabels.length ? failedENOENTLabels.join('\n') : '(无)';
+    showSidecarFatalDialog(
+      '本地 Sidecar 无法启动',
+      `未找到可用的 Python 解释器。已尝试：\n${tried}\n\n请安装 Python 3，或将环境变量 OMICS_SIDECAR_PYTHON 设为解释器的完整路径（例如 C:\\Python311\\python.exe）。`
+    );
+    return;
+  }
+
+  const spec = candidates[index];
+  const cmd = spec[0];
+  const prefixArgs = spec.slice(1);
+  const spawnArgs = [...prefixArgs, scriptPath];
+
+  console.log('[Omics Agent] Local Sidecar（开发态 Python）尝试启动:', cmd, spawnArgs);
+
+  const child = spawn(cmd, spawnArgs, {
+    cwd: sidecarCwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+
+  const displayLabel = `${formatSidecarSpawnLabel(spec)} ${scriptPath}`;
+  hookSidecarProcess(child, displayLabel, {
+    onENOENT: () => {
+      const label = `${formatSidecarSpawnLabel(spec)} （系统未找到该可执行文件）`;
+      console.warn('[Omics Agent]', label);
+      failedENOENTLabels.push(label);
+      trySpawnSidecarCandidate(candidates, index + 1, scriptPath, sidecarCwd, failedENOENTLabels);
+    },
+  });
 }
 
 function startLocalSidecar() {
   if (localSidecarProcess && !localSidecarProcess.killed) return;
-  const scriptPath = path.join(__dirname, 'local_sidecar', 'local_server.py');
-  if (!fs.existsSync(scriptPath)) {
-    console.error('[Omics Agent] Local Sidecar 启动失败，脚本不存在:', scriptPath);
+  const resourcesDir = app.isPackaged ? process.resourcesPath : __dirname;
+
+  if (app.isPackaged) {
+    const binaryPath = resolvePackagedSidecarBinary(resourcesDir);
+    if (!fs.existsSync(binaryPath)) {
+      showSidecarFatalDialog(
+        '本地 Sidecar 无法启动',
+        `未找到打包的 Sidecar 可执行文件：\n${binaryPath}\n请在 **当前目标平台** 先执行 local_sidecar/build_sidecar（生成 dist/）再打 Electron 安装包。`
+      );
+      return;
+    }
+    const sidecarCwd = path.dirname(binaryPath);
+    console.log('[Omics Agent] Local Sidecar（生产 PyInstaller 二进制）:', binaryPath);
+    const child = spawn(binaryPath, [], {
+      cwd: sidecarCwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    hookSidecarProcess(child, binaryPath, {});
     return;
   }
-  const pythonCmd = resolvePythonCommand();
-  localSidecarProcess = spawn(pythonCmd, [scriptPath], {
-    cwd: path.join(__dirname, 'local_sidecar'),
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  });
-  console.log('[Omics Agent] Local Sidecar 启动命令:', pythonCmd, scriptPath);
 
-  localSidecarProcess.stdout.on('data', (buf) => {
-    console.log('[Local Sidecar]', String(buf || '').trim());
-  });
-  localSidecarProcess.stderr.on('data', (buf) => {
-    console.error('[Local Sidecar]', String(buf || '').trim());
-  });
-  localSidecarProcess.on('exit', (code, signal) => {
-    console.log('[Omics Agent] Local Sidecar 已退出:', { code, signal });
-    localSidecarProcess = null;
-  });
-  localSidecarProcess.on('error', (err) => {
-    console.error('[Omics Agent] Local Sidecar 进程异常:', err && err.message);
-  });
+  const scriptPath = path.join(__dirname, 'local_sidecar', 'local_server.py');
+  const sidecarCwd = path.join(__dirname, 'local_sidecar');
+  if (!fs.existsSync(scriptPath)) {
+    showSidecarFatalDialog(
+      '本地 Sidecar 无法启动',
+      `未找到开发态入口脚本：\n${scriptPath}\n请确认 gibh-desktop-app/local_sidecar 目录存在。`
+    );
+    return;
+  }
+  const candidates = getPythonSpawnCandidates();
+  trySpawnSidecarCandidate(candidates, 0, scriptPath, sidecarCwd, []);
 }
 
 function stopLocalSidecar() {
   if (!localSidecarProcess || localSidecarProcess.killed) return;
+  const p = localSidecarProcess;
+  p._omicsIntentionalKill = true;
   try {
-    localSidecarProcess.kill('SIGTERM');
+    p.kill('SIGTERM');
   } catch (e) {
     console.warn('[Omics Agent] Local Sidecar SIGTERM 失败:', e && e.message);
   }
   localSidecarProcess = null;
+}
+
+/**
+ * 若 8019 上已有本应用 Sidecar（如残留进程），则不再 spawn，避免端口冲突。
+ * 与 local_sidecar/local_server.py 的 GET /health 约定一致。
+ */
+function probeExistingSidecarHealth() {
+  return new Promise((resolve) => {
+    const req = http.get(
+      'http://127.0.0.1:8019/health',
+      { timeout: 1500 },
+      (res) => {
+        let data = '';
+        res.on('data', (c) => {
+          data += String(c);
+        });
+        res.on('end', () => {
+          if (res.statusCode !== 200) {
+            resolve(false);
+            return;
+          }
+          try {
+            const j = JSON.parse(data);
+            resolve(Boolean(j && j.status === 'ok' && j.service === 'omics-local-sidecar'));
+          } catch (_e) {
+            resolve(false);
+          }
+        });
+      }
+    );
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      try {
+        req.destroy();
+      } catch (_e) {}
+      resolve(false);
+    });
+  });
+}
+
+async function startLocalSidecarIfNeeded() {
+  if (localSidecarProcess && !localSidecarProcess.killed) return;
+  const ok = await probeExistingSidecarHealth();
+  if (ok) {
+    console.log('[Omics Agent] 127.0.0.1:8019 已有 Sidecar 健康响应，跳过重复启动');
+    return;
+  }
+  startLocalSidecar();
 }
 
 function createMainWindow() {
@@ -330,84 +561,86 @@ function createMainWindow() {
 
 }
 
-if (!globalThis.__OMICS_IPC_REGISTERED__) {
-  globalThis.__OMICS_IPC_REGISTERED__ = true;
-  ipcMain.on('omics-retry-load', (event) => {
-    const w = BrowserWindow.fromWebContents(event.sender);
-    if (w && !w.isDestroyed()) loadRemote(w);
-  });
-  ipcMain.on('app-print-report', async (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win || win.isDestroyed()) return;
-    const wc = win.webContents;
-    if (!wc || wc.isDestroyed()) return;
-    try {
-      const { canceled, filePath } = await dialog.showSaveDialog(win, {
-        title: '导出分析报告',
-        defaultPath: 'Omics_Agent_Report.pdf',
-        filters: [{ name: 'PDF 文档', extensions: ['pdf'] }],
-      });
-      if (canceled || !filePath) return;
-
-      const pdfData = await wc.printToPDF({
-        printBackground: true,
-        landscape: false,
-        pageSize: 'A4',
-      });
-      fs.writeFileSync(filePath, pdfData);
-      try {
-        shell.openPath(filePath);
-      } catch (openErr) {
-        console.warn('[app-print-report] openPath:', openErr && openErr.message);
-      }
-    } catch (error) {
-      console.error('PDF 导出失败:', error);
-    }
-  });
-  ipcMain.on('app-install-update', () => {
-    if (!autoUpdater) return;
-    try {
-      autoUpdater.quitAndInstall(false, true);
-    } catch (e) {
-      console.error('[app-install-update]', e);
-    }
-  });
-  ipcMain.handle('app-select-workspace-folder', async (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    const targetWin = win && !win.isDestroyed() ? win : BrowserWindow.getAllWindows()[0];
-    const result = await dialog.showOpenDialog(targetWin || undefined, {
-      title: '选择本地项目目录',
-      properties: ['openDirectory', 'createDirectory'],
+if (gotSingleInstanceLock) {
+  if (!globalThis.__OMICS_IPC_REGISTERED__) {
+    globalThis.__OMICS_IPC_REGISTERED__ = true;
+    ipcMain.on('omics-retry-load', (event) => {
+      const w = BrowserWindow.fromWebContents(event.sender);
+      if (w && !w.isDestroyed()) loadRemote(w);
     });
-    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
-      return { canceled: true };
+    ipcMain.on('app-print-report', async (event) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (!win || win.isDestroyed()) return;
+      const wc = win.webContents;
+      if (!wc || wc.isDestroyed()) return;
+      try {
+        const { canceled, filePath } = await dialog.showSaveDialog(win, {
+          title: '导出分析报告',
+          defaultPath: 'Omics_Agent_Report.pdf',
+          filters: [{ name: 'PDF 文档', extensions: ['pdf'] }],
+        });
+        if (canceled || !filePath) return;
+
+        const pdfData = await wc.printToPDF({
+          printBackground: true,
+          landscape: false,
+          pageSize: 'A4',
+        });
+        fs.writeFileSync(filePath, pdfData);
+        try {
+          shell.openPath(filePath);
+        } catch (openErr) {
+          console.warn('[app-print-report] openPath:', openErr && openErr.message);
+        }
+      } catch (error) {
+        console.error('PDF 导出失败:', error);
+      }
+    });
+    ipcMain.on('app-install-update', () => {
+      if (!autoUpdater) return;
+      try {
+        autoUpdater.quitAndInstall(false, true);
+      } catch (e) {
+        console.error('[app-install-update]', e);
+      }
+    });
+    ipcMain.handle('app-select-workspace-folder', async (event) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const targetWin = win && !win.isDestroyed() ? win : BrowserWindow.getAllWindows()[0];
+      const result = await dialog.showOpenDialog(targetWin || undefined, {
+        title: '选择本地项目目录',
+        properties: ['openDirectory', 'createDirectory'],
+      });
+      if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+        return { canceled: true };
+      }
+      const selectedPath = result.filePaths[0];
+      return {
+        canceled: false,
+        workspace_path: selectedPath,
+        workspace_name: path.basename(selectedPath),
+      };
+    });
+  }
+
+  app.whenReady().then(async () => {
+    await startLocalSidecarIfNeeded();
+    hookAutoUpdaterEventsOnce();
+    createMainWindow();
+    scheduleAutoUpdateCheck();
+  });
+
+  app.on('window-all-closed', () => {
+    app.quit();
+  });
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createMainWindow();
     }
-    const selectedPath = result.filePaths[0];
-    return {
-      canceled: false,
-      workspace_path: selectedPath,
-      workspace_name: path.basename(selectedPath),
-    };
+  });
+
+  app.on('will-quit', () => {
+    stopLocalSidecar();
   });
 }
-
-app.whenReady().then(() => {
-  startLocalSidecar();
-  hookAutoUpdaterEventsOnce();
-  createMainWindow();
-  scheduleAutoUpdateCheck();
-});
-
-app.on('window-all-closed', () => {
-  app.quit();
-});
-
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createMainWindow();
-  }
-});
-
-app.on('will-quit', () => {
-  stopLocalSidecar();
-});

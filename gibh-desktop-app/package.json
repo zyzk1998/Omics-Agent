@@ -1,15 +1,20 @@
 {
   "name": "gibh-desktop-app",
-  "version": "0.12.6",
-  "description": "GIBH-AGENT-V2 Electron thin-client (V0.12.6)",
+  "version": "0.13.1",
+  "description": "GIBH-AGENT-V2 Electron thin-client (V0.13.1)",
   "author": "GIBH Omics Agent",
   "main": "main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
+    "build-sidecar": "node scripts/build-sidecar.js",
     "pack": "node scripts/prepare-pack-env.js && electron-builder --dir",
     "sync:download-page": "node scripts/write-download-release-meta.js",
     "prepare-pack-env": "node scripts/prepare-pack-env.js",
+    "predist": "npm run build-sidecar",
+    "predist:linux": "npm run build-sidecar",
+    "predist:win": "node scripts/predist-win-sidecar.js",
+    "predist:web": "npm run build-sidecar && node scripts/predist-win-sidecar.js",
     "dist": "npm run prepare-pack-env && electron-builder && npm run sync:download-page",
     "dist:linux": "npm run prepare-pack-env && electron-builder --linux && npm run sync:download-page",
     "dist:win": "npm run prepare-pack-env && electron-builder --win --x64 && npm run sync:download-page",
@@ -91,6 +96,13 @@
       "artifactName": "${productName} Setup ${version}.${ext}",
       "target": [
         "nsis"
+      ],
+      "extraResources": [
+        {
+          "from": "local_sidecar/dist",
+          "to": "local_sidecar",
+          "filter": ["local_sidecar.exe"]
+        }
       ]
     },
     "nsis": {
@@ -111,7 +123,14 @@
       "target": [
         "AppImage"
       ],
-      "category": "Science"
+      "category": "Science",
+      "extraResources": [
+        {
+          "from": "local_sidecar/dist",
+          "to": "local_sidecar",
+          "filter": ["local_sidecar"]
+        }
+      ]
     },
     "publish": [
       {

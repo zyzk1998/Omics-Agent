@@ -95,6 +95,10 @@
                     </details>
                 </div>
                 <div class="sidebar-bottom">
+                    <button type="button" class="sidebar-workspace-indicator is-empty" id="sidebar-workspace-indicator" title="点击展开右侧本地项目栏">
+                        <span class="sidebar-workspace-indicator__icon" aria-hidden="true">📂</span>
+                        <span class="sidebar-workspace-indicator__text" id="sidebar-workspace-indicator-text">未挂载</span>
+                    </button>
                     <div class="sidebar-user" id="sidebar-user-area" title="点击登录/注册" style="cursor:pointer;">
                         <i class="bi bi-person-circle sidebar-user-icon" style="font-size:1.5rem;color:#6b7280;"></i>
                         <div class="d-flex flex-column sidebar-user-text">
@@ -274,6 +278,7 @@
                 <img src="/static/favicon.png?v=13" alt="Omics Agent" class="hero-logo" width="56" height="56" decoding="async">
                 <h1 class="hero-title">Omics Agent</h1>
             </div>
+            <div class="hero-slogan">探索生命科学的多模态智能助手</div>
             <div class="hero-feature-cards" role="navigation" aria-label="快捷入口">
                 <button type="button" class="hero-feature-card" id="hero-card-omics" data-hero-action="skills-omics">
                     <span class="hero-feature-card-icon" aria-hidden="true"><i class="bi bi-grid-1x2-fill"></i></span>
@@ -297,7 +302,7 @@
         <div class="chat-scroll-area" id="chatBox">
             <div class="chat-content" id="chatContent"></div>
         </div>
-        <div id="input-wrapper-bottom">
+        <div id="input-wrapper-bottom" class="flush-bottom-host">
             <div class="input-wrapper input-bottom" id="inputWrapper">
                 <div id="stopBtnContainer" style="position: absolute; top: -40px; width: 100%; display: flex; justify-content: center; pointer-events: none;">
                     <button id="stopBtn" class="stop-btn" onclick="stopGeneration()">
@@ -305,6 +310,7 @@
                     </button>
                 </div>
                 <div class="chat-input-panel">
+                    <div id="attachment-preview-area" class="attachment-preview-area"></div>
                     <div id="filePreviewArea" class="file-chips-area"></div>
                     <div class="input-area">
                         <textarea id="userInput" class="main-input chat-input" placeholder="打算深入探究的内容、希望了解的问题，都可以发给我~" rows="1" oninput="autoResize(this); checkInput();" onkeydown="handleEnter(event)"></textarea>
@@ -315,7 +321,6 @@
                             <div class="workspace-dropdown-wrapper" style="position: relative;">
                                 <button type="button" id="btn-mount-local-project" class="ghost-btn btn-mount-local-project toolbar-btn workspace-mount-trigger" title="选择或切换本地工作目录" aria-expanded="false" aria-haspopup="true" aria-controls="workspace-dropdown-menu">
                                     <svg class="btn-mount-local-project__icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h4l2 3h12a2 2 0 012 2v11z"/></svg>
-                                    <span class="workspace-mount-trigger__text">选择工作目录</span>
                                 </button>
                                 <div id="workspace-dropdown-menu" class="workspace-dropdown workspace-dropdown--above hidden" role="menu" aria-hidden="true">
                                     <button type="button" class="workspace-menu-item workspace-menu-item--action" id="menu-select-new-dir" role="menuitem">
@@ -339,13 +344,22 @@
                                 <span class="context-badge__text">HPC-Open</span>
                                 <button type="button" class="badge-close-btn" aria-label="关闭 HPC 标识">×</button>
                             </div>
-                            <div class="model-select-wrap" title="模型切换">
+                            <div class="model-select-wrap model-select-wrap--icon-only" title="模型切换">
+                                <span class="model-select-icon" aria-hidden="true">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                        <line x1="5" y1="4" x2="5" y2="20"></line>
+                                        <line x1="12" y1="4" x2="12" y2="20"></line>
+                                        <line x1="19" y1="4" x2="19" y2="20"></line>
+                                        <circle cx="5" cy="8" r="2"></circle>
+                                        <circle cx="12" cy="14" r="2"></circle>
+                                        <circle cx="19" cy="10" r="2"></circle>
+                                    </svg>
+                                </span>
                                 <select id="modelSelect" class="ghost-btn model-select-native" title="模型切换" style="appearance: none; outline: none; cursor: pointer;">
                                     <option value="deepseek-v4-pro" selected> DeepSeek V4 Pro</option>
                                     <option value="glm-5.1">GLM-5.1</option>
                                     <option value="kimi-k2.6"> Kimi K2.6</option>
                                 </select>
-                                <span class="model-chevron">▼</span>
                             </div>
                         </div>
                         <div class="toolbar-right">
@@ -373,7 +387,31 @@
             </main>
 
             <aside id="right-file-explorer" class="right-sidebar" style="display: none;" aria-hidden="true">
-                <div class="right-sidebar-header">📁 本地项目</div>
+                <div class="sidebar-resizer" id="right-sidebar-resizer" aria-hidden="true"></div>
+                <div class="right-sidebar-header">
+                    <div class="right-sidebar-tabs" id="right-sidebar-tabs">
+                        <button type="button" class="right-sidebar-tab is-active" data-mode="local" id="right-sidebar-tab-local">本地项目</button>
+                        <button type="button" class="right-sidebar-tab" data-mode="hpc" id="right-sidebar-tab-hpc">超算资产</button>
+                        <button type="button" class="right-sidebar-tab" data-mode="files" id="right-sidebar-tab-files">文件管理</button>
+                    </div>
+                    <div class="right-sidebar-header__title-row">
+                        <div class="right-sidebar-header__title" id="right-sidebar-title">📁 本地项目</div>
+                        <div class="right-sidebar-header__actions">
+                            <button type="button" class="icon-btn right-sidebar-action-btn" id="btn-right-sidebar-search" title="搜索文件" aria-label="搜索文件"><i class="bi bi-search"></i></button>
+                            <button type="button" class="icon-btn right-sidebar-action-btn" id="btn-right-sidebar-toggle" title="收起本地项目栏" aria-label="收起本地项目栏">
+                                <svg id="right-sidebar-toggle-icon" class="sidebar-pane-icon right-sidebar-toggle-icon is-collapsing" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                                    <rect x="3" y="4" width="18" height="16" rx="3"></rect>
+                                    <path d="M9 4v16"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="right-sidebar-header__path" id="right-sidebar-workspace-path" title="未挂载工作区">未挂载工作区</div>
+                    <div class="right-sidebar-search" id="right-sidebar-search-box" style="display:none;">
+                        <input type="text" id="right-sidebar-search-input" placeholder="搜索文件名..." autocomplete="off">
+                        <button type="button" id="right-sidebar-search-clear" aria-label="清空搜索">×</button>
+                    </div>
+                </div>
                 <div id="file-tree-container" class="file-tree-container"></div>
             </aside>
             </div>
@@ -570,6 +608,23 @@
                 <div class="skill-upload-modal__footer">
                     <button type="button" class="skill-upload-modal__submit" id="skill-upload-submit" disabled>安装</button>
                 </div>
+            </div>
+        </div>
+
+        <div id="custom-context-menu" class="custom-context-menu" style="display:none;" aria-hidden="true">
+            <button type="button" class="custom-context-menu__item" data-action="add-to-chat"><i class="bi bi-chat-left-text"></i><span>添加到对话框</span></button>
+            <button type="button" class="custom-context-menu__item" data-action="copy-path"><i class="bi bi-clipboard"></i><span>复制文件路径</span></button>
+            <button type="button" class="custom-context-menu__item" data-action="preview"><i class="bi bi-eye"></i><span>预览</span></button>
+        </div>
+        <div id="file-preview-modal" class="file-preview-modal" style="display:none;" aria-hidden="true">
+            <div class="file-preview-modal__backdrop" id="file-preview-backdrop"></div>
+            <div class="file-preview-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="file-preview-title">
+                <div class="file-preview-modal__header">
+                    <h3 id="file-preview-title">文件预览</h3>
+                    <button type="button" class="file-preview-modal__close" id="file-preview-close" aria-label="关闭">×</button>
+                </div>
+                <div class="file-preview-modal__path" id="file-preview-path"></div>
+                <div class="file-preview-modal__body" id="file-preview-body">请选择文件</div>
             </div>
         </div>
 
@@ -1820,6 +1875,7 @@
                 try {
                     if (selection) localStorage.setItem('workspaceSelection', JSON.stringify(selection));
                 } catch (_e) {}
+                if (typeof syncWorkspaceIndicators === 'function') syncWorkspaceIndicators(selection || null);
             }
             function getCachedWorkspaceSelection() {
                 if (window.__workspaceSelection) return window.__workspaceSelection;
@@ -1833,20 +1889,388 @@
                 } catch (_e) {}
                 return null;
             }
-            async function postWorkspaceInit(workspacePath) {
-                var res = await fetch(localSidecarUrl('/api/workspace/init'), {
-                    method: 'POST',
-                    headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({ workspace_path: workspacePath }),
-                });
-                var data = await res.json();
-                if (!res.ok || !data || data.status !== 'success') {
-                    throw new Error((data && (data.detail || data.message)) || ('HTTP ' + res.status));
+            function getWorkspaceDisplayText(selection) {
+                if (!selection) return '未挂载';
+                var path = String(selection.workspace_path || '').trim();
+                if (path) return path;
+                return String(selection.workspace_name || '未挂载');
+            }
+            function setRightSidebarVisible(visible) {
+                var rex = document.getElementById('right-file-explorer');
+                var toggleIcon = document.getElementById('right-sidebar-toggle-icon');
+                var toggleBtn = document.getElementById('btn-right-sidebar-toggle');
+                if (!rex) return;
+                if (visible) {
+                    rex.style.display = 'flex';
+                    rex.classList.remove('right-sidebar-collapsed');
+                    rex.setAttribute('aria-hidden', 'false');
+                    if (toggleIcon) {
+                        toggleIcon.classList.add('is-collapsing');
+                        toggleIcon.classList.remove('is-expanding');
+                    }
+                    if (toggleBtn) toggleBtn.title = '收起本地项目栏';
+                } else {
+                    rex.classList.add('right-sidebar-collapsed');
+                    rex.setAttribute('aria-hidden', 'true');
+                    if (toggleIcon) {
+                        toggleIcon.classList.remove('is-collapsing');
+                        toggleIcon.classList.add('is-expanding');
+                    }
+                    if (toggleBtn) toggleBtn.title = '展开本地项目栏';
+                    window.setTimeout(function() {
+                        if (rex.classList.contains('right-sidebar-collapsed')) {
+                            rex.style.display = 'none';
+                        }
+                    }, 240);
                 }
-                return data.workspace || null;
+            }
+            function toggleRightSidebar() {
+                var rex = document.getElementById('right-file-explorer');
+                if (!rex) return;
+                var hiddenByDisplay = rex.style.display === 'none';
+                var collapsed = rex.classList.contains('right-sidebar-collapsed');
+                setRightSidebarVisible(hiddenByDisplay || collapsed);
+            }
+            function toggleRightSidebarPanel(mode) {
+                var m = (mode === 'hpc' || mode === 'files') ? mode : 'local';
+                var rex = document.getElementById('right-file-explorer');
+                if (!rex) return;
+                var hidden = rex.style.display === 'none' || rex.classList.contains('right-sidebar-collapsed');
+                if (hidden) {
+                    setRightSidebarVisible(true);
+                    setRightSidebarMode(m);
+                } else if (window.__rightSidebarMode === m) {
+                    setRightSidebarVisible(false);
+                    return;
+                } else {
+                    setRightSidebarMode(m);
+                }
+                if (m === 'hpc') {
+                    if (typeof fetchAndRenderHpcTreeView === 'function') fetchAndRenderHpcTreeView();
+                } else if (m === 'files') {
+                    if (typeof fetchAndRenderFilesPanel === 'function') fetchAndRenderFilesPanel();
+                } else if (typeof fetchAndRenderWorkspaceTree === 'function') {
+                    fetchAndRenderWorkspaceTree();
+                }
+            }
+            function syncWorkspaceIndicators(selection) {
+                var sel = selection || getCachedWorkspaceSelection();
+                var fullText = getWorkspaceDisplayText(sel);
+                var shortText = fullText.length > 38 ? ('…' + fullText.slice(-37)) : fullText;
+                var leftText = document.getElementById('sidebar-workspace-indicator-text');
+                var leftBtn = document.getElementById('sidebar-workspace-indicator');
+                if (leftText) leftText.textContent = shortText;
+                if (leftBtn) {
+                    leftBtn.classList.toggle('is-empty', !sel || !sel.workspace_path);
+                    leftBtn.title = fullText;
+                }
+                var rightPath = document.getElementById('right-sidebar-workspace-path');
+                if (rightPath) {
+                    rightPath.textContent = fullText;
+                    rightPath.title = fullText;
+                }
+            }
+            async function postWorkspaceInit(workspacePath) {
+                try {
+                    var res = await fetch(localSidecarUrl('/api/workspace/init'), {
+                        method: 'POST',
+                        headers: Object.assign({}, getAuthHeaders(), { 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ workspace_path: workspacePath }),
+                    });
+                    var data = await res.json();
+                    if (!res.ok || !data || data.status !== 'success') {
+                        throw new Error((data && (data.detail || data.message)) || ('HTTP ' + res.status));
+                    }
+                    return data.workspace || null;
+                } catch (e) {
+                    var low = String((e && e.message) || e || '').toLowerCase();
+                    var looksUnreachable =
+                        /failed to fetch|networkerror|network request failed|load failed|connection refused|ecconnrefused|err_connection/i.test(low) ||
+                        (e && e.name === 'TypeError' && /failed to fetch|networkerror|load failed|network request failed/i.test(low));
+                    if (looksUnreachable) {
+                        try {
+                            alert('无法连接本地环境，请确认 Python 依赖已安装且后台服务正在运行。');
+                        } catch (_a) {}
+                        try { e._omcsSidecarAlerted = true; } catch (_b) {}
+                    }
+                    throw e;
+                }
             }
             function fileTreeEscapeHtml(s) {
                 return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            }
+            window.__workspaceTreeData = window.__workspaceTreeData || [];
+            window.__workspaceTreeKeyword = window.__workspaceTreeKeyword || '';
+            function filterWorkspaceTreeNodes(nodes, keyword) {
+                var q = String(keyword || '').trim().toLowerCase();
+                if (!q) return nodes || [];
+                var out = [];
+                (nodes || []).forEach(function(node) {
+                    if (!node) return;
+                    var nm = String(node.name || '').toLowerCase();
+                    if (node.type === 'directory') {
+                        var children = filterWorkspaceTreeNodes(node.children || [], q);
+                        if (nm.indexOf(q) >= 0 || children.length > 0) {
+                            var cloned = Object.assign({}, node);
+                            cloned.children = children;
+                            out.push(cloned);
+                        }
+                    } else if (node.type === 'file') {
+                        if (nm.indexOf(q) >= 0) out.push(node);
+                    }
+                });
+                return out;
+            }
+            function renderWorkspaceTreeByKeyword(keyword) {
+                var container = document.getElementById('file-tree-container');
+                if (!container) return;
+                if (window.__rightSidebarMode === 'hpc') return;
+                var q = String(keyword || '').trim();
+                window.__workspaceTreeKeyword = q;
+                container.innerHTML = '';
+                var source = window.__workspaceTreeData || [];
+                var tree = q ? filterWorkspaceTreeNodes(source, q) : source;
+                if (!tree.length) {
+                    container.innerHTML = '<div class="file-tree-empty">未找到匹配文件</div>';
+                    return;
+                }
+                renderWorkspaceTreeNodes(tree, container);
+            }
+            function hasDataTransferType(dt, type) {
+                if (!dt || !dt.types || !type) return false;
+                try {
+                    if (typeof dt.types.contains === 'function') return dt.types.contains(type);
+                } catch (_e) {}
+                try {
+                    return Array.prototype.indexOf.call(dt.types, type) >= 0;
+                } catch (_e2) {
+                    return false;
+                }
+            }
+            function insertTextAtCursor(inputEl, text) {
+                if (!inputEl) return;
+                var marker = String(text || '');
+                var start = Number(inputEl.selectionStart || 0);
+                var end = Number(inputEl.selectionEnd || 0);
+                var before = inputEl.value.slice(0, start);
+                var after = inputEl.value.slice(end);
+                inputEl.value = before + marker + after;
+                var nextPos = start + marker.length;
+                try { inputEl.setSelectionRange(nextPos, nextPos); } catch (_e) {}
+                if (typeof autoResize === 'function') autoResize(inputEl);
+                if (typeof checkInput === 'function') checkInput();
+                inputEl.focus();
+            }
+            window.currentAttachments = window.currentAttachments || [];
+            function renderAttachmentPreviewArea() {
+                var host = document.getElementById('attachment-preview-area');
+                if (!host) return;
+                host.innerHTML = '';
+                if (!Array.isArray(window.currentAttachments) || window.currentAttachments.length === 0) {
+                    host.style.display = 'none';
+                    return;
+                }
+                host.style.display = 'flex';
+                window.currentAttachments.forEach(function(att, idx) {
+                    var chip = document.createElement('div');
+                    chip.className = 'attachment-chip';
+                    chip.innerHTML = '<span class="attachment-chip__icon">' + (att.source === 'hpc' ? '🖥️' : '📎') + '</span><span class="attachment-chip__name" title="' + fileTreeEscapeHtml(att.path || '') + '">' + fileTreeEscapeHtml(att.name || att.path || '文件') + '</span><button type="button" class="attachment-chip__remove" data-index="' + idx + '" aria-label="移除">×</button>';
+                    host.appendChild(chip);
+                });
+            }
+            function removeAttachmentByIndex(index) {
+                var idx = Number(index);
+                if (!Number.isFinite(idx) || idx < 0 || idx >= window.currentAttachments.length) return;
+                window.currentAttachments.splice(idx, 1);
+                renderAttachmentPreviewArea();
+                checkInput();
+            }
+            function addPathAsAttachment(absPath, source) {
+                var p = String(absPath || '').trim();
+                if (!p) return;
+                var normalized = p.replace(/\/+$/, '');
+                var exists = (window.currentAttachments || []).some(function(a) {
+                    return String(a.path || '').replace(/\/+$/, '') === normalized;
+                });
+                if (exists) {
+                    if (typeof showToast === 'function') showToast('该文件已添加为附件', 'info');
+                    return;
+                }
+                var display = normalized.split(/[/\\]/).filter(Boolean).pop() || normalized;
+                window.currentAttachments.push({
+                    path: normalized,
+                    name: display,
+                    source: source === 'hpc' ? 'hpc' : 'local'
+                });
+                renderAttachmentPreviewArea();
+                checkInput();
+            }
+            window.__rightSidebarMode = window.__rightSidebarMode || 'local';
+            window.__hpcTreeData = window.__hpcTreeData || [];
+            window.__filesPanelData = window.__filesPanelData || [];
+            var __fileTreeContextState = { targetPath: '', source: 'local' };
+            function setRightSidebarMode(mode) {
+                var m = (mode === 'hpc' || mode === 'files') ? mode : 'local';
+                window.__rightSidebarMode = m;
+                var tabWrap = document.getElementById('right-sidebar-tabs');
+                if (tabWrap) {
+                    tabWrap.querySelectorAll('.right-sidebar-tab').forEach(function(btn) {
+                        var active = (btn.dataset.mode === m);
+                        btn.classList.toggle('is-active', active);
+                    });
+                }
+                var titleEl = document.getElementById('right-sidebar-title');
+                var pathEl = document.getElementById('right-sidebar-workspace-path');
+                if (titleEl) titleEl.textContent = m === 'hpc' ? '🖥️ 超算资产' : (m === 'files' ? '🗂️ 文件管理' : '📁 本地项目');
+                if (pathEl && m === 'hpc') {
+                    var hp = String(window.currentHpcPath || '.');
+                    pathEl.textContent = hp;
+                    pathEl.title = hp;
+                } else if (pathEl && m === 'files') {
+                    pathEl.textContent = '数据资产与文件列表';
+                    pathEl.title = '数据资产与文件列表';
+                } else if (typeof syncWorkspaceIndicators === 'function') {
+                    syncWorkspaceIndicators();
+                }
+                renderRightSidebarCurrentMode();
+            }
+            function renderHpcRowsIntoRightSidebar(items) {
+                var container = document.getElementById('file-tree-container');
+                if (!container) return;
+                container.innerHTML = '';
+                var list = Array.isArray(items) ? items : [];
+                if (!list.length) {
+                    container.innerHTML = '<div class="file-tree-empty">当前目录为空。</div>';
+                    return;
+                }
+                list.forEach(function(item) {
+                    if (!item) return;
+                    var row = document.createElement('div');
+                    var isDir = item.type === 'directory';
+                    row.className = isDir ? 'file-tree-file hpc-tree-dir-item' : 'file-tree-file hpc-tree-file-item';
+                    row.dataset.path = item.path || '';
+                    row.dataset.type = item.type || '';
+                    row.dataset.source = 'hpc';
+                    if (!isDir) row.setAttribute('draggable', 'true');
+                    row.innerHTML = '<span class="file-tree-icon" aria-hidden="true">' + (isDir ? '📁' : '📄') + '</span><span class="file-tree-name">' + fileTreeEscapeHtml(item.name || '') + '</span>';
+                    if (!isDir) {
+                        row.addEventListener('dragstart', function(e) {
+                            var absPath = (row.dataset && row.dataset.path) ? String(row.dataset.path).trim() : '';
+                            if (!absPath || !e.dataTransfer) return;
+                            e.dataTransfer.effectAllowed = 'copy';
+                            e.dataTransfer.setData('text/plain', absPath);
+                            e.dataTransfer.setData('application/x-omics-hpc-file-path', absPath);
+                        });
+                    }
+                    container.appendChild(row);
+                });
+            }
+            function renderRightSidebarCurrentMode() {
+                if (window.__rightSidebarMode === 'hpc') {
+                    renderHpcRowsIntoRightSidebar(window.__hpcTreeData || []);
+                } else if (window.__rightSidebarMode === 'files') {
+                    renderFilesRowsIntoRightSidebar(window.__filesPanelData || []);
+                } else {
+                    renderWorkspaceTreeByKeyword(window.__workspaceTreeKeyword || '');
+                }
+            }
+            function renderFilesRowsIntoRightSidebar(items) {
+                var container = document.getElementById('file-tree-container');
+                if (!container) return;
+                container.innerHTML = '';
+                var list = Array.isArray(items) ? items : [];
+                if (!list.length) {
+                    container.innerHTML = '<div class="file-tree-empty">暂无文件</div>';
+                    return;
+                }
+                list.forEach(function(item) {
+                    if (!item) return;
+                    var row = document.createElement('div');
+                    row.className = 'file-tree-file files-panel-file-item';
+                    row.dataset.path = item.path || '';
+                    row.dataset.type = 'file';
+                    row.dataset.source = 'files';
+                    row.setAttribute('draggable', 'true');
+                    row.innerHTML = '<span class="file-tree-icon" aria-hidden="true">📄</span><span class="file-tree-name">' + fileTreeEscapeHtml(item.name || item.path || '') + '</span>';
+                    row.addEventListener('dragstart', function(e) {
+                        var absPath = (row.dataset && row.dataset.path) ? String(row.dataset.path).trim() : '';
+                        if (!absPath || !e.dataTransfer) return;
+                        e.dataTransfer.effectAllowed = 'copy';
+                        e.dataTransfer.setData('text/plain', absPath);
+                        e.dataTransfer.setData('application/x-omics-local-file-path', absPath);
+                    });
+                    container.appendChild(row);
+                });
+            }
+            function hideCustomContextMenu() {
+                var menu = document.getElementById('custom-context-menu');
+                if (!menu) return;
+                menu.style.display = 'none';
+                menu.setAttribute('aria-hidden', 'true');
+            }
+            function openCustomContextMenu(clientX, clientY, absPath, source) {
+                var menu = document.getElementById('custom-context-menu');
+                if (!menu) return;
+                __fileTreeContextState.targetPath = String(absPath || '').trim();
+                __fileTreeContextState.source = source === 'hpc' ? 'hpc' : 'local';
+                menu.style.display = 'block';
+                menu.setAttribute('aria-hidden', 'false');
+                menu.style.left = '0px';
+                menu.style.top = '0px';
+                var menuWidth = menu.offsetWidth || 200;
+                var menuHeight = menu.offsetHeight || 140;
+                var left = Math.min(clientX, window.innerWidth - menuWidth - 8);
+                var top = Math.min(clientY, window.innerHeight - menuHeight - 8);
+                menu.style.left = Math.max(8, left) + 'px';
+                menu.style.top = Math.max(8, top) + 'px';
+            }
+            function isUnsupportedPreviewPath(filePath) {
+                var ext = String(filePath || '').split('.').pop().toLowerCase();
+                var blocked = ['exe', 'dll', 'so', 'dylib', 'zip', 'rar', '7z', 'gz', 'bz2', 'xz', 'tar', 'jar', 'class', 'pyc', 'pyd', 'pyo', 'bin', 'iso', 'img', 'sqlite', 'db', 'mp3', 'wav', 'mp4', 'avi', 'mov', 'mkv', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'];
+                return blocked.indexOf(ext) >= 0;
+            }
+            function closeFilePreviewModal() {
+                var modal = document.getElementById('file-preview-modal');
+                if (!modal) return;
+                modal.style.display = 'none';
+                modal.setAttribute('aria-hidden', 'true');
+            }
+            async function openFilePreviewModal(absPath) {
+                var p = String(absPath || '').trim();
+                if (!p) return;
+                var modal = document.getElementById('file-preview-modal');
+                var pathEl = document.getElementById('file-preview-path');
+                var bodyEl = document.getElementById('file-preview-body');
+                if (!modal || !pathEl || !bodyEl) return;
+                modal.style.display = 'flex';
+                modal.setAttribute('aria-hidden', 'false');
+                pathEl.textContent = p;
+                bodyEl.textContent = '正在读取文件内容...';
+                if (isUnsupportedPreviewPath(p)) {
+                    bodyEl.innerHTML = '<div class="file-preview-modal__unsupported">该文件格式暂不支持预览</div>';
+                    return;
+                }
+                try {
+                    var res = await fetch('http://127.0.0.1:8019/api/tools/read_file', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ file_path: p, max_lines: 1200 }),
+                    });
+                    var data = await res.json().catch(function() { return {}; });
+                    if (!res.ok || !data || data.status !== 'success') {
+                        bodyEl.innerHTML = '<div class="file-preview-modal__unsupported">该文件格式暂不支持预览</div>';
+                        return;
+                    }
+                    var content = String(data.content || '');
+                    if (!content) {
+                        bodyEl.innerHTML = '<div class="file-preview-modal__unsupported">文件为空或暂无可展示内容</div>';
+                        return;
+                    }
+                    var hint = data.truncated ? '<div class="file-preview-modal__hint">内容较长，仅展示前 ' + Number(data.returned_lines || 0) + ' 行</div>' : '';
+                    bodyEl.innerHTML = hint + '<pre><code>' + fileTreeEscapeHtml(content) + '</code></pre>';
+                } catch (_e) {
+                    bodyEl.innerHTML = '<div class="file-preview-modal__unsupported">该文件格式暂不支持预览</div>';
+                }
             }
             function renderWorkspaceTreeNodes(nodes, parentEl) {
                 (nodes || []).forEach(function(node) {
@@ -1867,7 +2291,16 @@
                         var row = document.createElement('div');
                         row.className = 'file-tree-file';
                         row.title = node.path || '';
+                        row.setAttribute('draggable', 'true');
+                        row.dataset.path = node.path || '';
                         row.innerHTML = '<span class="file-tree-icon" aria-hidden="true">📄</span><span class="file-tree-name">' + fileTreeEscapeHtml(node.name) + '</span>';
+                        row.addEventListener('dragstart', function(e) {
+                            var absPath = (row.dataset && row.dataset.path) ? String(row.dataset.path).trim() : '';
+                            if (!absPath || !e.dataTransfer) return;
+                            e.dataTransfer.effectAllowed = 'copy';
+                            e.dataTransfer.setData('text/plain', absPath);
+                            e.dataTransfer.setData('application/x-omics-local-file-path', absPath);
+                        });
                         parentEl.appendChild(row);
                     }
                 });
@@ -1953,12 +2386,10 @@
                     selection.result_path = workspace.result_path || '';
                     selection.source = selection.source || 'workspace-init';
                     cacheWorkspaceSelection(selection);
+                    syncWorkspaceIndicators(selection);
                     if (typeof fetchAssets === 'function') fetchAssets();
-                    var rex = document.getElementById('right-file-explorer');
-                    if (rex) {
-                        rex.style.display = 'flex';
-                        rex.setAttribute('aria-hidden', 'false');
-                    }
+                    setRightSidebarVisible(true);
+                    setRightSidebarMode('local');
                     if (typeof fetchAndRenderWorkspaceTree === 'function') fetchAndRenderWorkspaceTree();
                 }
             }
@@ -1990,11 +2421,12 @@
                     }
                     container.innerHTML = '';
                     var tree = data.tree || [];
+                    window.__workspaceTreeData = tree;
                     if (!tree.length) {
                         container.innerHTML = '<div class="file-tree-empty">（空目录）</div>';
                         return;
                     }
-                    renderWorkspaceTreeNodes(tree, container);
+                    renderWorkspaceTreeByKeyword(window.__workspaceTreeKeyword || '');
                 } catch (e) {
                     container.innerHTML = '<div class="file-tree-error">' + fileTreeEscapeHtml((e && e.message) ? e.message : String(e)) + '</div>';
                 }
@@ -2105,10 +2537,8 @@
                 }
 
                 function onChecking() {
-                    showBanner();
-                    setText('正在检查是否有新版本…');
-                    if (progWrap) progWrap.style.display = 'none';
-                    if (restartBtn) restartBtn.style.display = 'none';
+                    /** 静默检查：不弹顶栏；仅在 update-available / 下载进度 / 下载完成时再展示 */
+                    hideBanner();
                 }
                 function onAvailable(info) {
                     showBanner();
@@ -2135,7 +2565,6 @@
                 }
                 function onNotAvailable() {
                     hideBanner();
-                    if (typeof showToast === 'function') showToast('当前客户端已是最新版本', 'info');
                 }
                 function onError(payload) {
                     /** 主进程已映射 net::ERR_* 等为 userMessage，此处不再展示原始 Chromium 网络错误 */
@@ -2449,14 +2878,9 @@
                 if (typeof renderFileManagementTable === 'function') renderFileManagementTable();
             }
             async function switchToHpcFtpView() {
-                persistLastChatSessionBeforeLeaving();
-                hideAllMainPanes();
-                var hpcPane = document.getElementById('hpc-ftp-view');
-                var wsPane = document.getElementById('workspace-pane');
-                var rzR = document.getElementById('resizer-right');
-                if (hpcPane) hpcPane.style.display = 'flex';
-                if (wsPane) wsPane.style.display = 'none';
-                if (rzR) rzR.style.display = 'none';
+                if (typeof showChatView === 'function') showChatView();
+                if (typeof setRightSidebarVisible === 'function') setRightSidebarVisible(true);
+                if (typeof setRightSidebarMode === 'function') setRightSidebarMode('hpc');
                 if (!window.currentHpcPath) window.currentHpcPath = '.';
                 if (typeof fetchAndRenderHpcTreeView === 'function') {
                     await fetchAndRenderHpcTreeView();
@@ -3764,7 +4188,7 @@
                 var sh = textarea.scrollHeight;
                 var h = sh <= 44 ? 44 : (sh >= 200 ? 200 : sh);
                 textarea.style.height = h + 'px';
-                textarea.style.overflowY = h >= 200 ? 'auto' : 'auto';
+                textarea.style.overflowY = h >= 200 ? 'auto' : 'hidden';
             }
             function toggleSidebarCollapse() {
                 var pane = document.getElementById('sidebar-pane');
@@ -4259,7 +4683,7 @@
                         if (typeof showToast === 'function') showToast('请先在系统设置中开启 HPC 连接', 'warning');
                         return;
                     }
-                    if (typeof switchToHpcFtpView === 'function') switchToHpcFtpView();
+                    if (typeof toggleRightSidebarPanel === 'function') toggleRightSidebarPanel('hpc');
                 };
                 containerEl.appendChild(entry);
             }
@@ -4323,38 +4747,21 @@
                 });
             }
             function renderHpcListRows(items) {
-                var host = document.getElementById('hpc-ftp-list-wrap');
-                if (!host) return;
-                host.innerHTML = '';
-                if (!items || !items.length) {
-                    host.innerHTML = '<div class="hpc-ftp-empty">当前目录为空。</div>';
-                    return;
+                window.__hpcTreeData = Array.isArray(items) ? items : [];
+                if (typeof renderRightSidebarCurrentMode === 'function' && window.__rightSidebarMode === 'hpc') {
+                    renderRightSidebarCurrentMode();
                 }
-                items.forEach(function(item) {
-                    var row = document.createElement('div');
-                    row.className = 'hpc-file-row ' + (item.type === 'directory' ? 'hpc-file-row--dir' : 'hpc-file-row--file');
-                    row.dataset.path = item.path || '';
-                    row.dataset.type = item.type || '';
-                    row.innerHTML = '<span class="hpc-file-main"><span class="hpc-file-icon">' + (item.type === 'directory' ? '📁' : '📄') + '</span><span class="hpc-file-name">' + (item.name || '') + '</span></span>';
-                    if (item.type === 'file') {
-                        var addBtn = document.createElement('button');
-                        addBtn.type = 'button';
-                        addBtn.className = 'hpc-add-to-chat-btn';
-                        addBtn.textContent = '添加到对话';
-                        addBtn.dataset.path = item.path || '';
-                        row.appendChild(addBtn);
-                    }
-                    host.appendChild(row);
-                });
             }
             async function enterHpcDirectory(nextPath) {
                 window.currentHpcPath = String(nextPath || '.').trim() || '.';
                 await fetchAndRenderHpcTreeView();
             }
             async function fetchAndRenderHpcTreeView() {
-                var listHost = document.getElementById('hpc-ftp-list-wrap');
+                var listHost = document.getElementById('file-tree-container');
                 if (!listHost) return;
-                listHost.innerHTML = '<div class="hpc-ftp-loading">正在拉取超算目录...</div>';
+                if (window.__rightSidebarMode === 'hpc') {
+                    listHost.innerHTML = '<div class="file-tree-loading">正在拉取超算目录...</div>';
+                }
                 try {
                     var q = encodeURIComponent(window.currentHpcPath || '.');
                     var response = await fetch('/api/config/mcp/hpc-files/list?path=' + q, { method: 'GET', headers: getAuthHeaders() });
@@ -4374,40 +4781,44 @@
                     window.currentHpcPath = String(data.path || window.currentHpcPath || '.');
                     renderHpcBreadcrumbs(window.currentHpcPath);
                     renderHpcListRows(Array.isArray(data.items) ? data.items : []);
+                    var pathEl = document.getElementById('right-sidebar-workspace-path');
+                    if (pathEl && window.__rightSidebarMode === 'hpc') {
+                        pathEl.textContent = window.currentHpcPath;
+                        pathEl.title = window.currentHpcPath;
+                    }
                 } catch (error) {
-                    listHost.innerHTML = '<div style="color: red; padding: 20px;">拉取失败，请检查后端日志或 MCP 状态。<br>错误信息: ' + ((error && error.message) ? error.message : String(error)) + '</div>';
+                    if (window.__rightSidebarMode === 'hpc') {
+                        listHost.innerHTML = '<div class="file-tree-error">拉取失败：' + fileTreeEscapeHtml((error && error.message) ? error.message : String(error)) + '</div>';
+                    }
                 }
             }
             window.enterHpcDirectory = enterHpcDirectory;
             window.fetchAndRenderHpcTreeView = fetchAndRenderHpcTreeView;
-            function renderLocalWorkspacePlaceholder(containerEl) {
-                if (!containerEl) return;
-                var workspace = getCachedWorkspaceSelection();
-                if (!workspace || !workspace.workspace_name) return;
-                var details = document.createElement('details');
-                details.className = 'asset-modality-group local-workspace-group';
-                details.open = true;
-                var summary = document.createElement('summary');
-                var iconWrap = document.createElement('span');
-                iconWrap.className = 'asset-modality-icon-wrap';
-                iconWrap.textContent = '💻';
-                summary.appendChild(iconWrap);
-                summary.appendChild(document.createTextNode('本地项目: ' + workspace.workspace_name));
-                details.appendChild(summary);
-
-                var fileList = document.createElement('div');
-                fileList.className = 'asset-modality-files';
-                var item = document.createElement('div');
-                item.className = 'sidebar-asset-item';
-                var text = document.createElement('span');
-                text.className = 'item-text';
-                text.style.color = 'green';
-                text.textContent = '✓ 已挂载: 准备就绪';
-                item.appendChild(text);
-                fileList.appendChild(item);
-                details.appendChild(fileList);
-                containerEl.appendChild(details);
+            async function fetchAndRenderFilesPanel() {
+                var container = document.getElementById('file-tree-container');
+                if (!container) return;
+                if (window.__rightSidebarMode === 'files') {
+                    container.innerHTML = '<div class="file-tree-loading">正在加载文件列表...</div>';
+                }
+                try {
+                    var res = await fetch('/api/assets', { method: 'GET', headers: getAuthHeaders() });
+                    var list = await res.json().catch(function() { return []; });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    if (!Array.isArray(list)) list = [];
+                    window.__filesPanelData = list.map(function(a) {
+                        return {
+                            name: a.file_name || a.file_path || '文件',
+                            path: a.file_path || ''
+                        };
+                    }).filter(function(it) { return !!it.path; });
+                    if (window.__rightSidebarMode === 'files') renderFilesRowsIntoRightSidebar(window.__filesPanelData);
+                } catch (e) {
+                    if (window.__rightSidebarMode === 'files') {
+                        container.innerHTML = '<div class="file-tree-error">加载失败：' + fileTreeEscapeHtml((e && e.message) ? e.message : String(e)) + '</div>';
+                    }
+                }
             }
+            window.fetchAndRenderFilesPanel = fetchAndRenderFilesPanel;
             function fetchAssets() {
                 fetch('/api/assets', { method: 'GET', headers: getAuthHeaders() })
                     .then(function(r) { return r.ok ? r.json() : r.text().then(function(t) { try { return Promise.reject(JSON.parse(t)); } catch (e) { return Promise.reject({ detail: t || ('HTTP ' + r.status) }); } }); })
@@ -4504,7 +4915,6 @@
                             details.appendChild(fileList);
                             el.appendChild(details);
                         });
-                        renderLocalWorkspacePlaceholder(el);
                         renderHpcAssetsPlaceholder(el);
                         var fileMgmtEntry = document.createElement('div');
                         fileMgmtEntry.className = 'sidebar-item';
@@ -4515,7 +4925,7 @@
                         fileMgmtIcon.innerHTML = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h3l2 3h9a2 2 0 012 2z"/></svg>';
                         fileMgmtEntry.appendChild(fileMgmtIcon);
                         fileMgmtEntry.appendChild(document.createTextNode('文件管理'));
-                        fileMgmtEntry.onclick = function() { if (typeof switchToFileManagementView === 'function') switchToFileManagementView(); };
+                        fileMgmtEntry.onclick = function() { if (typeof toggleRightSidebarPanel === 'function') toggleRightSidebarPanel('files'); };
                         el.appendChild(fileMgmtEntry);
                     })
                     .catch(function(e) { console.warn('[fetchAssets]', e); var el = document.getElementById('sidebar-assets-list'); if (el && e && e.detail) { el.innerHTML = ''; var h = document.createElement('div'); h.className = 'empty-sidebar-hint'; h.textContent = e.detail; el.appendChild(h); } });
@@ -4575,6 +4985,7 @@
                     closeWorkspaceMountDropdown();
                     openLocalProjectWorkspace().catch(function(err) {
                         console.warn('[workspace-init]', err);
+                        if (err && err._omcsSidecarAlerted) return;
                         showToast('初始化工作区失败：' + (err && err.message ? err.message : err), 'danger');
                     });
                     return;
@@ -4586,20 +4997,12 @@
                     closeWorkspaceMountDropdown();
                     quickInitWorkspaceFromPath(recentBtn.dataset.path).catch(function(err) {
                         console.warn('[workspace-recent]', err);
+                        if (err && err._omcsSidecarAlerted) return;
                         showToast('初始化工作区失败：' + (err && err.message ? err.message : err), 'danger');
                     });
                     return;
                 }
-                var hpcBreadcrumb = e.target && e.target.closest && e.target.closest('.hpc-breadcrumb-item');
-                if (hpcBreadcrumb && hpcBreadcrumb.dataset && hpcBreadcrumb.dataset.path) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (typeof enterHpcDirectory === 'function') {
-                        enterHpcDirectory(hpcBreadcrumb.dataset.path);
-                    }
-                    return;
-                }
-                var hpcDirRow = e.target && e.target.closest && e.target.closest('.hpc-file-row--dir');
+                var hpcDirRow = e.target && e.target.closest && e.target.closest('.hpc-tree-dir-item');
                 if (hpcDirRow && hpcDirRow.dataset && hpcDirRow.dataset.path) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -4608,21 +5011,22 @@
                     }
                     return;
                 }
-                var hpcAddBtn = e.target && e.target.closest && e.target.closest('.hpc-add-to-chat-btn');
-                if (hpcAddBtn) {
+                var hpcFileRow = e.target && e.target.closest && e.target.closest('.hpc-tree-file-item');
+                if (hpcFileRow && hpcFileRow.dataset && hpcFileRow.dataset.path) {
                     e.preventDefault();
                     e.stopPropagation();
-                    var filepath = (hpcAddBtn.dataset && hpcAddBtn.dataset.path) ? String(hpcAddBtn.dataset.path).trim() : '';
+                    var filepath = String(hpcFileRow.dataset.path || '').trim();
                     if (!filepath) return;
-                    if (typeof showChatView === 'function') showChatView();
-                    var inp = document.getElementById('userInput');
-                    if (inp) {
-                        var mark = '[HPC文件: ' + filepath + ']';
-                        inp.value = inp.value ? (inp.value + '\n' + mark) : mark;
-                        if (typeof autoResize === 'function') autoResize(inp);
-                        if (typeof checkInput === 'function') checkInput();
-                        inp.focus();
-                    }
+                    addPathAsAttachment(filepath, 'hpc');
+                    return;
+                }
+                var filesPanelRow = e.target && e.target.closest && e.target.closest('.files-panel-file-item');
+                if (filesPanelRow && filesPanelRow.dataset && filesPanelRow.dataset.path) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    var filesPath = String(filesPanelRow.dataset.path || '').trim();
+                    if (!filesPath) return;
+                    addPathAsAttachment(filesPath, 'files');
                 }
             });
             // 任务3：点击数据资产挂载为输入框上方附件标签，不清空当前对话
@@ -5561,12 +5965,10 @@
                 (function restoreWorkspaceFileExplorer() {
                     try {
                         var sel = typeof getCachedWorkspaceSelection === 'function' ? getCachedWorkspaceSelection() : null;
+                        if (typeof syncWorkspaceIndicators === 'function') syncWorkspaceIndicators(sel);
                         if (sel && sel.workspace_path) {
-                            var rex = document.getElementById('right-file-explorer');
-                            if (rex) {
-                                rex.style.display = 'flex';
-                                rex.setAttribute('aria-hidden', 'false');
-                            }
+                            if (typeof setRightSidebarVisible === 'function') setRightSidebarVisible(true);
+                            if (typeof setRightSidebarMode === 'function') setRightSidebarMode('local');
                             if (typeof window.fetchAndRenderWorkspaceTree === 'function') window.fetchAndRenderWorkspaceTree();
                         }
                     } catch (_r) {}
@@ -5608,10 +6010,216 @@
                     }).catch(function() { if (typeof showAdminConsoleIfNeeded === 'function') showAdminConsoleIfNeeded(); });
                 } else if (typeof showAdminConsoleIfNeeded === 'function') showAdminConsoleIfNeeded();
                 autoResize(userInput);
+                if (typeof renderAttachmentPreviewArea === 'function') renderAttachmentPreviewArea();
                 var sidebarLogo = document.getElementById('sidebarLogoRow');
                 var sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
+                var sidebarWorkspaceIndicator = document.getElementById('sidebar-workspace-indicator');
+                var rightSidebarToggleBtn = document.getElementById('btn-right-sidebar-toggle');
+                var rightSidebarSearchBtn = document.getElementById('btn-right-sidebar-search');
+                var rightSidebarTabLocal = document.getElementById('right-sidebar-tab-local');
+                var rightSidebarTabHpc = document.getElementById('right-sidebar-tab-hpc');
+                var rightSidebarTabFiles = document.getElementById('right-sidebar-tab-files');
+                var rightSidebarSearchBox = document.getElementById('right-sidebar-search-box');
+                var rightSidebarSearchInput = document.getElementById('right-sidebar-search-input');
+                var rightSidebarSearchClear = document.getElementById('right-sidebar-search-clear');
+                var fileTreeContainer = document.getElementById('file-tree-container');
+                var rightSidebarResizer = document.getElementById('right-sidebar-resizer');
+                var inputWrapper = document.getElementById('inputWrapper');
+                var userInputEl = document.getElementById('userInput');
+                var customContextMenu = document.getElementById('custom-context-menu');
+                var previewBackdrop = document.getElementById('file-preview-backdrop');
+                var previewClose = document.getElementById('file-preview-close');
+                var attachmentPreviewArea = document.getElementById('attachment-preview-area');
                 if (sidebarLogo) sidebarLogo.onclick = toggleSidebarCollapse;
                 if (sidebarToggleBtn) { sidebarToggleBtn.onclick = function(e) { e.stopPropagation(); toggleSidebarCollapse(); }; }
+                if (sidebarWorkspaceIndicator) {
+                    sidebarWorkspaceIndicator.onclick = function() {
+                        var sel = typeof getCachedWorkspaceSelection === 'function' ? getCachedWorkspaceSelection() : null;
+                        if (!sel || !sel.workspace_path) {
+                            showToast('请先挂载本地工作目录', 'warning');
+                            return;
+                        }
+                        setRightSidebarVisible(true);
+                        setRightSidebarMode('local');
+                        if (typeof window.fetchAndRenderWorkspaceTree === 'function') window.fetchAndRenderWorkspaceTree();
+                    };
+                }
+                if (rightSidebarToggleBtn) {
+                    rightSidebarToggleBtn.onclick = function() { toggleRightSidebar(); };
+                }
+                if (rightSidebarSearchBtn) {
+                    rightSidebarSearchBtn.onclick = function() {
+                        if (!rightSidebarSearchBox) return;
+                        var show = rightSidebarSearchBox.style.display === 'none';
+                        rightSidebarSearchBox.style.display = show ? 'flex' : 'none';
+                        if (show && rightSidebarSearchInput) rightSidebarSearchInput.focus();
+                    };
+                }
+                if (rightSidebarTabLocal) rightSidebarTabLocal.onclick = function() { setRightSidebarMode('local'); };
+                if (rightSidebarTabHpc) rightSidebarTabHpc.onclick = function() {
+                    setRightSidebarMode('hpc');
+                    if (typeof fetchAndRenderHpcTreeView === 'function') fetchAndRenderHpcTreeView();
+                };
+                if (rightSidebarTabFiles) rightSidebarTabFiles.onclick = function() {
+                    setRightSidebarMode('files');
+                    if (typeof fetchAndRenderFilesPanel === 'function') fetchAndRenderFilesPanel();
+                };
+                if (rightSidebarSearchInput) {
+                    rightSidebarSearchInput.addEventListener('input', function() {
+                        if (window.__rightSidebarMode === 'hpc') {
+                            var kw = String(this.value || '').trim().toLowerCase();
+                            var list = (window.__hpcTreeData || []).filter(function(it) {
+                                return !kw || String(it && it.name || '').toLowerCase().indexOf(kw) >= 0;
+                            });
+                            renderHpcRowsIntoRightSidebar(list);
+                        } else if (window.__rightSidebarMode === 'files') {
+                            var kf = String(this.value || '').trim().toLowerCase();
+                            var listf = (window.__filesPanelData || []).filter(function(it) {
+                                return !kf || String(it && it.name || '').toLowerCase().indexOf(kf) >= 0;
+                            });
+                            renderFilesRowsIntoRightSidebar(listf);
+                        } else {
+                            renderWorkspaceTreeByKeyword(this.value || '');
+                        }
+                    });
+                    rightSidebarSearchInput.addEventListener('keydown', function(e) {
+                        if (e.key === 'Escape') {
+                            this.value = '';
+                            if (window.__rightSidebarMode === 'hpc') renderHpcRowsIntoRightSidebar(window.__hpcTreeData || []);
+                            else if (window.__rightSidebarMode === 'files') renderFilesRowsIntoRightSidebar(window.__filesPanelData || []);
+                            else renderWorkspaceTreeByKeyword('');
+                        }
+                    });
+                }
+                if (rightSidebarSearchClear) {
+                    rightSidebarSearchClear.onclick = function() {
+                        if (!rightSidebarSearchInput) return;
+                        rightSidebarSearchInput.value = '';
+                        if (window.__rightSidebarMode === 'hpc') renderHpcRowsIntoRightSidebar(window.__hpcTreeData || []);
+                        else if (window.__rightSidebarMode === 'files') renderFilesRowsIntoRightSidebar(window.__filesPanelData || []);
+                        else renderWorkspaceTreeByKeyword('');
+                        rightSidebarSearchInput.focus();
+                    };
+                }
+                if (rightSidebarResizer) {
+                    rightSidebarResizer.onmousedown = function(e) {
+                        var sidebar = document.getElementById('right-file-explorer');
+                        if (!sidebar) return;
+                        e.preventDefault();
+                        var startX = e.clientX;
+                        var startWidth = sidebar.getBoundingClientRect().width;
+                        function onMouseMove(ev) {
+                            var delta = startX - ev.clientX;
+                            var next = startWidth + delta;
+                            var minW = 250;
+                            var maxW = Math.floor(window.innerWidth * 0.5);
+                            if (next < minW) next = minW;
+                            if (next > maxW) next = maxW;
+                            sidebar.style.width = next + 'px';
+                            sidebar.style.minWidth = next + 'px';
+                        }
+                        function onMouseUp() {
+                            document.removeEventListener('mousemove', onMouseMove);
+                            document.removeEventListener('mouseup', onMouseUp);
+                        }
+                        document.addEventListener('mousemove', onMouseMove);
+                        document.addEventListener('mouseup', onMouseUp);
+                    };
+                }
+                if (attachmentPreviewArea) {
+                    attachmentPreviewArea.addEventListener('click', function(e) {
+                        var rm = e.target && e.target.closest ? e.target.closest('.attachment-chip__remove') : null;
+                        if (!rm) return;
+                        removeAttachmentByIndex(rm.getAttribute('data-index'));
+                    });
+                }
+                if (inputWrapper) {
+                    inputWrapper.addEventListener('dragover', function(e) {
+                        var hasPath = hasDataTransferType(e.dataTransfer, 'application/x-omics-local-file-path') || hasDataTransferType(e.dataTransfer, 'application/x-omics-hpc-file-path');
+                        if (!hasPath) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.dataTransfer.dropEffect = 'copy';
+                    });
+                    inputWrapper.addEventListener('drop', function(e) {
+                        var isLocalPathDrag = hasDataTransferType(e.dataTransfer, 'application/x-omics-local-file-path');
+                        var isHpcPathDrag = hasDataTransferType(e.dataTransfer, 'application/x-omics-hpc-file-path');
+                        if (!isLocalPathDrag && !isHpcPathDrag) return;
+                        var absPath = e.dataTransfer ? (e.dataTransfer.getData(isHpcPathDrag ? 'application/x-omics-hpc-file-path' : 'application/x-omics-local-file-path') || e.dataTransfer.getData('text/plain')) : '';
+                        if (!absPath) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        addPathAsAttachment(absPath, isHpcPathDrag ? 'hpc' : 'local');
+                    });
+                }
+                if (userInputEl) {
+                    userInputEl.addEventListener('dragover', function(e) {
+                        var hasPath = hasDataTransferType(e.dataTransfer, 'application/x-omics-local-file-path') || hasDataTransferType(e.dataTransfer, 'application/x-omics-hpc-file-path');
+                        if (!hasPath) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.dataTransfer.dropEffect = 'copy';
+                    });
+                    userInputEl.addEventListener('drop', function(e) {
+                        var isLocalPathDrag = hasDataTransferType(e.dataTransfer, 'application/x-omics-local-file-path');
+                        var isHpcPathDrag = hasDataTransferType(e.dataTransfer, 'application/x-omics-hpc-file-path');
+                        if (!isLocalPathDrag && !isHpcPathDrag) return;
+                        var absPath = e.dataTransfer ? (e.dataTransfer.getData(isHpcPathDrag ? 'application/x-omics-hpc-file-path' : 'application/x-omics-local-file-path') || e.dataTransfer.getData('text/plain')) : '';
+                        if (!absPath) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        addPathAsAttachment(absPath, isHpcPathDrag ? 'hpc' : 'local');
+                    });
+                }
+                if (fileTreeContainer) {
+                    fileTreeContainer.addEventListener('contextmenu', function(e) {
+                        var row = e.target && e.target.closest ? e.target.closest('.file-tree-file') : null;
+                        if (!row || !fileTreeContainer.contains(row)) return;
+                        if (row.dataset && row.dataset.type === 'directory') return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openCustomContextMenu(e.clientX, e.clientY, (row.dataset && row.dataset.path) ? row.dataset.path : '', (row.dataset && row.dataset.source) ? row.dataset.source : 'local');
+                    });
+                }
+                if (customContextMenu) {
+                    customContextMenu.addEventListener('click', function(e) {
+                        var item = e.target && e.target.closest ? e.target.closest('.custom-context-menu__item') : null;
+                        if (!item) return;
+                        var action = item.dataset ? item.dataset.action : '';
+                        var absPath = (__fileTreeContextState && __fileTreeContextState.targetPath) ? __fileTreeContextState.targetPath : '';
+                        var source = (__fileTreeContextState && __fileTreeContextState.source) ? __fileTreeContextState.source : 'local';
+                        if (!absPath) {
+                            hideCustomContextMenu();
+                            return;
+                        }
+                        if (action === 'add-to-chat') {
+                            addPathAsAttachment(absPath, source);
+                        } else if (action === 'copy-path') {
+                            navigator.clipboard.writeText(absPath).then(function() {
+                                showToast('路径已复制', 'success');
+                            }).catch(function() {
+                                showToast('复制失败，请检查剪贴板权限', 'warning');
+                            });
+                        } else if (action === 'preview') {
+                            openFilePreviewModal(absPath);
+                        }
+                        hideCustomContextMenu();
+                    });
+                }
+                document.addEventListener('click', function(e) {
+                    var menu = document.getElementById('custom-context-menu');
+                    if (!menu || menu.style.display === 'none') return;
+                    if (e.target && e.target.closest && e.target.closest('#custom-context-menu')) return;
+                    hideCustomContextMenu();
+                });
+                document.addEventListener('contextmenu', function(e) {
+                    if (e.target && e.target.closest && e.target.closest('.file-tree-file')) return;
+                    hideCustomContextMenu();
+                });
+                window.addEventListener('resize', hideCustomContextMenu);
+                window.addEventListener('scroll', hideCustomContextMenu, true);
+                if (previewBackdrop) previewBackdrop.onclick = closeFilePreviewModal;
+                if (previewClose) previewClose.onclick = closeFilePreviewModal;
                 var btnNew = document.getElementById('btnNewSession');
                 if (btnNew) btnNew.onclick = function() { showChatView(); clearChatAndReset(); };
                 var btnExpand = document.getElementById('btn-expand-workspace');
@@ -6261,7 +6869,8 @@
             function checkInput() {
                 if (isProcessing) { sendBtn.classList.remove('active'); return; }
                 // 🔥 更新：检查文本输入或待上传文件
-                if (userInput.value.trim() !== '' || pendingFiles.length > 0 || uploadedFiles.length > 0) sendBtn.classList.add('active');
+                var hasAttachments = Array.isArray(window.currentAttachments) && window.currentAttachments.length > 0;
+                if (userInput.value.trim() !== '' || pendingFiles.length > 0 || uploadedFiles.length > 0 || hasAttachments) sendBtn.classList.add('active');
                 else sendBtn.classList.remove('active');
             }
 
@@ -6984,11 +7593,32 @@
                 document.getElementById('lightbox').style.display = 'none';
             }
 
-            window.addEventListener('dragenter', (e) => { if(!isProcessing) { e.preventDefault(); dropOverlay.style.display = 'flex'; } });
-            window.addEventListener('dragleave', (e) => { e.preventDefault(); if (e.clientX === 0 && e.clientY === 0) dropOverlay.style.display = 'none'; });
-            window.addEventListener('dragover', (e) => e.preventDefault());
+            function _dragEventHasExternalFiles(e) {
+                if (!e || !e.dataTransfer) return false;
+                return hasDataTransferType(e.dataTransfer, 'Files');
+            }
+            window.addEventListener('dragenter', (e) => {
+                if (!isProcessing && _dragEventHasExternalFiles(e)) {
+                    e.preventDefault();
+                    dropOverlay.style.display = 'flex';
+                }
+            });
+            window.addEventListener('dragleave', (e) => {
+                if (!_dragEventHasExternalFiles(e)) return;
+                e.preventDefault();
+                if (e.clientX === 0 && e.clientY === 0) dropOverlay.style.display = 'none';
+            });
+            window.addEventListener('dragover', (e) => {
+                if (!_dragEventHasExternalFiles(e)) return;
+                e.preventDefault();
+            });
             // 🔥 多文件修复：必须传入完整 FileList，禁止只传 files[0]（拖拽多文件时全部入队）
-            window.addEventListener('drop', (e) => { e.preventDefault(); dropOverlay.style.display = 'none'; if (!isProcessing && e.dataTransfer.files.length > 0) handleFileSelect(e.dataTransfer.files); });
+            window.addEventListener('drop', (e) => {
+                if (!_dragEventHasExternalFiles(e)) return;
+                e.preventDefault();
+                dropOverlay.style.display = 'none';
+                if (!isProcessing && e.dataTransfer.files.length > 0) handleFileSelect(e.dataTransfer.files);
+            });
             window.addEventListener('paste', (e) => { if (!isProcessing && e.clipboardData.files.length > 0) { e.preventDefault(); handleFileSelect(e.clipboardData.files); } });
 
             // 🔥 重写：Staging 模式 - 只添加到待上传列表，不立即上传
@@ -7332,7 +7962,8 @@
                 } else {
                     // 🔥 更新：检查文本、待上传文件、已上传文件、hiddenPayload 或历史资产标签
                     var hasAssetTags = document.querySelectorAll('#inputWrapper .asset-tag').length > 0;
-                    if (!text && pendingFiles.length === 0 && uploadedFiles.length === 0 && !workflowData && !useHistoryFiles && !hasAssetTags && !hiddenPayload) {
+                    var hasPathAttachments = Array.isArray(window.currentAttachments) && window.currentAttachments.length > 0;
+                    if (!text && pendingFiles.length === 0 && uploadedFiles.length === 0 && !workflowData && !useHistoryFiles && !hasAssetTags && !hiddenPayload && !hasPathAttachments) {
                         toggleLoadingState(false);
                         return;
                     }
@@ -7544,6 +8175,23 @@
                     }
                     filesToSend = _deduped;
                 }
+                var attachmentPaths = (Array.isArray(window.currentAttachments) ? window.currentAttachments : []).map(function(a) {
+                    return String((a && a.path) || '').trim();
+                }).filter(function(p) { return !!p; });
+                if (attachmentPaths.length > 0) {
+                    var attachmentFileObjs = attachmentPaths.map(function(p) {
+                        var n = p.split(/[/\\]/).filter(Boolean).pop() || p;
+                        return { path: p, file_path: p, name: n, file_name: n };
+                    });
+                    filesToSend = (filesToSend || []).concat(attachmentFileObjs);
+                    var _attachSeen = Object.create(null);
+                    filesToSend = filesToSend.filter(function(f) {
+                        var k = String(f.path || f.file_path || '').trim().replace(/\/+$/, '');
+                        if (!k || _attachSeen[k]) return false;
+                        _attachSeen[k] = true;
+                        return true;
+                    });
+                }
                 var finalMessage = (hiddenPayload != null && hiddenPayload !== '') ? hiddenPayload : text;
 
                 // 🔥 Step 2: 发送聊天请求（包含已上传的文件）
@@ -7562,6 +8210,7 @@
                     history: apiHistoryPayload, 
                     selected_tool: selectedTool, 
                     uploaded_files: filesToSend, // 🔥 CRITICAL: 使用 filesToSend（优先级：filesOverride > 全局 uploadedFiles）
+                    local_files: attachmentPaths,
                     tool_params: toolParams,
                     workflow_data: workflowData,
                     use_history_files: useHistoryFiles,
@@ -7585,6 +8234,11 @@
                 var _cm = (typeof window.currentChatMode !== 'undefined' && window.currentChatMode === 'flagship') ? 'flagship' : 'standard';
                 payload.mode = _cm;
                 payload.thinking_mode = (_cm === 'flagship') ? 'deep' : 'fast';
+                if (attachmentPaths.length > 0) {
+                    window.currentAttachments = [];
+                    renderAttachmentPreviewArea();
+                    checkInput();
+                }
                 
                 // 🔥 CRITICAL: 详细日志，确保文件被正确传递
                 console.log('📤 [sendMessage] 发送 /api/chat 请求');
