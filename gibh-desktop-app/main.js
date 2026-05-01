@@ -545,12 +545,21 @@ function createMainWindow() {
     win.webContents.openDevTools({ mode: 'detach' });
   }
 
-  /** 供渲染进程 localSidecarUrl() 使用；index.html 每次调用 getLocalSidecarBase() 读取，不在脚本顶层写死一次。 */
+  /** 供渲染进程 localSidecarUrl() 使用；仅允许 127.0.0.1 / localhost，防止 OMICS_SIDECAR_URL 误指远程站导致 check_file 打到 Nginx 404。 */
   win.webContents.on('did-finish-load', () => {
     try {
-      const sidecarBase = String(process.env.OMICS_SIDECAR_URL || 'http://127.0.0.1:8019')
-        .trim()
-        .replace(/\/+$/, '');
+      const fallback = 'http://127.0.0.1:8019';
+      const raw = String(process.env.OMICS_SIDECAR_URL || fallback).trim().replace(/\/+$/, '');
+      let sidecarBase = fallback;
+      try {
+        const withScheme = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
+        const u = new URL(withScheme);
+        if (u.hostname === '127.0.0.1' || u.hostname === 'localhost') {
+          sidecarBase = /^https?:\/\//i.test(raw) ? raw : `${u.protocol}//${u.host}`;
+        }
+      } catch (_) {
+        sidecarBase = fallback;
+      }
       win.webContents.executeJavaScript(
         `try{window.OMICS_SIDECAR_BASE_URL=${JSON.stringify(sidecarBase)};}catch(_){}`
       );

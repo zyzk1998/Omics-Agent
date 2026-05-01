@@ -907,21 +907,31 @@
                 }
             }
             initAuthState();
-            /** Electron 会在 did-finish-load 注入 OMICS_SIDECAR_BASE_URL；勿在模块顶层缓存为常量（否则早于注入）。 */
+            /** Electron 会在 did-finish-load 注入 OMICS_SIDECAR_BASE_URL；仅信任本机回环，避免误指远程 origin 时 fetch 打到 Nginx 产生 404 Not Found。 */
             function getLocalSidecarBase() {
+                var def = 'http://127.0.0.1:8019';
                 try {
                     var u = window.OMICS_SIDECAR_BASE_URL || window.OMICS_SIDECAR_URL;
                     if (typeof u === 'string') {
                         var s = u.trim().replace(/\/+$/, '');
-                        if (/^https?:\/\//i.test(s)) return s;
+                        if (/^https?:\/\//i.test(s)) {
+                            var pu = new URL(s);
+                            if (pu.hostname === '127.0.0.1' || pu.hostname === 'localhost') return s;
+                        }
                     }
                 } catch (e) {}
-                return 'http://127.0.0.1:8019';
+                return def;
             }
             function localSidecarUrl(pathname) {
+                var base = getLocalSidecarBase();
+                try {
+                    if (!/^https?:\/\//i.test(base)) base = 'http://127.0.0.1:8019';
+                } catch (e) {
+                    base = 'http://127.0.0.1:8019';
+                }
                 var path = String(pathname || '');
                 if (!path.startsWith('/')) path = '/' + path;
-                return getLocalSidecarBase() + path;
+                return base + path;
             }
 
             /** 云端 API 根（与当前页面同源；Electron 打包页通常为 PROD_SERVER_URL） */
@@ -980,18 +990,22 @@
                     if (Array.isArray(d)) return d.map(function(x) { return (x && x.msg) ? x.msg : String(x); }).join('; ');
                     try { return JSON.stringify(d); } catch (e) { return String(d); }
                 }
-                /** 优先 POST(JSON path) 避免 GET query 编码坑；404/405 时回退 GET+encodeURIComponent 兼容旧打包 Sidecar。 */
+                /**
+                 * POST(JSON path) 优先；任意非 2xx 再试 GET（URLSearchParams 编码 path），兼容仅实现 GET 的旧 Sidecar 及 POST 415 等。
+                 */
                 async function sidecarFetchCheckFile(pathStr) {
                     var ep = localSidecarUrl('/api/tools/check_file');
-                    var r = await fetch(ep, {
+                    var q = new URLSearchParams();
+                    q.set('path', pathStr);
+                    var getUrl = ep + '?' + q.toString();
+                    var postR = await fetch(ep, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ path: pathStr })
                     });
-                    if (r.status === 404 || r.status === 405) {
-                        r = await fetch(ep + '?path=' + encodeURIComponent(pathStr), { method: 'GET' });
-                    }
-                    return r;
+                    if (postR.ok) return postR;
+                    var getR = await fetch(getUrl, { method: 'GET' });
+                    return getR;
                 }
                 var stats = [];
                 for (var i = 0; i < locals.length; i++) {
