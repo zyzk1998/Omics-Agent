@@ -628,6 +628,18 @@
             </div>
         </div>
 
+        <div id="sandbox-modal" class="sandbox-modal" style="display:none;" aria-hidden="true">
+            <div class="sandbox-modal__backdrop" id="sandbox-modal-backdrop"></div>
+            <div class="sandbox-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="sandbox-modal-title">
+                <h3 id="sandbox-modal-title">本地计算沙盒</h3>
+                <p class="sandbox-modal__text">检测到大文件，系统需在本地配置轻量级计算沙盒，以便在本地执行分析并保持数据不外传到云端存储。</p>
+                <div class="sandbox-modal__actions">
+                    <button type="button" class="sandbox-modal__btn sandbox-modal__btn--ghost" id="sandbox-cancel-btn">取消</button>
+                    <button type="button" class="sandbox-modal__btn sandbox-modal__btn--primary" id="sandbox-install-btn">一键配置</button>
+                </div>
+            </div>
+        </div>
+
         <!-- 安装技能：防 Bootstrap 覆盖 — 仅 #skill-upload-modal 内生效，不碰 body/#app -->
         <style>
             #skill-upload-modal #skill-file-input.hidden-file-input,
@@ -898,6 +910,144 @@
             var LOCAL_SIDECAR_BASE = 'http://127.0.0.1:8019';
             function localSidecarUrl(pathname) {
                 return LOCAL_SIDECAR_BASE + pathname;
+            }
+
+            /** 云端 API 根（与当前页面同源；Electron 打包页通常为 PROD_SERVER_URL） */
+            function getCloudUploadBaseUrl() {
+                try {
+                    var o = window.location && window.location.origin ? String(window.location.origin) : '';
+                    if (o && o.indexOf('http') === 0) return o;
+                } catch (e) {}
+                return 'http://127.0.0.1:8018';
+            }
+
+            window.__sandboxBypassLocalGate = false;
+            window.__pendingSendMessageCtx = null;
+
+            function showSandboxModal() {
+                var el = document.getElementById('sandbox-modal');
+                if (!el) return;
+                el.style.display = 'flex';
+                el.setAttribute('aria-hidden', 'false');
+            }
+            function hideSandboxModal() {
+                var el = document.getElementById('sandbox-modal');
+                if (!el) return;
+                el.style.display = 'none';
+                el.setAttribute('aria-hidden', 'true');
+            }
+
+            function resumePendingSendMessage() {
+                var ctx = window.__pendingSendMessageCtx;
+                window.__pendingSendMessageCtx = null;
+                if (!ctx) return;
+                window.__sandboxBypassLocalGate = true;
+                sendMessage(ctx.selectedTool, ctx.originalQuery, ctx.toolParams, ctx.workflowData, ctx.useHistoryFiles, ctx.filesOverride, ctx.hiddenPayload);
+            }
+
+            /**
+             * 本地附件智能分流：<200MB 经 Sidecar 上传云端并替换为 web 路径；≥200MB 挂起并弹出沙盒 Modal。
+             * @returns {'ok'|'abort'|'sandbox_wait'}
+             */
+            async function runLocalAttachmentSmartGate(ctx) {
+                if (window.__sandboxBypassLocalGate) {
+                    window.__sandboxBypassLocalGate = false;
+                    return 'ok';
+                }
+                var atts = window.currentAttachments || [];
+                var locals = atts.filter(function(a) {
+                    return (a.type === 'local') || (a.source === 'local' && a.type !== 'web');
+                });
+                if (!locals.length) return 'ok';
+
+                var LIMIT = 200 * 1024 * 1024;
+                var stats = [];
+                for (var i = 0; i < locals.length; i++) {
+                    var p = locals[i].path;
+                    try {
+                        var r = await fetch(localSidecarUrl('/api/tools/check_file?path=' + encodeURIComponent(p)));
+                        var j = await r.json();
+                        var sz = (typeof j.size_bytes === 'number') ? j.size_bytes : 0;
+                        stats.push({ att: locals[i], size: sz, is_dir: !!j.is_dir, exists: !!j.exists });
+                    } catch (e) {
+                        console.warn('[LocalGate] sidecar stat failed', e);
+                        if (typeof showToast === 'function') showToast('无法连接本地 Sidecar（127.0.0.1:8019），请启动桌面客户端', 'danger');
+                        return 'abort';
+                    }
+                }
+                var anyLarge = stats.some(function(s) {
+                    return !s.exists || s.is_dir || s.size >= LIMIT;
+                });
+                if (anyLarge) {
+                    try {
+                        var er = await fetch(localSidecarUrl('/api/tools/check_env'));
+                        var ej = await er.json();
+                        if (ej && ej.has_env === true) {
+                            return 'ok';
+                        }
+                    } catch (e) {
+                        if (typeof showToast === 'function') showToast('环境检测失败', 'danger');
+                        return 'abort';
+                    }
+                    window.__pendingSendMessageCtx = ctx;
+                    showSandboxModal();
+                    return 'sandbox_wait';
+                }
+
+                if (typeof showToast === 'function') showToast('正在同步本地数据...', 'info');
+                var base = getCloudUploadBaseUrl();
+                var ah = (typeof getAuthHeaders === 'function') ? getAuthHeaders() : {};
+                for (var k = 0; k < locals.length; k++) {
+                    var item = locals[k];
+                    try {
+                        var ur = await fetch(localSidecarUrl('/api/tools/upload_to_cloud'), {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                local_file_path: item.path,
+                                upload_base_url: base,
+                                authorization: ah['Authorization'] || null,
+                                x_guest_uuid: ah['X-Guest-UUID'] || null
+                            })
+                        });
+                        var uj = await ur.json().catch(function() { return {}; });
+                        if (!ur.ok) {
+                            var _det = uj.detail;
+                            if (Array.isArray(_det)) {
+                                _det = _det.map(function(x) { return (x && x.msg) ? x.msg : String(x); }).join('; ');
+                            } else if (_det && typeof _det === 'object') {
+                                _det = JSON.stringify(_det);
+                            }
+                            throw new Error(_det || ur.statusText || 'upload failed');
+                        }
+                        var cp = uj.cloud_path || (uj.raw && uj.raw.file_paths && uj.raw.file_paths[0]);
+                        if (!cp) throw new Error('未解析到云端路径');
+                        var bn = String(cp).replace(/\\/g, '/').split('/').filter(Boolean).pop() || item.name;
+                        var idx = window.currentAttachments.findIndex(function(x) { return x.path === item.path && (x.type === 'local' || x.source === 'local'); });
+                        if (idx >= 0) {
+                            window.currentAttachments[idx] = {
+                                path: cp,
+                                name: bn,
+                                source: 'web',
+                                type: 'web'
+                            };
+                        }
+                        var dup = uploadedFiles.some(function(f) {
+                            var fp = (f.path || f.file_path || '').replace(/\/+$/, '');
+                            return fp === String(cp).replace(/\/+$/, '');
+                        });
+                        if (!dup) {
+                            uploadedFiles.push({ path: cp, file_path: cp, name: bn, file_name: bn });
+                        }
+                    } catch (e) {
+                        console.error('[LocalGate] upload_to_cloud', e);
+                        if (typeof showToast === 'function') showToast('同步到云端失败: ' + (e.message || e), 'danger');
+                        return 'abort';
+                    }
+                }
+                if (typeof renderAttachmentPreviewArea === 'function') renderAttachmentPreviewArea();
+                if (typeof renderFilePreviewArea === 'function') renderFilePreviewArea();
+                return 'ok';
             }
 
             // Task1: 请求头 100% 来自 localStorage 实时读取，不依赖任何全局变量
@@ -2074,7 +2224,7 @@
                 window.currentAttachments.forEach(function(att, idx) {
                     var chip = document.createElement('div');
                     chip.className = 'attachment-chip';
-                    chip.innerHTML = '<span class="attachment-chip__icon">' + (att.source === 'hpc' ? '🖥️' : '📎') + '</span><span class="attachment-chip__name" title="' + fileTreeEscapeHtml(att.path || '') + '">' + fileTreeEscapeHtml(att.name || att.path || '文件') + '</span><button type="button" class="attachment-chip__remove" data-index="' + idx + '" aria-label="移除">×</button>';
+                    chip.innerHTML = '<span class="attachment-chip__icon">' + (att.type === 'web' ? '☁️' : (att.source === 'hpc' ? '🖥️' : '📎')) + '</span><span class="attachment-chip__name" title="' + fileTreeEscapeHtml(att.path || '') + '">' + fileTreeEscapeHtml(att.name || att.path || '文件') + '</span><button type="button" class="attachment-chip__remove" data-index="' + idx + '" aria-label="移除">×</button>';
                     host.appendChild(chip);
                 });
             }
@@ -2097,10 +2247,13 @@
                     return;
                 }
                 var display = normalized.split(/[/\\]/).filter(Boolean).pop() || normalized;
+                var src = source === 'hpc' ? 'hpc' : (source === 'files' ? 'files' : 'local');
+                var typ = src === 'hpc' ? 'hpc' : (src === 'files' ? 'files' : 'local');
                 window.currentAttachments.push({
                     path: normalized,
                     name: display,
-                    source: source === 'hpc' ? 'hpc' : 'local'
+                    source: src,
+                    type: typ
                 });
                 renderAttachmentPreviewArea();
                 checkInput();
@@ -6220,6 +6373,30 @@
                 window.addEventListener('scroll', hideCustomContextMenu, true);
                 if (previewBackdrop) previewBackdrop.onclick = closeFilePreviewModal;
                 if (previewClose) previewClose.onclick = closeFilePreviewModal;
+                var sandboxBackdrop = document.getElementById('sandbox-modal-backdrop');
+                var sandboxCancel = document.getElementById('sandbox-cancel-btn');
+                var sandboxInstall = document.getElementById('sandbox-install-btn');
+                if (sandboxBackdrop) sandboxBackdrop.onclick = function() {
+                    window.__pendingSendMessageCtx = null;
+                    hideSandboxModal();
+                };
+                if (sandboxCancel) sandboxCancel.onclick = function() {
+                    window.__pendingSendMessageCtx = null;
+                    hideSandboxModal();
+                };
+                if (sandboxInstall) sandboxInstall.onclick = async function() {
+                    try {
+                        var r = await fetch(localSidecarUrl('/api/tools/install_sandbox'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+                        var j = await r.json().catch(function() { return {}; });
+                        if (!r.ok) throw new Error((j && j.detail) ? j.detail : (r.statusText || 'install failed'));
+                        hideSandboxModal();
+                        if (typeof showToast === 'function') showToast((j && j.message) ? j.message : '沙盒配置完成', 'success');
+                        resumePendingSendMessage();
+                    } catch (e) {
+                        console.error(e);
+                        if (typeof showToast === 'function') showToast('配置失败: ' + (e.message || e), 'danger');
+                    }
+                };
                 var btnNew = document.getElementById('btnNewSession');
                 if (btnNew) btnNew.onclick = function() { showChatView(); clearChatAndReset(); };
                 var btnExpand = document.getElementById('btn-expand-workspace');
@@ -7943,6 +8120,26 @@
                 // 🔥 当传入 hiddenPayload 时：气泡显示 originalQuery（即 text），发给后端的 message 使用 hiddenPayload
                 var messageForPayload = (hiddenPayload != null && hiddenPayload !== '') ? hiddenPayload : text;
                 var displayText = (hiddenPayload != null && hiddenPayload !== '') ? (originalQuery || text) : text;
+
+                if (!filesOverride) {
+                    try {
+                        var _lg = await runLocalAttachmentSmartGate({
+                            selectedTool: selectedTool,
+                            originalQuery: originalQuery,
+                            toolParams: toolParams,
+                            workflowData: workflowData,
+                            useHistoryFiles: useHistoryFiles,
+                            filesOverride: filesOverride,
+                            hiddenPayload: hiddenPayload
+                        });
+                        if (_lg === 'abort') return;
+                        if (_lg === 'sandbox_wait') return;
+                    } catch (_gateErr) {
+                        console.error('[LocalGate]', _gateErr);
+                        if (typeof showToast === 'function') showToast('本地附件分流失败', 'danger');
+                        return;
+                    }
+                }
                 
                 // 🔥 CRITICAL: 初始化状态和时间戳（在所有分支中都需要）
                 toggleLoadingState(true);

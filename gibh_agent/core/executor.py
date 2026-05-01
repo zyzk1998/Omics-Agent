@@ -107,6 +107,20 @@ class WorkflowExecutor:
         """
         if not file_path or file_path in ["<待上传数据>", "<PENDING_UPLOAD>", ""]:
             return file_path
+
+        from ..utils.path_resolver import (
+            is_hpc_style_path,
+            is_windows_abs_path,
+            normalize_duplicate_tail_filename,
+        )
+
+        file_path = normalize_duplicate_tail_filename(str(file_path).strip())
+        if is_windows_abs_path(file_path) or is_hpc_style_path(file_path):
+            logger.info(
+                "✅ [Path Resolver] Local/HPC 路径：跳过 UPLOAD_DIR/Results 拼接，原样返回: %s",
+                file_path,
+            )
+            return file_path
         
         original_path = file_path
         attempted_paths = []

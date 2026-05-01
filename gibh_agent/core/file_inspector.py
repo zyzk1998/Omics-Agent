@@ -1394,72 +1394,64 @@ class FileInspector:
         self.handlers = [handler_class() for handler_class in _registry.get_handlers()]
         logger.info(f"✅ [FileInspector] Loaded {len(self.handlers)} handlers")
     
-    def _resolve_actual_path(self, file_path: str) -> Tuple[Optional[str], List[str]]:
+    def _legacy_filename_scan(self, normalized: str, searched_paths: List[str]) -> Optional[str]:
         """
-        智能路径解析：尝试在多个常见路径中查找文件或目录
-        
-        Args:
-            file_path: 原始文件路径
-            
-        Returns:
-            (actual_path, searched_paths)
+        兼容旧布局：仅在容器内「Web 上传」语义下，按文件名在各挂载根下再扫描一次。
+        绝不把 Windows/HPC 路径与 UPLOAD_DIR 拼接。
         """
-        searched_paths = []
-        original_path = Path(file_path)
-        
-        # Step 1: 检查原始路径
-        if original_path.exists():
-            resolved_path = str(original_path.resolve())
-            searched_paths.append(resolved_path)
-            logger.info(f"✅ [Smart Path Resolution] Found: {resolved_path}")
-            return resolved_path, searched_paths
-        
-        if original_path.is_absolute():
-            searched_paths.append(str(original_path))
-        else:
-            cwd_path = Path(os.getcwd()) / original_path
-            searched_paths.append(str(cwd_path.resolve()))
-        
-        # Step 1.5: 相对路径时优先在 upload_dir 下按完整路径查找（修复 guest/session/10x_data_xxx 无法识别）
-        if not original_path.is_absolute() and file_path and self.upload_dir:
-            upload_base = Path(self.upload_dir)
-            try:
-                candidate = (upload_base / file_path).resolve()
-                candidate = candidate.resolve()
-                if candidate.exists():
-                    searched_paths.append(str(candidate))
-                    logger.info(f"✅ [Smart Path Resolution] Found under upload_dir: {candidate}")
-                    return str(candidate), searched_paths
-                searched_paths.append(str(candidate))
-            except (OSError, ValueError) as e:
-                logger.debug(f"⚠️ upload_dir + file_path resolve failed: {e}")
-        
-        # Step 2: 提取文件名或目录名
-        path_name = original_path.name if original_path.name else str(original_path)
-        if not path_name or path_name == '.':
-            return None, searched_paths
-        
-        # Step 3: 在常见挂载路径中搜索
+        original_path = Path(normalized)
+        path_name = original_path.name if original_path.name else str(normalized)
+        if not path_name or path_name == ".":
+            return None
         for mount_path in self.common_mount_paths:
             mount_path_obj = Path(mount_path)
             if not mount_path_obj.is_absolute():
                 mount_path_obj = Path(os.getcwd()) / mount_path_obj
-            
             try:
                 resolved_mount = mount_path_obj.resolve()
                 candidate_path = resolved_mount / path_name
                 searched_paths.append(str(candidate_path))
-                
                 if candidate_path.exists():
-                    logger.info(f"✅ [Smart Path Resolution] Found: {candidate_path}")
-                    return str(candidate_path), searched_paths
+                    logger.info(f"✅ [Smart Path Resolution] (legacy scan) Found: {candidate_path}")
+                    return str(candidate_path.resolve())
             except (OSError, ValueError) as e:
                 logger.debug(f"⚠️ Invalid path {mount_path}: {e}")
                 continue
-        
-        logger.warning(f"❌ [Smart Path Resolution] Not found: {path_name}")
+        return None
+
+    def _resolve_actual_path(self, file_path: str) -> Tuple[Optional[str], List[str]]:
+        """
+        三态路径解析 + 存在性校验。
+        Local（Windows 绝对路径）/ HPC：禁止与 UPLOAD_DIR 拼接；存在性由侧车或挂载决定。
+        """
+        from ..utils.path_resolver import (
+            normalize_duplicate_tail_filename,
+            resolve_real_path,
+            verify_path_exists_after_resolve,
+        )
+
+        searched_paths: List[str] = []
+        normalized = normalize_duplicate_tail_filename((file_path or "").strip())
+        try:
+            resolved = resolve_real_path(normalized, str(self.upload_dir))
+        except ValueError:
+            return None, searched_paths
+
+        ok, _err = verify_path_exists_after_resolve(resolved)
+        if resolved.kind == "web" and resolved.web_absolute_path:
+            searched_paths.append(resolved.web_absolute_path)
+            if ok:
+                return resolved.web_absolute_path, searched_paths
+            fuzzy = self._legacy_filename_scan(normalized, searched_paths)
+            if fuzzy:
+                return fuzzy, searched_paths
+            return None, searched_paths
+
+        searched_paths.append(normalized)
+        if ok:
+            return normalized, searched_paths
         return None, searched_paths
-    
+
     def inspect_file(self, file_path: str) -> Dict[str, Any]:
         """
         多模态文件检查主入口（分发器）
@@ -1470,33 +1462,89 @@ class FileInspector:
         Returns:
             包含检查结果的字典
         """
-        # Step 1: 使用智能路径解析
-        actual_path, searched_paths = self._resolve_actual_path(file_path)
-        
-        if actual_path is None:
+        from ..utils.path_resolver import (
+            infer_loose_file_type_from_path_string,
+            normalize_duplicate_tail_filename,
+            resolve_real_path,
+            validate_inspector_file_format,
+            verify_path_exists_after_resolve,
+        )
+
+        normalized = normalize_duplicate_tail_filename((file_path or "").strip())
+
+        fmt_err = validate_inspector_file_format(normalized)
+        if fmt_err:
+            return fmt_err
+
+        searched_paths: List[str] = []
+        try:
+            resolved = resolve_real_path(normalized, str(self.upload_dir))
+        except ValueError:
+            return {
+                "status": "error",
+                "success": False,
+                "error": "路径为空或无效",
+                "file_type": "unknown",
+                "file_path": file_path,
+            }
+
+        ok, exist_err = verify_path_exists_after_resolve(resolved)
+        actual_path: Optional[str] = None
+        if resolved.kind == "web":
+            actual_path = resolved.web_absolute_path
+            if actual_path:
+                searched_paths.append(actual_path)
+            if not ok:
+                fuzzy = self._legacy_filename_scan(normalized, searched_paths)
+                if fuzzy:
+                    actual_path = fuzzy
+                    ok = True
+        else:
+            searched_paths.append(normalized)
+            if ok:
+                actual_path = normalized
+
+        if not ok or not actual_path:
             current_cwd = os.getcwd()
-            error_msg = (
-                f"File or directory not found: '{file_path}'\n\n"
+            error_msg = exist_err or (
+                f"File or directory not found: '{normalized}'\n\n"
                 f"**Searched locations ({len(searched_paths)}):**\n"
                 + "\n".join(f"  - {path}" for path in searched_paths[:10])
                 + f"\n\n**Current working directory:** {current_cwd}\n"
                 f"**Upload directory (configured):** {self.upload_dir}\n"
                 f"**Environment UPLOAD_DIR:** {os.getenv('UPLOAD_DIR', 'Not set')}"
             )
-            
             logger.error(f"❌ [FileInspector] {error_msg}")
-            
             return {
                 "status": "error",
                 "success": False,
                 "error": error_msg,
                 "file_type": "unknown",
-                "file_path": file_path,
+                "file_path": normalized,
                 "searched_paths": searched_paths,
-                "current_cwd": current_cwd
+                "current_cwd": current_cwd,
             }
-        
-        # Step 2: 转换为 Path 对象
+
+        # Local / HPC：已通过存在性校验，容器内不做深度读取（避免 C:\\ 在 Linux 上失效）
+        if resolved.kind != "web":
+            ft = infer_loose_file_type_from_path_string(normalized)
+            return {
+                "status": "success",
+                "success": True,
+                "file_path": normalized,
+                "file_type": ft,
+                "shape": {"rows": 0, "cols": 0},
+                "n_obs": 0,
+                "n_vars": 0,
+                "remote_mount": True,
+                "mount_kind": resolved.kind,
+                "message": (
+                    "路径已在客户端/集群侧通过存在性校验；服务端容器无法直接读取该绝对路径的深度内容，"
+                    "后续执行将经由本地侧车或算子链路访问。"
+                ),
+            }
+
+        # Step 2: Web → 转换为 Path 对象（容器内可读）
         path = Path(actual_path)
 
         # Step 2b: 医学影像（.nii / .nii.gz / .dcm）严禁走表格类 pandas 逻辑，优先旁路体检

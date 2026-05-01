@@ -35,6 +35,11 @@ from .stream_utils import stream_with_suggestions
 from .workspace_context import build_workspace_system_instruction, get_workspace_context
 from .workflows import WorkflowRegistry
 from .file_handlers.universal_normalizer import _is_archive
+from ..utils.path_resolver import (
+    normalize_duplicate_tail_filename,
+    resolve_real_path,
+    resolve_upload_path_for_container,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -346,12 +351,8 @@ class AgentOrchestrator:
                 p = str(f)
             if not p:
                 continue
-            po = Path(p)
-            if not po.is_absolute():
-                po = (self.upload_dir / po).resolve()
-            else:
-                po = po.resolve()
-            s = str(po)
+            praw = normalize_duplicate_tail_filename(str(p).strip())
+            s = resolve_upload_path_for_container(praw, str(self.upload_dir))
             if s not in seen:
                 seen.add(s)
                 ordered.append(s)
@@ -392,12 +393,9 @@ class AgentOrchestrator:
         for raw in paths:
             if not raw:
                 continue
-            p = Path(raw)
-            if not p.is_absolute():
-                p = (self.upload_dir / p).resolve()
-            else:
-                p = p.resolve()
-            s = str(p)
+            praw = normalize_duplicate_tail_filename(str(raw).strip())
+            s = resolve_upload_path_for_container(praw, str(self.upload_dir))
+            p = Path(s)
             if s not in seen:
                 seen.add(s)
                 out.append(s)
@@ -486,12 +484,8 @@ class AgentOrchestrator:
             return raw
         resolved: List[str] = []
         for p in raw:
-            po = Path(p)
-            if not po.is_absolute():
-                po = (self.upload_dir / po).resolve()
-            else:
-                po = po.resolve()
-            resolved.append(str(po))
+            praw = normalize_duplicate_tail_filename(str(p).strip())
+            resolved.append(resolve_upload_path_for_container(praw, str(self.upload_dir)))
         kept = set(self._strip_replaced_archive_paths_static(resolved))
         return [orig for orig, r in zip(raw, resolved) if r in kept]
 
@@ -2516,9 +2510,15 @@ class AgentOrchestrator:
                 path_for_inspect = file_path
                 # 🔥 Spatial 单文件：若路径为 tissue_positions_list.csv 或含 spatial，按目录体检以得到 real_data_path
                 if len(files) == 1:
-                    _p = Path(file_path)
-                    if not _p.is_absolute():
-                        _p = (self.upload_dir / _p).resolve()
+                    _sr = resolve_real_path(
+                        normalize_duplicate_tail_filename(str(file_path).strip()),
+                        str(self.upload_dir),
+                    )
+                    _p = (
+                        Path(_sr.web_absolute_path)
+                        if (_sr.kind == "web" and _sr.web_absolute_path)
+                        else Path(file_path)
+                    )
                     if _p.is_file() and (
                         _p.name == "tissue_positions_list.csv"
                         or "tissue_positions" in _p.name.lower()
@@ -2545,11 +2545,9 @@ class AgentOrchestrator:
                         p = f.get("path") or f.get("file_path") or f.get("name") if isinstance(f, dict) else f
                         if not p:
                             continue
-                        p = Path(p)
-                        if not p.is_absolute():
-                            p = (self.upload_dir / p).resolve()
-                        else:
-                            p = p.resolve()
+                        praw = normalize_duplicate_tail_filename(str(p).strip())
+                        s = resolve_upload_path_for_container(praw, str(self.upload_dir))
+                        p = Path(s)
                         if p.exists():
                             resolved_paths.append(p)
                     if len(resolved_paths) > 1:
@@ -2610,11 +2608,12 @@ class AgentOrchestrator:
                             chosen_reason = "unique_paths[0]"
 
                         if chosen_raw:
-                            p_ins = Path(chosen_raw)
-                            if not p_ins.is_absolute():
-                                p_ins = (self.upload_dir / p_ins).resolve()
-                            else:
-                                p_ins = p_ins.resolve()
+                            p_ins = Path(
+                                resolve_upload_path_for_container(
+                                    normalize_duplicate_tail_filename(str(chosen_raw).strip()),
+                                    str(self.upload_dir),
+                                )
+                            )
                             if p_ins.exists():
                                 try:
                                     from .file_handlers.structure_normalizer import normalize_session_directory
@@ -2637,11 +2636,12 @@ class AgentOrchestrator:
                                     "⚠️ [Orchestrator] 多文件体检路径不存在，回退 unique_paths[0]: %s",
                                     chosen_raw,
                                 )
-                                fb = Path(unique_paths[0])
-                                if not fb.is_absolute():
-                                    fb = (self.upload_dir / fb).resolve()
-                                else:
-                                    fb = fb.resolve()
+                                fb = Path(
+                                    resolve_upload_path_for_container(
+                                        normalize_duplicate_tail_filename(str(unique_paths[0]).strip()),
+                                        str(self.upload_dir),
+                                    )
+                                )
                                 path_for_inspect = str(fb)
                 
                 # Step 2: Inspect（有文件时必做，快车道与老路均不可跳过）
@@ -2658,10 +2658,16 @@ class AgentOrchestrator:
                             from .security_config import get_signing_public_key
                             public_key_b64 = get_signing_public_key()
                             if public_key_b64:
-                                path_for_verify = Path(file_path)
-                                if not path_for_verify.is_absolute():
-                                    path_for_verify = (self.upload_dir / path_for_verify).resolve()
-                                if path_for_verify.is_file():
+                                _vr = resolve_real_path(
+                                    normalize_duplicate_tail_filename(str(file_path).strip()),
+                                    str(self.upload_dir),
+                                )
+                                path_for_verify = (
+                                    Path(_vr.web_absolute_path)
+                                    if (_vr.kind == "web" and _vr.web_absolute_path)
+                                    else None
+                                )
+                                if path_for_verify is not None and path_for_verify.is_file():
                                     sig_path = Path(str(path_for_verify) + ".sig")
                                     if sig_path.exists():
                                         if not verify_file_signature(path_for_verify, public_key_b64):

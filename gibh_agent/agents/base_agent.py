@@ -328,35 +328,32 @@ class BaseAgent(ABC):
         """
         import os
         from pathlib import Path
-        
-        # 获取上传目录（与 server.py 保持一致）
-        upload_dir = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
-        
+
+        from ..utils.path_resolver import (
+            normalize_duplicate_tail_filename,
+            resolve_real_path,
+            resolve_upload_path_for_container,
+        )
+
+        upload_root = os.getenv("UPLOAD_DIR", "/app/uploads")
+
         paths = []
         for file_info in uploaded_files:
             if isinstance(file_info, dict):
                 path = file_info.get("path") or file_info.get("name") or file_info.get("file_path") or file_info.get("file_id")
             else:
                 path = getattr(file_info, "path", None) or getattr(file_info, "name", None) or getattr(file_info, "file_path", None) or getattr(file_info, "file_id", None)
-            
+
             if not path:
                 continue
-            
-            # 🔥 修复：转换为绝对路径
-            path_obj = Path(path)
-            
-            # 如果已经是绝对路径，直接使用
-            if path_obj.is_absolute():
-                absolute_path = str(path_obj.resolve())
-            else:
-                # 如果是相对路径，拼接 UPLOAD_DIR
-                absolute_path = str((upload_dir / path_obj).resolve())
-            
-            # 验证路径是否存在（如果不存在，记录警告但继续处理，让调用方处理错误）
-            if not os.path.exists(absolute_path):
+
+            raw = normalize_duplicate_tail_filename(str(path).strip())
+            resolved = resolve_real_path(raw, upload_root)
+            absolute_path = resolve_upload_path_for_container(raw, upload_root)
+
+            if resolved.kind == "web" and not os.path.exists(absolute_path):
                 logger.warning(f"⚠️ 文件路径不存在: {absolute_path} (原始路径: {path})")
-                # 仍然添加到列表，让调用方处理（可能文件稍后会被创建）
-            
+
             paths.append(absolute_path)
         
         return paths

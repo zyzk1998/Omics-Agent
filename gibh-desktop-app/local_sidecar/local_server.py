@@ -1,12 +1,14 @@
+import asyncio
 import logging
 import os
 import platform
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
+import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -39,6 +41,15 @@ class ReadFileRequest(BaseModel):
 class WriteFileRequest(BaseModel):
     file_path: str
     content: str
+
+
+class UploadToCloudRequest(BaseModel):
+    """由 Sidecar 从用户磁盘读取并 multipart 转发至云端 /api/upload。"""
+
+    local_file_path: str
+    upload_base_url: str
+    authorization: Optional[str] = None
+    x_guest_uuid: Optional[str] = None
 
 
 _workspace_context: Dict[str, Any] = {}
@@ -162,6 +173,116 @@ async def workspace_tree() -> Dict[str, Any]:
 @app.get("/api/workspace/list")
 async def workspace_list() -> Dict[str, Any]:
     return await workspace_tree()
+
+
+@app.get("/api/tools/check_file")
+async def check_file_tool(path: str = Query(..., description="主机侧绝对路径")) -> Dict[str, Any]:
+    """供服务端 Docker 隔空校验本地文件/目录是否存在（勿与 UPLOAD_DIR 拼接）。"""
+    raw_path = str(path or "").strip()
+    if not raw_path:
+        raise HTTPException(status_code=400, detail="path 不能为空")
+    target = Path(raw_path).expanduser()
+    try:
+        target = target.resolve()
+    except (OSError, ValueError):
+        pass
+    exists = target.exists()
+    size_bytes: Optional[int] = None
+    if exists and target.is_file():
+        try:
+            size_bytes = int(target.stat().st_size)
+        except OSError:
+            size_bytes = None
+    return {
+        "status": "success",
+        "exists": bool(exists),
+        "is_file": target.is_file() if exists else False,
+        "is_dir": target.is_dir() if exists else False,
+        "path": str(target),
+        "size_bytes": size_bytes,
+    }
+
+
+def _primary_path_from_upload_json(data: Dict[str, Any]) -> str:
+    fps = data.get("file_paths")
+    if isinstance(fps, list) and fps:
+        return str(fps[0])
+    files = data.get("files")
+    if isinstance(files, list) and files:
+        fp = files[0].get("file_path") if isinstance(files[0], dict) else None
+        if fp:
+            return str(fp)
+    return ""
+
+
+@app.post("/api/tools/upload_to_cloud")
+async def upload_to_cloud(payload: UploadToCloudRequest) -> Dict[str, Any]:
+    """
+    将本地文件以 multipart/form-data 转发到宿主云端 POST /api/upload（字段名 files），
+    绕过浏览器对大文件与路径的限制。
+    """
+    raw = str(payload.local_file_path or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="local_file_path 不能为空")
+    target = Path(raw).expanduser()
+    try:
+        target = target.resolve()
+    except (OSError, ValueError):
+        pass
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=400, detail=f"本地文件不存在或不是文件: {target}")
+
+    base = str(payload.upload_base_url or "").strip().rstrip("/")
+    if not base.startswith("http://") and not base.startswith("https://"):
+        raise HTTPException(status_code=400, detail="upload_base_url 无效")
+
+    upload_url = f"{base}/api/upload"
+    headers: Dict[str, str] = {}
+    if payload.authorization:
+        headers["Authorization"] = payload.authorization.strip()
+    if payload.x_guest_uuid:
+        headers["X-Guest-UUID"] = payload.x_guest_uuid.strip()
+
+    timeout = httpx.Timeout(connect=30.0, read=3600.0, write=3600.0, pool=30.0)
+
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        with target.open("rb") as fp:
+            files = {"files": (target.name, fp, "application/octet-stream")}
+            resp = await client.post(upload_url, files=files, headers=headers)
+
+    if resp.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail=f"云端上传失败 HTTP {resp.status_code}: {resp.text[:800]}",
+        )
+
+    try:
+        data = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="云端返回非 JSON")
+
+    cloud_path = _primary_path_from_upload_json(data if isinstance(data, dict) else {})
+    if not cloud_path:
+        raise HTTPException(status_code=502, detail="无法从上传响应解析 file_path")
+
+    return {
+        "status": "success",
+        "cloud_path": cloud_path,
+        "raw": data,
+    }
+
+
+@app.get("/api/tools/check_env")
+async def check_env() -> Dict[str, Any]:
+    """占位：后续可检测本机 Python/conda。当前固定无环境以触发沙盒流程。"""
+    return {"has_env": False}
+
+
+@app.post("/api/tools/install_sandbox")
+async def install_sandbox() -> Dict[str, Any]:
+    """本地沙盒安装存根。"""
+    await asyncio.sleep(1.2)
+    return {"status": "success", "message": "轻量级计算沙盒已配置完成（模拟）"}
 
 
 @app.post("/api/tools/read_file")

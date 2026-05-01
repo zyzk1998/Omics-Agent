@@ -3,6 +3,9 @@
  * 自动更新：electron-updater 的 generic 根地址内嵌自 package.json → build.publish[0].url。
  * 发版前请将该行中的 YOUR_SERVER_URL 换成公网可解析的域名或 IP（勿提交真实内网段入公开仓库时遵守团队 Git 规范）。
  * 也可在环境变量中设置 OMICS_AUTO_UPDATE_BASE_URL（指向 …/downloads/）或 OMICS_AGENT_WEB_URL（将自动追加 /downloads/），优先级高于内嵌 URL。
+ *
+ * 本地大文件/附件分流：业务逻辑在打包的 Web UI（services/nginx/html/index.html）的 sendMessage 前闸
+ * `runLocalAttachmentSmartGate` + Sidecar `POST /api/tools/upload_to_cloud`；此处无重复实现。
  */
 
 const path = require('path');
