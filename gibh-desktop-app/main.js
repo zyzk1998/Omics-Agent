@@ -545,6 +545,20 @@ function createMainWindow() {
     win.webContents.openDevTools({ mode: 'detach' });
   }
 
+  /** 供渲染进程 localSidecarUrl() 使用；index.html 每次调用 getLocalSidecarBase() 读取，不在脚本顶层写死一次。 */
+  win.webContents.on('did-finish-load', () => {
+    try {
+      const sidecarBase = String(process.env.OMICS_SIDECAR_URL || 'http://127.0.0.1:8019')
+        .trim()
+        .replace(/\/+$/, '');
+      win.webContents.executeJavaScript(
+        `try{window.OMICS_SIDECAR_BASE_URL=${JSON.stringify(sidecarBase)};}catch(_){}`
+      );
+    } catch (e) {
+      console.warn('[Omics Agent] inject OMICS_SIDECAR_BASE_URL failed:', e && e.message);
+    }
+  });
+
   win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame) return;
     const failed = String(validatedURL || '');

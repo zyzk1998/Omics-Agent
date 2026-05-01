@@ -52,14 +52,21 @@
 
             <div class="changelog-history">
                 <div style="margin-bottom: 1rem;">
-                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.13.2（当前推荐）</div>
+                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.13.3（当前推荐）</div>
                     <ul class="changelog">
-                        <li><strong>【V0.13.2 · 路径与本地数据分流】</strong></li>
-                        <li>后端：三态路径解析（Web/Local/HPC），修复 Windows 盘符路径被误拼到 <code>/app/uploads</code> 的问题；本地存在性可经 Sidecar 隔空校验。</li>
-                        <li>Sidecar：大文件经 <code>httpx</code> 从本机直传云端 <code>/api/upload</code>；<code>check_file</code> 返回 <code>size_bytes</code>；新增 <code>check_env</code>、<code>install_sandbox</code> 及沙盒配置弹窗流程。</li>
-                        <li>发送对话前：本地附件 &lt;200MB 静默同步为云端路径；≥200MB 或目录时引导本地沙盒（可恢复挂起的发送）。</li>
+                        <li><strong>【V0.13.3 · check_file 对接与兼容】</strong></li>
+                        <li>Sidecar 增加 <code>POST /api/tools/check_file</code>（JSON 传 path）；前端对称支持；旧 Sidecar 仅支持 GET 时自动回退 GET+<code>encodeURIComponent</code>。</li>
+                        <li>本地闸门称重逻辑兼容重启后旧二进制，无需强制升级即可恢复；仍建议升级以获得 POST 路径与最新 Sidecar。</li>
                     </ul>
                 </div>
+
+                <details>
+                    <summary>V0.13.2</summary>
+                    <ul class="changelog">
+                        <li><strong>【V0.13.2 · 路径与本地数据分流】</strong></li>
+                        <li>三态路径解析、Sidecar 上传云端、沙盒弹窗与 &lt;200MB 静默同步等（详见上一版说明）。</li>
+                    </ul>
+                </details>
 
                 <details>
                     <summary>V0.13.1</summary>
@@ -168,11 +175,11 @@
             var verLine = document.getElementById('ver-line');
 
             var staticFallback = {
-                version: '0.13.2',
-                displayVersion: 'V0.13.2',
+                version: '0.13.3',
+                displayVersion: 'V0.13.3',
                 productName: 'Omics Agent',
-                winSetupFile: 'Omics Agent Setup 0.13.2.exe',
-                linuxAppImageFile: 'Omics Agent-0.13.2.AppImage'
+                winSetupFile: 'Omics Agent Setup 0.13.3.exe',
+                linuxAppImageFile: 'Omics Agent-0.13.3.AppImage'
             };
 
             function setVersion(meta) {

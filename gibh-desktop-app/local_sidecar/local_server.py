@@ -52,6 +52,12 @@ class UploadToCloudRequest(BaseModel):
     x_guest_uuid: Optional[str] = None
 
 
+class CheckFileRequest(BaseModel):
+    """POST /api/tools/check_file 使用 JSON 传递路径，避免 GET query 对 Windows 反斜杠等字符的编码坑。"""
+
+    path: str
+
+
 _workspace_context: Dict[str, Any] = {}
 _SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".mypy_cache", ".pytest_cache"}
 _MAX_DEPTH = 6
@@ -175,13 +181,12 @@ async def workspace_list() -> Dict[str, Any]:
     return await workspace_tree()
 
 
-@app.get("/api/tools/check_file")
-async def check_file_tool(path: str = Query(..., description="主机侧绝对路径")) -> Dict[str, Any]:
-    """供服务端 Docker 隔空校验本地文件/目录是否存在（勿与 UPLOAD_DIR 拼接）。"""
-    raw_path = str(path or "").strip()
-    if not raw_path:
+def _check_file_result(raw_path: str) -> Dict[str, Any]:
+    """供服务端 Docker / 前端称重：本地文件/目录是否存在（勿与 UPLOAD_DIR 拼接）。"""
+    path_in = str(raw_path or "").strip()
+    if not path_in:
         raise HTTPException(status_code=400, detail="path 不能为空")
-    target = Path(raw_path).expanduser()
+    target = Path(path_in).expanduser()
     try:
         target = target.resolve()
     except (OSError, ValueError):
@@ -201,6 +206,17 @@ async def check_file_tool(path: str = Query(..., description="主机侧绝对路
         "path": str(target),
         "size_bytes": size_bytes,
     }
+
+
+@app.get("/api/tools/check_file")
+async def check_file_tool_get(path: str = Query(..., description="主机侧绝对路径")) -> Dict[str, Any]:
+    return _check_file_result(path)
+
+
+@app.post("/api/tools/check_file")
+async def check_file_tool_post(payload: CheckFileRequest) -> Dict[str, Any]:
+    """推荐：JSON body 传 path，避免 GET 查询串破坏含 \\、#、& 的 Windows 路径。"""
+    return _check_file_result(payload.path)
 
 
 def _primary_path_from_upload_json(data: Dict[str, Any]) -> str:

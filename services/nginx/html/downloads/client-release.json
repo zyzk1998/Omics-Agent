@@ -1,8 +1,8 @@
 {
-  "version": "0.13.2",
-  "displayVersion": "V0.13.2",
+  "version": "0.13.3",
+  "displayVersion": "V0.13.3",
   "productName": "Omics Agent",
-  "winSetupFile": "Omics Agent Setup 0.13.2.exe",
-  "linuxAppImageFile": "Omics Agent-0.13.2.AppImage",
-  "updatedAt": "2026-05-01T13:54:57.816Z"
+  "winSetupFile": "Omics Agent Setup 0.13.3.exe",
+  "linuxAppImageFile": "Omics Agent-0.13.3.AppImage",
+  "updatedAt": "2026-05-01T14:20:33.653Z"
 }
