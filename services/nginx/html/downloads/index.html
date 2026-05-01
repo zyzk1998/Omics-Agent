@@ -52,13 +52,21 @@
 
             <div class="changelog-history">
                 <div style="margin-bottom: 1rem;">
-                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.13.3（当前推荐）</div>
+                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.13.4（当前推荐）</div>
                     <ul class="changelog">
-                        <li><strong>【V0.13.3 · check_file 对接与兼容】</strong></li>
-                        <li>Sidecar 增加 <code>POST /api/tools/check_file</code>（JSON 传 path）；前端对称支持；旧 Sidecar 仅支持 GET 时自动回退 GET+<code>encodeURIComponent</code>。</li>
-                        <li>本地闸门称重逻辑兼容重启后旧二进制，无需强制升级即可恢复；仍建议升级以获得 POST 路径与最新 Sidecar。</li>
+                        <li><strong>【V0.13.4 · Sidecar 与闸门闭环】</strong></li>
+                        <li>启动时轮询 <code>/health</code> 直至就绪，并用 <code>/openapi.json</code> 校验是否存在 <code>/api/tools/check_file</code>；缺失则提示端口可能被旧版 Sidecar 占用。</li>
+                        <li>安装包内置按当前仓库构建的 PyInstaller Sidecar（含 GET/POST check_file、upload_to_cloud 等）；请务必结束旧进程后再启动，避免 8019 被旧二进制占用。</li>
                     </ul>
                 </div>
+
+                <details>
+                    <summary>V0.13.3</summary>
+                    <ul class="changelog">
+                        <li><strong>【V0.13.3 · check_file 对接与兼容】</strong></li>
+                        <li>POST/GET 双通道与前端 URL 绝对化等（详见上一版说明）。</li>
+                    </ul>
+                </details>
 
                 <details>
                     <summary>V0.13.2</summary>
@@ -175,11 +183,11 @@
             var verLine = document.getElementById('ver-line');
 
             var staticFallback = {
-                version: '0.13.3',
-                displayVersion: 'V0.13.3',
+                version: '0.13.4',
+                displayVersion: 'V0.13.4',
                 productName: 'Omics Agent',
-                winSetupFile: 'Omics Agent Setup 0.13.3.exe',
-                linuxAppImageFile: 'Omics Agent-0.13.3.AppImage'
+                winSetupFile: 'Omics Agent Setup 0.13.4.exe',
+                linuxAppImageFile: 'Omics Agent-0.13.4.AppImage'
             };
 
             function setVersion(meta) {
