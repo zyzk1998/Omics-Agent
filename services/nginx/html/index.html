@@ -923,15 +923,15 @@
                 return def;
             }
             function localSidecarUrl(pathname) {
-                var base = getLocalSidecarBase();
+                var base = getLocalSidecarBase().replace(/\/+$/, '');
+                if (!/^https?:\/\//i.test(base)) base = 'http://127.0.0.1:8019';
+                var p = String(pathname || '');
+                if (!p.startsWith('/')) p = '/' + p;
                 try {
-                    if (!/^https?:\/\//i.test(base)) base = 'http://127.0.0.1:8019';
+                    return new URL(p, base).href;
                 } catch (e) {
-                    base = 'http://127.0.0.1:8019';
+                    return 'http://127.0.0.1:8019' + p;
                 }
-                var path = String(pathname || '');
-                if (!path.startsWith('/')) path = '/' + path;
-                return base + path;
             }
 
             /** 云端 API 根（与当前页面同源；Electron 打包页通常为 PROD_SERVER_URL） */
@@ -991,21 +991,27 @@
                     try { return JSON.stringify(d); } catch (e) { return String(d); }
                 }
                 /**
-                 * POST(JSON path) 优先；任意非 2xx 再试 GET（URLSearchParams 编码 path），兼容仅实现 GET 的旧 Sidecar 及 POST 415 等。
+                 * 优先 GET（与多数已部署 Sidecar 一致）；失败再 POST(JSON)。
+                 * 全程用 URL/searchParams 拼绝对地址，禁止手写 query，避免相对 URL 误打到远程 origin 返回 404。
                  */
                 async function sidecarFetchCheckFile(pathStr) {
-                    var ep = localSidecarUrl('/api/tools/check_file');
-                    var q = new URLSearchParams();
-                    q.set('path', pathStr);
-                    var getUrl = ep + '?' + q.toString();
-                    var postR = await fetch(ep, {
+                    var base = getLocalSidecarBase().replace(/\/+$/, '');
+                    if (!/^https?:\/\//i.test(base)) base = 'http://127.0.0.1:8019';
+                    var getU = new URL('/api/tools/check_file', base);
+                    getU.searchParams.set('path', pathStr);
+                    var getR = await fetch(getU.href, { method: 'GET', cache: 'no-store' });
+                    if (getR.ok) return getR;
+                    var postU = new URL('/api/tools/check_file', base);
+                    var postR = await fetch(postU.href, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ path: pathStr })
+                        body: JSON.stringify({ path: pathStr }),
+                        cache: 'no-store'
                     });
-                    if (postR.ok) return postR;
-                    var getR = await fetch(getUrl, { method: 'GET' });
-                    return getR;
+                    if (!postR.ok) {
+                        console.warn('[LocalGate] check_file both failed', 'GET', getR.status, getU.href, 'POST', postR.status, postU.href);
+                    }
+                    return postR;
                 }
                 var stats = [];
                 for (var i = 0; i < locals.length; i++) {
