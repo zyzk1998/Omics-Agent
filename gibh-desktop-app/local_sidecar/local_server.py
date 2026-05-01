@@ -2,6 +2,8 @@ import asyncio
 import logging
 import os
 import platform
+import threading
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -128,6 +130,18 @@ def _build_tree(root: Path, depth: int = 0) -> List[Dict[str, Any]]:
 @app.get("/health")
 async def health() -> Dict[str, Any]:
     return {"status": "ok", "service": "omics-local-sidecar", "platform": platform.system()}
+
+
+@app.post("/api/shutdown")
+async def shutdown_sidecar() -> Dict[str, Any]:
+    """Electron 退出前调用：短暂返回响应后 os._exit，释放 8019，避免残留僵尸 Sidecar。"""
+
+    def _exit_soon() -> None:
+        time.sleep(0.08)
+        os._exit(0)
+
+    threading.Thread(target=_exit_soon, daemon=True).start()
+    return {"status": "ok", "message": "terminating"}
 
 
 @app.post("/api/workspace/init")

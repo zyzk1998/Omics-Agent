@@ -11,7 +11,7 @@
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 
 (function loadProdEnvFiles() {
   try {
@@ -507,59 +507,46 @@ async function waitForSidecarReady(timeoutMs) {
   return false;
 }
 
-/**
- * 通过 OpenAPI 校验「与本仓库前端一致的」路由是否存在于当前 8019 进程。
- * 若端口被旧版 Sidecar 占用，会出现 /health 正常但无 /api/tools/check_file。
- */
-function fetchHttpJson(url, timeoutMs = 4000) {
-  return new Promise((resolve) => {
-    const req = http.get(url, { timeout: timeoutMs }, (res) => {
-      let data = '';
-      res.on('data', (c) => {
-        data += String(c);
-      });
-      res.on('end', () => {
-        if (res.statusCode !== 200) return resolve(null);
-        try {
-          resolve(JSON.parse(data));
-        } catch (_e) {
-          resolve(null);
-        }
-      });
-    });
-    req.on('error', () => resolve(null));
-    req.on('timeout', () => {
-      try {
-        req.destroy();
-      } catch (_e) {}
-      resolve(null);
-    });
-  });
-}
-
-async function probeSidecarHasCheckFileRoute() {
-  const doc = await fetchHttpJson('http://127.0.0.1:8019/openapi.json');
-  if (!doc || typeof doc.paths !== 'object') return false;
-  return Boolean(doc.paths['/api/tools/check_file']);
-}
-
-function warnStaleSidecarCapabilityOnce() {
-  if (globalThis.__OMICS_SIDECAR_STALE_WARNED__) return;
-  globalThis.__OMICS_SIDECAR_STALE_WARNED__ = true;
+/** 退出前同步请求 Sidecar 自毁（优先 curl，避免 async before-quit 未被 Electron 等待） */
+function requestSidecarShutdownBestEffortSync() {
   try {
-    dialog.showMessageBoxSync({
-      type: 'warning',
-      buttons: ['确定'],
-      defaultId: 0,
-      title: '本地 Sidecar 能力不足',
-      message:
-        '检测到 127.0.0.1:8019 上的服务缺少「/api/tools/check_file」接口，本地附件称重与同步将无法使用。',
-      detail:
-        '常见原因：该端口被旧版 Omics Agent / local_sidecar 占用，与本安装包内置 API 不一致。\n\n建议：\n1）在任务管理器中结束所有 Omics Agent、local_sidecar、python 等相关进程后，仅启动本客户端；\n2）从官网下载页安装最新版本（内含新版 Sidecar 二进制）。\n\n若仍失败，请在 PowerShell 执行：curl.exe http://127.0.0.1:8019/openapi.json | findstr check_file',
-    });
-  } catch (e) {
-    console.warn('[Omics Agent] Sidecar 能力不足提示框失败:', e && e.message);
+    if (process.platform === 'win32') {
+      execSync('curl.exe -s -m 2 -X POST http://127.0.0.1:8019/api/shutdown', {
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+    } else {
+      execSync('curl -s -m 2 -X POST http://127.0.0.1:8019/api/shutdown', { stdio: 'ignore' });
+    }
+  } catch (_) {}
+}
+
+/**
+ * 硬核兜底：杀掉本客户端 spawn 的 Sidecar 进程树（Windows taskkill /T /F；类 Unix kill -9）。
+ * 解决 Electron 退出后 Python 子进程残留导致旧 Sidecar 长期占用 8019。
+ */
+function forceKillSidecarProcessTree() {
+  if (!localSidecarProcess || localSidecarProcess.killed || !localSidecarProcess.pid) {
+    localSidecarProcess = null;
+    return;
   }
+  const pid = localSidecarProcess.pid;
+  try {
+    if (process.platform === 'win32') {
+      execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore', windowsHide: true });
+    } else {
+      try {
+        execSync(`kill -9 ${pid}`, { stdio: 'ignore' });
+      } catch (_e) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch (__e) {}
+      }
+    }
+  } catch (_err) {
+    // 进程已退出等情况忽略
+  }
+  localSidecarProcess = null;
 }
 
 async function startLocalSidecarIfNeeded() {
@@ -720,11 +707,6 @@ if (gotSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     await startLocalSidecarIfNeeded();
-    const hasCheckFile = await probeSidecarHasCheckFileRoute();
-    if (!hasCheckFile) {
-      console.warn('[Omics Agent] openapi 未包含 /api/tools/check_file，本地闸门可能失败');
-      warnStaleSidecarCapabilityOnce();
-    }
     hookAutoUpdaterEventsOnce();
     createMainWindow();
     scheduleAutoUpdateCheck();
@@ -741,6 +723,8 @@ if (gotSingleInstanceLock) {
   });
 
   app.on('will-quit', () => {
+    requestSidecarShutdownBestEffortSync();
+    forceKillSidecarProcessTree();
     stopLocalSidecar();
   });
 }

@@ -8466,6 +8466,12 @@
                     }
                     filesToSend = _deduped;
                 }
+                function pathLooksLikeCloudOmicsStorage(p) {
+                    var s = String(p || '').replace(/\\/g, '/').trim();
+                    if (!s) return false;
+                    if (/^https?:\/\//i.test(s)) return true;
+                    return s.indexOf('/app/uploads') === 0 || s.indexOf('/app/results') === 0;
+                }
                 var attachmentPaths = (Array.isArray(window.currentAttachments) ? window.currentAttachments : []).map(function(a) {
                     return String((a && a.path) || '').trim();
                 }).filter(function(p) { return !!p; });
@@ -8496,12 +8502,13 @@
                 var apiHistoryPayload = typeof buildApiHistoryFromChatHistory === 'function' ? buildApiHistoryFromChatHistory(chatHistory, 8) : (chatHistory || []);
                 var _modelSelEl = document.getElementById('modelSelect');
                 var _pickedModel = (_modelSelEl && _modelSelEl.value) ? _modelSelEl.value : (typeof getSelectedModel === 'function' ? getSelectedModel() : 'deepseek-v4-pro');
+                var localFilesPayload = attachmentPaths.filter(function(p) { return !pathLooksLikeCloudOmicsStorage(p); });
                 const payload = { 
                     message: finalMessage, 
                     history: apiHistoryPayload, 
                     selected_tool: selectedTool, 
                     uploaded_files: filesToSend, // 🔥 CRITICAL: 使用 filesToSend（优先级：filesOverride > 全局 uploadedFiles）
-                    local_files: attachmentPaths,
+                    local_files: localFilesPayload,
                     tool_params: toolParams,
                     workflow_data: workflowData,
                     use_history_files: useHistoryFiles,
