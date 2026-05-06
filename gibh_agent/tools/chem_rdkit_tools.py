@@ -674,3 +674,42 @@ def chem_tanimoto_similarity(
         smiles2_text=smiles2_text,
         timeout_seconds=timeout_seconds,
     )
+
+
+def _ensure_chem_gi_absorption_registered() -> None:
+    """
+    「胃肠道吸收」工具实现在独立模块 ``chem_gi_absorption_tools.py``。
+    在本模块末尾强制 import，确保任意**仅显式加载 chem_rdkit_tools**、而未完整遍历
+    ``gibh_agent.tools`` 包的进程仍能执行 ``@registry.register(name=\"chem_gi_absorption\")``，
+    避免 SkillAgent 报「未在 ToolRegistry 中找到工具」。
+    """
+    try:
+        import importlib
+
+        importlib.import_module("gibh_agent.tools.chem_gi_absorption_tools")
+    except Exception as e:
+        logger.warning(
+            "chem_gi_absorption_tools 侧车注册失败（GI 技能快车道将不可用）: %s",
+            e,
+            exc_info=True,
+        )
+
+
+_ensure_chem_gi_absorption_registered()
+
+
+def _ensure_chem_misc_tools_registered() -> None:
+    """molmass / 元素查询 / 分子图 / Open Babel 实现在 ``chem_misc_tools.py``；侧车注册以防仅加载本模块。"""
+    try:
+        import importlib
+
+        importlib.import_module("gibh_agent.tools.chem_misc_tools")
+    except Exception as e:
+        logger.warning(
+            "chem_misc_tools 侧车注册失败（扩展化学原子工具将不可用）: %s",
+            e,
+            exc_info=True,
+        )
+
+
+_ensure_chem_misc_tools_registered()

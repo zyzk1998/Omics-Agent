@@ -69,6 +69,41 @@ PATCH_ROWS: list[dict[str, str]] = [
         "description": "平均分子量与精确分子量（RDKit Descriptors）。",
         "prompt_template": CHEM_PROMPTS_BY_SKILL_NAME["分子量计算工具"],
     },
+    {
+        "name": "分子胃肠道吸收能力评估工具",
+        "main_category": "化学",
+        "sub_category": "预测与建模",
+        "description": "基于 TPSA/logP 经验阈值估算胃肠道被动吸收倾向（非 PBPK）。",
+        "prompt_template": CHEM_PROMPTS_BY_SKILL_NAME["分子胃肠道吸收能力评估工具"],
+    },
+    {
+        "name": "分子量计算",
+        "main_category": "化学",
+        "sub_category": "数据分析",
+        "description": "按化学式（molmass）计算分子量与元素组成；可选同位素谱；非 SMILES。",
+        "prompt_template": CHEM_PROMPTS_BY_SKILL_NAME["分子量计算"],
+    },
+    {
+        "name": "化学元素查询",
+        "main_category": "化学",
+        "sub_category": "信息检索",
+        "description": "周期表查询：符号/中英文名/原子序数 → 原子量与属性。",
+        "prompt_template": CHEM_PROMPTS_BY_SKILL_NAME["化学元素查询"],
+    },
+    {
+        "name": "分子图像生成工具",
+        "main_category": "化学",
+        "sub_category": "数据可视化",
+        "description": "SMILES → 2D 结构 PNG（RDKit Draw），右栏挂载结果。",
+        "prompt_template": CHEM_PROMPTS_BY_SKILL_NAME["分子图像生成工具"],
+    },
+    {
+        "name": "Open Babel",
+        "main_category": "化学",
+        "sub_category": "数据处理",
+        "description": "obabel 格式转换、3D、性质计算；文件或内联输入。",
+        "prompt_template": CHEM_PROMPTS_BY_SKILL_NAME["Open Babel"],
+    },
 ]
 
 INSERT_IF_MISSING = [

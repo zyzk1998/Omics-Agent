@@ -362,4 +362,5 @@ async def write_file_tool(payload: WriteFileRequest) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8019, log_level="info")
+    _port = int(os.getenv("OMICS_SIDECAR_PORT", "8019"))
+    uvicorn.run(app, host="127.0.0.1", port=_port, log_level="info")

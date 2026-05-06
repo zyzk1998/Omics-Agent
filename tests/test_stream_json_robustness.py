@@ -75,23 +75,17 @@ async def _async_json_fragmentation_stress() -> None:
     rng = random.Random(42)
     stream = _micro_chunk_stream(full_text, rng, low=1, high=2)
 
-    thoughts: List[str] = []
     parsed: Optional[Any] = None
     errors: List[Any] = []
 
     async for ev, data in stream_and_extract_json(stream):
-        if ev == "thought":
-            c = (data or {}).get("content") if isinstance(data, dict) else ""
-            thoughts.append(str(c))
-        elif ev == "json":
+        if ev == "json":
             parsed = data
         elif ev == "json_error":
             errors.append(data)
 
     assert not errors, f"不应产生 json_error，实际: {errors}"
     assert parsed == complex_obj, "解析结果必须与原始对象一致"
-    merged_thought = "".join(thoughts)
-    assert thought_inner in merged_thought or len(merged_thought) > 0, "应透出思考片段"
 
 
 async def _async_rna_generate_plan_structure_offline() -> None:

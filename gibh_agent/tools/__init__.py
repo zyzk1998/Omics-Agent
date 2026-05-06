@@ -99,6 +99,8 @@ for _mod in [
     "dynamic_proxy",
     "drt_tool",
     "chem_rdkit_tools",
+    "chem_gi_absorption_tools",
+    "chem_misc_tools",
 ]:
     try:
         importlib.import_module(f".{_mod}", package=__name__)

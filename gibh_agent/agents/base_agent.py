@@ -9,7 +9,7 @@ from openai import AuthenticationError, APIError
 from ..core.llm_client import LLMClient
 from ..core.prompt_manager import PromptManager, DATA_DIAGNOSIS_PROMPT
 from ..core.data_diagnostician import DataDiagnostician
-from ..core.stream_utils import strip_suggestions_from_text
+from ..core.stream_utils import stream_from_llm_chunks, strip_suggestions_from_text
 from ..core.openai_tools import (
     apply_hpc_mcp_tool_policy,
     hpc_chat_system_suffix,
@@ -264,17 +264,13 @@ class BaseAgent(ABC):
         try:
             _llm = self.llm_for_request()
             if stream:
-                # 流式输出：直接传递内容，让前端处理 think 标签
-                # DeepSeek-R1 的 think 过程会以 <think>...</think> 标签形式返回
-                # 也支持旧协议的 <think>...</think> 标签
                 has_yielded = False
                 try:
-                    async for chunk in _llm.astream(messages):
-                        if chunk.choices and chunk.choices[0].delta.content:
-                            content = chunk.choices[0].delta.content
-                            if content:
-                                # 直接传递内容，前端会检测和处理 think 标签（<think> 或 <think>）
-                                yield content
+                    async for evt, data in stream_from_llm_chunks(_llm.astream(messages)):
+                        if evt == "message":
+                            ch = (data.get("content") if isinstance(data, dict) else None) or ""
+                            if ch:
+                                yield ch
                                 has_yielded = True
                 except Exception as stream_error:
                     logger.error(f"❌ 流式响应错误: {stream_error}", exc_info=True)
@@ -288,11 +284,9 @@ class BaseAgent(ABC):
                 # 提取 think 过程和实际内容
                 think_content, actual_content = _llm.extract_think_and_content(completion)
                 
-                # 如果有 think 内容，包装在标签中
                 if think_content:
-                    yield f"<think>{think_content}</think>\n\n{actual_content}"
-                else:
-                    yield actual_content
+                    logger.debug("BaseAgent.chat: 非流式已剥离思考内容，不向调用方回传标签")
+                yield actual_content
         except AuthenticationError as e:
             error_msg = (
                 f"\n\n❌ 认证错误 (Error code: 401 - Invalid token)\n"

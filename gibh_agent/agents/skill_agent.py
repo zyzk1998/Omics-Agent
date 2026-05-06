@@ -22,6 +22,19 @@ from gibh_agent.core.utils import sanitize_for_json
 
 logger = logging.getLogger(__name__)
 
+# 双保险：快车道解析工具名前，确保 GI 等「侧车模块」已完成 @registry.register
+# （与 gibh_agent/tools/chem_rdkit_tools.py 末尾侧车一致；避免部分入口未 import gibh_agent.tools 全包）
+try:
+    import importlib
+
+    importlib.import_module("gibh_agent.tools.chem_gi_absorption_tools")
+    importlib.import_module("gibh_agent.tools.chem_misc_tools")
+except Exception:
+    logger.warning(
+        "chem_gi_absorption_tools / chem_misc_tools 预加载失败（若仅使用其它化学工具可忽略）",
+        exc_info=True,
+    )
+
 # 药物相似性技能（逻辑 ID drug_similarity）：双工具 persona，供填参 LLM 对齐科学叙事
 DRUG_SIM_PERSONA_LIPINSKI = (
     "你是计算化学与成药性（drug-likeness）方向的助理：当前任务为 **Lipinski 五规则** 快筛，"

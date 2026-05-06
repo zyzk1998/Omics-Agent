@@ -62,14 +62,37 @@ function ensureArtifactInDownloads(filename, downloadsDir) {
   return false;
 }
 
+function readYmlSemver(filePath) {
+  try {
+    const t = fs.readFileSync(filePath, 'utf8');
+    const m = t.match(/^version:\s*([\d.]+)\s*$/m);
+    return m ? String(m[1]).trim() : '';
+  } catch (e) {
+    return '';
+  }
+}
+
 /** electron-updater generic：与安装包同目录的 yml 元数据 + 差分 blockmap */
-function copyAutoUpdateMetadataToDownloads(downloadsDir) {
+function copyAutoUpdateMetadataToDownloads(downloadsDir, expectedSemver) {
   const ymlNames = ['latest.yml', 'latest-linux.yml', 'latest-mac.yml'];
   let ymlCount = 0;
   for (const name of ymlNames) {
     const src = path.join(distOutDir, name);
     const dest = path.join(downloadsDir, name);
     if (fs.existsSync(src)) {
+      const yv = readYmlSemver(src);
+      if (expectedSemver && yv && yv !== expectedSemver) {
+        console.warn(
+          '[sync] 跳过复制',
+          name,
+          '：dist-out 内 version=',
+          yv,
+          '与 package.json',
+          expectedSemver,
+          '不一致（请重新 electron-builder 后再 sync，或保留 downloads/ 中已手写的 yml）'
+        );
+        continue;
+      }
       fs.mkdirSync(downloadsDir, { recursive: true });
       fs.copyFileSync(src, dest);
       ymlCount += 1;
@@ -91,6 +114,10 @@ function copyAutoUpdateMetadataToDownloads(downloadsDir) {
   }
   for (const name of entryNames) {
     if (!name.endsWith('.blockmap')) continue;
+    if (expectedSemver && !name.includes(expectedSemver)) {
+      console.warn('[sync] 跳过复制 blockmap（文件名未包含当前版本', expectedSemver, '）', name);
+      continue;
+    }
     const src = path.join(distOutDir, name);
     const dest = path.join(downloadsDir, name);
     try {
@@ -193,5 +220,5 @@ if (fs.existsSync(iconSrc)) {
 
 ensureArtifactInDownloads(effectiveWin, downloadsDir);
 ensureArtifactInDownloads(effectiveLinux, downloadsDir);
-copyAutoUpdateMetadataToDownloads(downloadsDir);
+copyAutoUpdateMetadataToDownloads(downloadsDir, version);
 removeStaleArtifacts(downloadsDir, productName, effectiveWin, effectiveLinux);

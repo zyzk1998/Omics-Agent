@@ -52,8 +52,15 @@ if (!gotSingleInstanceLock) {
 
 let localSidecarProcess = null;
 
+/** 应用正常退出流程中（before-quit / will-quit），忽略 Sidecar 随之退出，避免误报 ErrorBox */
+let isAppQuitting = false;
+
 /** Sidecar 进程 stdout/stderr 环形缓冲上限（字符） */
 const SIDECAR_LOG_CAP = 48000;
+
+/** 与 local_sidecar/local_server.py 中 uvicorn 监听端口一致；loopback 注入绝不可误用 Web/API 端口（如 8018） */
+const SIDECAR_HTTP_PORT = Number.parseInt(String(process.env.OMICS_SIDECAR_PORT || '8019'), 10) || 8019;
+const SIDECAR_LOOPBACK_BASE = `http://127.0.0.1:${SIDECAR_HTTP_PORT}`;
 
 /** 同一启动周期内 Sidecar 致命错误只弹一次原生对话框，避免刷屏 */
 let sidecarFatalDialogShown = false;
@@ -147,6 +154,7 @@ function hookSidecarProcess(child, displayLabel, options) {
   attachStream(child.stderr, 'stderr');
 
   child.on('error', (err) => {
+    if (isAppQuitting) return;
     if (err && err.code === 'ENOENT' && options && typeof options.onENOENT === 'function') {
       skipExitDialog = true;
       console.warn('[Omics Agent] 未找到解释器，尝试下一候选');
@@ -163,6 +171,7 @@ function hookSidecarProcess(child, displayLabel, options) {
   child.on('close', (code, signal) => {
     console.log('[Omics Agent] Local Sidecar 已关闭:', { code, signal });
     if (localSidecarProcess === child) localSidecarProcess = null;
+    if (isAppQuitting) return;
     if (child._omicsIntentionalKill || skipExitDialog) return;
     const abnormal = code !== 0 && code !== null;
     if (!abnormal) return;
@@ -395,6 +404,7 @@ function trySpawnSidecarCandidate(candidates, index, scriptPath, sidecarCwd, fai
 
   const child = spawn(cmd, spawnArgs, {
     cwd: sidecarCwd,
+    env: { ...process.env, OMICS_SIDECAR_PORT: String(SIDECAR_HTTP_PORT) },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
@@ -410,9 +420,42 @@ function trySpawnSidecarCandidate(candidates, index, scriptPath, sidecarCwd, fai
   });
 }
 
+/**
+ * 开发/排障：强制用仓库内 Python 跑 local_server.py（即使已是安装包）。
+ * 例：OMICS_USE_PYTHON_SIDECAR=1 OMICS_PYTHON_SIDECAR_ENTRY=/abs/path/to/local_server.py
+ */
+function resolvePythonSidecarDevEntry() {
+  const fromEnv = process.env.OMICS_PYTHON_SIDECAR_ENTRY && String(process.env.OMICS_PYTHON_SIDECAR_ENTRY).trim();
+  if (fromEnv && fs.existsSync(fromEnv)) {
+    return { scriptPath: fromEnv, sidecarCwd: path.dirname(fromEnv) };
+  }
+  const scriptPath = path.join(__dirname, 'local_sidecar', 'local_server.py');
+  const sidecarCwd = path.join(__dirname, 'local_sidecar');
+  if (fs.existsSync(scriptPath)) return { scriptPath, sidecarCwd };
+  return null;
+}
+
 function startLocalSidecar() {
   if (localSidecarProcess && !localSidecarProcess.killed) return;
   const resourcesDir = app.isPackaged ? process.resourcesPath : __dirname;
+
+  const forcePy =
+    process.env.OMICS_USE_PYTHON_SIDECAR === '1' ||
+    process.env.OMICS_USE_PYTHON_SIDECAR === 'true' ||
+    process.env.OMICS_DEV_PYTHON_SIDECAR === '1';
+  if (forcePy) {
+    const pyEntry = resolvePythonSidecarDevEntry();
+    if (pyEntry) {
+      console.warn(
+        '[Omics Agent] OMICS_USE_PYTHON_SIDECAR：使用 Python 源码 Sidecar（非打包二进制）：',
+        pyEntry.scriptPath
+      );
+      const candidates = getPythonSpawnCandidates();
+      trySpawnSidecarCandidate(candidates, 0, pyEntry.scriptPath, pyEntry.sidecarCwd, []);
+      return;
+    }
+    console.warn('[Omics Agent] 已请求 OMICS_USE_PYTHON_SIDECAR，但未找到 local_server.py，回退默认启动方式');
+  }
 
   if (app.isPackaged) {
     const binaryPath = resolvePackagedSidecarBinary(resourcesDir);
@@ -427,6 +470,7 @@ function startLocalSidecar() {
     console.log('[Omics Agent] Local Sidecar（生产 PyInstaller 二进制）:', binaryPath);
     const child = spawn(binaryPath, [], {
       cwd: sidecarCwd,
+      env: { ...process.env, OMICS_SIDECAR_PORT: String(SIDECAR_HTTP_PORT) },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
@@ -466,7 +510,7 @@ function stopLocalSidecar() {
 function probeExistingSidecarHealth() {
   return new Promise((resolve) => {
     const req = http.get(
-      'http://127.0.0.1:8019/health',
+      `${SIDECAR_LOOPBACK_BASE}/health`,
       { timeout: 1500 },
       (res) => {
         let data = '';
@@ -497,6 +541,33 @@ function probeExistingSidecarHealth() {
   });
 }
 
+/**
+ * FastAPI 对缺少必填 Query 的 GET 返回 422（路由存在）；若进程占用了端口却不是本 Sidecar（或旧二进制无该路由），则为 404。
+ */
+function probeCheckFileRouteRegistered() {
+  return new Promise((resolve) => {
+    const req = http.get(
+      `${SIDECAR_LOOPBACK_BASE}/api/tools/check_file`,
+      { timeout: 1500 },
+      (res) => {
+        res.resume();
+        if (res.statusCode === 404) {
+          resolve(false);
+          return;
+        }
+        resolve(true);
+      }
+    );
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      try {
+        req.destroy();
+      } catch (_e) {}
+      resolve(false);
+    });
+  });
+}
+
 /** 轮询直至 /health 成功或超时（spawn 后需等待 uvicorn 绑定端口） */
 async function waitForSidecarReady(timeoutMs) {
   const deadline = Date.now() + timeoutMs;
@@ -511,12 +582,12 @@ async function waitForSidecarReady(timeoutMs) {
 function requestSidecarShutdownBestEffortSync() {
   try {
     if (process.platform === 'win32') {
-      execSync('curl.exe -s -m 2 -X POST http://127.0.0.1:8019/api/shutdown', {
+      execSync(`curl.exe -s -m 2 -X POST ${SIDECAR_LOOPBACK_BASE}/api/shutdown`, {
         stdio: 'ignore',
         windowsHide: true,
       });
     } else {
-      execSync('curl -s -m 2 -X POST http://127.0.0.1:8019/api/shutdown', { stdio: 'ignore' });
+      execSync(`curl -s -m 2 -X POST ${SIDECAR_LOOPBACK_BASE}/api/shutdown`, { stdio: 'ignore' });
     }
   } catch (_) {}
 }
@@ -549,16 +620,109 @@ function forceKillSidecarProcessTree() {
   localSidecarProcess = null;
 }
 
+/**
+ * 夺回 Sidecar 监听端口：杀掉霸占 PID（覆盖安装后遗留的旧 Sidecar / 其它占位进程）。
+ * 不设「弹窗让用户自行 taskkill」——生产级客户端必须自行清场后再 spawn。
+ * 排查时可设 OMICS_SKIP_PORT_RECLAIM=1 跳过（仅限开发）。
+ */
+function forceReclaimSidecarPortSync() {
+  if (process.env.OMICS_SKIP_PORT_RECLAIM === '1' || process.env.OMICS_SKIP_PORT_RECLAIM === 'true') {
+    console.warn('[Omics Agent] 已跳过 forceReclaimSidecarPortSync（OMICS_SKIP_PORT_RECLAIM）');
+    return;
+  }
+  const port = SIDECAR_HTTP_PORT;
+  try {
+    if (process.platform === 'win32') {
+      try {
+        execSync('taskkill /F /IM local_sidecar.exe /T', { stdio: 'ignore', windowsHide: true });
+      } catch (_e) {}
+      let netOut = '';
+      try {
+        netOut = execSync('netstat -ano', {
+          encoding: 'utf8',
+          windowsHide: true,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+      } catch (_e) {
+        return;
+      }
+      const portNeedle = `:${port}`;
+      const pids = new Set();
+      for (const line of netOut.split(/\r?\n/)) {
+        if (!/LISTENING/i.test(line)) continue;
+        if (!line.includes(portNeedle)) continue;
+        const idx = line.indexOf(portNeedle);
+        const nextCh = line[idx + portNeedle.length];
+        if (nextCh !== undefined && nextCh !== ' ' && nextCh !== '\t') continue;
+        const parts = line.trim().split(/\s+/);
+        const last = parts[parts.length - 1];
+        if (/^\d+$/.test(last)) pids.add(last);
+      }
+      for (const pid of pids) {
+        try {
+          execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore', windowsHide: true });
+        } catch (_e) {}
+      }
+      return;
+    }
+    try {
+      execSync('pkill -9 -f local_sidecar 2>/dev/null || true', { stdio: 'ignore', shell: '/bin/bash' });
+    } catch (_e) {}
+    let pids = [];
+    try {
+      const out = execSync(`lsof -t -iTCP:${port} -sTCP:LISTEN 2>/dev/null`, {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+      });
+      pids = String(out || '')
+        .split(/\s+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    } catch (_e) {}
+    if (!pids.length) {
+      try {
+        const out2 = execSync(`ss -lntp 2>/dev/null | grep ":${port}" || true`, {
+          encoding: 'utf8',
+          shell: '/bin/bash',
+        });
+        const m = String(out2 || '').match(/pid=(\d+)/g);
+        if (m) {
+          for (const x of m) {
+            const mm = x.match(/pid=(\d+)/);
+            if (mm) pids.push(mm[1]);
+          }
+        }
+      } catch (_e) {}
+    }
+    const uniq = [...new Set(pids)];
+    for (const pid of uniq) {
+      try {
+        execSync(`kill -9 ${pid}`, { stdio: 'ignore' });
+      } catch (_e) {}
+    }
+  } catch (e) {
+    console.warn('[Omics Agent] forceReclaimSidecarPortSync:', e && e.message);
+  }
+}
+
 async function startLocalSidecarIfNeeded() {
   if (localSidecarProcess && !localSidecarProcess.killed) {
     await waitForSidecarReady(2500);
     return;
   }
-  const ok = await probeExistingSidecarHealth();
-  if (ok) {
-    console.log('[Omics Agent] 127.0.0.1:8019 已有 Sidecar 健康响应，跳过重复启动');
+  const healthy = await probeExistingSidecarHealth();
+  const routeOk = healthy ? await probeCheckFileRouteRegistered() : false;
+  if (healthy && routeOk) {
+    console.log(`[Omics Agent] ${SIDECAR_LOOPBACK_BASE} 已有兼容 Sidecar（/health + check_file），跳过重复启动`);
     return;
   }
+  if (healthy && !routeOk) {
+    console.warn(`[Omics Agent] 端口 ${SIDECAR_HTTP_PORT} 上服务疑似旧版 Sidecar（缺少 check_file），尝试礼貌 shutdown…`);
+    requestSidecarShutdownBestEffortSync();
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  forceReclaimSidecarPortSync();
+  await new Promise((r) => setTimeout(r, 450));
   startLocalSidecar();
   await waitForSidecarReady(14000);
 }
@@ -601,23 +765,24 @@ function createMainWindow() {
     win.webContents.openDevTools({ mode: 'detach' });
   }
 
-  /** 供渲染进程 localSidecarUrl() 使用；仅允许 127.0.0.1 / localhost，防止 OMICS_SIDECAR_URL 误指远程站导致 check_file 打到 Nginx 404。 */
+  /** 供渲染进程 localSidecarUrl() 使用；仅允许 127.0.0.1 / localhost，且 loopback 强制使用 Sidecar 端口（默认 8019），防止误用 8018 等 Web 端口导致 check_file 打到 Nginx 404。 */
   win.webContents.on('did-finish-load', () => {
     try {
-      const fallback = 'http://127.0.0.1:8019';
+      const fallback = SIDECAR_LOOPBACK_BASE;
       const raw = String(process.env.OMICS_SIDECAR_URL || fallback).trim().replace(/\/+$/, '');
       let sidecarBase = fallback;
       try {
         const withScheme = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
         const u = new URL(withScheme);
         if (u.hostname === '127.0.0.1' || u.hostname === 'localhost') {
-          sidecarBase = /^https?:\/\//i.test(raw) ? raw : `${u.protocol}//${u.host}`;
+          const p = SIDECAR_HTTP_PORT;
+          sidecarBase = `${u.protocol}//${u.hostname}:${p}`;
         }
       } catch (_) {
         sidecarBase = fallback;
       }
       win.webContents.executeJavaScript(
-        `try{window.OMICS_SIDECAR_BASE_URL=${JSON.stringify(sidecarBase)};}catch(_){}`
+        `try{window.OMICS_SIDECAR_BASE_URL=${JSON.stringify(sidecarBase)};window.OMICS_SIDECAR_PORT=${JSON.stringify(String(SIDECAR_HTTP_PORT))};}catch(_){}`
       );
     } catch (e) {
       console.warn('[Omics Agent] inject OMICS_SIDECAR_BASE_URL failed:', e && e.message);
@@ -716,6 +881,10 @@ if (gotSingleInstanceLock) {
     app.quit();
   });
 
+  app.on('before-quit', () => {
+    isAppQuitting = true;
+  });
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createMainWindow();
@@ -723,6 +892,7 @@ if (gotSingleInstanceLock) {
   });
 
   app.on('will-quit', () => {
+    isAppQuitting = true;
     requestSidecarShutdownBestEffortSync();
     forceKillSidecarProcessTree();
     stopLocalSidecar();

@@ -48,113 +48,35 @@
 
         <div class="card">
             <div class="card-h">历史版本记录 (Changelog)</div>
-            <p style="font-size: 0.88rem; color: var(--muted); margin: 0 0 1rem;">以下为近期版本摘要；更早版本请查阅仓库或发行说明。</p>
+                <p style="font-size: 0.88rem; color: var(--muted); margin: 0 0 1rem;">以下为按<strong>次版本线</strong>（如 V0.14、V0.13）汇总的更新摘要：同一发行线（0.14.<em>x</em>、0.13.<em>x</em>）内的补丁合并叙述，不再为每个补丁号单独开一节。更早细节请查阅仓库 <code>gibh-desktop-app/客户端版本迭代.md</code> 或历史提交。</p>
 
             <div class="changelog-history">
                 <div style="margin-bottom: 1rem;">
-                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.13.5（当前推荐）</div>
+                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.14.0（当前推荐）</div>
                     <ul class="changelog">
-                        <li><strong>【V0.13.5 · Sidecar 退出与载荷修正】</strong></li>
-                        <li>Sidecar：<code>POST /api/shutdown</code>；客户端退出时先请求自毁再 <code>taskkill/kill</code> 进程树，防止 8019 僵尸进程。</li>
-                        <li>网页：<code>/api/chat</code> 的 <code>local_files</code> 不再混入已上传至 <code>/app/uploads</code> 的路径；小文件经 Sidecar 直传后按云端文件进入分析链路。</li>
+                        <li><strong>【V0.14 发行线】</strong>客户端 semver <strong>0.14.0</strong>；Windows NSIS（<code>Omics Agent Setup 0.14.0.exe</code>）与 Linux AppImage（<code>Omics Agent-0.14.0.AppImage</code>）已同步至本站 <code>/downloads/</code>。</li>
+                        <li><strong>自动更新：</strong><code>latest.yml</code>、<code>latest-linux.yml</code> 与对应 <code>.blockmap</code> 与安装包同源构建，electron-updater（generic）可按哈希校验增量。</li>
+                        <li><strong>内置网页：</strong>与主仓库同步；含 Markdown 表格渲染修复（诊断区「参数推荐」等表格正常展示）、流式与排版类改进（以当前打包内 <code>bundled-web-ui</code> 为准）。</li>
+                        <li><strong>运维提示：</strong>若在本机构建新平台包，请在对应环境执行 <code>npm run dist:win</code> / <code>dist:linux</code> 后务必再运行 <code>npm run sync:download-page</code>，避免 <code>sha512</code> 与文件名漂移。</li>
                     </ul>
                 </div>
 
                 <details>
-                    <summary>V0.13.4</summary>
+                    <summary>V0.13.x（系列汇总）</summary>
                     <ul class="changelog">
-                        <li><strong>【V0.13.4】</strong> openapi 自检与下载页同步等（进程占用改由 V0.13.5 根治）。</li>
+                        <li><strong>Sidecar / 8019：</strong>本地 FastAPI 中间件、<code>POST /api/shutdown</code>、进程树清理、端口强制夺回（<code>forceReclaimSidecarPortSync</code>）；NSIS <code>installer.nsh</code> 安装前后 <code>taskkill local_sidecar.exe</code>。</li>
+                        <li><strong>本地附件与路径：</strong><code>check_file</code> POST/GET 兼容、上传云端、三态路径解析、沙盒与大文件分流、<code>/api/chat</code> 载荷中 <code>local_files</code> 与已上传路径去重。</li>
+                        <li><strong>交互：</strong>右侧栏折叠与可调宽、实体附件卡片、欢迎页与文件树检索拖拽等（补丁迭代均归入本条目不逐一列出）。</li>
+                        <li><strong>发版纪律：</strong>可执行内容变更须递增 <code>package.json</code> 版本并重打对应平台包，否则 <code>latest*.yml</code> 无法区分新二进制。</li>
                     </ul>
                 </details>
 
                 <details>
-                    <summary>V0.13.3</summary>
+                    <summary>V0.12.x（系列汇总）</summary>
                     <ul class="changelog">
-                        <li><strong>【V0.13.3 · check_file 对接与兼容】</strong></li>
-                        <li>POST/GET 双通道与前端 URL 绝对化等（详见上一版说明）。</li>
-                    </ul>
-                </details>
-
-                <details>
-                    <summary>V0.13.2</summary>
-                    <ul class="changelog">
-                        <li><strong>【V0.13.2 · 路径与本地数据分流】</strong></li>
-                        <li>三态路径解析、Sidecar 上传云端、沙盒弹窗与 &lt;200MB 静默同步等（详见上一版说明）。</li>
-                    </ul>
-                </details>
-
-                <details>
-                    <summary>V0.13.1</summary>
-                    <ul class="changelog">
-                        <li><strong>【V0.13.1 · 交互与布局精修】</strong></li>
-                        <li>右侧侧边栏可折叠、可调宽；实体附件卡片与欢迎页排版精修（详见历史说明）。</li>
-                    </ul>
-                </details>
-
-                <details>
-                    <summary>V0.12.9</summary>
-                    <ul class="changelog">
-                        <li><strong>【V0.12.9 · Bug 修复】</strong></li>
-                        <li>修复 Windows 安装包误将 Linux 版 Sidecar 一并打入 <code>extraResources</code>，导致安装包体积异常膨胀（约多出七十余兆字节）的问题；现按平台仅打入对应二进制（Windows：<code>local_sidecar.exe</code>；Linux：同名无后缀可执行文件）。</li>
-                        <li>下载页与自动更新元数据同步为本版本瘦身后的 Windows / Linux 安装包。</li>
-                    </ul>
-                </details>
-
-                <details>
-                    <summary>V0.12.8</summary>
-                    <ul class="changelog">
-                        <li><strong>【V0.12.8】</strong></li>
-                        <li>内置 PyInstaller Sidecar，免用户机 Python；<code>npm run dist:*</code> 链式构建。</li>
-                        <li>补充按平台拆分 Sidecar 资源说明（随后发现 Windows 包仍误带 Linux 二进制，已于 V0.12.9 修复）。</li>
-                    </ul>
-                </details>
-
-                <details>
-                    <summary>V0.12.7</summary>
-                    <ul class="changelog">
-                        <li><strong>【V0.12.7】</strong></li>
-                        <li>生产包通过 <code>extraResources</code> 携带 Sidecar；<code>process.resourcesPath</code> 定位资源。</li>
-                        <li>开发态仍可用系统 Python 调试；生产态逐步切换为内置二进制（见 V0.12.8）。</li>
-                        <li>自动更新与挂载工作区相关体验优化见该版本发版说明。</li>
-                    </ul>
-                </details>
-
-                <details>
-                    <summary>V0.12.6</summary>
-                    <ul class="changelog">
-                        <li><strong>【V0.12.6】</strong></li>
-                        <li>新增 Local Sidecar 本地中间件（127.0.0.1:8019），将本地工作区挂载与文件树能力下沉到宿主机执行。</li>
-                        <li>新增本地中继工具接口：<code>/api/tools/read_file</code> 与 <code>/api/tools/write_file</code>，支持前端桥接本地文件读写。</li>
-                        <li>新增 Dual-Track 双轨机制：Web 轨道保持云端 <code>/app/uploads</code>、<code>/app/results</code> 传统链路；本地轨道走前端 relay + Sidecar。</li>
-                        <li>优化 Electron 生命周期：应用启动自动拉起 Sidecar，退出时自动回收 Python 子进程。</li>
-                    </ul>
-                </details>
-
-                <details>
-                    <summary>V0.12.3</summary>
-                    <ul class="changelog">
-                        <li><strong>【V0.12.3 核心更新】</strong></li>
-                        <li>新增：桌面级高权限模式，支持挂载本地项目工作区。</li>
-                        <li>新增：右侧资源管理器 (File Explorer)，实时映射本地代码/数据目录。</li>
-                        <li>新增：文件「一键引用」功能，点击文件树节点即可快速加入对话上下文。</li>
-                        <li>优化：重构主界面 Flexbox 弹性布局，自适应侧边栏收缩，消除 UI 塌陷隐患。</li>
-                        <li>安全：增加目录穿越 (Path Traversal) 物理防护墙，锁定智能体读写范围。</li>
-                    </ul>
-                </details>
-
-                <details>
-                    <summary>V0.12.2</summary>
-                    <ul class="changelog">
-                        <li>Windows 安装包：工作台报告打印/导出与网页版版式对齐，修复整页空白等问题。</li>
-                        <li>化学信息学（RDKit）相关工具与技能能力对齐服务端。</li>
-                        <li>编排与对话：会话标题、工具输出记忆等体验优化；技能广场与前端若干改进。</li>
-                    </ul>
-                </details>
-                <details>
-                    <summary>V0.12.1</summary>
-                    <ul class="changelog">
-                        <li>（占位）桌面端稳定性与网络重试策略优化。</li>
-                        <li>（占位）与 Web 端 API 协议小版本对齐。</li>
+                        <li><strong>Sidecar 引入与打包：</strong>127.0.0.1:8019 本地轨、双轨读写、PyInstaller 侧车按平台打入 <code>extraResources</code>（曾修复 Windows 误带 Linux 二进制导致体积膨胀等问题）。</li>
+                        <li><strong>桌面能力：</strong>挂载本地工作区、文件树与一键引用、Flexbox 布局与安全路径约束；工作台报告与网页版式对齐、RDKit 等能力与后端对齐。</li>
+                        <li>更小补丁（0.12.1～0.12.9）中的稳定性与元数据同步细节合并至此，不再分号单独展开。</li>
                     </ul>
                 </details>
             </div>
@@ -190,11 +112,11 @@
             var verLine = document.getElementById('ver-line');
 
             var staticFallback = {
-                version: '0.13.5',
-                displayVersion: 'V0.13.5',
+                version: '0.14.0',
+                displayVersion: 'V0.14.0',
                 productName: 'Omics Agent',
-                winSetupFile: 'Omics Agent Setup 0.13.5.exe',
-                linuxAppImageFile: 'Omics Agent-0.13.5.AppImage'
+                winSetupFile: 'Omics Agent Setup 0.14.0.exe',
+                linuxAppImageFile: 'Omics Agent-0.14.0.AppImage'
             };
 
             function setVersion(meta) {

@@ -3558,14 +3558,15 @@ class AgentOrchestrator:
 
     @staticmethod
     def _sanitize_snapshot_text(text: str) -> str:
-        """清洗 state_snapshot 文本：剔除 <<>>...<<>> 与 <think>...</think> 标签（含跨行）。"""
+        """清洗 state_snapshot 文本：剔除各类思考标签、追问块与占位符污染（含跨行）。"""
         if not text or not isinstance(text, str):
             return ""
-        t = text
-        t = re.sub(r"<think>[\s\S]*?<\/think>", "", t, flags=re.IGNORECASE)
+        from gibh_agent.core.stream_utils import strip_think_markup_for_user
+
+        t = strip_think_markup_for_user(text)
         t = re.sub(r"<suggest>[\s\S]*?</suggest>", "", t, flags=re.IGNORECASE)
-        t = re.sub(r"<<>>\[[\s\S]*?\]<<>>", "", t)
-        t = re.sub(r"<<>>[\s\S]*?<<>>", "", t)
+        t = re.sub(r"<<[^>]+>>\[[\s\S]*?\]<<[^>]+>>", "", t)
+        t = re.sub(r"<<[^>]+>>[\s\S]*?<<[^>]+>>", "", t)
         return t.strip()
 
     def _sanitize_large_json(self, history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

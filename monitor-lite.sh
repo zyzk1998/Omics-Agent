@@ -211,6 +211,7 @@ import sys, re, json
 hard_noise = [r'^GET /health', r'^GET /static', r'^200 OK$', r'^$']
 keywords = [
     ('[LLM_RAW_DUMP]', '\033[1;95m'),
+    ('[CLIENT_LOCAL_GATE]', '\033[1;31m'),
     ('Traceback', '\033[1;31m'), ('ERROR', '\033[1;31m'), ('Exception', '\033[1;31m'),
     ('收到聊天请求', '\033[0;32m'), ('处理查询', '\033[0;32m'), ('✅', '\033[0;32m'),
     ('路由', '\033[0;36m'), ('Router', '\033[0;36m'), ('🎯', '\033[0;36m'),
@@ -261,6 +262,7 @@ import sys, re, json
 hard_noise = [r'^GET /health', r'^GET /static', r'^200 OK$', r'^$']
 keywords = [
     ('[LLM_RAW_DUMP]', '\033[1;95m'),
+    ('[CLIENT_LOCAL_GATE]', '\033[1;31m'),
     ('Traceback', '\033[1;31m'), ('ERROR', '\033[1;31m'), ('Exception', '\033[1;31m'),
     ('收到聊天请求', '\033[0;32m'), ('处理查询', '\033[0;32m'), ('✅', '\033[0;32m'),
     ('路由', '\033[0;36m'), ('Router', '\033[0;36m'), ('🎯', '\033[0;36m'),

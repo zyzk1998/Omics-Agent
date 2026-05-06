@@ -21,6 +21,7 @@
             // #endregion
         </script>
         <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+        <script src="/js/main.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
@@ -907,16 +908,27 @@
                 }
             }
             initAuthState();
-            /** Electron 会在 did-finish-load 注入 OMICS_SIDECAR_BASE_URL；仅信任本机回环，避免误指远程 origin 时 fetch 打到 Nginx 产生 404 Not Found。 */
+            /** Electron 会在 did-finish-load 注入 OMICS_SIDECAR_BASE_URL / OMICS_SIDECAR_PORT；loopback 强制对齐 Sidecar 监听端口（默认 8019），禁止误用 8018 Web 端口否则 check_file 会打到 Nginx 404。 */
+            function getLocalSidecarPort() {
+                var p = '8019';
+                try {
+                    var raw = window.OMICS_SIDECAR_PORT;
+                    if (typeof raw === 'string' && /^\d+$/.test(raw.trim())) p = raw.trim();
+                } catch (e) {}
+                return p;
+            }
             function getLocalSidecarBase() {
-                var def = 'http://127.0.0.1:8019';
+                var port = getLocalSidecarPort();
+                var def = 'http://127.0.0.1:' + port;
                 try {
                     var u = window.OMICS_SIDECAR_BASE_URL || window.OMICS_SIDECAR_URL;
                     if (typeof u === 'string') {
                         var s = u.trim().replace(/\/+$/, '');
                         if (/^https?:\/\//i.test(s)) {
                             var pu = new URL(s);
-                            if (pu.hostname === '127.0.0.1' || pu.hostname === 'localhost') return s;
+                            if (pu.hostname === '127.0.0.1' || pu.hostname === 'localhost') {
+                                return pu.protocol + '//' + pu.hostname + ':' + port;
+                            }
                         }
                     }
                 } catch (e) {}
@@ -924,13 +936,13 @@
             }
             function localSidecarUrl(pathname) {
                 var base = getLocalSidecarBase().replace(/\/+$/, '');
-                if (!/^https?:\/\//i.test(base)) base = 'http://127.0.0.1:8019';
+                if (!/^https?:\/\//i.test(base)) base = 'http://127.0.0.1:' + getLocalSidecarPort();
                 var p = String(pathname || '');
                 if (!p.startsWith('/')) p = '/' + p;
                 try {
                     return new URL(p, base).href;
                 } catch (e) {
-                    return 'http://127.0.0.1:8019' + p;
+                    return 'http://127.0.0.1:' + getLocalSidecarPort() + p;
                 }
             }
 
@@ -967,6 +979,27 @@
                 sendMessage(ctx.selectedTool, ctx.originalQuery, ctx.toolParams, ctx.workflowData, ctx.useHistoryFiles, ctx.filesOverride, ctx.hiddenPayload);
             }
 
+            /** 上报到 api-server，写入 Docker 日志；monitor-lite「Agent Logic Trace」可检索 [CLIENT_LOCAL_GATE] */
+            async function reportClientTraceToServer(event, message, detail, meta) {
+                try {
+                    var origin = '';
+                    try { origin = window.location && window.location.origin ? String(window.location.origin) : ''; } catch (e) {}
+                    if (!origin || origin.indexOf('http') !== 0) return;
+                    var ah = (typeof getAuthHeaders === 'function') ? getAuthHeaders() : {};
+                    var headers = Object.assign({}, ah, { 'Content-Type': 'application/json' });
+                    await fetch(origin + '/api/utils/client_trace', {
+                        method: 'POST',
+                        headers: headers,
+                        body: JSON.stringify({
+                            event: String(event || 'unknown'),
+                            message: String(message || '').slice(0, 4000),
+                            detail: detail != null ? String(detail).slice(0, 8000) : null,
+                            meta: meta && typeof meta === 'object' ? meta : null
+                        })
+                    }).catch(function() {});
+                } catch (e) {}
+            }
+
             /**
              * 本地附件智能分流：<200MB 经 Sidecar 上传云端并替换为 web 路径；≥200MB 挂起并弹出沙盒 Modal。
              * @returns {'ok'|'abort'|'sandbox_wait'}
@@ -991,16 +1024,12 @@
                     try { return JSON.stringify(d); } catch (e) { return String(d); }
                 }
                 /**
-                 * 优先 GET（与多数已部署 Sidecar 一致）；失败再 POST(JSON)。
-                 * 全程用 URL/searchParams 拼绝对地址，禁止手写 query，避免相对 URL 误打到远程 origin 返回 404。
+                 * 优先 POST(JSON)，避免 Windows 路径在 GET query 编码边界 case；失败再 GET。
+                 * 全程用绝对 origin（127.0.0.1:SidecarPort），禁止相对 URL 误打到当前页面所在 Web 服务返回 404。
                  */
                 async function sidecarFetchCheckFile(pathStr) {
                     var base = getLocalSidecarBase().replace(/\/+$/, '');
-                    if (!/^https?:\/\//i.test(base)) base = 'http://127.0.0.1:8019';
-                    var getU = new URL('/api/tools/check_file', base);
-                    getU.searchParams.set('path', pathStr);
-                    var getR = await fetch(getU.href, { method: 'GET', cache: 'no-store' });
-                    if (getR.ok) return getR;
+                    if (!/^https?:\/\//i.test(base)) base = 'http://127.0.0.1:' + getLocalSidecarPort();
                     var postU = new URL('/api/tools/check_file', base);
                     var postR = await fetch(postU.href, {
                         method: 'POST',
@@ -1008,10 +1037,32 @@
                         body: JSON.stringify({ path: pathStr }),
                         cache: 'no-store'
                     });
-                    if (!postR.ok) {
-                        console.warn('[LocalGate] check_file both failed', 'GET', getR.status, getU.href, 'POST', postR.status, postU.href);
+                    if (postR.ok) {
+                        try {
+                            window.__localGateLastDebug = {
+                                sidecar_base: base,
+                                tried_post_url: postU.href,
+                                post_status: postR.status
+                            };
+                        } catch (e) {}
+                        return postR;
                     }
-                    return postR;
+                    var getU = new URL('/api/tools/check_file', base);
+                    getU.searchParams.set('path', pathStr);
+                    var getR = await fetch(getU.href, { method: 'GET', cache: 'no-store' });
+                    try {
+                        window.__localGateLastDebug = {
+                            sidecar_base: base,
+                            tried_post_url: postU.href,
+                            tried_get_url: getU.href,
+                            post_status: postR.status,
+                            get_status: getR.status
+                        };
+                    } catch (e) {}
+                    if (!getR.ok) {
+                        console.warn('[LocalGate] check_file both failed', 'POST', postR.status, postU.href, 'GET', getR.status, getU.href);
+                    }
+                    return getR.ok ? getR : postR;
                 }
                 var stats = [];
                 for (var i = 0; i < locals.length; i++) {
@@ -1025,27 +1076,65 @@
                         r = await sidecarFetchCheckFile(pathStr);
                     } catch (e) {
                         console.warn('[LocalGate] check_file fetch failed', e);
+                        await reportClientTraceToServer('local_gate_network', 'fetch check_file threw', String(e && e.message ? e.message : e), {
+                            path: pathStr,
+                            error: String(e)
+                        });
                         if (typeof showToast === 'function') showToast('无法连接本地 Sidecar（请确认桌面客户端已启动）', 'danger');
+                        return 'abort';
+                    }
+                    var txt = '';
+                    try {
+                        txt = await r.text();
+                    } catch (e) {
+                        await reportClientTraceToServer('local_gate_read_body', 'check_file could not read response body', String(e && e.message ? e.message : e), {
+                            path: pathStr,
+                            http_status: r.status,
+                            debug: window.__localGateLastDebug || null
+                        });
+                        if (typeof showToast === 'function') showToast('无法获取文件信息（Sidecar 无响应体）', 'danger');
                         return 'abort';
                     }
                     var j = {};
                     try {
-                        j = await r.json();
+                        j = txt ? JSON.parse(txt) : {};
                     } catch (e) {
+                        await reportClientTraceToServer('local_gate_bad_json', 'check_file response not JSON', String(e && e.message ? e.message : e), {
+                            path: pathStr,
+                            http_status: r.status,
+                            raw_preview: (txt || '').slice(0, 1500),
+                            debug: window.__localGateLastDebug || null
+                        });
                         if (typeof showToast === 'function') showToast('无法获取文件信息（Sidecar 返回非 JSON）', 'danger');
                         return 'abort';
                     }
                     if (!r.ok) {
                         var httpErr = extractFastApiDetail(j) || r.statusText || ('HTTP ' + r.status);
                         console.warn('[LocalGate] check_file failed', r.status, httpErr);
+                        await reportClientTraceToServer('local_gate_check_file', 'check_file HTTP ' + r.status, httpErr, {
+                            path: pathStr,
+                            http_status: r.status,
+                            response_body: j,
+                            debug: window.__localGateLastDebug || null
+                        });
                         if (typeof showToast === 'function') showToast('无法获取文件信息：' + httpErr, 'danger');
                         return 'abort';
                     }
                     if (typeof j.exists !== 'boolean') {
+                        await reportClientTraceToServer('local_gate_bad_shape', 'check_file missing boolean exists', pathStr, {
+                            path: pathStr,
+                            response_body: j,
+                            debug: window.__localGateLastDebug || null
+                        });
                         if (typeof showToast === 'function') showToast('无法获取文件状态（响应缺少 exists）', 'danger');
                         return 'abort';
                     }
                     if (!j.exists) {
+                        await reportClientTraceToServer('local_gate_not_exists', 'check_file reports exists=false', pathStr, {
+                            path: pathStr,
+                            response_body: j,
+                            debug: window.__localGateLastDebug || null
+                        });
                         if (typeof showToast === 'function') showToast('本地文件不存在或 Sidecar 无法访问：' + pathStr, 'danger');
                         return 'abort';
                     }
@@ -1112,10 +1201,25 @@
                             } else if (_det && typeof _det === 'object') {
                                 _det = JSON.stringify(_det);
                             }
-                            throw new Error(_det || ur.statusText || 'upload failed');
+                            var _ue = _det || ur.statusText || 'upload failed';
+                            await reportClientTraceToServer('local_gate_upload_http', 'upload_to_cloud HTTP ' + ur.status, _ue, {
+                                local_path: item && item.path,
+                                upload_base: base,
+                                http_status: ur.status,
+                                response_body: uj,
+                                sidecar_url: (typeof localSidecarUrl === 'function') ? localSidecarUrl('/api/tools/upload_to_cloud') : null
+                            });
+                            throw new Error(_ue);
                         }
                         var cp = uj.cloud_path || (uj.raw && uj.raw.file_paths && uj.raw.file_paths[0]);
-                        if (!cp) throw new Error('未解析到云端路径');
+                        if (!cp) {
+                            await reportClientTraceToServer('local_gate_upload_parse', 'upload_to_cloud missing cloud_path', String(item && item.path || ''), {
+                                local_path: item && item.path,
+                                upload_base: base,
+                                response_body: uj
+                            });
+                            throw new Error('未解析到云端路径');
+                        }
                         var bn = String(cp).replace(/\\/g, '/').split('/').filter(Boolean).pop() || item.name;
                         var idx = window.currentAttachments.findIndex(function(x) { return x.path === item.path && (x.type === 'local' || x.source === 'local'); });
                         if (idx >= 0) {
@@ -1135,6 +1239,11 @@
                         }
                     } catch (e) {
                         console.error('[LocalGate] upload_to_cloud', e);
+                        await reportClientTraceToServer('local_gate_upload_to_cloud', 'upload_to_cloud failed', String(e && e.message ? e.message : e), {
+                            local_path: item && item.path,
+                            upload_base: base,
+                            error: String(e)
+                        });
                         if (typeof showToast === 'function') showToast('同步到云端失败: ' + (e.message || e), 'danger');
                         return 'abort';
                     }
@@ -1217,7 +1326,8 @@
                     if (t.role && (t.content != null || t.message != null)) {
                         var rl = String(t.role).toLowerCase();
                         if (rl === 'ai') rl = 'assistant';
-                        var c = String(t.content != null ? t.content : t.message).trim();
+                        var _rawTurn = t.content != null ? t.content : t.message;
+                        var c = (typeof _rawTurn === 'string' ? _rawTurn : stringifyAssistantPayloadLoose(_rawTurn)).trim();
                         if (c) out.push({ role: rl, content: c });
                         continue;
                     }
@@ -1422,6 +1532,71 @@
                 </div>`;
             };
 
+            /**
+             * Markdown 表格：新版 marked 传入 **table token**（header/rows 为单元格 token 数组），
+             * 旧实现把对象 String() 成 "[object Object],[object Object]"，导致「💡 参数推荐」下 Markdown 表损坏。
+             * 兼容：① 两参数且均为字符串（旧 API）；② 单参数 token + this.tablecell / this.tablerow（与 marked 默认 Renderer 一致）。
+             */
+            renderer.table = function (header, body) {
+                var wrapOpen = '<div class="table-responsive" style="overflow-x: auto; width: 100%; display: block; margin-bottom: 15px;">';
+                var wrapClose = '</div>';
+                var tableOpen = '<table class="md-table markdown-table">';
+                var tableClose = '</table>';
+                if (typeof header === 'string' && typeof body === 'string') {
+                    return wrapOpen + tableOpen + '<thead>' + header + '</thead><tbody>' + body + '</tbody>' + tableClose + wrapClose;
+                }
+                var token = header;
+                if (token && typeof token === 'object' && Array.isArray(token.header)) {
+                    var cell = '';
+                    var j, k;
+                    for (j = 0; j < token.header.length; j++) {
+                        cell += this.tablecell(token.header[j]);
+                    }
+                    var headerRow = this.tablerow({ text: cell });
+                    var bodyHtml = '';
+                    if (token.rows && token.rows.length) {
+                        for (j = 0; j < token.rows.length; j++) {
+                            var row = token.rows[j];
+                            cell = '';
+                            for (k = 0; k < row.length; k++) {
+                                cell += this.tablecell(row[k]);
+                            }
+                            bodyHtml += this.tablerow({ text: cell });
+                        }
+                    }
+                    return wrapOpen + tableOpen + '<thead>' + headerRow + '</thead><tbody>' + bodyHtml + '</tbody>' + tableClose + wrapClose;
+                }
+                try {
+                    var fallback = (token && typeof token === 'object') ? JSON.stringify(token) : String(token || '');
+                    return wrapOpen + tableOpen + '<tbody><tr><td><pre class="small mb-0">' +
+                        String(fallback).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') +
+                        '</pre></td></tr></tbody>' + tableClose + wrapClose;
+                } catch (_e) {
+                    return wrapOpen + tableOpen + tableClose + wrapClose;
+                }
+            };
+
+            renderer.image = function (href, title, text) {
+                var h = href, ti = title, te = text;
+                if (h && typeof h === 'object' && h !== null) {
+                    if (h.href != null) h = h.href;
+                    else if (h.raw != null) h = h.raw;
+                    if (h.title != null) ti = h.title;
+                    if (h.text != null) te = h.text;
+                }
+                h = String(h == null ? '' : h);
+                te = String(te == null ? '' : te);
+                ti = ti == null ? '' : String(ti);
+                var esc = (typeof window.escAttr === 'function') ? window.escAttr : function (s) {
+                    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                };
+                var imgHtml = '<img src="' + esc(h) + '" alt="' + esc(te) + '"' + (ti ? ' title="' + esc(ti) + '"' : '') + ' class="report-image img-fluid" loading="lazy" />';
+                if (typeof window.buildSmartContentShell === 'function') {
+                    return window.buildSmartContentShell(imgHtml);
+                }
+                return '<p style="margin:12px 0;">' + imgHtml + '</p>';
+            };
+
             // #region agent log
             // 已禁用调试请求: fetch('http://localhost:7242/ingest/...',...).catch(()=>{});
             // #endregion
@@ -1429,21 +1604,250 @@
                 marked.use({ renderer });
             }
             
+            /** 参数推荐表格单元格（先于 normalize，供扼喉表格化复用） */
+            function _escRecommendationCell(s) {
+                if (s == null || s === undefined) return '';
+                return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            }
+            function _fmtRecommendationCell(v) {
+                if (v === null || v === undefined) return '';
+                if (typeof window.formatRecommendationDisplayValue === 'function' &&
+                    (typeof v === 'object' || Array.isArray(v))) {
+                    return _escRecommendationCell(window.formatRecommendationDisplayValue(v));
+                }
+                if (typeof v === 'object') {
+                    try {
+                        return _escRecommendationCell(JSON.stringify(v));
+                    } catch (e) {
+                        return '';
+                    }
+                }
+                return _escRecommendationCell(String(v));
+            }
+            /** 对象数组 → 完整 HTML 表（normalize 扼喉兜底；禁止 String(数组)） */
+            function arrayOfPlainObjectsToSmartTableHtml(rows) {
+                if (!rows || !rows.length) return '';
+                var keySet = {};
+                rows.forEach(function(r) {
+                    if (!r || typeof r !== 'object' || Array.isArray(r)) return;
+                    Object.keys(r).forEach(function(k) { keySet[k] = true; });
+                });
+                var keys = Object.keys(keySet);
+                var preferred = ['step_name', 'step', 'tool_id', 'tool_name', 'param_name', 'name', 'parameter', 'key',
+                    'default', 'default_value', 'value', 'recommended', 'recommended_value', 'reason', '推荐理由', 'rationale'];
+                keys.sort(function(a, b) {
+                    var ia = preferred.indexOf(a);
+                    var ib = preferred.indexOf(b);
+                    if (ia === -1 && ib === -1) return a.localeCompare(b);
+                    if (ia === -1) return 1;
+                    if (ib === -1) return -1;
+                    return ia - ib;
+                });
+                var thead = '<thead><tr>' + keys.map(function(k) {
+                    return '<th>' + _escRecommendationCell(k) + '</th>';
+                }).join('') + '</tr></thead>';
+                var tbody = '<tbody>' + rows.map(function(obj) {
+                    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return '';
+                    return '<tr>' + keys.map(function(k) {
+                        return '<td>' + _fmtRecommendationCell(obj[k]) + '</td>';
+                    }).join('') + '</tr>';
+                }).join('') + '</tbody>';
+                return '<div class="smart-content-wrapper" style="max-height:500px;overflow:auto;"><table class="md-table markdown-table">' +
+                    thead + tbody + '</table></div>';
+            }
+
+            /**
+             * 报告区 Markdown 归一化：扼喉 —— 对象数组绝不 String(input)，直接 HTML 表兜底。
+             */
+            function normalizeReportMarkdownInput(input) {
+                if (input === null || input === undefined) return '';
+                var t = typeof input;
+                if (t === 'string') return input;
+                if (t === 'number' || t === 'boolean') return String(input);
+                if (Array.isArray(input)) {
+                    if (input.length > 0 &&
+                        input.every(function(x) { return x != null && typeof x === 'object' && !Array.isArray(x); })) {
+                        try {
+                            return arrayOfPlainObjectsToSmartTableHtml(input);
+                        } catch (e) {
+                            console.error('[normalizeReportMarkdownInput] 强制表格化失败', e);
+                            try {
+                                return '```json\n' + JSON.stringify(input, null, 2) + '\n```';
+                            } catch (e2) {
+                                return '';
+                            }
+                        }
+                    }
+                    if (typeof window.formatRecommendationDisplayValue === 'function') {
+                        try {
+                            return window.formatRecommendationDisplayValue(input);
+                        } catch (_fe) { /* fall through */ }
+                    }
+                    try {
+                        return JSON.stringify(input, null, 2);
+                    } catch (_e) {
+                        return '';
+                    }
+                }
+                if (t === 'object') {
+                    if (typeof input.message === 'string') return input.message;
+                    if (input.message !== undefined && input.message !== null) {
+                        return normalizeReportMarkdownInput(input.message);
+                    }
+                    if (typeof input.diagnosis_report === 'string') return input.diagnosis_report;
+                    if (input.diagnosis_report != null) {
+                        return normalizeReportMarkdownInput(input.diagnosis_report);
+                    }
+                    try {
+                        return JSON.stringify(input, null, 2);
+                    } catch (_e2) {
+                        return '';
+                    }
+                }
+                return '';
+            }
+
+            /** 禁止结构化 payload 被 String() 成 [object Object]（入库 / SSE / API 历史共用） */
+            function stringifyAssistantPayloadLoose(v) {
+                if (v === null || v === undefined) return '';
+                if (typeof v === 'string') return v;
+                if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+                if (typeof v === 'object') {
+                    try {
+                        return JSON.stringify(v, null, 2);
+                    } catch (_e) {
+                        return '';
+                    }
+                }
+                return String(v);
+            }
+
+            /**
+             * Git 34eb5a9 旧逻辑复刻：诊断区优先 diagnosis_report / message / recommendations 数组，
+             * 顶层对象绝不拼进 Markdown 字符串；未知形状用 JSON.stringify，禁止 String(对象)。
+             */
+            function extractDiagnosisSectionInput(content, fullData) {
+                fullData = fullData || {};
+                if (content == null) return { body: '', mergedFull: fullData };
+                if (typeof content === 'string') return { body: content, mergedFull: fullData };
+                if (typeof content === 'object') {
+                    var merged = Object.assign({}, fullData);
+                    if (content.recommendation && !merged.recommendation) merged.recommendation = content.recommendation;
+                    if (typeof content.diagnosis_report === 'string') return { body: content.diagnosis_report, mergedFull: merged };
+                    if (content.diagnosis_report != null) return { body: content.diagnosis_report, mergedFull: merged };
+                    if (typeof content.message === 'string') return { body: content.message, mergedFull: merged };
+                    if (content.message != null) return { body: content.message, mergedFull: merged };
+                    if (Array.isArray(content.recommendations) && content.recommendations.length)
+                        return { body: content.recommendations, mergedFull: merged };
+                    try {
+                        return { body: JSON.stringify(content, null, 2), mergedFull: merged };
+                    } catch (_e) {
+                        return { body: '', mergedFull: merged };
+                    }
+                }
+                return { body: String(content), mergedFull: fullData };
+            }
+
             // 安全的 marked 包装函数
             function safeMarkedParse(text) {
                 if (text === null || text === undefined) return '';
-                var s = String(text);
+                var s = normalizeReportMarkdownInput(text);
+                // Sidecar / 挂载调试用前缀行不透出 UI
+                s = s.replace(/^\s*(?:\[Local[^\]\n]*\]|local_workspace_mounted\s*=\s*\S+)\s*$/gim, '');
                 // 剔除大模型生成的黄色警示图标
                 s = s.replace(/⚠️/g, '');
                 // #region agent log
                 // 已禁用调试请求: fetch('http://localhost:7242/ingest/...',...).catch(()=>{});
                 // #endregion
+                if (/^\s*<div class="smart-content-wrapper\b/.test(s)) {
+                    return s;
+                }
                 if (typeof marked !== 'undefined' && marked.parse) {
                     return marked.parse(s);
                 }
                 // 降级：简单的 HTML 转义和换行处理
                 return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
             }
+
+            /** 后端 recommendation.params 映射表（与一键应用一致） */
+            function renderRecommendationParamsDict(params) {
+                if (!params || typeof params !== 'object' || Array.isArray(params)) return '';
+                var keys = Object.keys(params);
+                if (!keys.length) return '';
+                var thead = '<thead class="table-light"><tr><th class="small">参数名</th><th class="small">推荐值</th><th class="small">推荐理由</th></tr></thead>';
+                var tbody = '<tbody>' + keys.map(function(k) {
+                    var pr = params[k] || {};
+                    var rawVal = pr.value !== undefined && pr.value !== null ? pr.value : pr.recommended_value;
+                    var reason = pr.reason !== undefined && pr.reason !== null ? pr.reason : (pr.rationale !== undefined && pr.rationale !== null ? pr.rationale : '');
+                    return '<tr><td class="small"><code>' + _escRecommendationCell(k) + '</code></td><td class="small">' +
+                        _fmtRecommendationCell(rawVal) + '</td><td class="small">' + _fmtRecommendationCell(reason) + '</td></tr>';
+                }).join('') + '</tbody>';
+                return '<div class="table-responsive recommendation-params-table-wrap"><table class="table table-sm table-bordered table-hover mb-0 recommendation-params-table">' +
+                    thead + tbody + '</table></div>';
+            }
+
+            /**
+             * 参数推荐：对象数组专用 HTML 表格（动态列）
+             */
+            function renderRecommendationTable(recommendations) {
+                if (!Array.isArray(recommendations) || recommendations.length === 0) return '';
+                function isPlainObj(x) { return x != null && typeof x === 'object' && !Array.isArray(x); }
+                if (!isPlainObj(recommendations[0])) {
+                    return '<div class="table-responsive"><pre class="small bg-light p-2 rounded mb-0">' +
+                        _escRecommendationCell(JSON.stringify(recommendations, null, 2)) + '</pre></div>';
+                }
+                var keySet = {};
+                recommendations.forEach(function(r) {
+                    if (!isPlainObj(r)) return;
+                    Object.keys(r).forEach(function(k) { keySet[k] = true; });
+                });
+                var keys = Object.keys(keySet);
+                var preferred = ['step_name', 'step', 'tool_id', 'tool_name', 'param_name', 'name', 'parameter', 'key',
+                    'default', 'default_value', 'value', 'recommended', 'recommended_value', 'reason', '推荐理由', 'rationale'];
+                keys.sort(function(a, b) {
+                    var ia = preferred.indexOf(a);
+                    var ib = preferred.indexOf(b);
+                    if (ia === -1 && ib === -1) return a.localeCompare(b);
+                    if (ia === -1) return 1;
+                    if (ib === -1) return -1;
+                    return ia - ib;
+                });
+                if (!keys.length) return '';
+                var thead = '<thead class="table-light"><tr>' + keys.map(function(k) {
+                    return '<th class="small">' + _escRecommendationCell(k) + '</th>';
+                }).join('') + '</tr></thead>';
+                var tbody = '<tbody>' + recommendations.map(function(r) {
+                    if (!isPlainObj(r)) return '';
+                    return '<tr>' + keys.map(function(k) {
+                        return '<td class="small">' + _fmtRecommendationCell(r[k]) + '</td>';
+                    }).join('') + '</tr>';
+                }).join('') + '</tbody>';
+                return '<div class="table-responsive diagnosis-recommendation-table-wrap"><table class="table table-sm table-bordered table-hover mb-0 recommendation-aoo-table">' +
+                    thead + tbody + '</table></div>';
+            }
+
+            /** 右侧「数据诊断报告」：normalize 已扼喉对象数组为 HTML 表；此处仅包一层 + 可选 recommendation.params */
+            function buildDiagnosisReportBodyHtml(content, fullData) {
+                fullData = fullData || {};
+                var parts = [];
+                var norm = normalizeReportMarkdownInput(content);
+                if (/^\s*<div class="smart-content-wrapper\b/.test(norm)) {
+                    parts.push('<div class="diagnosis-markdown-block markdown-body">' + norm + '</div>');
+                } else if (norm) {
+                    parts.push('<div class="diagnosis-markdown-block markdown-body">' + safeMarkedParse(norm) + '</div>');
+                }
+                var prm = fullData.recommendation && fullData.recommendation.params;
+                if (prm && typeof prm === 'object' && !Array.isArray(prm) && Object.keys(prm).length) {
+                    parts.push('<div class="diagnosis-params-rec-block mt-3"><h6 class="text-muted mb-2">💡 参数推荐</h6>' +
+                        renderRecommendationParamsDict(prm) + '</div>');
+                }
+                if (!parts.length) {
+                    parts.push('<p class="text-muted small">暂无诊断内容</p>');
+                }
+                return parts.join('');
+            }
+            window.buildDiagnosisReportBodyHtml = buildDiagnosisReportBodyHtml;
+            window.renderRecommendationTable = renderRecommendationTable;
 
             /**
              * 沉浸式 Demo / 无 SSE 闭包时：将 steps_details 写入右栏「执行结果详情」（summary Markdown + 图片资产）。
@@ -1594,7 +1998,7 @@
                         }
                         case 'message': {
                             var raw = d.content || '';
-                            var cleaned = String(raw || '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+                            var cleaned = (typeof raw === 'string' ? raw : stringifyAssistantPayloadLoose(raw)).replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
                             var tz = window.currentMessageZones && window.currentMessageZones.textZone;
                             if (tz) tz.innerHTML = typeof safeMarkedParse === 'function' ? safeMarkedParse(cleaned) : cleaned;
                             break;
@@ -1633,7 +2037,16 @@
                                         return x;
                                     })();
                                     var tg = rc.querySelector('.report-diagnosis-content');
-                                    if (tg) tg.innerHTML = '<h6 class="text-muted mb-2">\u6570\u636e\u8bca\u65ad\u62a5\u544a</h6><div class="report-content-box" style="font-size:14px;line-height:1.8">' + safeMarkedParse(String(d.diagnosis_report)) + '</div>';
+                                    if (tg) {
+                                        var _dxDemo = extractDiagnosisSectionInput(d.diagnosis_report, d);
+                                        var _diagInner = (typeof buildDiagnosisReportBodyHtml === 'function')
+                                            ? buildDiagnosisReportBodyHtml(_dxDemo.body, _dxDemo.mergedFull)
+                                            : safeMarkedParse(typeof _dxDemo.body === 'string' ? _dxDemo.body : stringifyAssistantPayloadLoose(_dxDemo.body));
+                                        tg.innerHTML = '<h6 class="text-muted mb-2">\u6570\u636e\u8bca\u65ad\u62a5\u544a</h6><div class="report-content-box" style="font-size:14px;line-height:1.8">' + _diagInner + '</div>';
+                                        if (typeof window.syncWorkspacePanelWidthFromContent === 'function') {
+                                            window.syncWorkspacePanelWidthFromContent(tg);
+                                        }
+                                    }
                                 }
                             }
                             break;
@@ -1666,7 +2079,12 @@
                                     var rc3 = wr3.querySelector('.unified-report-container');
                                     if (rc3) {
                                         var dg = rc3.querySelector('.report-diagnosis-content');
-                                        if (dg) dg.innerHTML = '<h6 class="text-muted mb-2">\u6570\u636e\u8bca\u65ad\u62a5\u544a</h6><div class="report-content-box">' + safeMarkedParse(String(rd.diagnosis)) + '</div>';
+                                        if (dg) {
+                                            var _dgInner = (typeof buildDiagnosisReportBodyHtml === 'function')
+                                                ? buildDiagnosisReportBodyHtml(rd.diagnosis, d)
+                                                : safeMarkedParse(rd.diagnosis);
+                                            dg.innerHTML = '<h6 class="text-muted mb-2">\u6570\u636e\u8bca\u65ad\u62a5\u544a</h6><div class="report-content-box">' + _dgInner + '</div>';
+                                        }
                                     }
                                 }
                             }
@@ -1676,10 +2094,16 @@
                                     var rc4 = wr4.querySelector('.unified-report-container');
                                     if (rc4) {
                                         var sm = rc4.querySelector('.report-summary-content');
-                                        if (sm) sm.innerHTML = '<h6 class="text-muted mb-2">\u5206\u6790\u7ed3\u9898\u62a5\u544a</h6><div class="report-content-box">' + safeMarkedParse(String(rd.report)) + '</div>';
+                                        if (sm) sm.innerHTML = '<h6 class="text-muted mb-2">\u5206\u6790\u7ed3\u9898\u62a5\u544a</h6><div class="report-content-box">' + safeMarkedParse(rd.report) + '</div>';
                                     }
                                 }
                             }
+                            (function () {
+                                var wrSync = document.getElementById('active-workspace-content');
+                                if (wrSync && typeof window.syncWorkspacePanelWidthFromContent === 'function') {
+                                    window.syncWorkspacePanelWidthFromContent(wrSync);
+                                }
+                            })();
                             break;
                         }
                         case 'done':
@@ -2498,7 +2922,7 @@
                     return;
                 }
                 try {
-                    var res = await fetch('http://127.0.0.1:8019/api/tools/read_file', {
+                    var res = await fetch(localSidecarUrl('/api/tools/read_file'), {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ file_path: p, max_lines: 1200 }),
@@ -3965,6 +4389,43 @@
                 div.textContent = text;
                 return div.innerHTML;
             }
+            /** 参数推荐：对象/对象数组禁止直接 String()，避免 [object Object] */
+            window.formatRecommendationDisplayValue = function(v) {
+                if (v === null || v === undefined) return '';
+                var t = typeof v;
+                if (t === 'string' || t === 'number' || t === 'boolean') return String(v);
+                if (Array.isArray(v)) {
+                    if (v.length === 0) return '';
+                    var head = v[0];
+                    if (head !== null && typeof head === 'object' && !Array.isArray(head)) {
+                        return v.map(function(item, i) {
+                            if (!item || typeof item !== 'object' || Array.isArray(item)) {
+                                return (i + 1) + '. ' + window.formatRecommendationDisplayValue(item);
+                            }
+                            var pairs = Object.keys(item).map(function(k) {
+                                return k + ': ' + window.formatRecommendationDisplayValue(item[k]);
+                            });
+                            return (i + 1) + '. ' + pairs.join('; ');
+                        }).join('\n');
+                    }
+                    return v.map(function(x) { return window.formatRecommendationDisplayValue(x); }).join(', ');
+                }
+                if (t === 'object') {
+                    try {
+                        return Object.keys(v).map(function(k) {
+                            return k + ': ' + window.formatRecommendationDisplayValue(v[k]);
+                        }).join('; ');
+                    } catch (_e) {
+                        try { return JSON.stringify(v); } catch (__e) { return String(v); }
+                    }
+                }
+                return String(v);
+            };
+            window.recommendationValueForDataAttr = function(v) {
+                if (v === null || v === undefined) return '';
+                if (typeof v === 'object') return JSON.stringify(v);
+                return String(v);
+            };
             function noopAddProcessStep() {}
 
             window.__workflowCardRenderHooks = {
@@ -4137,8 +4598,11 @@
                     </h6>`;
 
                 if (diagnosisReport) {
+                    var _cardDiagBody = (typeof buildDiagnosisReportBodyHtml === 'function')
+                        ? buildDiagnosisReportBodyHtml(diagnosisReport, workflowData)
+                        : safeMarkedParse(diagnosisReport);
                     formHtml += `<div style="font-size: 14px; line-height: 1.6; color: #333; margin-bottom: 10px;">
-                        ${safeMarkedParse(diagnosisReport)}
+                        ${_cardDiagBody}
                     </div>`;
                 }
 
@@ -4170,12 +4634,14 @@
                                     const defVal = rec.default !== undefined && rec.default !== null ? rec.default : '';
                                     const recVal = rec.value !== undefined && rec.value !== null ? rec.value : '';
                                     const reason = rec.reason || '基于数据特征推荐';
+                                    var defDisp = window.formatRecommendationDisplayValue(defVal);
+                                    var recDisp = window.formatRecommendationDisplayValue(recVal);
                                     return `<tr>
                                         <td>${escapeHtml(String(stepName))}</td>
                                         <td>${escapeHtml(String(toolName))}</td>
                                         <td><code>${escapeHtml(String(paramName))}</code></td>
-                                        <td>${escapeHtml(String(defVal))}</td>
-                                        <td><code>${escapeHtml(String(recVal))}</code></td>
+                                        <td style="white-space:pre-wrap;font-size:13px;">${escapeHtml(defDisp)}</td>
+                                        <td style="white-space:pre-wrap;font-size:13px;"><code>${escapeHtml(recDisp)}</code></td>
                                         <td>${escapeHtml(String(reason))}</td>
                                     </tr>`;
                                 }).join('')}
@@ -4290,7 +4756,8 @@
 
                             // 🔥 TASK 3 FIX: 检查是否有参数推荐
                             const hasRecommendation = recommendation && recommendation.params && recommendation.params[paramName];
-                            const recommendedValue = hasRecommendation ? String(recommendation.params[paramName].value) : null;
+                            const _rawRecV = hasRecommendation ? recommendation.params[paramName].value : null;
+                            const recommendedValue = hasRecommendation ? window.recommendationValueForDataAttr(_rawRecV) : null;
                             let defaultValue = String(paramValue || '');
                             let numValue = typeof paramValue === 'number' ? paramValue : (parseFloat(paramValue) || 0);
                             // 🔥 STED-EC 默认参数注入：预览模式下空/占位时用生信默认值，用户可改
@@ -4336,8 +4803,9 @@
                             // 🔥 TASK 3 FIX: 显示推荐值提示
                             if (hasRecommendation) {
                                 const reason = recommendation.params[paramName].reason || '基于数据特征推荐';
-                                formHtml += `<small class="text-muted d-block mt-1">
-                                    <i class="bi bi-lightbulb"></i> 推荐值: <code>${escapeHtml(recommendedValue)}</code> - ${escapeHtml(reason)}
+                                const recDisp = window.formatRecommendationDisplayValue(_rawRecV);
+                                formHtml += `<small class="text-muted d-block mt-1" style="white-space:pre-wrap;">
+                                    <i class="bi bi-lightbulb"></i> 推荐值: <code>${escapeHtml(recDisp)}</code> - ${escapeHtml(reason)}
                                 </small>`;
                             }
 
@@ -5515,7 +5983,7 @@
                     if (sub) {
                         try {
                             subHtml = (typeof safeMarkedParse === 'function')
-                                ? '<div class="checklist-subtitle">' + safeMarkedParse(String(sub)) + '</div>'
+                                ? '<div class="checklist-subtitle">' + safeMarkedParse(sub) + '</div>'
                                 : '<div class="checklist-subtitle">' + (sub + '').replace(/</g, '&lt;') + '</div>';
                         } catch (e) {
                             subHtml = '<div class="checklist-subtitle">' + (sub + '').replace(/</g, '&lt;') + '</div>';
@@ -5554,7 +6022,9 @@
                 }
                 function textToHtml(text, useMarkdown) {
                     if (text == null) return '';
-                    var raw = typeof text === 'string' ? text : (text.message ? text.message : JSON.stringify(text));
+                    var raw = (typeof normalizeReportMarkdownInput === 'function')
+                        ? normalizeReportMarkdownInput(text)
+                        : (typeof text === 'string' ? text : (text.message ? text.message : JSON.stringify(text)));
                     if (options && typeof options.markdown === 'function') return options.markdown(raw);
                     return esc(raw).replace(/\n/g, '<br>');
                 }
@@ -5573,7 +6043,10 @@
                 if (hasRenderableDiagnosis(diagnosis)) {
                     diagBlock = document.createElement('div');
                     diagBlock.className = 'report-diagnosis-content mb-4';
-                    diagBlock.innerHTML = '<h6 class="text-muted mb-2">数据诊断报告</h6><div class="report-content-box" style="font-size:14px;line-height:1.8;color:#333;background:#f0f7ff;padding:16px;border-radius:8px;border-left:4px solid #4d6bfe">' + textToHtml(diagnosis) + '</div>';
+                    var diagBody = (typeof buildDiagnosisReportBodyHtml === 'function')
+                        ? buildDiagnosisReportBodyHtml(diagnosis, reportData)
+                        : textToHtml(diagnosis);
+                    diagBlock.innerHTML = '<h6 class="text-muted mb-2">数据诊断报告</h6><div class="report-content-box" style="font-size:14px;line-height:1.8;color:#333;background:#f0f7ff;padding:16px;border-radius:8px;border-left:4px solid #4d6bfe">' + diagBody + '</div>';
                 }
                 // 分析结题仅来自 report_data.report；兼容旧快照的 summary 作为专家正文（绝不写入诊断区）
                 var expertMarkdown = (rd && rd.report != null && String(rd.report).trim() !== '') ? rd.report
@@ -5686,10 +6159,11 @@
                         }
                         var durationHeader = (duration != null && duration !== '') ? ('<div class="checklist-subtitle text-muted small mt-1">耗时 ' + (typeof duration === 'number' ? duration.toFixed(1) : duration) + 's</div>') : '';
                         var itemHtml = '<div class="accordion-item snapshot-step-section">' +
-                            '<h2 class="accordion-header">' +
-                            '<button class="accordion-button text-start" type="button" data-bs-toggle="collapse" data-bs-target="#' + stepId + '" aria-expanded="true">' +
+                            '<h2 class="accordion-header exec-result-accordion-header d-flex align-items-stretch flex-nowrap py-0 pe-0">' +
+                            '<button class="accordion-button text-start flex-grow-1" type="button" data-bs-toggle="collapse" data-bs-target="#' + stepId + '" aria-expanded="true">' +
                             '<span class="checklist-icon icon-success me-2">✓</span><div class="flex-grow-1"><span class="checklist-title">' + esc(name) + '</span>' + durationHeader + '</div>' +
-                            '</button></h2>' +
+                            '</button>' +
+                            '<button type="button" class="focus-mode-btn" title="全屏查看此结果" aria-label="全屏查看此结果">⛶</button></h2>' +
                             '<div id="' + stepId + '" class="accordion-collapse collapse show">' +
                             '<div class="accordion-body">' + (contentHtml || '') + '</div></div></div>';
                         list.insertAdjacentHTML('beforeend', itemHtml);
@@ -5764,6 +6238,9 @@
                 //     outer.appendChild(evalWrap);
                 // }
                 targetContainer.appendChild(outer);
+                if (typeof window.syncWorkspacePanelWidthFromContent === 'function') {
+                    window.syncWorkspacePanelWidthFromContent(outer);
+                }
             }
             // 🔥 内部：仅渲染工作流卡片到 targetZone，返回 formId（供 renderStaticHistorySnapshot 调用）；messageId 用于 data-message-id 与自动保存
             function _renderStaticWorkflowCard(workflowData, targetZone, messageId) {
@@ -6006,8 +6483,10 @@
                 fillFromRoot('skill_last_tool');
                 if ((!snap.tool_calls || !snap.tool_calls.length) && content.tool_calls && content.tool_calls.length)
                     snap.tool_calls = content.tool_calls;
-                if ((snap.text == null || snap.text === '') && content.message != null)
-                    snap.text = String(content.message);
+                if ((snap.text == null || snap.text === '') && content.message != null) {
+                    var _m = content.message;
+                    snap.text = (typeof _m === 'string') ? _m : stringifyAssistantPayloadLoose(_m);
+                }
                 return snap;
             }
             // 🔥 工具调用记录：终端风格 <pre>，与 code-block-wrapper 视觉一致（仅追加，不改布局骨架）
@@ -9412,7 +9891,7 @@
                                         appendReasoningToActiveLog(rawReasoning);
                                         appendReasoningToTextZone(rawReasoning);
                                     }
-                                    var delta = (typeof rawContent === 'string' ? rawContent : String(rawContent || ''));
+                                    var delta = (typeof rawContent === 'string' ? rawContent : stringifyAssistantPayloadLoose(rawContent));
                                     var parsedDelta = consumeThinkTaggedDelta(delta);
                                     if (sseApiMode === 'flagship' && parsedDelta.thoughtDelta) {
                                         thoughtBuffer += parsedDelta.thoughtDelta;
@@ -10113,21 +10592,27 @@
                                 return;
                             }
                             if (section !== 'diagnosis' && section !== 'summary') return;
-                            let rawMessage = '';
-                            if (typeof content === 'string') rawMessage = content;
-                            else if (content && content.message) rawMessage = content.message;
-                            else if (content) rawMessage = JSON.stringify(content, null, 2);
                             const integrityVerified = (content && content.integrity_status === 'verified') ||
                                 (fullData && (fullData.integrity_status === 'verified' || (fullData.report_data && fullData.report_data.integrity_status === 'verified')));
-                            // 报告区 Markdown 必须是“纯净内容”：在渲染前直接移除 <think>...</think>
-                            let reportContent = rawMessage;
-                            if (typeof reportContent === 'string') {
-                                // 支持 <think>...</think> 与 <thinking>...</thinking>（忽略大小写）
-                                reportContent = reportContent.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
-                            }
                             const integrityBadge = integrityVerified ? '<p class="mb-2 small text-success"><i class="bi bi-shield-check"></i> 数据完整性校验通过</p>' : '';
                             const sectionTitle = section === 'diagnosis' ? '数据诊断报告' : '分析结题报告';
-                            const bodyHtml = '<h6 class="text-muted mb-2">' + sectionTitle + '</h6>' + integrityBadge + '<div class="report-content-box" style="font-size:14px;line-height:1.8;color:#333;background:#f0f7ff;padding:20px;border-radius:8px;border-left:4px solid #4d6bfe">' + safeMarkedParse(reportContent) + '</div>';
+                            var sectionInnerHtml = '';
+                            if (section === 'diagnosis') {
+                                var _dx = extractDiagnosisSectionInput(content, fullData);
+                                sectionInnerHtml = typeof buildDiagnosisReportBodyHtml === 'function'
+                                    ? buildDiagnosisReportBodyHtml(_dx.body, _dx.mergedFull)
+                                    : safeMarkedParse(typeof _dx.body === 'string' ? _dx.body : stringifyAssistantPayloadLoose(_dx.body));
+                            } else {
+                                var rawMessage = (typeof normalizeReportMarkdownInput === 'function')
+                                    ? normalizeReportMarkdownInput(content)
+                                    : (typeof content === 'string' ? content : (content && content.message) ? content.message : JSON.stringify(content, null, 2));
+                                var reportContent = rawMessage;
+                                if (typeof reportContent === 'string') {
+                                    reportContent = reportContent.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+                                }
+                                sectionInnerHtml = safeMarkedParse(reportContent);
+                            }
+                            const bodyHtml = '<h6 class="text-muted mb-2">' + sectionTitle + '</h6>' + integrityBadge + '<div class="report-content-box" style="font-size:14px;line-height:1.8;color:#333;background:#f0f7ff;padding:20px;border-radius:8px;border-left:4px solid #4d6bfe">' + sectionInnerHtml + '</div>';
                             var reportContainer = cardZoneRef.querySelector('.unified-report-container');
                             if (!reportContainer) {
                                 reportContainer = document.createElement('div');
@@ -10138,6 +10623,9 @@
                             var target = reportContainer.querySelector(section === 'diagnosis' ? '.report-diagnosis-content' : '.report-summary-content');
                             if (target) {
                                 target.innerHTML = bodyHtml;
+                                if (typeof window.syncWorkspacePanelWidthFromContent === 'function') {
+                                    window.syncWorkspacePanelWidthFromContent(target);
+                                }
                                 console.log('✅ [renderReportSection] 已写入 ' + sectionTitle);
                             }
                         }
@@ -10336,7 +10824,7 @@
                                                 if (!imageUrl.startsWith('/')) {
                                                     imageUrl = (imgPath && String(imgPath).indexOf('uploads') !== -1) ? `/uploads/${imageUrl}` : `/results/${imageUrl}`;
                                                 }
-                                                resultContentHtml += `
+                                                var _imgCell = `
                                                     <div class="mt-2">
                                                         ${imgTitle ? `<p class="small text-muted mb-1">${escapeHtml(imgTitle)}</p>` : ''}
                                                         <img src="${typeof getAbsoluteMediaUrl === 'function' ? getAbsoluteMediaUrl(imageUrl) : imageUrl}" 
@@ -10348,6 +10836,7 @@
                                                         <p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${imageUrl}</p>
                                                     </div>
                                                 `;
+                                                resultContentHtml += (typeof window.buildSmartContentShell === 'function') ? window.buildSmartContentShell(_imgCell) : _imgCell;
                                             } else {
                                                 resultContentHtml += renderUniversalFileCard(imgPath, isDataFile(imgPath) ? '数据文件' : '结果文件');
                                             }
@@ -10362,7 +10851,7 @@
                                             if (!imageUrl.startsWith('/')) {
                                                 imageUrl = (plotPath && plotPath.indexOf('uploads') !== -1) ? `/uploads/${imageUrl}` : `/results/${imageUrl}`;
                                             }
-                                            resultContentHtml += `
+                                            var _plotCell = `
                                                 <div class="mt-2">
                                                     <img src="${typeof getAbsoluteMediaUrl === 'function' ? getAbsoluteMediaUrl(imageUrl) : imageUrl}" 
                                                         class="img-fluid rounded shadow-sm" 
@@ -10373,6 +10862,7 @@
                                                     <p style="display:none; color: #999; font-size: 12px;">图片加载失败: ${imageUrl}</p>
                                                 </div>
                                             `;
+                                            resultContentHtml += (typeof window.buildSmartContentShell === 'function') ? window.buildSmartContentShell(_plotCell) : _plotCell;
                                         } else {
                                             resultContentHtml += renderUniversalFileCard(plotPath, isDataFile(plotPath) ? '数据文件' : '结果文件');
                                         }
@@ -10424,7 +10914,7 @@
                                                 const headers = Object.keys(firstRow);
                                                 const displayRows = tables.slice(0, 5); // Show first 5 rows
                                                 
-                                                resultContentHtml += `
+                                                var _tblInner = `
                                                     <div class="mt-2">
                                                         <h6 class="small text-muted">结果表格（显示前 ${displayRows.length} 行，共 ${tables.length} 行）</h6>
                                                         <div class="table-responsive">
@@ -10445,6 +10935,7 @@
                                                         </div>
                                                     </div>
                                                 `;
+                                                resultContentHtml += (typeof window.buildSmartContentShell === 'function') ? window.buildSmartContentShell(_tblInner) : _tblInner;
                                             }
                                         }
                                     }
@@ -10471,8 +10962,9 @@
                                             <div class="step-body">
                                                 <div class="accordion" id="${stepId}-acc">
                                                     <div class="accordion-item" style="border:none;">
-                                                        <h2 class="accordion-header">
-                                                            <button class="accordion-button py-2" type="button" data-bs-toggle="collapse" data-bs-target="#${stepId}" aria-expanded="true" style="font-size:13px;">查看详情</button>
+                                                        <h2 class="accordion-header exec-result-accordion-header d-flex align-items-stretch flex-nowrap py-0 pe-0">
+                                                            <button class="accordion-button py-2 flex-grow-1" type="button" data-bs-toggle="collapse" data-bs-target="#${stepId}" aria-expanded="true" style="font-size:13px;">查看详情</button>
+                                                            <button type="button" class="focus-mode-btn" title="全屏查看此结果" aria-label="全屏查看此结果">⛶</button>
                                                         </h2>
                                                         <div id="${stepId}" class="accordion-collapse collapse show">
                                                             <div class="accordion-body">
@@ -10517,6 +11009,9 @@
                             executionSection.innerHTML = stepsHtml;
                             if (typeof window.hydrateToolAssetPreviews === 'function') window.hydrateToolAssetPreviews(executionSection);
                             syncMiddlePaneChecklistIcons(stepsDetails);
+                            if (typeof window.syncWorkspacePanelWidthFromContent === 'function') {
+                                window.syncWorkspacePanelWidthFromContent(executionSection);
+                            }
                             console.log(`✅ [renderExecutionSteps] 已渲染 ${stepsDetails.length} 个步骤到统一报告容器`);
                         }
                         window.__workspace_renderExecutionSteps = renderExecutionSteps;
@@ -12875,8 +13370,14 @@
                     'data.diagnosis': data.diagnosis,
                     'reportData.diagnosis': reportData.diagnosis,
                     'final diagnosis': diagnosis,
-                    'diagnosis length': diagnosis ? diagnosis.length : 0
+                    'diagnosis length': (typeof diagnosis === 'string' && diagnosis.length) ? diagnosis.length : (diagnosis && typeof diagnosis === 'object' ? 'object' : 0)
                 });
+                var diagnosisSectionHtml = '';
+                if (diagnosis && diagnosis !== '暂无诊断信息') {
+                    diagnosisSectionHtml = (typeof buildDiagnosisReportBodyHtml === 'function')
+                        ? buildDiagnosisReportBodyHtml(diagnosis, data)
+                        : (typeof safeMarkedParse === 'function' ? safeMarkedParse(typeof diagnosis === 'string' ? diagnosis : '') : '');
+                }
                 
                 // 🔍 智能寻找 Key Plot (本次任务的最高级产出)
                 // 逻辑：倒序遍历，找到第一个有图的步骤，它就是本次运行的“最终结果”
@@ -13137,7 +13638,7 @@
                 html += `</div></div>
                     <div class="report-section">
                         <h6>2. AI 专家诊断</h6>
-                        <div class="llm-diagnosis" style="display: block; padding: 15px; background: #f0f7ff; border-left: 4px solid #4d6bfe; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333;">${diagnosis && diagnosis !== "暂无诊断信息" ? safeMarkedParse(diagnosis) : '<p class="text-muted">暂无诊断信息</p>'}</div>
+                        <div class="llm-diagnosis" style="display: block; padding: 15px; background: #f0f7ff; border-left: 4px solid #4d6bfe; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333;">${diagnosisSectionHtml || '<p class="text-muted">暂无诊断信息</p>'}</div>
                     </div>
                     ${keyPlotHtml}
                 </div>`;
@@ -13203,7 +13704,9 @@
                     hasDiagnosisReport: !!diagnosisReport,
                     isTemplateMode: isTemplateMode,
                     recommendation: recommendation,
-                    diagnosisReport: diagnosisReport ? diagnosisReport.substring(0, 100) + '...' : null
+                    diagnosisReport: (diagnosisReport && typeof diagnosisReport === 'string')
+                        ? (diagnosisReport.substring(0, 100) + '...')
+                        : (diagnosisReport ? '[non-string payload]' : null)
                 });
                 
                 if (!steps || steps.length === 0) {
@@ -13253,13 +13756,16 @@
                     // 🔥 TASK 5: 检查是否有参数推荐
                     const hasRecommendations = recommendation && recommendation.params && Object.keys(recommendation.params).length > 0;
                     const useRecommendedParams = false; // 默认使用默认参数
+                    const _formDiagBody = (typeof buildDiagnosisReportBodyHtml === 'function')
+                        ? buildDiagnosisReportBodyHtml(diagnosisReport, data)
+                        : safeMarkedParse(diagnosisReport);
                     
                     formHtml += `<div class="alert alert-success mb-3" style="background-color: #f0f7ff; border-left: 4px solid #4d6bfe; padding: 15px; border-radius: 4px;">
                         <h6 style="margin-top: 0; color: #1976D2; margin-bottom: 10px;">
                             <i class="bi bi-clipboard-check"></i> ${isTemplateMode ? '方案已生成' : '数据诊断与参数推荐报告'}
                         </h6>
                         <div style="font-size: 14px; line-height: 1.6; color: #333;">
-                            ${safeMarkedParse(diagnosisReport)}
+                            ${_formDiagBody}
                         </div>
                         ${hasRecommendations ? `
                             <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
@@ -13289,12 +13795,14 @@
                                             const defVal = rec.default !== undefined && rec.default !== null ? rec.default : '';
                                             const recVal = rec.value !== undefined && rec.value !== null ? rec.value : '';
                                             const reason = rec.reason || '基于数据特征推荐';
+                                            const defDisp = window.formatRecommendationDisplayValue(defVal);
+                                            const recDisp = window.formatRecommendationDisplayValue(recVal);
                                             return `<tr>
                                                 <td>${escapeHtml(String(stepName))}</td>
                                                 <td>${escapeHtml(String(toolName))}</td>
                                                 <td><code>${escapeHtml(String(paramName))}</code></td>
-                                                <td>${escapeHtml(String(defVal))}</td>
-                                                <td><code>${escapeHtml(String(recVal))}</code></td>
+                                                <td style="white-space:pre-wrap;font-size:13px;">${escapeHtml(defDisp)}</td>
+                                                <td style="white-space:pre-wrap;font-size:13px;"><code>${escapeHtml(recDisp)}</code></td>
                                                 <td>${escapeHtml(String(reason))}</td>
                                             </tr>`;
                                         }).join('')}
@@ -13323,10 +13831,11 @@
                             if (paramRec && paramRec.value !== undefined) {
                                 const displayName = paramName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                                 const reason = paramRec.reason || '基于数据特征推荐';
-                                formHtml += `<li style="margin-bottom: 6px;">
-                                    <strong>${displayName}:</strong> 
-                                    <code style="background-color: #fff3cd; padding: 2px 6px; border-radius: 3px; font-size: 12px;">${paramRec.value}</code> 
-                                    <span style="color: #666; font-size: 12px;">- ${reason}</span>
+                                const valDisp = window.formatRecommendationDisplayValue(paramRec.value);
+                                formHtml += `<li style="margin-bottom: 6px; white-space:pre-wrap;">
+                                    <strong>${escapeHtml(displayName)}:</strong> 
+                                    <code style="background-color: #fff3cd; padding: 2px 6px; border-radius: 3px; font-size: 12px;">${escapeHtml(valDisp)}</code> 
+                                    <span style="color: #666; font-size: 12px;">- ${escapeHtml(reason)}</span>
                                 </li>`;
                             }
                         }
@@ -13389,10 +13898,13 @@
                                 formHtml += `</select>`;
                             } else {
                                 // 文本输入 - 🔥 TASK 5: 支持推荐参数切换
-                                let valueStr = paramValue !== null && paramValue !== undefined ? String(paramValue) : '';
+                                let valueStr = paramValue !== null && paramValue !== undefined
+                                    ? (typeof paramValue === 'object' ? JSON.stringify(paramValue) : String(paramValue))
+                                    : '';
                                 const defaultValue = valueStr; // 保存默认值
                                 const hasRecommendation = recommendation && recommendation.params && recommendation.params[paramName];
-                                const recommendedValue = hasRecommendation ? String(recommendation.params[paramName].value) : null;
+                                const _rvRawForm = hasRecommendation ? recommendation.params[paramName].value : null;
+                                const recommendedValue = hasRecommendation ? window.recommendationValueForDataAttr(_rvRawForm) : null;
                                 
                                 // 添加数据属性，用于切换参数（使用转义确保安全）
                                 const dataAttrs = `data-param-name="${escapeHtml(paramName)}" data-default-value="${escapeHtml(defaultValue)}" ${recommendedValue ? `data-recommended-value="${escapeHtml(recommendedValue)}"` : ''}`;
@@ -13402,8 +13914,9 @@
                                 // 如果有推荐值，显示提示
                                 if (hasRecommendation) {
                                     const reason = recommendation.params[paramName].reason || '基于数据特征推荐';
-                                    formHtml += `<small class="text-muted d-block mt-1">
-                                        <i class="bi bi-lightbulb"></i> 推荐值: <code>${escapeHtml(recommendedValue)}</code> - ${escapeHtml(reason)}
+                                    const recDispForm = window.formatRecommendationDisplayValue(_rvRawForm);
+                                    formHtml += `<small class="text-muted d-block mt-1" style="white-space:pre-wrap;">
+                                        <i class="bi bi-lightbulb"></i> 推荐值: <code>${escapeHtml(recDispForm)}</code> - ${escapeHtml(reason)}
                                     </small>`;
                                 }
                             }
