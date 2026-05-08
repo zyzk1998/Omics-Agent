@@ -4,6 +4,9 @@ Auto-initializing signing keys for file signatures (BLAKE3 + Ed25519).
 On first use: if the keys file does not exist, generate a new Ed25519 key pair,
 persist to a JSON file on the mounted volume, and return the keys.
 On subsequent runs: load keys from the file. No manual .env or copy-paste required.
+
+宿主机开发：默认 `/app/data/security/` 往往不可写；会按候选路径依次回退到用户缓存目录，
+避免刷屏告警并确保密钥可持久化。
 """
 
 from __future__ import annotations
@@ -13,20 +16,74 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Persisted under mounted volume so keys survive container restarts (e.g. /app/data)
-DEFAULT_KEYS_PATH = os.getenv("SECURITY_KEYS_PATH", "/app/data/security/signing_keys.json")
+# 容器内挂载卷（可被 SECURITY_KEYS_PATH 覆盖）
+_ENV_DEFAULT = "/app/data/security/signing_keys.json"
 
 _keys_cache: Optional[Tuple[str, str]] = None
+_resolved_keys_file: Optional[Path] = None
+
+
+def _key_path_candidates() -> List[Path]:
+    """Ordered: env override -> container default -> user cache (always writable on POSIX)."""
+    out: List[Path] = []
+    env = (os.getenv("SECURITY_KEYS_PATH") or "").strip()
+    if env:
+        out.append(Path(env))
+    out.append(Path(_ENV_DEFAULT))
+    out.append(Path.home() / ".cache" / "gibh-agent" / "security" / "signing_keys.json")
+    seen: set = set()
+    uniq: List[Path] = []
+    for p in out:
+        try:
+            key = str(p.resolve())
+        except OSError:
+            key = str(p)
+        if key not in seen:
+            seen.add(key)
+            uniq.append(p)
+    return uniq
+
+
+def _find_existing_keys_file() -> Optional[Path]:
+    for p in _key_path_candidates():
+        try:
+            if p.is_file():
+                return p.resolve()
+        except OSError:
+            continue
+    return None
+
+
+def _allocate_keys_file_for_write() -> Path:
+    """First candidate whose parent directory can be created and is writable."""
+    last_err: Optional[Exception] = None
+    for p in _key_path_candidates():
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            return p.resolve()
+        except OSError as e:
+            last_err = e
+            continue
+    raise RuntimeError(
+        "Cannot create writable directory for signing keys; set SECURITY_KEYS_PATH to a "
+        f"writable JSON path. Last error: {last_err}"
+    )
 
 
 def _ensure_keys_file() -> Path:
-    path = Path(DEFAULT_KEYS_PATH)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+    global _resolved_keys_file
+    if _resolved_keys_file is not None:
+        return _resolved_keys_file
+    existing = _find_existing_keys_file()
+    if existing is not None:
+        _resolved_keys_file = existing
+        return _resolved_keys_file
+    _resolved_keys_file = _allocate_keys_file_for_write()
+    return _resolved_keys_file
 
 
 def _generate_and_persist_keys() -> Tuple[str, str]:
@@ -49,9 +106,11 @@ def _generate_and_persist_keys() -> Tuple[str, str]:
 
 
 def _load_keys() -> Optional[Tuple[str, str]]:
-    path = Path(DEFAULT_KEYS_PATH)
-    if not path.is_file():
+    global _resolved_keys_file
+    path = _find_existing_keys_file()
+    if path is None:
         return None
+    _resolved_keys_file = path
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)

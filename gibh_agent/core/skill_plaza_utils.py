@@ -15,14 +15,8 @@ __all__ = [
     "sort_skill_payloads_inplace",
 ]
 
-# 多模态组学中暂未对接执行链路的子类：橱窗不展示，种子数据仍保留在 DB 便于后续启用
-MULTIMODAL_PLAZA_HIDDEN_SUBCATEGORIES = frozenset(
-    {
-        "基因组学",
-        "表观遗传组学",
-        "蛋白质组学",
-    }
-)
+# 曾用于隐藏未接链路的子类；三大组学快车道已接 Mock 全 DAG，橱窗与 GET /api/skills 均展示
+MULTIMODAL_PLAZA_HIDDEN_SUBCATEGORIES = frozenset()
 
 
 def infer_skill_implemented_from_prompt(prompt_template: Optional[str]) -> bool:
@@ -36,8 +30,8 @@ def is_multimodal_skill_hidden_from_plaza(
     sub_category: Optional[str],
 ) -> bool:
     """
-    「多模态组学」下指定子类暂不列入技能广场橱窗（与占位技能同理：仅隐藏展示）。
-    数据库记录与 seed_skills 种子不变，后续接入快车道或工作流后再从集合中移除子类名即可。
+    「多模态组学」下若 sub_category 命中 MULTIMODAL_PLAZA_HIDDEN_SUBCATEGORIES 则 API 侧不展示。
+    集合默认可为空；需要灰度隐藏某子类时在此维护子类名，并同步前端 `filterDeferredMultimodalSkillsForPlaza`。
     """
     if (main_category or "").strip() != "多模态组学":
         return False

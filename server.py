@@ -3367,8 +3367,8 @@ async def execute_workflow(request: dict):
         raise HTTPException(status_code=500, detail="智能体未初始化")
     
     try:
-        workflow_data = request.get("workflow_data")
-        file_paths = request.get("file_paths", [])
+        workflow_data = request.get("workflow_data") or {}
+        file_paths = request.get("file_paths", []) or workflow_data.get("file_paths", [])
         enabled_mcps = request.get("enabled_mcps") or []
         if isinstance(enabled_mcps, str):
             try:
@@ -3409,8 +3409,11 @@ async def execute_workflow(request: dict):
                 route_query = "metabolomics analysis"
             elif file_ext in [".h5ad", ".h5"]:
                 route_query = "single cell transcriptomics analysis"
-            elif "fastq" in file_path.lower():
-                route_query = "single cell RNA-seq analysis"
+            elif any(
+                ext in file_path.lower()
+                for ext in (".fastq.gz", ".fq.gz", ".fastq", ".fq")
+            ):
+                route_query = "human whole genome sequencing FASTQ germline analysis"
             else:
                 route_query = "bioinformatics analysis"
         else:
@@ -3471,6 +3474,94 @@ async def execute_workflow(request: dict):
                 if not target_agent:
                     raise HTTPException(status_code=500, detail="RNA Agent 未找到")
         
+        # 🔥 执行前加固：绝对路径 + 首步 params.file_path 强制与本次上传一致（修复占位/串会话路径）
+        from pathlib import Path as _ExecPath
+        from gibh_agent.core.workflow_execution_preflight import inject_primary_file_path_into_workflow
+
+        _fp_flat: list = []
+        for p in file_paths or []:
+            s = (p if isinstance(p, str) else str(p)).strip()
+            if not s:
+                continue
+            if ";" in s or "," in s:
+                for part in s.replace(";", ",").split(","):
+                    t = part.strip()
+                    if t:
+                        _fp_flat.append(t)
+            else:
+                _fp_flat.append(s)
+        resolved_execute_paths: list = []
+        _ud = UPLOAD_DIR if isinstance(UPLOAD_DIR, Path) else Path(str(UPLOAD_DIR))
+        for fp in _fp_flat:
+            po = _ExecPath(fp)
+            if po.is_file():
+                resolved_execute_paths.append(str(po.resolve()))
+            elif (_ud / po.name).is_file():
+                resolved_execute_paths.append(str((_ud / po.name).resolve()))
+            elif po.exists():
+                resolved_execute_paths.append(str(po.resolve()))
+            else:
+                logger.warning("⚠️ [Execute] 文件不存在，跳过: %s", fp)
+        resolved_execute_paths = list(dict.fromkeys(resolved_execute_paths))
+        file_paths = resolved_execute_paths
+        if not file_paths:
+            logger.error(
+                "❌ [Execute] 未解析到任何容器内存在的文件路径；Payload 摘要 keys=%s workflow_keys=%s",
+                list(request.keys()),
+                list(workflow_data.keys()) if isinstance(workflow_data, dict) else None,
+            )
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "type": "execution_error",
+                    "status": "error",
+                    "message": "未找到可执行的上传文件：请确认 Docker 已将宿主 uploads 挂载到 UPLOAD_DIR，且前端传入 file_paths 或 workflow_data.file_paths。",
+                },
+            )
+
+        if workflow_data.get("steps"):
+            try:
+                _inj_ok = inject_primary_file_path_into_workflow(
+                    workflow_data,
+                    file_paths,
+                    upload_dir=str(_ud.resolve()),
+                )
+                if not _inj_ok:
+                    logger.error(
+                        "❌ [Execute] inject_primary_file_path_into_workflow 失败 | "
+                        "file_paths=%r UPLOAD_DIR=%r",
+                        file_paths,
+                        str(_ud.resolve()),
+                    )
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "type": "execution_error",
+                            "status": "error",
+                            "message": "无法在容器内定位上传文件，首步 file_path 注入失败。请检查挂载路径与文件名是否一致。",
+                            "file_paths_received": file_paths,
+                            "upload_dir": str(_ud.resolve()),
+                        },
+                    )
+            except Exception as inj_exc:
+                import traceback as _tb_inj
+
+                logger.error(
+                    "❌ [Execute] Preflight 注入异常 Payload error: keys=%s err=%s",
+                    list(request.keys()),
+                    inj_exc,
+                    exc_info=True,
+                )
+                return JSONResponse(
+                    status_code=500,
+                    content={
+                        "type": "execution_error",
+                        "status": "error",
+                        "message": str(inj_exc),
+                        "traceback": _tb_inj.format_exc(),
+                    },
+                )
+
         # 🔥 Step 4: 使用通用执行器（动态执行，不依赖硬编码逻辑）
         try:
             from gibh_agent.core.executor import WorkflowExecutor
@@ -3481,14 +3572,29 @@ async def execute_workflow(request: dict):
             output_dir = str(RESULTS_DIR / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
             
             # 创建执行器并执行（传递 agent 实例以生成诊断）
-            executor = WorkflowExecutor(output_dir=output_dir)
-            report_data = executor.execute_workflow(
-                workflow_data=workflow_data,
-                file_paths=file_paths,
-                output_dir=output_dir,
-                agent=target_agent,  # 🔥 传递 agent 实例以生成 AI Expert Diagnosis
-                enabled_mcps=enabled_mcps,
-            )
+            executor = WorkflowExecutor(output_dir=output_dir, upload_dir=str(_ud.resolve()))
+            try:
+                report_data = executor.execute_workflow(
+                    workflow_data=workflow_data,
+                    file_paths=file_paths,
+                    output_dir=output_dir,
+                    agent=target_agent,  # 🔥 传递 agent 实例以生成 AI Expert Diagnosis
+                    enabled_mcps=enabled_mcps,
+                )
+            except Exception as exec_exc:
+                import traceback as _tb_ex
+
+                _tb_str = _tb_ex.format_exc()
+                logger.error("❌❌ EXECUTE_WORKFLOW 崩溃 ❌❌\n%s", _tb_str)
+                return JSONResponse(
+                    status_code=500,
+                    content={
+                        "type": "execution_error",
+                        "status": "error",
+                        "message": str(exec_exc),
+                        "traceback": _tb_str,
+                    },
+                )
             
             logger.info("✅ 通用执行器执行完成")
             
@@ -3497,13 +3603,33 @@ async def execute_workflow(request: dict):
                 try:
                     logger.info("📝 [Server] 生成 AI Expert Diagnosis...")
                     
-                    # 检测组学类型
-                    omics_type = "Metabolomics"  # 默认
-                    steps = workflow_data.get("steps", [])
-                    if any("rna" in step.get("id", "").lower() or "rna" in step.get("tool_id", "").lower() for step in steps):
-                        omics_type = "scRNA"
-                    elif any("metabolomics" in step.get("id", "").lower() or "metabolomics" in step.get("tool_id", "").lower() for step in steps):
-                        omics_type = "Metabolomics"
+                    # 检测组学类型（禁止默认落到代谢组导致报告串台）
+                    steps = workflow_data.get("steps", []) or []
+                    dom = (workflow_data.get("domain_name") or "").strip().lower()
+                    omics_type = dom or ""
+                    if not omics_type:
+                        tools_one = " ".join(
+                            str(s.get("tool_id") or "") + str(s.get("step_id") or "")
+                            for s in steps
+                            if isinstance(s, dict)
+                        ).lower()
+                        if "genomics_" in tools_one or "step_genomics" in tools_one:
+                            omics_type = "genomics"
+                        elif "epigenomics_" in tools_one or "step_epi" in tools_one:
+                            omics_type = "epigenomics"
+                        elif "proteomics_" in tools_one or "step_prot" in tools_one:
+                            omics_type = "proteomics"
+                        elif any(
+                            "rna" in str(s.get("tool_id", "")).lower()
+                            or "scrna" in str(s.get("tool_id", "")).lower()
+                            for s in steps
+                            if isinstance(s, dict)
+                        ):
+                            omics_type = "scRNA"
+                        elif any("metabolomics" in str(s.get("tool_id", "")).lower() for s in steps if isinstance(s, dict)):
+                            omics_type = "Metabolomics"
+                        else:
+                            omics_type = "generic"
                     
                     # 调用异步方法生成诊断
                     steps_results = report_data.get("steps_results", [])

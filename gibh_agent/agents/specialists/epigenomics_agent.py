@@ -1,26 +1,4 @@
-"""表观遗传组学智能体（Epigenomics Agent）"""
-from typing import Dict, Any, List, Optional
-from ..base_agent import BaseAgent
-from ...core.llm_client import LLMClient
-from ...core.prompt_manager import PromptManager
+"""兼容旧导入路径：表观智能体见 gibh_agent.agents.epigenomics_agent。"""
+from ..epigenomics_agent import EpigenomicsAgent
 
-
-class EpigenomicsAgent(BaseAgent):
-    """表观遗传组学智能体（占位符，待实现）"""
-    
-    def __init__(self, llm_client: Optional[LLMClient], prompt_manager: PromptManager):
-        super().__init__(llm_client, prompt_manager, "epigenomics_expert")
-    
-    async def process_query(
-        self,
-        query: str,
-        history: List[Dict[str, str]] = None,
-        uploaded_files: List[Dict[str, str]] = None,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """处理查询（待实现）"""
-        return {
-            "type": "chat",
-            "response": "Epigenomics Agent is under development. Coming soon!"
-        }
-
+__all__ = ["EpigenomicsAgent"]

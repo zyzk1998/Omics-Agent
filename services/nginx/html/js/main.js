@@ -32,7 +32,10 @@
 
     function workspaceContentNeedsReportWidth(html) {
         if (!html || typeof html !== 'string') return false;
-        return /markdown-table|md-table|class="table|&lt;table[\s>]|```\s*mermaid|!\[[^\]]*\]\(|<img[\s>]/i.test(html);
+        // 含 Markdown 围栏代码块时，渲染后会走 buildSmartContentShell，需与表格/图同宽
+        return /markdown-table|md-table|class="table|&lt;table[\s>]|```\s*mermaid|```|!\[[^\]]*\]\(|<img[\s>]/i.test(
+            html
+        );
     }
 
     function setWorkspacePanelReportMode(on) {

@@ -203,8 +203,32 @@ def guess_format(filepath: str) -> str:
     return format_map.get(ext, 'mol')
 
 
+def _parse_obabel_append_line(line: str, n_props: int) -> list:
+    """
+    解析 ``obabel -o smi --append ...`` 的首行输出。
+
+    常见两种形态：
+    1) 多列制表：SMILES 与每个性质各占一列（须按列对齐）；旧实现误用 ``parts[-1]`` 会把最后一列当成全部性质。
+    2) 单列续行：仅一个制表符，第二段内以空格分隔多个性质。
+    """
+    line = (line or "").strip()
+    if not line or n_props <= 0:
+        return []
+    if "\t" not in line:
+        toks = line.split()
+        return toks[1 : 1 + n_props] if len(toks) > 1 else []
+
+    parts = line.split("\t")
+    if len(parts) >= n_props + 1:
+        return [parts[i + 1].strip() for i in range(n_props)]
+    if len(parts) == 2:
+        return parts[1].split()
+    toks = line.split()
+    return toks[1 : 1 + n_props] if len(toks) > 1 else []
+
+
 def calculate_properties(input_data: str, input_format: str = None) -> dict:
-    """计算分子基础性质"""
+    """计算分子基础性质（依赖系统 ``obabel`` 的 ``--append`` 描述符列）。"""
     props = {}
     
     try:
@@ -212,7 +236,7 @@ def calculate_properties(input_data: str, input_format: str = None) -> dict:
         fmt = input_format if input_format else (guess_format(input_data) if is_file else "smi")
         
         # 使用 obabel --append 计算性质
-        # 支持的性质: molwt, logp, tpsa, HBA1, HBA2, HBD, nrot, etc.
+        # 支持的性质: molwt, logP, TPSA, HBA1, HBD, nrot 等
         properties_to_calc = ["molwt", "logP", "TPSA", "HBA1", "HBD", "nrot"]
         append_str = " ".join(properties_to_calc)
         
@@ -232,22 +256,11 @@ def calculate_properties(input_data: str, input_format: str = None) -> dict:
         if process.returncode == 0:
             output = process.stdout.strip()
             if output:
-                # 解析输出: SMILES + tab + properties
-                parts = output.split('\t')
-                if len(parts) >= 2:
-                    prop_values = parts[-1].split()
-                    for i, prop_name in enumerate(properties_to_calc):
-                        if i < len(prop_values):
-                            props[prop_name] = prop_values[i]
-                else:
-                    # 可能是只有一行数据
-                    all_parts = output.split()
-                    # 第一个是SMILES，后面是性质
-                    if len(all_parts) > 1:
-                        for i, prop_name in enumerate(properties_to_calc):
-                            idx = i + 1  # +1 because first is SMILES
-                            if idx < len(all_parts):
-                                props[prop_name] = all_parts[idx]
+                first_line = output.splitlines()[0]
+                vals = _parse_obabel_append_line(first_line, len(properties_to_calc))
+                for i, prop_name in enumerate(properties_to_calc):
+                    if i < len(vals):
+                        props[prop_name] = vals[i]
         
     except FileNotFoundError:
         props["error"] = "obabel not found"

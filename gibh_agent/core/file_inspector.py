@@ -921,6 +921,281 @@ class Archive10xHandler(BaseFileHandler):
             }
 
 
+def _omics_binary_file_label(name_lower: str) -> str:
+    if name_lower.endswith((".bam", ".cram", ".sam")):
+        return "alignment"
+    if name_lower.endswith((".mzml",)):
+        return "proteomics_ms"
+    if name_lower.endswith((".raw",)):
+        return "proteomics_raw_ms"
+    if name_lower.endswith(".h5") and not name_lower.endswith(".h5ad"):
+        return "hdf5_omics"
+    return "binary_omics"
+
+
+@register_inspector(priority=15)
+class OmicsRawSingleFileHandler(BaseFileHandler):
+    """
+    单文件组学专有格式（优先级 15，先于表格/通用退化逻辑）。
+
+    - 通道 A：.fastq.gz / .fq.gz / .fastq / .fq → 仅用 gzip.open/rt 或文本 open 读取 FASTQ 头 4 行
+    - 通道 B：.vcf.gz / .vcf → gzip 文本读取头部若干行（严禁 pandas）
+    - 通道 C：.bam / .cram / .sam / .mzML / .raw / 非 h5ad 的 .h5 → 免检通行（仅体积与扩展名）
+    """
+
+    def can_handle(self, path: Path) -> bool:
+        if not path.is_file():
+            return False
+        if path_looks_like_medical_imaging(path):
+            return False
+        nl = path.name.lower()
+        if nl.endswith(
+            (
+                ".fastq.gz",
+                ".fq.gz",
+                ".fastq",
+                ".fq",
+                ".vcf.gz",
+                ".vcf",
+                ".bam",
+                ".cram",
+                ".sam",
+                ".mzml",
+                ".raw",
+            )
+        ):
+            return True
+        if nl.endswith(".h5") and not nl.endswith(".h5ad"):
+            return True
+        return False
+
+    def _empty_original_error(
+        self, abs_path: str, *, detail: str, file_type: str = "unknown"
+    ) -> Dict[str, Any]:
+        """原始文件为空或无可解析内容时返回，阻止下游误判为「有效组学数据」。"""
+        return {
+            "status": "error",
+            "success": False,
+            "file_path": abs_path,
+            "file_type": file_type,
+            "error": detail,
+            "diagnosis_info": {"empty_original_data": True},
+        }
+
+    def _inspect_fastq_single(
+        self, path: Path, abs_path: str, size_mb: float, size_bytes: int
+    ) -> Dict[str, Any]:
+        nl = path.name.lower()
+        lines: List[str] = []
+        sniff_ok = False
+        read_exc: Optional[BaseException] = None
+        try:
+            if nl.endswith(".gz"):
+                with gzip.open(path, "rt", encoding="utf-8", errors="replace") as gf:
+                    for _ in range(4):
+                        ln = gf.readline()
+                        if not ln:
+                            break
+                        lines.append(ln[:8000])
+            else:
+                with open(path, "rt", encoding="utf-8", errors="replace") as tf:
+                    for _ in range(4):
+                        ln = tf.readline()
+                        if not ln:
+                            break
+                        lines.append(ln[:8000])
+            sniff_ok = len(lines) >= 4 and lines[0].lstrip().startswith("@")
+        except Exception as e:
+            read_exc = e
+            logger.warning("⚠️ [OmicsRawSingleFileHandler] FASTQ gzip/text 读取异常: %s", e)
+
+        # 原始数据「真空」或不构成一条 FASTQ read：必须报错，勿伪装成功
+        if size_bytes == 0:
+            return self._empty_original_error(
+                abs_path,
+                detail="原始数据文件大小为 0 字节（空文件），请重新上传。",
+                file_type="fastq",
+            )
+        if read_exc is not None:
+            return self._empty_original_error(
+                abs_path,
+                detail=f"无法读取 FASTQ 内容（可能不是有效的 gzip/文本）: {read_exc}",
+                file_type="fastq",
+            )
+        if len(lines) == 0:
+            return self._empty_original_error(
+                abs_path,
+                detail="文件非空但未能读出任何行，原始数据可能损坏或加密/格式异常。",
+                file_type="fastq",
+            )
+        if len(lines) < 4:
+            return self._empty_original_error(
+                abs_path,
+                detail=(
+                    "FASTQ 至少需要 4 行构成一条 read（@header / 序列 / + / quality）；"
+                    f"当前仅读到 {len(lines)} 行，原始数据可能截断或内容为空。"
+                ),
+                file_type="fastq",
+            )
+
+        seq_line = lines[1].strip() if len(lines) > 1 else ""
+        read_len = len(seq_line) if seq_line else 0
+        head_md = (
+            "FASTQ 头嗅探: **"
+            + ("通过 `@` 行与 4 行结构" if sniff_ok else "未确认标准 FASTQ（仍视为测序原始文件）")
+            + "**\n\n```\n"
+            + "".join(lines)[:1200]
+            + "\n```"
+        )
+        return {
+            "status": "success",
+            "success": True,
+            "file_path": abs_path,
+            "file_type": "fastq",
+            "is_matrix": False,
+            "non_matrix_omics": True,
+            "inspection_channel": "gzip_fastq" if nl.endswith(".gz") else "plain_fastq",
+            "file_size_mb": round(size_mb, 4),
+            "shape": {"rows": 1, "cols": max(1, read_len or 1)},
+            "n_samples": 1,
+            "n_features": max(1, read_len or 1),
+            "n_obs": 1,
+            "n_vars": max(1, read_len or 1),
+            "diagnosis_info": {
+                "file_count": 1,
+                "format": "FASTQ",
+                "compressed": nl.endswith(".gz"),
+                "sniff_ok": sniff_ok,
+                "read_length_hint": read_len or None,
+                "total_size_gb": round(size_mb / 1024, 6),
+            },
+            "head": {"markdown": head_md, "json": {}},
+            "message": (
+                f"有效测序原始文件（FASTQ），约 {size_mb:.2f} MB；"
+                f"已通过 gzip 安全读取文件头（禁止整文件当 CSV 解析）。"
+            ),
+        }
+
+    def _inspect_vcf_single(
+        self, path: Path, abs_path: str, size_mb: float, size_bytes: int
+    ) -> Dict[str, Any]:
+        nl = path.name.lower()
+        header_lines: List[str] = []
+        vcf_exc: Optional[BaseException] = None
+        try:
+            if nl.endswith(".gz"):
+                opener = gzip.open(path, "rt", encoding="utf-8", errors="replace")
+            else:
+                opener = open(path, "rt", encoding="utf-8", errors="replace")
+            with opener as vf:
+                for _ in range(80):
+                    ln = vf.readline()
+                    if not ln:
+                        break
+                    header_lines.append(ln[:500])
+                    if ln.startswith("#CHROM"):
+                        break
+        except Exception as e:
+            vcf_exc = e
+            logger.warning("⚠️ [OmicsRawSingleFileHandler] VCF 头读取失败: %s", e)
+
+        if size_bytes == 0:
+            return self._empty_original_error(
+                abs_path,
+                detail="原始 VCF 文件大小为 0 字节（空文件），请重新上传。",
+                file_type="variants",
+            )
+        if vcf_exc is not None:
+            return self._empty_original_error(
+                abs_path,
+                detail=f"无法读取 VCF 内容: {vcf_exc}",
+                file_type="variants",
+            )
+        if not header_lines:
+            return self._empty_original_error(
+                abs_path,
+                detail="VCF 文件非空但未能读出任何头部行，原始数据可能损坏或格式异常。",
+                file_type="variants",
+            )
+
+        prev = "".join(header_lines)[:2000]
+        return {
+            "status": "success",
+            "success": True,
+            "file_path": abs_path,
+            "file_type": "variants",
+            "is_matrix": False,
+            "non_matrix_omics": True,
+            "inspection_channel": "vcf_gzip" if nl.endswith(".gz") else "vcf_plain",
+            "file_size_mb": round(size_mb, 4),
+            "shape": {"rows": 1, "cols": 1},
+            "n_samples": 1,
+            "n_features": 1,
+            "n_obs": 1,
+            "n_vars": 1,
+            "head": {
+                "markdown": f"VCF 头部预览（未全量解析）\n\n```\n{prev}\n```",
+                "json": {},
+            },
+            "message": f"有效变异文件（VCF），约 {size_mb:.2f} MB；已安全读取头部注释（不用 pandas 矩阵逻辑）。",
+        }
+
+    def _inspect_binary_bypass(
+        self, path: Path, abs_path: str, size_mb: float, name_lower: str, size_bytes: int
+    ) -> Dict[str, Any]:
+        if size_bytes == 0:
+            return self._empty_original_error(
+                abs_path,
+                detail="原始数据文件大小为 0 字节（空文件），请重新上传。",
+                file_type=_omics_binary_file_label(name_lower),
+            )
+        ft = _omics_binary_file_label(name_lower)
+        return {
+            "status": "success",
+            "success": True,
+            "file_path": abs_path,
+            "file_type": ft,
+            "is_matrix": False,
+            "non_matrix_omics": True,
+            "inspection_channel": "binary_bypass",
+            "file_size_mb": round(size_mb, 4),
+            "shape": {"rows": 1, "cols": 1},
+            "n_samples": 1,
+            "n_features": 1,
+            "n_obs": 1,
+            "n_vars": 1,
+            "head": {
+                "markdown": "Binary or complex omics file. Ready for pipeline.",
+                "json": {},
+            },
+            "message": (
+                f"免检通道：二进制/专用格式（约 {size_mb:.2f} MB），"
+                f"未使用 pandas/文本矩阵解析；后续由专线工具处理。"
+            ),
+        }
+
+    def inspect(self, path: Path) -> Dict[str, Any]:
+        abs_path = str(path.resolve())
+        try:
+            size_bytes = path.stat().st_size
+        except OSError as e:
+            return {
+                "status": "error",
+                "success": False,
+                "file_path": abs_path,
+                "file_type": "unknown",
+                "error": f"无法访问原始文件（stat 失败）: {e}",
+            }
+        size_mb = size_bytes / (1024 * 1024)
+        nl = path.name.lower()
+
+        if nl.endswith((".fastq.gz", ".fq.gz", ".fastq", ".fq")):
+            return self._inspect_fastq_single(path, abs_path, size_mb, size_bytes)
+        if nl.endswith((".vcf.gz", ".vcf")):
+            return self._inspect_vcf_single(path, abs_path, size_mb, size_bytes)
+        return self._inspect_binary_bypass(path, abs_path, size_mb, nl, size_bytes)
+
+
 @register_inspector(priority=8)
 class FastqDirectoryHandler(BaseFileHandler):
     """
@@ -1202,6 +1477,24 @@ class TabularHandler(BaseFileHandler):
         if not path.is_file():
             return False
         if path_looks_like_medical_imaging(path):
+            return False
+        nl = path.name.lower()
+        # 组学专有扩展名不得走 pandas 表格通道（由 OmicsRawSingleFileHandler 等承接）
+        if nl.endswith(
+            (
+                ".fastq.gz",
+                ".fq.gz",
+                ".fastq",
+                ".fq",
+                ".vcf.gz",
+                ".vcf",
+                ".bam",
+                ".cram",
+                ".sam",
+                ".mzml",
+                ".raw",
+            )
+        ) or (nl.endswith(".h5") and not nl.endswith(".h5ad")):
             return False
         return path.suffix.lower() in self.SUPPORTED_EXTENSIONS
     
@@ -1571,6 +1864,32 @@ class FileInspector:
                 # 继续尝试下一个检查器
                 continue
         
+        # Step 3b: 组学常见原始格式无专用 FileHandler 时，退化为「路径级」成功元数据（与 local/hpc 浅层体检一致）
+        if path.is_file():
+            name_l = path.name.lower()
+            omics_loose: Optional[str] = None
+            if name_l.endswith((".fastq.gz", ".fq.gz", ".fastq", ".fq")):
+                omics_loose = "fastq"
+            elif name_l.endswith((".mzml", ".raw")):
+                omics_loose = "proteomics_ms"
+            elif name_l.endswith((".bam", ".cram", ".sam")):
+                omics_loose = "alignment"
+            elif name_l.endswith((".vcf", ".vcf.gz")):
+                omics_loose = "variants"
+            if omics_loose:
+                return {
+                    "status": "success",
+                    "success": True,
+                    "file_path": str(path.resolve()),
+                    "file_type": omics_loose,
+                    "shape": {"rows": 0, "cols": 0},
+                    "n_obs": 0,
+                    "n_vars": 0,
+                    "remote_mount": False,
+                    "mount_kind": resolved.kind,
+                    "message": "组学原始文件：无深度解析 FileHandler，已按扩展名通过路径级体检。",
+                }
+
         # Step 4: 特殊处理：单独的 .mtx 文件
         if path.suffix == '.mtx' or path.name.lower() == 'matrix.mtx':
             error_msg = (

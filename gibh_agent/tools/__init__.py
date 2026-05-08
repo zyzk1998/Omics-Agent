@@ -90,6 +90,9 @@ except Exception as e:
 # Step 2 (Additive only): Explicitly ensure modality packages and flat modules are loaded.
 # Genomics, Epigenomics, Proteomics, Spatial, Radiomics. Do not remove existing imports above.
 for _mod in [
+    "omics_genomics_pipeline_tools",
+    "omics_proteomics_pipeline_tools",
+    "omics_epigenomics_pipeline_tools",
     "genomics_tools",
     "epigenomics_tools",
     "proteomics_tools",
@@ -101,6 +104,7 @@ for _mod in [
     "chem_rdkit_tools",
     "chem_gi_absorption_tools",
     "chem_misc_tools",
+    "chem_rdkit_batch2_tools",
 ]:
     try:
         importlib.import_module(f".{_mod}", package=__name__)

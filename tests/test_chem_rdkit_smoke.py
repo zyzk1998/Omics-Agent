@@ -28,6 +28,7 @@ def test_chem_registry_tool_ids() -> None:
     importlib.import_module("gibh_agent.tools.chem_rdkit_tools")
     importlib.import_module("gibh_agent.tools.chem_gi_absorption_tools")
     importlib.import_module("gibh_agent.tools.chem_misc_tools")
+    importlib.import_module("gibh_agent.tools.chem_rdkit_batch2_tools")
     from gibh_agent.core.tool_registry import registry
 
     for tid in (
@@ -42,6 +43,12 @@ def test_chem_registry_tool_ids() -> None:
         "chem_element_query",
         "chem_molecule_image",
         "chem_openbabel",
+        "chem_aromaticity_perception",
+        "chem_lipinski_five",
+        "chem_functional_groups",
+        "chem_kekulization",
+        "chem_pattern_fingerprint",
+        "chem_tanimoto_matrix",
     ):
         assert registry.get_tool(tid) is not None, tid
 
@@ -165,6 +172,11 @@ def test_chem_openbabel_properties_smoke(tmp_path: Path, monkeypatch: pytest.Mon
     out = misc.chem_openbabel(smiles_text="CCO", compute_properties=True)
     assert out["status"] == "success", out
     assert out.get("markdown")
+    flat = (out.get("data") or {}).get("result") or {}
+    props = flat.get("properties") or {}
+    if props:
+        mw = props.get("molwt")
+        assert mw not in ("??", "", None), props
 
 
 @pytest.mark.skipif(not shutil.which("obabel"), reason="openbabel CLI not installed")
@@ -173,3 +185,31 @@ def test_chem_openbabel_convert_smoke(tmp_path: Path, monkeypatch: pytest.Monkey
     misc = importlib.import_module("gibh_agent.tools.chem_misc_tools")
     out = misc.chem_openbabel(smiles_text="CCO", out_format="smi")
     assert out["status"] == "success", out
+
+
+def test_obabel_append_line_parser() -> None:
+    """多列制表输出须与 --append 顺序对齐（回归：勿只解析最后一列）。"""
+    import importlib.util
+
+    p = ROOT / "gibh_agent" / "assets" / "openbabel_converter" / "openbabel_converter.py"
+    spec = importlib.util.spec_from_file_location("_obabel_skill_parser", p)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    fn = mod._parse_obabel_append_line
+    assert fn("CCO\t46.069\t-0.0014\t20.23\t1\t1\t0", 6) == [
+        "46.069",
+        "-0.0014",
+        "20.23",
+        "1",
+        "1",
+        "0",
+    ]
+    assert fn("CCO\t46.069 -0.0014 20.23 1 1 0", 6) == [
+        "46.069",
+        "-0.0014",
+        "20.23",
+        "1",
+        "1",
+        "0",
+    ]

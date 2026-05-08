@@ -41,6 +41,24 @@ MAX_DESCRIPTION = 10000
 MAX_PROMPT = 50000
 
 
+@router.get("/skills/omics-fast-lane-prompts")
+def get_omics_fast_lane_prompts():
+    """三大组学快车道 Prompt：与 `omics_skill_prompt_templates.OMICS_FAST_LANE_PROMPTS` 同源，供前端注入输入框与离线兜底对齐。"""
+    from gibh_agent.db.omics_skill_prompt_templates import OMICS_FAST_LANE_PROMPTS
+
+    g = OMICS_FAST_LANE_PROMPTS.get("基因组学全流程") or ""
+    p = OMICS_FAST_LANE_PROMPTS.get("蛋白组学全流程") or ""
+    e = OMICS_FAST_LANE_PROMPTS.get("表观组学全流程") or ""
+    return {
+        "genomics": g,
+        "proteomics": p,
+        "epigenomics": e,
+        "基因组学全流程": g,
+        "蛋白组学全流程": p,
+        "表观组学全流程": e,
+    }
+
+
 class SkillCreate(BaseModel):
     """用户上传技能表单（强校验，防 SQL 注入 / XSS 通过长度与类型约束）。"""
     name: str = Field(..., min_length=1, max_length=MAX_NAME)

@@ -359,6 +359,102 @@ class AgentOrchestrator:
         ordered = self._strip_replaced_archive_paths_static(ordered)
         return self._expand_visium_sibling_matrix_paths(ordered)
 
+    def _extract_file_paths_from_history_message(self, msg: Any) -> List[str]:
+        """从单条 history 记录中抽取上传路径（兼容 content 为 dict / JSON 字符串）。"""
+        out: List[str] = []
+        if not isinstance(msg, dict):
+            return out
+        content = msg.get("content")
+        if isinstance(content, dict):
+            for key in ("file_paths", "files", "uploaded_files", "local_files"):
+                val = content.get(key)
+                if not isinstance(val, list):
+                    continue
+                for item in val:
+                    if isinstance(item, str) and item.strip():
+                        out.append(item.strip())
+                    elif isinstance(item, dict):
+                        p = item.get("path") or item.get("file_path")
+                        if p:
+                            out.append(str(p).strip())
+        elif isinstance(content, str):
+            s = content.strip()
+            if s.startswith("{") and '"file_paths"' in s:
+                try:
+                    obj = json.loads(s)
+                    if isinstance(obj, dict):
+                        for key in ("file_paths", "files", "uploaded_files"):
+                            val = obj.get(key)
+                            if isinstance(val, list):
+                                for item in val:
+                                    if isinstance(item, str) and item.strip():
+                                        out.append(item.strip())
+                                    elif isinstance(item, dict):
+                                        p = item.get("path") or item.get("file_path")
+                                        if p:
+                                            out.append(str(p).strip())
+                except Exception:
+                    pass
+        return out
+
+    def _resolve_inherited_upload_files(
+        self,
+        session_state: Dict[str, Any],
+        history: Optional[List[Dict[str, Any]]],
+        upload_dir: str,
+    ) -> List[Dict[str, str]]:
+        """
+        多轮对话：本轮请求未带 attachments 时，从 Session 快照或 chat history 回溯最近一次有效路径。
+        供 Path A 体检与 SOPPlanner._fill_parameters 注入 file_metadata。
+        """
+        cached = session_state.get("last_session_upload_files")
+        merged: List[Dict[str, str]] = []
+        if isinstance(cached, list) and cached:
+            for item in cached:
+                if isinstance(item, dict):
+                    p = item.get("path") or item.get("file_path")
+                    name = item.get("name") or item.get("file_name") or ""
+                    if p:
+                        merged.append({"name": name or Path(str(p)).name, "path": str(p)})
+                elif isinstance(item, str) and item.strip():
+                    p = item.strip()
+                    merged.append({"name": Path(p).name, "path": p})
+            if merged:
+                logger.info(
+                    "✅ [Orchestrator] 从 session_state.last_session_upload_files 继承 %d 个文件引用",
+                    len(merged),
+                )
+                return merged
+
+        paths_seen: Set[str] = set()
+        ordered_paths: List[str] = []
+        if history:
+            for msg in reversed(history):
+                for p in self._extract_file_paths_from_history_message(msg):
+                    if not p or p in paths_seen:
+                        continue
+                    paths_seen.add(p)
+                    ordered_paths.append(p)
+                if len(ordered_paths) >= 16:
+                    break
+        upload_root = Path(upload_dir)
+        result: List[Dict[str, str]] = []
+        for raw in ordered_paths:
+            path_obj = Path(raw)
+            if not path_obj.is_absolute():
+                path_obj = upload_root / path_obj
+            elif not path_obj.exists():
+                cand = upload_root / path_obj.name
+                if cand.exists():
+                    path_obj = cand
+            result.append({"name": path_obj.name, "path": str(path_obj)})
+        if result:
+            logger.info(
+                "✅ [Orchestrator] 从 chat history 继承上传路径 %d 条（用于本轮体检/规划）",
+                len(result),
+            )
+        return result
+
     def _get_semantic_router_file_status(self, files: Optional[List[Any]]) -> Dict[str, Any]:
         """
         为 SemanticRouter 聚合文件上下文：与编排器其余路径一致，使用已解析的绝对路径列表。
@@ -1416,6 +1512,32 @@ class AgentOrchestrator:
                     _abs_paths.append(str(_path))
                 file_paths = self._strip_replaced_archive_paths_static(_abs_paths)
                 logger.info(f"📁 [Orchestrator] 文件路径(绝对): {file_paths}")
+
+                try:
+                    from .workflow_execution_preflight import inject_primary_file_path_into_workflow
+
+                    _inj = inject_primary_file_path_into_workflow(
+                        workflow_config,
+                        file_paths,
+                        upload_dir=upload_dir_str,
+                    )
+                    if not _inj:
+                        logger.error(
+                            "❌ [Orchestrator] 首步 file_path 注入失败（容器内找不到文件） paths=%s upload_dir=%s",
+                            file_paths,
+                            upload_dir_str,
+                        )
+                        yield self._emit_sse(state_snapshot, "error", {
+                            "error": "execution_preflight_failed",
+                            "message": "无法在容器内定位上传文件，请检查 Docker 挂载与路径。",
+                            "file_paths": file_paths,
+                            "upload_dir": upload_dir_str,
+                        })
+                        state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                        yield self._format_sse("state_snapshot", state_snapshot)
+                        return
+                except Exception as _inj_err:
+                    logger.error("⚠️ [Orchestrator] 首步 file_path 注入异常: %s", _inj_err, exc_info=True)
                 
                 # 🔥 直接执行时也按 workflow 类型更新未分类资产的 modality，使左侧栏数据资产实时归到对应组学
                 db = kwargs.get("db")
@@ -1638,15 +1760,25 @@ class AgentOrchestrator:
                 # 🔥 修复：从GIBHAgent.agents中选择合适的领域智能体
                 target_agent = None
                 if self.agent:
-                    # 检测领域类型，选择对应的智能体
-                    domain_name = "Metabolomics"  # Default
-                    workflow_name = workflow_config.get("workflow_name", "")
-                    # 优先使用 Planner / generate_template 写入的域名（与用户选择的 A/B 通道一致）
+                    # 检测领域类型，选择对应的智能体（禁止默认落到 Metabolomics 导致基因组/蛋白/表观结题串台）
+                    workflow_name = (workflow_config.get("workflow_name") or "").strip()
                     _cfg_domain = workflow_config.get("domain_name")
+                    _tool_ids = [str((s or {}).get("tool_id") or "") for s in (steps or [])]
+                    _step_ids = [str((s or {}).get("step_id") or "") for s in (steps or [])]
+                    _tool_blob = (" ".join(_tool_ids) + " " + " ".join(_step_ids)).lower()
+
+                    domain_name = None
                     if _cfg_domain in ("STED_EC", "SPATIOTEMPORAL_DYNAMICS"):
                         domain_name = _cfg_domain
-                    else:
-                        _tool_ids = [str((s or {}).get("tool_id") or "") for s in (steps or [])]
+                    elif _cfg_domain:
+                        _cs = str(_cfg_domain).strip()
+                        _lc = _cs.lower()
+                        if _lc in ("genomics", "proteomics", "epigenomics"):
+                            domain_name = _lc
+                        elif _cs in ("RNA", "Metabolomics", "Spatial", "Radiomics"):
+                            domain_name = _cs
+
+                    if domain_name is None:
                         _has_sted_tool = any(t.startswith("sted_ec_") for t in _tool_ids)
                         if _has_sted_tool:
                             domain_name = (
@@ -1654,11 +1786,64 @@ class AgentOrchestrator:
                                 if "sted_ec_pathway_enrichment" in _tool_ids
                                 else "STED_EC"
                             )
+
+                    if domain_name is None:
+                        if "genomics_" in _tool_blob or "step_genomics" in _tool_blob:
+                            domain_name = "genomics"
+                        elif "proteomics_" in _tool_blob or "step_prot" in _tool_blob:
+                            domain_name = "proteomics"
+                        elif "epigenomics_" in _tool_blob or "step_epi" in _tool_blob:
+                            domain_name = "epigenomics"
+                        elif any(
+                            k in _tool_blob
+                            for k in (
+                                "radiomics",
+                                "pyradiomics",
+                                "extract_radiomics",
+                                "load_image",
+                            )
+                        ):
+                            domain_name = "Radiomics"
+                        elif any(k in _tool_blob for k in ("spatial_", "squidpy", "visium")):
+                            domain_name = "Spatial"
+                        elif any(
+                            k in _tool_blob
+                            for k in (
+                                "rna_",
+                                "cellranger",
+                                "scanpy",
+                                "scrna",
+                                "adata",
+                            )
+                        ):
+                            domain_name = "RNA"
+                        elif any(
+                            k in _tool_blob
+                            for k in ("metabolomics", "pca", "pls", "mzml", "xcms")
+                        ):
+                            domain_name = "Metabolomics"
+
+                    if domain_name is None:
+                        wnl = workflow_name.lower()
+                        if "基因组" in workflow_name or "genomics" in wnl or "wgs" in wnl or "wes" in wnl:
+                            domain_name = "genomics"
+                        elif "蛋白" in workflow_name or "proteomics" in wnl:
+                            domain_name = "proteomics"
+                        elif "表观" in workflow_name or "epigenomics" in wnl or "atac" in wnl or "chip-seq" in wnl:
+                            domain_name = "epigenomics"
+                        elif "rna" in wnl or "转录" in workflow_name or "单细胞" in workflow_name:
+                            domain_name = "RNA"
+                        elif "空间" in workflow_name or "spatial" in wnl:
+                            domain_name = "Spatial"
+                        elif "影像" in workflow_name or "radiomics" in wnl:
+                            domain_name = "Radiomics"
+                        else:
+                            domain_name = "Metabolomics"
+
                     if domain_name == "Metabolomics" and (
                         "RNA" in workflow_name or "rna" in workflow_name.lower()
                     ):
                         domain_name = "RNA"
-                        # 检查步骤中的工具ID来确定领域
                         for step in steps:
                             tool_id = step.get("tool_id", "").lower()
                             if "rna" in tool_id or "cellranger" in tool_id or "scanpy" in tool_id:
@@ -1680,6 +1865,12 @@ class AgentOrchestrator:
                             target_agent = self.agent.agents["spatial_agent"]
                         elif domain_name == "Radiomics" and "radiomics_agent" in self.agent.agents:
                             target_agent = self.agent.agents["radiomics_agent"]
+                        elif domain_name == "genomics" and "dna_agent" in self.agent.agents:
+                            target_agent = self.agent.agents["dna_agent"]
+                        elif domain_name == "proteomics" and "proteomics_agent" in self.agent.agents:
+                            target_agent = self.agent.agents["proteomics_agent"]
+                        elif domain_name == "epigenomics" and "epigenomics_agent" in self.agent.agents:
+                            target_agent = self.agent.agents["epigenomics_agent"]
                         else:
                             # 如果没有匹配的智能体，使用第一个可用的
                             target_agent = list(self.agent.agents.values())[0] if self.agent.agents else None
@@ -2101,6 +2292,32 @@ class AgentOrchestrator:
                     
                     if file_dict:
                         valid_files.append(file_dict)
+
+            # 🔥 多轮对话文件继承：本轮无新附件时，从 Session 或 history 回溯最近一次上传，避免诊断/规划「数据集为空」与工作流第一步空载
+            if not valid_files:
+                _inh = self._resolve_inherited_upload_files(
+                    session_state, history, str(self.upload_dir)
+                )
+                for f in _inh:
+                    path = f.get("path")
+                    if not path:
+                        continue
+                    path_obj = Path(path)
+                    if not path_obj.is_absolute():
+                        path_obj = Path(self.upload_dir) / path_obj
+                    elif not path_obj.exists():
+                        _fn = path_obj.name
+                        _pot = Path(self.upload_dir) / _fn
+                        if _pot.exists():
+                            path_obj = _pot
+                            logger.info(f"✅ [Orchestrator] 继承路径在 upload_dir 命中: {path_obj}")
+                    valid_files.append(
+                        {
+                            "name": f.get("name") or path_obj.name,
+                            "path": str(path_obj),
+                        }
+                    )
+                    logger.info(f"✅ [Orchestrator] 已合并继承文件: {valid_files[-1]}")
             
             logger.info(f"✅ [Orchestrator] 规范化后的文件列表: {valid_files}, 数量: {len(valid_files)}")
             
@@ -2193,6 +2410,9 @@ class AgentOrchestrator:
                         "metabolomics": "Metabolomics",
                         "radiomics": "Radiomics",
                         "spatial": "Spatial",
+                        "genomics": "genomics",
+                        "proteomics": "proteomics",
+                        "epigenomics": "epigenomics",
                         "sted_ec_trajectory": "STED_EC",
                         "spatiotemporal_dynamics": "SPATIOTEMPORAL_DYNAMICS",
                     }
@@ -2433,6 +2653,9 @@ class AgentOrchestrator:
                             "Radiomics": "影像组 (Radiomics)",
                             "Spatial": "空间组学",
                             "RNA": "转录组",
+                            "genomics": "基因组学",
+                            "proteomics": "蛋白组学",
+                            "epigenomics": "表观遗传组学",
                             "STED_EC": "STED_EC 分析流程（基础四步）",
                             "SPATIOTEMPORAL_DYNAMICS": "单细胞时空动力学分析（完全体）",
                         }
@@ -2712,6 +2935,12 @@ class AgentOrchestrator:
                                         agent_instance = self.agent.agents.get("metabolomics_agent")
                                     elif domain_name == "Radiomics":
                                         agent_instance = self.agent.agents.get("radiomics_agent")
+                                    elif domain_name == "genomics":
+                                        agent_instance = self.agent.agents.get("dna_agent")
+                                    elif domain_name == "proteomics":
+                                        agent_instance = self.agent.agents.get("proteomics_agent")
+                                    elif domain_name == "epigenomics":
+                                        agent_instance = self.agent.agents.get("epigenomics_agent")
 
                                 if agent_instance and hasattr(agent_instance, '_perform_data_diagnosis'):
                                     logger.info(f"🔍 [Orchestrator] 调用agent诊断方法生成诊断报告: {domain_name}")
@@ -2721,6 +2950,12 @@ class AgentOrchestrator:
                                         omics_type = "Metabolomics"
                                     elif domain_name == "Radiomics":
                                         omics_type = "Radiomics"
+                                    elif domain_name == "genomics":
+                                        omics_type = "genomics"
+                                    elif domain_name == "proteomics":
+                                        omics_type = "proteomics"
+                                    elif domain_name == "epigenomics":
+                                        omics_type = "epigenomics"
                                     elif domain_name in ("STED_EC", "SPATIOTEMPORAL_DYNAMICS"):
                                         omics_type = "scRNA"
                                     else:
@@ -2802,6 +3037,18 @@ class AgentOrchestrator:
                                 payload["suggestions"] = sug
                         yield self._emit_sse(state_snapshot,"diagnosis", payload)
                         await asyncio.sleep(0.01)
+                        # 🔥 会话级文件快照：供下一轮「仅文字」请求继承路径，对齐 SOPPlanner / 诊断
+                        try:
+                            _snap = self.conversation_state.get(session_id, {})
+                            _snap["last_session_upload_files"] = [
+                                {"name": x.get("name"), "path": x.get("path")}
+                                for x in (files or [])
+                                if isinstance(x, dict) and (x.get("path") or x.get("file_path"))
+                            ]
+                            _snap["last_session_domain_hint"] = domain_name
+                            self.conversation_state[session_id] = _snap
+                        except Exception as _snap_e:
+                            logger.debug("persist last_session_upload_files skip: %s", _snap_e)
                     elif file_metadata:
                         # 文件检查未通过（类型无法识别或读取失败），避免进入规划阶段导致“工作流规划失败”
                         err_msg = file_metadata.get("error") or "无法识别该文件类型或读取失败"
@@ -3218,6 +3465,67 @@ class AgentOrchestrator:
 
         n_samples = file_metadata.get("n_samples") or file_metadata.get("n_obs") or file_metadata.get("shape", {}).get("rows", 0)
         n_features = file_metadata.get("n_features") or file_metadata.get("n_vars") or file_metadata.get("shape", {}).get("cols", 0)
+
+        if domain_name == "genomics":
+            ft = (file_type or "").lower()
+            if ft == "fastq" or "fastq" in ft:
+                di = file_metadata.get("diagnosis_info") or {}
+                fc = di.get("file_count", 0)
+                tsg = di.get("total_size_gb", 0)
+                pe = di.get("has_paired_end", False)
+                return f"""### 📊 数据诊断报告
+
+**数据规模**:
+- **FASTQ 文件数**: {fc} 个
+- **总大小**: {float(tsg):.2f} GB（若可解析）
+
+**数据特征**:
+- 文件类型: {file_type}
+- 配对端: {'是' if pe else '否'}
+
+**数据质量**: 原始测序数据已就绪，可进入基因组学标准流程（质控→比对→变异）。
+
+**下一步**: 已为您规划 **基因组学** 分析流程，请确认执行。"""
+            return f"""### 📊 数据诊断报告
+
+**数据规模**:
+- **记录数/样本维度**: {n_samples}
+- **特征维度**: {n_features}
+
+**数据特征**:
+- 文件类型: {file_type}
+
+**数据质量**: 数据已就绪，可开始基因组学分析。
+
+**下一步**: 已为您规划 **基因组学** 流程，请确认执行。"""
+
+        if domain_name == "proteomics":
+            return f"""### 📊 数据诊断报告
+
+**数据规模**:
+- **样本/行**: {n_samples}
+- **特征/蛋白维度**: {n_features}
+
+**数据特征**:
+- 文件类型: {file_type}
+
+**数据质量**: 数据已就绪，可开始蛋白质组学分析。
+
+**下一步**: 已为您规划 **蛋白质组学** 流程，请确认执行。"""
+
+        if domain_name == "epigenomics":
+            return f"""### 📊 数据诊断报告
+
+**数据规模**:
+- **样本/区间维度**: {n_samples}
+- **特征维度**: {n_features}
+
+**数据特征**:
+- 文件类型: {file_type}
+
+**数据质量**: 数据已就绪，可开始表观遗传组学（ChIP/ATAC 等）分析。
+
+**下一步**: 已为您规划 **表观遗传组学** 流程，请确认执行。"""
 
         if domain_name == "Metabolomics":
             return f"""### 📊 数据诊断报告

@@ -312,33 +312,48 @@ Return JSON only (no other text):
 }
 
 
-# 数据诊断和参数推荐模板
+# 数据诊断和参数推荐模板（Jinja2：`create_default_prompt_manager` 已 register）
 DATA_DIAGNOSIS_PROMPT = """You are a Senior Bioinformatician.
 
+**当前任务组学语境（铁律 · 防串台）**：{{ omics_label }}
+- 正文、表格与小结必须与此一致；**禁止**将数据误称为「代谢组/LC-MS/代谢物/VIP」等，除非上述语境明确为代谢组学。
+{% if highdim_guard %}
+{{ highdim_guard }}
+{% endif %}
+
 Based on the file inspection results:
-{inspection_data}
+{{ inspection_data }}
+
+{% if head_preview %}
+**数据预览（节选）:**
+{{ head_preview }}
+{% endif %}
 
 Please output a **Data Diagnosis & Parameter Recommendation** in Simplified Chinese (简体中文).
 
 **Format:**
 ### 🔍 数据报告
-- **数据规模**: [e.g., 30k cells, 20k genes]
-- **数据特征**: [e.g., Raw counts, high sparsity, normalized, etc.]
-- **数据质量**: [e.g., Good quality, needs filtering, etc.]
+- **数据规模**: [与 inspection_data 一致，禁止编造]
+- **数据特征**: [例如稀疏度、是否有配对端等]
+- **数据质量**: [基于统计事实的评估]
 
 ### 💡 参数推荐
-Create a Markdown table with the following columns:
+Create a Markdown table **only if** the workflow exposes algorithmic tunables (thresholds, resolution, model strictness, etc.) listed in the system constraints below.
+**铁律（空表静默）**：
+- **仅当**某步骤存在需要人类干预的**算法/统计参数**（过滤阈值、匹配严格度、cluster resolution、FDR 等）时，才在表中输出该步骤对应的行。
+- 对于**仅**需要 file_path、input_dir、data_path 等**资产流转**、且系统未给出推荐值的步骤：**整步静默**，禁止为凑数而输出表格行。
+
+表格列（若输出）：
 | 参数名 | 默认值 | **推荐值** | 推荐理由 |
 | :--- | :--- | :--- | :--- |
 
-**参数名列规则（与前端一键应用一致）**：第一列必须是后续系统消息中给出的「可用参数名」之一，**一字不差**（与表单 `name="param_{步骤下标}_{参数名}"` 中的参数名相同，通常为英文 snake_case）。**禁止**用中文或 Title Case（如 `Min Genes`）代替。第一列不要用 `**` 或反引号包裹。
+**参数名列规则（与前端一键应用一致）**：第一列必须是后续系统消息中给出的「可用参数名」之一，**一字不差**（与表单 name=\"param_步骤索引_参数键\" 中的参数键相同，通常为英文 snake_case）。**禁止**用中文或 Title Case 代替。第一列不要用 Markdown 加粗或反引号包裹。
 
-Example:
+Example（仅当确有可调算法参数时）:
 | 参数名 | 默认值 | **推荐值** | 推荐理由 |
 | :--- | :--- | :--- | :--- |
-| min_genes | 200 | **500** | 数据量大（>10k cells），需更严格过滤低质量细胞 |
-| resolution | 0.5 | **0.8** | 细胞数多，建议提高分辨率以发现细分亚群 |
-| max_mt | 20 | **5** | 数据质量好，可降低线粒体基因阈值 |
+| min_genes | 200 | **500** | 数据量大，需更严格过滤 |
+| resolution | 0.5 | **0.8** | 细胞数多，建议提高分辨率 |
 
 ### ❓ 下一步
 是否按推荐参数执行分析？我将使用这些推荐参数生成工作流配置。

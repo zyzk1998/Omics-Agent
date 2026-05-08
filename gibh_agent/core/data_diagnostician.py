@@ -10,6 +10,44 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def sanitize_stats_dict_for_llm(
+    stats: Optional[Dict[str, Any]],
+    file_metadata: Optional[Dict[str, Any]],
+    omics_type: Optional[str],
+) -> Dict[str, Any]:
+    """
+    在序列化给 LLM 之前剥离「0 行 0 列」类矩阵语义键，并注入正向状态。
+    适用于基因组学 / 蛋白质组学 / 表观组学路由，或 FileInspector 标记的 non_matrix_omics。
+    """
+    out: Dict[str, Any] = dict(stats or {})
+    ot = (omics_type or "").lower()
+    nm = bool((file_metadata or {}).get("non_matrix_omics"))
+    highdim = ot in (
+        "genomics",
+        "dna",
+        "proteomics",
+        "protein",
+        "epigenomics",
+        "epigenetic",
+    ) or nm
+    if not highdim:
+        return out
+    for k in (
+        "row_count",
+        "col_count",
+        "n_rows",
+        "n_cols",
+        "num_rows",
+        "num_cols",
+        "total_rows",
+        "total_cols",
+    ):
+        out.pop(k, None)
+    out["status"] = "valid"
+    out["file_status"] = "Valid binary/compressed omics file."
+    return out
+
+
 class DataDiagnostician:
     """
     数据诊断器
@@ -54,20 +92,35 @@ class DataDiagnostician:
             or file_metadata.get("file_type") in ("medical_image", "medical_imaging")
             or (omics_type and str(omics_type).lower() in ["radiomics", "medical_image", "medical_imaging", "imaging"])
         )
+        _ot = (omics_type or "").lower()
         if _is_radiomics:
-            return self._analyze_radiomics(file_metadata, dataframe)
-        
-        # 根据组学类型分发到不同的分析器
-        if omics_type and omics_type.lower() in ["scrna", "scrna-seq", "single_cell", "single-cell"]:
-            return self._analyze_scRNA(file_metadata, dataframe)
-        elif omics_type.lower() in ["metabolomics", "metabolomic", "metabonomics"]:
-            return self._analyze_metabolomics(file_metadata, dataframe)
-        elif omics_type.lower() in ["bulkrna", "bulk_rna", "bulk-rna", "rna-seq"]:
-            return self._analyze_bulkRNA(file_metadata, dataframe)
-        elif omics_type.lower() in ["radiomics", "medical_image", "medical_imaging", "imaging"]:
-            return self._analyze_radiomics(file_metadata, dataframe)
+            result = self._analyze_radiomics(file_metadata, dataframe)
+        elif _ot in ("genomics", "dna", "proteomics", "protein", "epigenomics", "epigenetic"):
+            result = self._analyze_highdim_pipeline_raw(file_metadata, dataframe, _ot)
+        elif _ot in ["scrna", "scrna-seq", "single_cell", "single-cell"]:
+            result = self._analyze_scRNA(file_metadata, dataframe)
+        elif _ot in ["metabolomics", "metabolomic", "metabonomics"]:
+            result = self._analyze_metabolomics(file_metadata, dataframe)
+        elif _ot in ["bulkrna", "bulk_rna", "bulk-rna", "rna-seq"]:
+            result = self._analyze_bulkRNA(file_metadata, dataframe)
+        elif _ot in ["radiomics", "medical_image", "medical_imaging", "imaging"]:
+            result = self._analyze_radiomics(file_metadata, dataframe)
         else:
-            return self._analyze_default(file_metadata, dataframe)
+            result = self._analyze_default(file_metadata, dataframe)
+
+        return self._finalize_diagnosis_stats(result, file_metadata, omics_type)
+
+    def _finalize_diagnosis_stats(
+        self,
+        result: Dict[str, Any],
+        file_metadata: Dict[str, Any],
+        omics_type_in: str,
+    ) -> Dict[str, Any]:
+        if result.get("status") != "success" or not isinstance(result.get("stats"), dict):
+            return result
+        ot = result.get("omics_type") or omics_type_in
+        result["stats"] = sanitize_stats_dict_for_llm(result["stats"], file_metadata, str(ot))
+        return result
     
     def _analyze_scRNA(
         self,
@@ -303,6 +356,68 @@ class DataDiagnostician:
             "stats": stats,
         }
 
+    def _analyze_highdim_pipeline_raw(
+        self,
+        file_metadata: Dict[str, Any],
+        dataframe: Optional[pd.DataFrame],
+        omics_type_key: str,
+    ) -> Dict[str, Any]:
+        """
+        基因组 / 蛋白组 / 表观组原始入口：FASTQ、VCF、BAM、质谱等（非表达矩阵）。
+        禁止向 stats 输出「0 行 0 列」式空矩阵语义。
+        """
+        stats: Dict[str, Any] = {}
+        ft = (file_metadata.get("file_type") or "").lower()
+        size_mb = file_metadata.get("file_size_mb")
+        stats["file_format"] = ft
+        stats["file_size_mb"] = size_mb
+        stats["file_path"] = file_metadata.get("file_path")
+        stats["is_matrix"] = file_metadata.get("is_matrix", True)
+        stats["non_matrix_omics"] = bool(file_metadata.get("non_matrix_omics"))
+        stats["inspection_channel"] = file_metadata.get("inspection_channel")
+        if file_metadata.get("diagnosis_info"):
+            stats["diagnosis_info"] = file_metadata["diagnosis_info"]
+
+        shape = file_metadata.get("shape") or {}
+        nr = int(shape.get("rows") or 1)
+        nc = int(shape.get("cols") or 1)
+        stats["n_rows"] = max(1, nr)
+        stats["n_cols"] = max(1, nc)
+
+        if ft == "fastq":
+            stats["presentation"] = (
+                f"有效测序原始文件（FASTQ），"
+                f"约 {size_mb if size_mb is not None else '?'} MB；"
+                f"非二维样本×特征矩阵，下游按碱基序列管线处理。"
+            )
+        elif ft == "variants":
+            stats["presentation"] = (
+                f"有效变异清单文件（VCF），约 {size_mb if size_mb is not None else '?'} MB。"
+            )
+        elif ft in ("alignment", "proteomics_ms", "proteomics_raw_ms", "hdf5_omics", "binary_omics"):
+            stats["presentation"] = (
+                f"二进制或专用组学格式（{ft}），"
+                f"约 {size_mb if size_mb is not None else '?'} MB；免检元数据，交由专线工具。"
+            )
+        else:
+            stats["presentation"] = file_metadata.get("message") or "有效组学文件（非矩阵预览通道）。"
+
+        stats["data_quality"] = stats["presentation"]
+
+        label_map = {
+            "genomics": "genomics",
+            "dna": "genomics",
+            "proteomics": "proteomics",
+            "protein": "proteomics",
+            "epigenomics": "epigenomics",
+            "epigenetic": "epigenomics",
+        }
+        return {
+            "status": "success",
+            "omics_type": label_map.get(omics_type_key, omics_type_key),
+            "stats": stats,
+        }
+
     def _analyze_default(
         self,
         file_metadata: Dict[str, Any],
@@ -320,9 +435,18 @@ class DataDiagnostician:
         """
         stats = {}
 
-        # 基本统计
-        stats["n_rows"] = file_metadata.get("shape", {}).get("rows", 0)
-        stats["n_cols"] = file_metadata.get("shape", {}).get("cols", 0)
+        # 基本统计（FileInspector 免检 / 组学原始文件：避免 0 行 0 列误报）
+        if file_metadata.get("non_matrix_omics"):
+            sh = file_metadata.get("shape") or {}
+            stats["n_rows"] = max(1, int(sh.get("rows") or 1))
+            stats["n_cols"] = max(1, int(sh.get("cols") or 1))
+            stats["presentation"] = file_metadata.get("message") or (
+                f"有效组学文件（{file_metadata.get('file_type', 'unknown')}），"
+                f"约 {file_metadata.get('file_size_mb', '?')} MB"
+            )
+        else:
+            stats["n_rows"] = file_metadata.get("shape", {}).get("rows", 0)
+            stats["n_cols"] = file_metadata.get("shape", {}).get("cols", 0)
         stats["missing_rate"] = file_metadata.get("missing_rate", 0)
 
         # 数据范围

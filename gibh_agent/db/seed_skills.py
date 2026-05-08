@@ -1,5 +1,6 @@
 """
-7 大核心组学技能种子数据：供 server 启动注入与 API 按需补种使用。
+多模态组学种子数据（3 条编排快车道 + 4 条核心技能）：供 server 启动注入与 API 按需补种使用。
+基因组学 / 蛋白质组学 / 表观遗传组学的「占位单项技能」已移除，由快车道「全流程」卡片唯一承接，避免广场重复。
 保证 status=approved、author_id=system、main_category=多模态组学。
 防重：热修复（仅系统技能去重 + 强制 name UNIQUE 索引）+ MySQL 原子 INSERT ON DUPLICATE KEY UPDATE，
 不依赖 create_all 改表，不依赖 Python 层 try/except 竞态。
@@ -10,7 +11,32 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from gibh_agent.db.chem_skill_prompt_templates import CHEM_PROMPTS_BY_SKILL_NAME
+from gibh_agent.db.omics_skill_prompt_templates import OMICS_FAST_LANE_PROMPTS
 from gibh_agent.db.models import Skill as SkillModel
+
+OMICS_FAST_LANE_SKILLS = [
+    {
+        "name": "基因组学全流程",
+        "main_category": "多模态组学",
+        "sub_category": "基因组学",
+        "description": "一键进入基因组胚系 DAG：含 [Omics_Route: genomics]，上传 FASTQ/BAM/VCF 注入首步 file_path。",
+        "prompt_template": OMICS_FAST_LANE_PROMPTS["基因组学全流程"],
+    },
+    {
+        "name": "蛋白组学全流程",
+        "main_category": "多模态组学",
+        "sub_category": "蛋白质组学",
+        "description": "一键进入蛋白组搜库定量 DAG：含 [Omics_Route: proteomics]，上传 RAW/mzML。",
+        "prompt_template": OMICS_FAST_LANE_PROMPTS["蛋白组学全流程"],
+    },
+    {
+        "name": "表观组学全流程",
+        "main_category": "多模态组学",
+        "sub_category": "表观遗传组学",
+        "description": "一键进入 ATAC/ChIP 主线：含 [Omics_Route: epigenomics]，上传 FASTQ/BAM。",
+        "prompt_template": OMICS_FAST_LANE_PROMPTS["表观组学全流程"],
+    },
+]
 
 CORE_OMICS_SKILLS = [
     {
@@ -123,87 +149,6 @@ CORE_OMICS_SKILLS = [
 
 【输出要求】
 请输出包含 LASSO 系数路径图、多算法 ROC 对比图、特征权重图的专业诊断模型评估报告。""",
-    },
-    {
-        "name": "基因组变异检测",
-        "main_category": "多模态组学",
-        "sub_category": "基因组学",
-        "description": "从原始测序数据到变异 calling、注释与致病性评估，输出质控与变异解读报告。",
-        "prompt_template": """【角色设定】
-你是一位资深的基因组学(Genomics)与临床遗传学专家，精通 WES/WGS 数据分析流程及 GATK 最佳实践。
-
-【任务目标】
-接收原始测序数据或 BAM/VCF 文件，执行变异检测与功能注释，评估突变的临床致病性。
-
-【输入规范与前置检查】
-请确认用户输入的数据类型（FASTQ/BAM/VCF），以及参考基因组版本（如 hg19/hg38）。
-
-【标准分析流程】
-1. [测序质控]：执行 FastQC 质量评估。
-2. [序列比对]：使用 BWA-MEM 将 Reads 比对至参考基因组，并进行 PCR 去重。
-3. [变异检测]：执行 GATK HaplotypeCaller 进行 SNP/Indel calling。
-4. [变异注释]：使用 ANNOVAR 或 SnpEff 进行功能注释与致病性(ClinVar)评估。
-5. [报告生成]：输出高频突变基因全景图(OncoPlot)与临床解读报告。
-
-【约束与安全护栏】
-1. 变异致病性解读必须严格依据 ACMG 指南，严禁主观臆断突变的临床意义。
-
-【输出要求】
-请输出包含突变频谱图(Mutational Signatures)、OncoPlot 及关键致病变异列表的临床级基因组报告。""",
-    },
-    {
-        "name": "表观遗传峰与 motif 分析",
-        "main_category": "多模态组学",
-        "sub_category": "表观遗传组学",
-        "description": "峰 calling、差异分析、motif 富集与转录组/基因组整合解读。",
-        "prompt_template": """【角色设定】
-你是一位资深的表观遗传学(Epigenomics)专家，精通 ChIP-seq 与 ATAC-seq 分析，擅长解析染色质开放性与转录因子调控网络。
-
-【任务目标】
-接收表观遗传测序比对文件，识别富集区域(Peaks)，寻找差异调控位点及核心转录因子结合基序。
-
-【输入规范与前置检查】
-请确认实验类型（ChIP-seq 靶点或 ATAC-seq），以及是否包含 Input/Control 对照样本。
-
-【标准分析流程】
-1. [数据质控]：评估测序深度、文库复杂度及 TSS 富集得分。
-2.[Peak Calling]：使用 MACS2 识别染色质开放区或转录因子结合位点。
-3. [差异 Peak 分析]：寻找组间显著变化的调控区域。
-4.[Motif 富集]：执行 Homer 分析，寻找核心转录因子结合基序(Motifs)。
-5.[多组学整合]：将 Peak 关联至最近的靶基因，并尝试结合转录组数据进行联合解释。
-
-【约束与安全护栏】
-1. 必须严格校验 Peak 的假阳性率(FDR)，确保调控位点的可靠性。
-
-【输出要求】
-请输出包含 Peak 基因组分布饼图、差异 Peak 火山图、Top Motif 序列 Logo 图的表观调控分析报告。""",
-    },
-    {
-        "name": "蛋白质互作网络分析",
-        "main_category": "多模态组学",
-        "sub_category": "蛋白质组学",
-        "description": "质谱定量、差异蛋白、富集分析与蛋白质互作网络构建与通路解读。",
-        "prompt_template": """【角色设定】
-你是一位资深的蛋白质组学(Proteomics)与系统生物学专家，精通质谱数据处理与复杂生物网络拓扑分析。
-
-【任务目标】
-接收蛋白质定量矩阵，筛选差异表达蛋白，构建并解析蛋白质-蛋白质相互作用(PPI)网络，识别核心枢纽(Hub)蛋白。
-
-【输入规范与前置检查】
-请确认定量数据的类型（如 TMT, Label-free），以及是否已进行过 Log 转换和中位数归一化。
-
-【标准分析流程】
-1. [数据预处理]：质谱定量数据的缺失值插补与标准化。
-2. [差异蛋白筛选]：执行统计学检验(如 limma/t-test)，输出火山图。
-3.[PPI 网络构建]：基于 STRING 数据库映射差异蛋白，构建蛋白质互作网络。
-4. [Hub 蛋白识别]：使用网络拓扑算法(如 Degree, Betweenness)提取核心枢纽蛋白。
-5. [功能富集]：对核心网络模块执行 KEGG/GO 深度富集分析。
-
-【约束与安全护栏】
-1. PPI 网络的边权重(Edge Confidence)必须设置合理的阈值（如 >0.4），过滤低质量互作证据。
-
-【输出要求】
-请输出包含差异蛋白火山图、高分辨率 PPI 网络拓扑图、Hub 蛋白列表及核心通路富集气泡图的系统生物学报告。""",
     },
 ]
 
@@ -642,7 +587,17 @@ CHEMISTRY_SKILLS.extend(ADDITIONAL_CHEMISTRY_SKILLS)
 
 
 def run_seed_core_skills(db: Session) -> int:
-    """向当前 Session 插入 7 大核心组学技能（不 commit）。返回插入条数。"""
+    """向当前 Session 插入编排快车道 + 核心组学技能（不 commit）。返回插入条数。"""
+    for core in OMICS_FAST_LANE_SKILLS:
+        db.add(SkillModel(
+            name=core["name"],
+            description=core["description"],
+            main_category=core.get("main_category", "多模态组学"),
+            sub_category=core["sub_category"],
+            prompt_template=core["prompt_template"],
+            author_id="system",
+            status="approved",
+        ))
     for core in CORE_OMICS_SKILLS:
         db.add(SkillModel(
             name=core["name"],
@@ -653,13 +608,14 @@ def run_seed_core_skills(db: Session) -> int:
             author_id="system",
             status="approved",
         ))
-    return len(CORE_OMICS_SKILLS)
+    return len(OMICS_FAST_LANE_SKILLS) + len(CORE_OMICS_SKILLS)
 
 
 def get_all_system_skills_list() -> list:
-    """返回合并后的系统技能列表（CORE 最前，其次 BIOMEDICINE、ADDITIONAL_BIOMED、CHEMISTRY），供幂等 Upsert 使用。"""
+    """返回合并后的系统技能列表（编排快车道 + CORE …），供幂等 Upsert 使用。"""
     return (
-        CORE_OMICS_SKILLS
+        OMICS_FAST_LANE_SKILLS
+        + CORE_OMICS_SKILLS
         + BIOMEDICINE_SKILLS
         + ADDITIONAL_BIOMED_SKILLS
         + CHEMISTRY_SKILLS

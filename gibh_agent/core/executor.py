@@ -82,6 +82,16 @@ class WorkflowExecutor:
         self.upload_dir = upload_dir or os.getenv("UPLOAD_DIR", "/app/uploads")
         self.results_dir = os.getenv("RESULTS_DIR", "/app/results")
         self.step_results: Dict[str, Any] = {}  # 存储步骤结果，用于数据流传递
+
+    def _serialize_prior_qc_metrics(self) -> str:
+        """聚合前几步工具返回的 qc_metrics（如 genomics_raw_qc），供报告步骤透传。"""
+        bundle: Dict[str, Any] = {}
+        for sid, raw in self.step_results.items():
+            if isinstance(raw, dict) and isinstance(raw.get("qc_metrics"), dict) and raw["qc_metrics"]:
+                bundle[str(sid)] = raw["qc_metrics"]
+        if not bundle:
+            return ""
+        return json.dumps(bundle, ensure_ascii=False)
     
     def _resolve_file_path(self, file_path: str) -> str:
         """
@@ -2303,9 +2313,9 @@ class WorkflowExecutor:
                     params["adata_path"] = params.pop("file_path")
                     logger.info("🔄 参数映射: file_path -> adata_path（反射）")
             
-            # 🔥 修复：自动检测并替换 group_column 参数
-            # 如果工具需要 group_column，但指定的列不存在，尝试自动检测
-            if "group_column" in params and current_file_path:
+            # 🔥 修复：自动检测并替换 group_column 参数（仅当显式传入非空列名时）
+            gc_raw = params.get("group_column")
+            if gc_raw is not None and str(gc_raw).strip() and current_file_path:
                 specified_group_col = params["group_column"]
                 detected_group_col = self._detect_group_column_from_file(current_file_path)
                 
@@ -2330,6 +2340,12 @@ class WorkflowExecutor:
             # 如果工具需要 output_dir，也自动注入
             if "output_dir" not in params and self.output_dir:
                 params["output_dir"] = self.output_dir
+
+            # 基因组临床报告：注入前几步的真实 qc_metrics（JSON 字符串，工具侧解析）
+            if tool_id == "genomics_clinical_reporting":
+                pm = self._serialize_prior_qc_metrics()
+                if pm:
+                    params["pipeline_metrics_json"] = pm
             
             # 更新步骤的 params
             step["params"] = params

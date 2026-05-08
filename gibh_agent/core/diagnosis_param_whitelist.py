@@ -12,6 +12,34 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# 仅路径/资产流转类参数：不应出现在「💡 参数推荐」表格中凑数（无可调算法语义时整步静默）
+PIPELINE_PLUMBING_PARAM_KEYS = frozenset(
+    {
+        "file_path",
+        "data_path",
+        "input_dir",
+        "matrix_dir",
+        "adata_path",
+        "h5ad_path",
+        "image_path",
+        "mask_path",
+        "sequence_or_path",
+        "counts_file",
+        "raw_counts_path",
+        "reference_path",
+        "reference_id",
+        "vcf_path",
+        "bam_path",
+        "ingress_file_path",
+    }
+)
+
+
+def _is_algorithmic_param_key(key: str) -> bool:
+    if not key or not isinstance(key, str):
+        return False
+    return key not in PIPELINE_PLUMBING_PARAM_KEYS
+
 
 def humanize_param_key_as_ui_label(key: str) -> str:
     """与前端 index.html 中 displayName 规则对齐：下划线转空格 + 首字母大写。"""
@@ -58,7 +86,7 @@ def build_diagnosis_whitelist_prompt(
             params = st.get("params")
             if not isinstance(params, dict) or not params:
                 continue
-            keys = [k for k in params if isinstance(k, str)]
+            keys = [k for k in params if isinstance(k, str) and _is_algorithmic_param_key(k)]
             if not keys:
                 continue
             keys_csv = ", ".join(keys)
@@ -95,7 +123,7 @@ def build_diagnosis_whitelist_prompt(
             params = (meta or {}).get("default_params") or {}
             if not isinstance(params, dict) or not params:
                 continue
-            keys = [k for k in params if isinstance(k, str)]
+            keys = [k for k in params if isinstance(k, str) and _is_algorithmic_param_key(k)]
             if not keys:
                 continue
             keys_csv = ", ".join(keys)
@@ -123,6 +151,7 @@ def build_diagnosis_whitelist_prompt(
 1. 表格的第一列「参数名」必须严格使用上述某一 Key，**一字不差**（区分大小写，通常为 snake_case）。**绝不允许**捏造列表外不存在的参数（例如 log_transform 若未出现在上表中则禁止写入）！
 2. **绝不允许**用 UI 标签、中文名、Title Case 或简写代替 Key；不满足则**宁可省略整张参数表**，仅在正文定性描述。
 3. 表格第一列**禁止**用 Markdown 加粗（**）或反引号（`）包裹 Key。
+4. **静默规则**：若某步骤仅有 file_path / input_dir 等路径流转、且无可调算法阈值，则**禁止**为该步骤单独占一行凑数；白名单中已剔除此类 Key。
 """
     return flat_ordered, prompt
 
@@ -144,18 +173,26 @@ def collect_param_names_from_plan_result(plan: Optional[Dict[str, Any]]) -> List
         params = st.get("params")
         if isinstance(params, dict):
             for k in params.keys():
-                if isinstance(k, str) and k not in seen:
+                if (
+                    isinstance(k, str)
+                    and _is_algorithmic_param_key(k)
+                    and k not in seen
+                ):
                     seen.add(k)
                     ordered.append(k)
         elif isinstance(params, list):
             for item in params:
                 if isinstance(item, dict):
                     n = item.get("name") or item.get("key")
-                    if n is not None:
-                        s = str(n)
-                        if s and s not in seen:
-                            seen.add(s)
-                            ordered.append(s)
+                    if n is None:
+                        continue
+                    s = str(n).strip()
+                    # list 形态必须与 dict 键一致：剔除管线 plumbing（file_path 等）
+                    if not s or not _is_algorithmic_param_key(s):
+                        continue
+                    if s not in seen:
+                        seen.add(s)
+                        ordered.append(s)
     return ordered
 
 
@@ -202,7 +239,11 @@ def collect_param_whitelist_for_diagnosis(
         params = (meta or {}).get("default_params") or {}
         if isinstance(params, dict):
             for k in params.keys():
-                if isinstance(k, str) and k not in seen:
+                if (
+                    isinstance(k, str)
+                    and _is_algorithmic_param_key(k)
+                    and k not in seen
+                ):
                     seen.add(k)
                     ordered.append(k)
     return ordered

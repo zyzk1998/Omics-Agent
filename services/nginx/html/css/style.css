@@ -821,7 +821,6 @@
     .chat-input-area,
     #dropOverlay,
     #lightbox,
-    #debug-sidebar,
     .auth-modal-overlay,
     #skill-upload-modal {
         display: none !important;

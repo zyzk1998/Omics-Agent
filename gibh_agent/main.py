@@ -13,10 +13,10 @@ from .core.dispatcher import TaskDispatcher, create_dispatcher_from_config
 from .agents.router_agent import RouterAgent
 from .agents.base_agent import BaseAgent
 from .agents.specialists.rna_agent import RNAAgent
-from .agents.specialists.dna_agent import DNAAgent
-from .agents.specialists.epigenomics_agent import EpigenomicsAgent
+from .agents.genomics_agent import GenomicsAgent
+from .agents.epigenomics_agent import EpigenomicsAgent
 from .agents.specialists.metabolomics_agent import MetabolomicsAgent
-from .agents.specialists.proteomics_agent import ProteomicsAgent
+from .agents.proteomics_agent import ProteomicsAgent
 from .agents.specialists.spatial_agent import SpatialAgent
 from .agents.specialists.radiomics_agent import RadiomicsAgent
 from .agents.specialists.imaging_agent import ImagingAgent
@@ -147,10 +147,10 @@ class GIBHAgent:
             test_data_dir=test_data_dir
         )
         
-        # DNA Agent（基因组）
-        agents["dna_agent"] = DNAAgent(
+        # 基因组（胚系主线，注册键仍为 dna_agent 供编排器路由）
+        agents["dna_agent"] = GenomicsAgent(
             llm_client=self.llm_clients.get("logic"),
-            prompt_manager=self.prompt_manager
+            prompt_manager=self.prompt_manager,
         )
         
         # 其他智能体（占位符）

@@ -8,7 +8,7 @@ Stream and text parsing utilities for LLM responses.
 import json
 import re
 import logging
-from typing import AsyncIterator, List, Optional, Tuple, Any, Union
+from typing import Any, AsyncIterator, List, Optional, Set, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ TAG_SUGGEST_CLOSE = "</suggest>"
 # 兼容多厂商：content 中出现的思考块起止标签（去重保序）
 _THINK_PAIRS_ORDERED: Tuple[Tuple[str, str], ...] = (
     ('<think>', '</think>'),
-    ('<redacted_thinking>', '</redacted_thinking>'),
+    ("<redacted_reasoning>", "</redacted_reasoning>"),
     ("<reasoning>", "</reasoning>"),
     ("<thought>", "</thought>"),
     ("<thinking>", "</thinking>"),
@@ -70,6 +70,14 @@ def strip_think_markup_for_user(text: str) -> str:
     for open_m, close_m in THINK_TAG_PAIRS:
         pat = re.escape(open_m) + r"[\s\S]*?" + re.escape(close_m)
         t = re.sub(pat, "", t, flags=re.IGNORECASE)
+    # 流式中断：无闭合结束标签时，从起始标签起删至文末（防泄漏）
+    seen_open: Set[str] = set()
+    for open_m, _ in THINK_TAG_PAIRS:
+        if open_m in seen_open:
+            continue
+        seen_open.add(open_m)
+        pat_tail = re.escape(open_m) + r"[\s\S]*$"
+        t = re.sub(pat_tail, "", t, flags=re.IGNORECASE)
     return t.strip()
 
 

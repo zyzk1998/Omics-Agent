@@ -104,6 +104,48 @@ PATCH_ROWS: list[dict[str, str]] = [
         "description": "obabel 格式转换、3D、性质计算；文件或内联输入。",
         "prompt_template": CHEM_PROMPTS_BY_SKILL_NAME["Open Babel"],
     },
+    {
+        "name": "分子芳香性感知操作工具",
+        "main_category": "化学",
+        "sub_category": "数据处理",
+        "description": "芳香环表示规范化（凯库勒式与芳香记法互参考）。",
+        "prompt_template": CHEM_PROMPTS_BY_SKILL_NAME["分子芳香性感知操作工具"],
+    },
+    {
+        "name": "分子Kekulization 转换工具",
+        "main_category": "化学",
+        "sub_category": "数据处理",
+        "description": "芳香记法展开为显式单双键凯库勒形式。",
+        "prompt_template": CHEM_PROMPTS_BY_SKILL_NAME["分子Kekulization 转换工具"],
+    },
+    {
+        "name": "分子官能团识别工具",
+        "main_category": "化学",
+        "sub_category": "数据分析",
+        "description": "SMARTS 匹配枚举常见官能团标签。",
+        "prompt_template": CHEM_PROMPTS_BY_SKILL_NAME["分子官能团识别工具"],
+    },
+    {
+        "name": "分子Pattern Fingerprint生成工具",
+        "main_category": "化学",
+        "sub_category": "数据处理",
+        "description": "模式指纹比特向量摘要（子结构命中型）。",
+        "prompt_template": CHEM_PROMPTS_BY_SKILL_NAME["分子Pattern Fingerprint生成工具"],
+    },
+    {
+        "name": "Tanimoto 距离矩阵计算工具",
+        "main_category": "化学",
+        "sub_category": "分子计算",
+        "description": "多分子 Morgan 指纹两两距离矩阵（小规模集合）。",
+        "prompt_template": CHEM_PROMPTS_BY_SKILL_NAME["Tanimoto 距离矩阵计算工具"],
+    },
+    {
+        "name": "分子分析工具",
+        "main_category": "化学",
+        "sub_category": "数据分析",
+        "description": "Lipinski 五规则快速核对（分子量、logP、氢键供受体与违规条数）。",
+        "prompt_template": CHEM_PROMPTS_BY_SKILL_NAME["分子分析工具"],
+    },
 ]
 
 INSERT_IF_MISSING = [

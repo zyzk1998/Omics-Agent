@@ -46,10 +46,10 @@
             <button type="button" id="desktop-update-dismiss-btn" style="white-space:nowrap;padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.35);background:transparent;color:#e2e8f0;cursor:pointer;font-size:12px;">关闭提示</button>
         </div>
 
-        <!-- 🔍 图片灯箱 -->
-        <div id="lightbox" class="lightbox" onclick="closeLightbox()">
-            <span class="lightbox-close">&times;</span>
-            <img id="lightbox-img" src="">
+        <!-- 🔍 图片灯箱（仅点击遮罩或关闭钮关闭，点击图片不关闭） -->
+        <div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="图片预览" onclick="if (event.target === this) { closeLightbox(); }">
+            <button type="button" class="lightbox-close" onclick="event.stopPropagation(); closeLightbox();" aria-label="关闭预览">&times;</button>
+            <img id="lightbox-img" src="" alt="" onclick="event.stopPropagation();">
         </div>
 
         <div id="app">
@@ -57,10 +57,12 @@
             <!-- 左栏：Logo + 折叠 + 导航与历史 -->
             <aside id="sidebar-pane">
                 <div class="sidebar-fixed-top">
-                    <div class="sidebar-logo-row" id="sidebarLogoRow" title="点击折叠/展开侧栏">
-                        <img src="/static/favicon.png?v=13" alt="Omics Agent" class="sidebar-logo" width="28" height="28" decoding="async" fetchpriority="high">
-                        <span class="sidebar-title">Omics Agent</span>
-                        <button type="button" class="sidebar-toggle-btn" id="sidebarToggleBtn" aria-label="折叠侧栏"><svg class="sidebar-pane-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button>
+                    <div class="sidebar-logo-row sidebar-header" id="sidebarLogoRow">
+                        <button type="button" class="sidebar-brand-home" id="sidebarBrandHome" title="返回首页与新建会话" aria-label="回到主页并重置会话">
+                            <img src="/static/favicon.png?v=13" alt="Omics Agent" class="sidebar-logo" width="28" height="28" decoding="async" fetchpriority="high">
+                            <span class="sidebar-title">Omics Agent</span>
+                        </button>
+                        <button type="button" class="sidebar-toggle-icon" id="sidebarToggleBtn" aria-label="折叠侧栏" title="折叠/展开侧栏"><svg class="sidebar-pane-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button>
                     </div>
                     <div class="sidebar-top">
                         <button class="btn-new-session" type="button" id="btnNewSession">
@@ -267,9 +269,9 @@
                 </div>
             </div>
             <div class="header-right">
-                <a href="/downloads/" class="icon-btn icon-btn-text" id="link-download-desktop" title="打开下载页：Windows 安装向导 / Linux AppImage">安装桌面版</a>
-                <button type="button" class="icon-btn" onclick="toggleDebugSidebar()" title="调试面板"><i class="bi bi-bug"></i></button>
-                <button type="button" class="icon-btn icon-btn-text" id="btn-expand-workspace" title="展开/收起工作台">展开工作台</button>
+                <button type="button" class="icon-btn" id="btn-expand-workspace" title="展开工作台" aria-label="展开工作台">
+                    <svg class="header-icon-svg header-workspace-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="18" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg>
+                </button>
             </div>
         </header>
         <!-- 空状态：中央 Hero + 快捷入口；输入框始终在底部 #input-wrapper-bottom -->
@@ -310,18 +312,28 @@
                         <i class="bi bi-stop-circle-fill"></i> 停止生成
                     </button>
                 </div>
-                <div class="chat-input-panel">
+                <div class="chat-input-panel" id="chatInputPanel">
                     <div id="attachment-preview-area" class="attachment-preview-area"></div>
                     <div id="filePreviewArea" class="file-chips-area"></div>
-                    <div class="input-area">
-                        <textarea id="userInput" class="main-input chat-input" placeholder="打算深入探究的内容、希望了解的问题，都可以发给我~" rows="1" oninput="autoResize(this); checkInput();" onkeydown="handleEnter(event)"></textarea>
+                    <div class="chat-input-panel__compose">
+                        <div class="chat-input-compose-inner">
+                            <div class="chat-input-expand-hover-zone">
+                                <button type="button" class="chat-input-expand-btn" id="btnChatInputExpand" title="展开输入框以查看或编辑较长内容" aria-label="展开输入框">
+                                    <svg class="chat-input-expand-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
+                                </button>
+                            </div>
+                            <div class="input-area chat-input-compose-area">
+                                <textarea id="userInput" class="main-input chat-input" placeholder="打算深入探究的内容、希望了解的问题，都可以发给我~" rows="1" oninput="autoResize(this); checkInput();" onkeydown="handleEnter(event)"></textarea>
+                            </div>
+                        </div>
                     </div>
+                    <div class="chat-input-toolbar-row">
                     <div class="toolbar input-toolbar">
                         <div class="toolbar-left">
                             <input type="file" id="local-project-folder-input" webkitdirectory directory class="file-input-hidden" tabindex="-1" aria-hidden="true" title="">
                             <div class="workspace-dropdown-wrapper" style="position: relative;">
                                 <button type="button" id="btn-mount-local-project" class="ghost-btn btn-mount-local-project toolbar-btn workspace-mount-trigger" title="选择或切换本地工作目录" aria-expanded="false" aria-haspopup="true" aria-controls="workspace-dropdown-menu">
-                                    <svg class="btn-mount-local-project__icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h4l2 3h12a2 2 0 012 2v11z"/></svg>
+                                    <i class="bi bi-folder2 btn-mount-local-project__icon" aria-hidden="true"></i>
                                 </button>
                                 <div id="workspace-dropdown-menu" class="workspace-dropdown workspace-dropdown--above hidden" role="menu" aria-hidden="true">
                                     <button type="button" class="workspace-menu-item workspace-menu-item--action" id="menu-select-new-dir" role="menuitem">
@@ -347,7 +359,7 @@
                             </div>
                             <div class="model-select-wrap model-select-wrap--icon-only" title="模型切换">
                                 <span class="model-select-icon" aria-hidden="true">
-                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                         <line x1="5" y1="4" x2="5" y2="20"></line>
                                         <line x1="12" y1="4" x2="12" y2="20"></line>
                                         <line x1="19" y1="4" x2="19" y2="20"></line>
@@ -363,7 +375,7 @@
                                 </select>
                             </div>
                         </div>
-                        <div class="toolbar-right">
+                        <div class="toolbar-right chat-toolbar-right-cluster">
                             <div class="model-select-wrap" title="回答模式" id="modeSelectorWrapper">
                                 <button type="button" id="modeTrigger" class="ghost-btn model-select-native">标准</button>
                                 <span class="model-chevron" aria-hidden="true">▼</span>
@@ -372,10 +384,9 @@
                                     <button type="button" class="popover-item" data-mode="flagship" role="option">旗舰</button>
                                 </div>
                             </div>
-                            <button id="sendBtn" class="send-btn" onclick="sendMessage()">
-                                <i class="bi bi-arrow-up"></i>
-                            </button>
+                            <button type="button" id="sendBtn" class="send-btn" onclick="sendMessage()" title="发送" aria-label="发送"><i class="bi bi-arrow-up"></i></button>
                         </div>
+                    </div>
                     </div>
                     <div id="immersiveDemoEntryWrap" style="display: flex; justify-content: center; width: 100%; margin-top: 10px; margin-bottom: 10px;" aria-hidden="true">
                         <button type="button" id="btnImmersiveSpatiotemporalDemo" class="btn-immersive-demo" style="display: none;">
@@ -427,8 +438,12 @@
                         <svg class="workspace-refresh-icon" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                     </button>
                     <div class="workspace-actions">
-                        <button type="button" class="header-action-btn" id="btn-workspace-print" title="打印/下载报告">🖨️ 打印/下载报告</button>
-                        <button type="button" class="icon-btn" id="btn-workspace-close" title="关闭工作台">✕</button>
+                        <button type="button" class="icon-btn workspace-action-icon-btn" id="btn-workspace-print" title="打印/下载报告" aria-label="打印/下载报告">
+                            <i class="bi bi-printer workspace-toolbar-icon" aria-hidden="true"></i>
+                        </button>
+                        <button type="button" class="icon-btn workspace-action-icon-btn" id="btn-workspace-close" title="关闭工作台" aria-label="关闭工作台">
+                            <svg class="workspace-toolbar-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                        </button>
                     </div>
                 </header>
                 <div class="workspace-scroll">
@@ -443,17 +458,6 @@
                 </div>
             </aside>
         </div>
-        </div>
-
-        <!-- 🔥 调试侧边栏 -->
-        <div id="debug-sidebar">
-            <div id="debug-sidebar-header">
-                <span id="debug-sidebar-title">🐛 调试面板</span>
-                <button id="debug-sidebar-close" onclick="toggleDebugSidebar()">&times;</button>
-            </div>
-            <div id="debug-sidebar-content">
-                <pre><code id="debug-json-content">等待数据...</code></pre>
-            </div>
         </div>
 
         <!-- Phase 3: 身份认证抽屉（分步壳层；MFA/OAuth 演示与后端对齐见 docs/身份认证体系.md） -->
@@ -1519,17 +1523,23 @@
                     highlightedCode = escapeForTextareaInnerHTML(codeText);
                 }
 
-                return `
-                <div class="code-block-wrapper">
-                    <div class="code-header">
-                        <span>${validLang}</span>
-                        <button type="button" class="copy-btn" onclick="copyCode(this)">
-                            <i class="bi bi-clipboard"></i> 复制
-                        </button>
-                    </div>
-                    <pre><code class="hljs language-${validLang}">${highlightedCode}</code></pre>
-                    <textarea class="code-block-raw" readonly tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;">${escapeForTextareaInnerHTML(codeText)}</textarea>
-                </div>`;
+                var codeInner =
+                    '<div class="code-block-wrapper">' +
+                    '<div class="code-header">' +
+                    '<span>' + validLang + '</span>' +
+                    '<button type="button" class="copy-btn" onclick="copyCode(this)">' +
+                    '<i class="bi bi-clipboard"></i> 复制' +
+                    '</button>' +
+                    '</div>' +
+                    '<pre><code class="hljs language-' + validLang + '">' + highlightedCode + '</code></pre>' +
+                    '<textarea class="code-block-raw" readonly tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;">' +
+                    escapeForTextareaInnerHTML(codeText) +
+                    '</textarea>' +
+                    '</div>';
+                if (typeof window.buildSmartContentShell === 'function') {
+                    return window.buildSmartContentShell(codeInner);
+                }
+                return codeInner;
             };
 
             /**
@@ -1748,10 +1758,36 @@
                 return { body: String(content), mergedFull: fullData };
             }
 
+            /**
+             * 剿灭推理标签：成对闭合与非闭合（流式截断至文末）一并处理，避免 half-tag 泄漏。
+             */
+            function stripAllInferenceTagsAggressive(s) {
+                if (s === null || s === undefined || typeof s !== 'string') return '';
+                var t = s;
+                var patterns = [
+                    /<think>[\s\S]*?(?:<\/redacted_thinking>|$)/gi,
+                    /<redacted_reasoning>[\s\S]*?(?:<\/redacted_reasoning>|$)/gi,
+                    /<think(?:\s[^>]*)?>[\s\S]*?(?:<\/think>|$)/gi,
+                    /<thinking(?:\s[^>]*)?>[\s\S]*?(?:<\/thinking>|$)/gi,
+                    /<reasoning(?:\s[^>]*)?>[\s\S]*?(?:<\/reasoning>|$)/gi,
+                    /<thought(?:\s[^>]*)?>[\s\S]*?(?:<\/thought>|$)/gi
+                ];
+                for (var i = 0; i < patterns.length; i++) {
+                    t = t.replace(patterns[i], '');
+                }
+                return t;
+            }
+            /** 在 marked.parse 之前全局剔除 think / redacted 标签，防止诊断与终报泄露模型私域标签 */
+            function stripInferenceTagsForMarkdown(s) {
+                return stripAllInferenceTagsAggressive(s);
+            }
+            window.stripAllInferenceTagsAggressive = stripAllInferenceTagsAggressive;
+            window.stripInferenceTagsForMarkdown = stripInferenceTagsForMarkdown;
             // 安全的 marked 包装函数
             function safeMarkedParse(text) {
                 if (text === null || text === undefined) return '';
                 var s = normalizeReportMarkdownInput(text);
+                s = stripInferenceTagsForMarkdown(s);
                 // Sidecar / 挂载调试用前缀行不透出 UI
                 s = s.replace(/^\s*(?:\[Local[^\]\n]*\]|local_workspace_mounted\s*=\s*\S+)\s*$/gim, '');
                 // 剔除大模型生成的黄色警示图标
@@ -2202,6 +2238,18 @@
                 epigenomics: "【角色设定】你是一位资深的表观遗传学分析专家。\n\n【组学类型】表观遗传组学 (Epigenomics)\n\n【分析内容和步骤】\n1. [原始数据质控]\n2. [峰 calling 与注释]\n3. [差异分析与 motif 富集]\n4. [与转录组/基因组整合解读]\n\n【输出要求】请输出峰图、差异区域与生物学解释。",
                 proteomics: "【角色设定】你是一位资深的蛋白质组学与质谱分析专家。\n\n【组学类型】蛋白质组学 (Proteomics)\n\n【分析内容和步骤】\n1. [原始谱图质控与搜库]\n2. [定量与归一化]\n3. [差异蛋白筛选与富集分析]\n4. [蛋白质互作网络与通路解读]\n\n【输出要求】请输出火山图、热图与互作网络，并解读关键蛋白与通路。"
             };
+            /** 与后端 `OMICS_FAST_LANE_PROMPTS` 对齐：启动后 GET 覆盖 genomics/proteomics/epigenomics；失败则保留上方兜底文案 */
+            (function hydrateOmicsFastLanePromptTemplates() {
+                fetch('/api/skills/omics-fast-lane-prompts')
+                    .then(function(r) { return r.ok ? r.json() : null; })
+                    .then(function(d) {
+                        if (!d || typeof d !== 'object') return;
+                        if (d.genomics) OMICS_PROMPT_TEMPLATES.genomics = d.genomics;
+                        if (d.proteomics) OMICS_PROMPT_TEMPLATES.proteomics = d.proteomics;
+                        if (d.epigenomics) OMICS_PROMPT_TEMPLATES.epigenomics = d.epigenomics;
+                    })
+                    .catch(function() { });
+            })();
 
             // ================= Skills Square (扁平化：仅大类 Tab + 真分页 API) =================
             var skillsCurrentMain = '';
@@ -2291,7 +2339,7 @@
             }
             /** 与后端 MULTIMODAL_PLAZA_HIDDEN_SUBCATEGORIES 一致：暂缓上线的多模态子类不进橱窗（种子仍在 DB）。「我的」不关此过滤。 */
             function filterDeferredMultimodalSkillsForPlaza(items) {
-                var hiddenSub = { '基因组学': 1, '表观遗传组学': 1, '蛋白质组学': 1 };
+                var hiddenSub = { };
                 return (items || []).filter(function(s) {
                     if (!s) return false;
                     if (String(s.main_category || '').trim() !== '多模态组学') return true;
@@ -3505,6 +3553,15 @@
                 if (typeof fetchSkills === 'function') fetchSkills(dm, 1);
             }
             window.showSkillsSquareMainCategory = showSkillsSquareMainCategory;
+            function syncWorkspaceExpandButtonUI() {
+                var btn = document.getElementById('btn-expand-workspace');
+                var wp = document.getElementById('workspace-pane');
+                if (!btn || !wp) return;
+                var active = wp.classList.contains('workspace-active');
+                btn.setAttribute('title', active ? '\u6536\u8d77\u5de5\u4f5c\u53f0' : '\u5c55\u5f00\u5de5\u4f5c\u53f0');
+                btn.setAttribute('aria-label', active ? '\u6536\u8d77\u5de5\u4f5c\u53f0' : '\u5c55\u5f00\u5de5\u4f5c\u53f0');
+            }
+            window.syncWorkspaceExpandButtonUI = syncWorkspaceExpandButtonUI;
             function showChatView() {
                 window._volatileActiveSessionIdToReturn = null;
                 if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
@@ -3728,7 +3785,7 @@
                     // 拖拽右分隔条时，确保工作台可见
                     if (!wsPane.classList.contains('workspace-active')) {
                         wsPane.classList.add('workspace-active');
-                        if (btnExpand) btnExpand.textContent = '收起工作台';
+                        if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
                     }
                     const minW = 400;
                     const maxW = Math.max(minW + 80, Math.floor(window.innerWidth * 0.66));
@@ -3987,6 +4044,7 @@
                             '<button type="button" class="skill-mm-zoombtn" data-zoom="in" title="放大" aria-label="放大"><i class="bi bi-zoom-in"></i></button>' +
                             '<button type="button" class="skill-mm-zoombtn" data-zoom="out" title="缩小" aria-label="缩小"><i class="bi bi-zoom-out"></i></button>' +
                             '<button type="button" class="skill-mm-zoombtn skill-mm-zoombtn--reset" data-zoom="reset" title="重置缩放" aria-label="重置缩放"><span class="skill-mm-zoompct">100%</span></button>' +
+                            '<button type="button" class="skill-mm-zoombtn skill-mm-zoombtn--lightbox" data-skill-lightbox="1" title="全屏预览" aria-label="全屏预览"><i class="bi bi-arrows-fullscreen"></i></button>' +
                             '</div>' +
                             '<div class="skill-mm-img-viewport">' +
                             '<figure class="skill-mm-figure">' +
@@ -4061,7 +4119,7 @@
                         img.style.transformOrigin = 'center center';
                         if (pctEl) pctEl.textContent = Math.round(scale * 100) + '%';
                     }
-                    wrap.querySelectorAll('.skill-mm-zoombtn').forEach(function (btn) {
+                    wrap.querySelectorAll('.skill-mm-zoombtn[data-zoom]').forEach(function (btn) {
                         btn.addEventListener('click', function () {
                             var z = btn.getAttribute('data-zoom');
                             if (z === 'in') scale = Math.min(3, Math.round((scale + 0.2) * 100) / 100);
@@ -4071,6 +4129,24 @@
                         });
                     });
                     applyScale();
+                    var lbBtn = wrap.querySelector('.skill-mm-zoombtn--lightbox');
+                    if (lbBtn && img) {
+                        lbBtn.addEventListener('click', function (ev) {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            var u = img.currentSrc || img.src;
+                            if (u && typeof openLightbox === 'function') openLightbox(u);
+                        });
+                    }
+                    if (img) {
+                        img.style.cursor = 'zoom-in';
+                        img.addEventListener('click', function (ev) {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            var u = img.currentSrc || img.src;
+                            if (u && typeof openLightbox === 'function') openLightbox(u);
+                        });
+                    }
                 });
 
                 skillRoot.querySelectorAll('.skill-ws-print-btn').forEach(function (printBtn) {
@@ -4093,10 +4169,9 @@
             }
             function showSkillWorkspaceChrome() {
                 var wp = document.getElementById('workspace-pane');
-                var btnExpand = document.getElementById('btn-expand-workspace');
                 if (wp) {
                     wp.classList.add('workspace-active');
-                    if (btnExpand) btnExpand.textContent = '收起工作台';
+                    if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
                 }
                 if (typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
                 var ph = document.getElementById('workspace-placeholder');
@@ -4245,6 +4320,14 @@
                     bottomSlotReset.appendChild(iw);
                 }
                 if (iw) { iw.classList.remove('input-center'); iw.classList.add('input-bottom'); }
+                var cipR = document.getElementById('chatInputPanel');
+                if (cipR) cipR.classList.remove('chat-input-panel--expanded');
+                var expBtn0 = document.getElementById('btnChatInputExpand');
+                if (expBtn0) {
+                    expBtn0.setAttribute('aria-expanded', 'false');
+                    expBtn0.setAttribute('title', '展开输入框以查看或编辑较长内容');
+                }
+                if (userInputEl && typeof autoResize === 'function') autoResize(userInputEl);
                 if (wp) wp.classList.remove('workspace-active');
                 if (titleEl) titleEl.textContent = '新会话';
                 if (workspaceContent) workspaceContent.innerHTML = '';
@@ -4895,15 +4978,24 @@
             };
             window._executeWorkflowFromFormImpl = null;
             window.executeWorkflowFromForm = function(buttonElement) {
-                if (typeof window._executeWorkflowFromFormImpl === 'function') return window._executeWorkflowFromFormImpl(buttonElement);
+                if (typeof window._executeWorkflowFromFormImpl !== 'function') {
+                    console.error('执行函数未挂载！');
+                    alert('系统正在加载或发生内部错误，执行引擎未就绪，请刷新页面重试。');
+                    return;
+                }
+                return window._executeWorkflowFromFormImpl(buttonElement);
             };
 
             function autoResize(textarea) {
                 textarea.style.height = 'auto';
                 var sh = textarea.scrollHeight;
-                var h = sh <= 44 ? 44 : (sh >= 200 ? 200 : sh);
+                var panel = document.getElementById('chatInputPanel');
+                var expanded = panel && panel.classList.contains('chat-input-panel--expanded');
+                var minH = expanded ? 264 : 42;
+                var maxH = expanded ? Math.min(Math.floor(window.innerHeight * 0.92), 760) : 200;
+                var h = sh <= minH ? minH : (sh >= maxH ? maxH : sh);
                 textarea.style.height = h + 'px';
-                textarea.style.overflowY = h >= 200 ? 'auto' : 'hidden';
+                textarea.style.overflowY = h >= maxH ? 'auto' : 'hidden';
             }
             function toggleSidebarCollapse() {
                 var pane = document.getElementById('sidebar-pane');
@@ -6737,7 +6829,7 @@
                 } else if (typeof showAdminConsoleIfNeeded === 'function') showAdminConsoleIfNeeded();
                 autoResize(userInput);
                 if (typeof renderAttachmentPreviewArea === 'function') renderAttachmentPreviewArea();
-                var sidebarLogo = document.getElementById('sidebarLogoRow');
+                var sidebarBrandHome = document.getElementById('sidebarBrandHome');
                 var sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
                 var sidebarWorkspaceIndicator = document.getElementById('sidebar-workspace-indicator');
                 var rightSidebarToggleBtn = document.getElementById('btn-right-sidebar-toggle');
@@ -6756,7 +6848,27 @@
                 var previewBackdrop = document.getElementById('file-preview-backdrop');
                 var previewClose = document.getElementById('file-preview-close');
                 var attachmentPreviewArea = document.getElementById('attachment-preview-area');
-                if (sidebarLogo) sidebarLogo.onclick = toggleSidebarCollapse;
+                var chatInputPanel = document.getElementById('chatInputPanel');
+                var btnChatInputExpand = document.getElementById('btnChatInputExpand');
+                if (btnChatInputExpand && chatInputPanel && userInput) {
+                    btnChatInputExpand.addEventListener('click', function (ev) {
+                        ev.preventDefault();
+                        chatInputPanel.classList.toggle('chat-input-panel--expanded');
+                        var ex = chatInputPanel.classList.contains('chat-input-panel--expanded');
+                        btnChatInputExpand.setAttribute('aria-expanded', ex ? 'true' : 'false');
+                        btnChatInputExpand.setAttribute('title', ex ? '收起输入框高度' : '展开输入框以查看或编辑较长内容');
+                        if (typeof autoResize === 'function') autoResize(userInput);
+                        try { userInput.focus(); } catch (e0) {}
+                    });
+                }
+                if (sidebarBrandHome) {
+                    sidebarBrandHome.onclick = function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (typeof showChatView === 'function') showChatView();
+                        if (typeof clearChatAndReset === 'function') clearChatAndReset();
+                    };
+                }
                 if (sidebarToggleBtn) { sidebarToggleBtn.onclick = function(e) { e.stopPropagation(); toggleSidebarCollapse(); }; }
                 if (sidebarWorkspaceIndicator) {
                     sidebarWorkspaceIndicator.onclick = function() {
@@ -6978,7 +7090,7 @@
                     if (!wp) return;
                     wp.classList.toggle('workspace-active');
                     if (!wp.classList.contains('workspace-active')) wp.style.width = '';
-                    this.textContent = wp.classList.contains('workspace-active') ? '收起工作台' : '展开工作台';
+                    if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
                 };
                 var btnPrint = document.getElementById('btn-workspace-print');
                 if (btnPrint) {
@@ -6996,9 +7108,9 @@
                 if (btnClose) btnClose.onclick = function() {
                     var wp = document.getElementById('workspace-pane');
                     if (wp) { wp.classList.remove('workspace-active'); wp.style.width = ''; }
-                    var btnExpand = document.getElementById('btn-expand-workspace');
-                    if (btnExpand) btnExpand.textContent = '展开工作台';
+                    if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
                 };
+                if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
 
                 // 视图路由：技能广场 / 聊天
                 var btnSkills = document.getElementById('btn-skills-square');
@@ -8326,9 +8438,11 @@
             }
 
             function openLightbox(src) {
-                const lightbox = document.getElementById('lightbox');
-                const img = document.getElementById('lightbox-img');
-                img.src = src;
+                var lightbox = document.getElementById('lightbox');
+                var img = document.getElementById('lightbox-img');
+                if (!lightbox || !img) return;
+                var abs = (typeof getAbsoluteMediaUrl === 'function') ? getAbsoluteMediaUrl(src) : src;
+                img.src = abs || src;
                 lightbox.style.display = 'flex';
             }
             // 打印/导出时图片需用绝对 URL，否则打印预览中会加载失败
@@ -8340,8 +8454,19 @@
                 return origin ? (origin + p) : p;
             }
             function closeLightbox() {
-                document.getElementById('lightbox').style.display = 'none';
+                var lb = document.getElementById('lightbox');
+                if (lb) lb.style.display = 'none';
             }
+            (function bindLightboxEscapeOnce() {
+                if (window.__lightboxEscapeBound) return;
+                window.__lightboxEscapeBound = true;
+                document.addEventListener('keydown', function (ev) {
+                    if (ev.key !== 'Escape') return;
+                    var lb = document.getElementById('lightbox');
+                    if (!lb || lb.style.display !== 'flex') return;
+                    closeLightbox();
+                });
+            })();
 
             function _dragEventHasExternalFiles(e) {
                 if (!e || !e.dataTransfer) return false;
@@ -9356,9 +9481,6 @@
                             }
                         }
                         
-                        // 🔥 获取 DOM 元素引用（确保在正确的作用域内）
-                        const debugPanel = document.getElementById('debug-json-content');
-                        
                         // 🔥 辅助函数：转义 HTML
                         function escapeHtml(text) {
                             if (!text) return '';
@@ -9425,16 +9547,11 @@
                             return isDataFile(path);
                         }
                         
-                        // 🔥 辅助函数：更新调试面板（原始数据）
+                        // 🔥 原始 SSE 数据输出到浏览器控制台（F12 → 控制台；Verbose 级别可见 console.debug）
                         function updateDebugPanel(rawText) {
-                            if (debugPanel) {
-                                const currentText = debugPanel.textContent || '';
-                                debugPanel.textContent = currentText + rawText;
-                                // 自动滚动到底部
-                                const scrollContainer = debugPanel.parentElement;
-                                if (scrollContainer) {
-                                    scrollContainer.scrollTop = scrollContainer.scrollHeight;
-                                }
+                            if (rawText == null || rawText === '') return;
+                            if (typeof console !== 'undefined' && console.debug) {
+                                console.debug('[OmicsAgent][SSE raw]', rawText);
                             }
                         }
                         
@@ -9816,14 +9933,6 @@
                                 }
                             }
                             console.log(`📡 [SSE Event] ${eventType}:`, data);
-                            
-                            // 🔥 TASK 2: Only append structured LLM outputs to Debug Panel
-                            // Only show: workflow (plan JSON), diagnosis (report), thought (reasoning), error (backend errors)
-                            const structuredEvents = ['workflow', 'diagnosis', 'thought', 'error'];
-                            if (debugPanel && structuredEvents.includes(eventType)) {
-                                const formatted = `\n[${eventType}] ${JSON.stringify(data, null, 2)}\n`;
-                                updateDebugPanel(formatted);
-                            }
                             
                             // Phase 5: 捕获 session_id 供下次请求携带，并刷新历史列表
                             if (eventType === 'session' && data && data.session_id) {
@@ -10468,15 +10577,7 @@
                                 return;
                             }
                             var cleaned = typeof text === 'string' ? text : '';
-                            // 仅移除**成对且非贪婪**的真推理块；禁止 /<tag>[\s\S]*$/ 误杀正文
-                            cleaned = cleaned.replace(/<think>[\s\S]*?<\/redacted_thinking>/gi, '');
-                            cleaned = cleaned.replace(/<redacted_reasoning>[\s\S]*?<\/redacted_reasoning>/gi, '');
-                            cleaned = cleaned.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
-                            // 正文里字面提及「<think>」且全串无闭合结束标签时，转义尖括号而非截断
-                            if (cleaned.indexOf('<think>') !== -1 && cleaned.indexOf('</think>') === -1) {
-                                cleaned = cleaned.replace(/<think>/gi, '&lt;redacted_thinking&gt;');
-                            }
-                            cleaned = cleaned.trim();
+                            cleaned = (window.stripAllInferenceTagsAggressive || stripAllInferenceTagsAggressive)(cleaned).trim();
                             var spinner = textZoneRef.querySelector('.spinner-border');
                             if (spinner) spinner.remove();
                             try {
@@ -10566,15 +10667,7 @@
 
                         // 右侧报告：只移除非贪婪**成对**标签；禁止未闭合时截断全文
                         function stripThinkForReport(text) {
-                            var s = String(text || '');
-                            s = s.replace(/<think>[\s\S]*?<\/redacted_thinking>/gi, '');
-                            s = s.replace(/<redacted_reasoning>[\s\S]*?<\/redacted_reasoning>/gi, '');
-                            s = s.replace(/<think>[\s\S]*?<\/think>/gi, '');
-                            s = s.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
-                            if (s.indexOf('<think>') !== -1 && s.indexOf('</think>') === -1) {
-                                s = s.replace(/<think>/gi, '&lt;redacted_thinking&gt;');
-                            }
-                            return s;
+                            return (window.stripAllInferenceTagsAggressive || stripAllInferenceTagsAggressive)(String(text || ''));
                         }
                         
                         // 数据驱动报告渲染：挂载到右栏 #active-workspace-content，无则回退到聊天气泡
@@ -10632,14 +10725,52 @@
                         
                         // 🔥 全链路生态对齐：tool_id -> 中文步骤展示名（后端未提供 name 时使用）
                         window.STEP_NAME_MAP = {
-                            rna_data_validation: '正在执行底层数据结构与内存预检...',
-                            rna_clustering_comparison: '正在生成多分辨率聚类鲁棒性对比图...',
-                            metabo_data_validation: '正在执行底层数据与稀疏性校验...',
-                            metabo_model_comparison: '正在执行多维机器学习模型 (PCA/PLS-DA) 效能对比...',
-                            spatial_data_validation: '正在执行空间影像与坐标校验...',
-                            spatial_clustering_comparison: '正在生成多分辨率空间域物理映射对比图...',
-                            radiomics_data_validation: '正在执行数据与 ROI 校验...',
-                            radiomics_model_comparison: '正在执行多算法 (LR/SVM/RF) ROC 诊断效能对比...'
+                            'rna_data_validation': '正在执行底层数据结构与内存预检...',
+                            'rna_clustering_comparison': '正在生成多分辨率聚类鲁棒性对比图...',
+                            'metabo_data_validation': '正在执行底层数据与稀疏性校验...',
+                            'metabo_model_comparison': '正在执行多维机器学习模型 (PCA/PLS-DA) 效能对比...',
+                            'spatial_data_validation': '正在执行空间影像与坐标校验...',
+                            'spatial_clustering_comparison': '正在生成多分辨率空间域物理映射对比图...',
+                            'radiomics_data_validation': '正在执行数据与 ROI 校验...',
+                            'radiomics_model_comparison': '正在执行多算法 (LR/SVM/RF) ROC 诊断效能对比...',
+                            'step_genomics_raw_qc': '原始数据质控',
+                            'step_genomics_read_trim': '序列清洗与接头过滤',
+                            'step_genomics_align': '参考基因组比对',
+                            'step_genomics_mark_dup': '排序与重复标记',
+                            'step_genomics_bqsr': '碱基质量重校准 (BQSR)',
+                            'step_genomics_germline': '胚系变异检测',
+                            'step_genomics_cnv': '拷贝数变异分析',
+                            'step_genomics_sv': '结构变异分析',
+                            'step_genomics_vqsr': '变异质量校准、过滤与位点标准化 (VQSR + norm)',
+                            'step_genomics_anno': '多维多态性注释',
+                            'step_genomics_acmg': '临床致病性评级 (ACMG)',
+                            'step_genomics_report': '全景变异报告生成',
+                            'step_prot_raw_qc': '原始数据转换与基础质控',
+                            'step_prot_spectrum_pre': '谱图预处理与特征提取',
+                            'step_prot_db_search': '搜索引擎比对与肽段鉴定',
+                            'step_prot_fdr_rescore': '假阳性控制与重打分',
+                            'step_prot_inference': '蛋白质推断与定性分组',
+                            'step_prot_quant': '蛋白质丰度定量计算',
+                            'step_prot_impute_batch': '缺失值插补与批次效应校正',
+                            'step_prot_norm_qc': '数据标准化与质量控制',
+                            'step_prot_dea': '差异蛋白表达统计',
+                            'step_prot_biomarker': '标志物机器学习筛选',
+                            'step_prot_enrichment': '功能富集与通路分析',
+                            'step_prot_ppi': '蛋白互作网络与核心节点',
+                            'step_prot_report': '蛋白组学多维全景报告',
+                            'step_epi_raw_qc': '原始数据质控与接头清洗',
+                            'step_epi_align': '参考基因组定向比对',
+                            'step_epi_post_filter': '比对后过滤与去重',
+                            'step_epi_shift': '移位校正与片段特征分析',
+                            'step_epi_peak': '染色质开放区/结合位点检测',
+                            'step_epi_idr': '生物学重复一致性检验',
+                            'step_epi_consensus': '共有峰集合构建与矩阵生成',
+                            'step_epi_peak_anno': '峰区域基因组特征深度注释',
+                            'step_epi_diff': '差异富集与结合状态分析',
+                            'step_epi_motif': '核心转录因子基序发现',
+                            'step_epi_footprint': '转录因子物理足迹分析',
+                            'step_epi_cis': '顺式调控元件靶基因推断',
+                            'step_epi_multi': '表观-转录多组学调控整合'
                         };
                         // Task2: 中栏 Checklist 与右栏状态同步（按索引替换 icon class 与内容）
                         function syncMiddlePaneChecklistIcons(stepsDetails) {
@@ -11280,17 +11411,59 @@
                             // 🔥 CRITICAL REGRESSION FIX: Construct workflow payload correctly（使用去重后的路径）
                             // 🔥 Multi-instance 支持：为本次执行生成唯一 executionId
                             const execId = 'exec-' + Date.now();
-                            const workflowName = formElement.querySelector('h5')?.textContent?.replace('📋 ', '').replace(' [模版预览 Mode]', '') || '工作流';
+                            var _h5El = formElement.querySelector('h5');
+                            var workflowName = '工作流';
+                            if (_h5El) {
+                                workflowName = (_h5El.innerText || _h5El.textContent || '')
+                                    .replace(/\s+/g, ' ')
+                                    .replace(/^[\s📋]+/u, '')
+                                    .replace(/\s*\[模版预览 Mode\].*$/u, '')
+                                    .replace(/\s*\[历史\].*$/u, '')
+                                    .trim() || workflowName;
+                            }
+                            if (!workflowName || workflowName === '工作流计划') {
+                                try {
+                                    var _cw = window.workflowCache && window.workflowCache[formId] && window.workflowCache[formId].workflowData;
+                                    if (_cw) {
+                                        var _wnFix = (_cw.workflow_config && _cw.workflow_config.workflow_data && _cw.workflow_config.workflow_data.workflow_name) ||
+                                            (_cw.workflow_data && _cw.workflow_data.workflow_name) || _cw.workflow_name;
+                                        if (_wnFix && String(_wnFix).trim()) workflowName = String(_wnFix).trim();
+                                    }
+                                } catch (_eWf) {}
+                            }
+                            var _domainFromCache = null;
+                            try {
+                                var _cd = window.workflowCache && window.workflowCache[formId] && window.workflowCache[formId].workflowData;
+                                if (_cd) {
+                                    _domainFromCache = (_cd.workflow_data && _cd.workflow_data.domain_name) ||
+                                        (_cd.workflow_config && _cd.workflow_config.workflow_data && _cd.workflow_config.workflow_data.domain_name) ||
+                                        _cd.domain_name || null;
+                                    if (_domainFromCache) _domainFromCache = String(_domainFromCache).trim();
+                                }
+                            } catch (_eDom) {}
                             const workflowPayload = {
-                                workflow_data: {
-                                    workflow_name: workflowName,
-                                    steps: updatedSteps,
-                                    file_paths: uniquePaths
-                                },
+                                workflow_name: workflowName,
+                                steps: updatedSteps,
                                 file_paths: uniquePaths,
                                 execution_id: execId
                             };
-                            
+                            if (_domainFromCache) {
+                                workflowPayload.domain_name = _domainFromCache;
+                            }
+                            if (uniquePaths.length > 0 && updatedSteps.length > 0) {
+                                var _st0 = updatedSteps[0];
+                                if (!_st0.params || typeof _st0.params !== 'object') _st0.params = {};
+                                var _fp0 = _st0.params.file_path;
+                                var _fpMissing = !_fp0 ||
+                                    _fp0 === '<PENDING_UPLOAD>' ||
+                                    _fp0 === '<待上传数据>' ||
+                                    (typeof _fp0 === 'string' && _fp0.trim().length === 0) ||
+                                    (typeof _fp0 === 'string' && /^<[^>]+>$/.test(_fp0.trim()));
+                                if (_fpMissing) {
+                                    _st0.params.file_path = uniquePaths[0];
+                                }
+                            }
+
                             console.log("🚀 [executeWorkflowFromForm] 发送工作流执行请求:", workflowPayload);
                             
                             // Store workflow payload in form container for submitWorkflow to use
@@ -11806,9 +11979,6 @@
                                         }
                                     } catch (e) {
                                         console.error('❌ SSE JSON 解析错误:', e, 'Raw data:', jsonData);
-                                        if (debugPanel) {
-                                            updateDebugPanel(`\n❌ JSON 解析错误: ${e.message}\n原始数据: ${jsonData}\n`);
-                                        }
                                     }
                                 }
                             }
@@ -11898,7 +12068,7 @@
                         aiMessageDiv.closest('.message-row').remove();
                         const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
-                        // 🔥 Task 2: 显示 JSON 到调试侧边栏
+                        // 🔥 非流式 JSON 响应：写入控制台便于排查
                         updateDebugSidebar(data);
 
                         // 处理错误响应
@@ -13340,19 +13510,15 @@
                 btnEl.textContent = expanded ? '收起 ▴' : '展开更多 ▾';
             }
             
-            function toggleDebugSidebar() {
-                const sidebar = document.getElementById('debug-sidebar');
-                sidebar.classList.toggle('open');
-            }
-            
             function updateDebugSidebar(data) {
-                const contentDiv = document.getElementById('debug-json-content');
-                if (contentDiv && data) {
-                    try {
-                        const jsonStr = JSON.stringify(data, null, 2);
-                        contentDiv.textContent = jsonStr;
-                    } catch (e) {
-                        contentDiv.textContent = `JSON 序列化失败: ${e.message}\n\n原始数据: ${String(data)}`;
+                if (data == null) return;
+                try {
+                    if (typeof console !== 'undefined' && console.log) {
+                        console.log('[OmicsAgent][non-stream JSON]', data);
+                    }
+                } catch (e) {
+                    if (typeof console !== 'undefined' && console.warn) {
+                        console.warn('[OmicsAgent][non-stream JSON] 输出失败:', e, data);
                     }
                 }
             }

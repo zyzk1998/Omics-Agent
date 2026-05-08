@@ -17,7 +17,7 @@ class WorkflowRegistry:
     职责：
     1. 注册和存储所有有效的工作流
     2. 根据域名（domain_name）路由到对应的工作流
-    3. 提供严格的域绑定检查（支持 Metabolomics / RNA / Spatial / Radiomics / STED_EC / SPATIOTEMPORAL_DYNAMICS）
+    3. 提供严格的域绑定检查（支持 Metabolomics / RNA / Spatial / Radiomics / genomics / proteomics / epigenomics / STED_EC / SPATIOTEMPORAL_DYNAMICS）
     """
     
     _instance = None
@@ -47,6 +47,9 @@ class WorkflowRegistry:
         from .spatial_workflow import SpatialWorkflow
         from .radiomics_workflow import RadiomicsWorkflow
         from .sted_ec_workflow import STEDECWorkflow, SpatiotemporalDynamicsWorkflow
+        from .genomics_workflow import GenomicsWorkflow
+        from .proteomics_workflow import ProteomicsWorkflow
+        from .epigenomics_workflow import EpigenomicsWorkflow
         
         # 注册代谢组学工作流
         metabolomics = MetabolomicsWorkflow()
@@ -70,6 +73,10 @@ class WorkflowRegistry:
         # 通道 B：单细胞时空动力学完全体（六步工具 + 系统 Reporting；自然语言「时空动力学」等触发）
         spatiotemporal = SpatiotemporalDynamicsWorkflow()
         self.register(spatiotemporal)
+
+        self.register(GenomicsWorkflow())
+        self.register(ProteomicsWorkflow())
+        self.register(EpigenomicsWorkflow())
         
         logger.info(f"✅ [WorkflowRegistry] 已注册 {len(self._workflows)} 个工作流: {list(self._workflows.keys())}")
     

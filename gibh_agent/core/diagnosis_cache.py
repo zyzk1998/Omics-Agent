@@ -11,6 +11,9 @@ import os
 
 logger = logging.getLogger(__name__)
 
+# 变更诊断载荷 / Prompt 规则时递增，使旧 .diagnosis.json 失效并强制重跑 LLM
+DIAGNOSIS_CACHE_SCHEMA_VERSION = 2
+
 
 class DiagnosisCache:
     """
@@ -116,6 +119,7 @@ class DiagnosisCache:
             cache_data = {
                 "file_path": str(Path(file_path).resolve()),
                 "file_hash": file_hash,
+                "schema_version": DIAGNOSIS_CACHE_SCHEMA_VERSION,
                 "diagnosis_result": diagnosis_result,
                 "file_metadata": file_metadata,
                 "cached_at": str(Path(file_path).stat().st_mtime) if Path(file_path).exists() else None
@@ -155,6 +159,17 @@ class DiagnosisCache:
             # 读取缓存数据
             with open(cache_path, 'r', encoding='utf-8') as f:
                 cache_data = json.load(f)
+
+            sv = cache_data.get("schema_version", 1)
+            if sv != DIAGNOSIS_CACHE_SCHEMA_VERSION:
+                logger.info(
+                    f"⚠️ [DiagnosisCache] 缓存 schema 过时 ({sv} != {DIAGNOSIS_CACHE_SCHEMA_VERSION})，删除: {cache_path}"
+                )
+                try:
+                    cache_path.unlink()
+                except Exception as e:
+                    logger.warning(f"⚠️ 删除过时缓存失败: {e}")
+                return None
             
             # 验证缓存有效性
             current_hash = self._get_file_hash(file_path)

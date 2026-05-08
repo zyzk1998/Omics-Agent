@@ -29,6 +29,7 @@ try:
 
     importlib.import_module("gibh_agent.tools.chem_gi_absorption_tools")
     importlib.import_module("gibh_agent.tools.chem_misc_tools")
+    importlib.import_module("gibh_agent.tools.chem_rdkit_batch2_tools")
 except Exception:
     logger.warning(
         "chem_gi_absorption_tools / chem_misc_tools 预加载失败（若仅使用其它化学工具可忽略）",
@@ -107,6 +108,57 @@ def _extract_inline_smiles_for_fallback(text: str) -> str:
         if len(s) >= 2 and re.match(r"^[A-Za-z0-9@+\-\[\]()=#\.\\/,;:]+$", s):
             if any(c in s for c in "()[]=#") or (len(s) <= 20 and s[0].isalpha()):
                 return s.split()[0]
+    return ""
+
+
+def _extract_multi_smiles_for_matrix_fallback(text: str) -> str:
+    """从用户正文、反引号或表格中抽取至少两条疑似 SMILES，供 ``chem_tanimoto_matrix``。"""
+    t = text or ""
+    hits: List[str] = []
+    for m in re.finditer(r"`([A-Za-z0-9@+\-\[\]()=#\\.\\/,;%:]+)`", t):
+        cand = m.group(1).strip()
+        if _looks_like_smiles_token(cand):
+            hits.append(cand.split()[0])
+    dedup: List[str] = []
+    seen: set[str] = set()
+    for h in hits:
+        if h not in seen:
+            seen.add(h)
+            dedup.append(h)
+    if len(dedup) >= 2:
+        return "\n".join(dedup)
+
+    line_hits: List[str] = []
+    for ln in t.splitlines():
+        s = ln.strip()
+        if not s or s.startswith("#"):
+            continue
+        if all(c in "-:| " for c in s):
+            continue
+        if s.startswith("|"):
+            cells = [c.strip() for c in s.split("|")]
+            for c in cells:
+                if c and _looks_like_smiles_token(c):
+                    line_hits.append(c.split()[0])
+                    break
+            continue
+        if _looks_like_smiles_token(s):
+            line_hits.append(s.split()[0])
+    out_ln: List[str] = []
+    seen2: set[str] = set()
+    for h in line_hits:
+        if h not in seen2:
+            seen2.add(h)
+            out_ln.append(h)
+    if len(out_ln) >= 2:
+        return "\n".join(out_ln)
+
+    flat = t.replace("\n", " ").strip()
+    if "|" in flat:
+        parts = [p.strip() for p in flat.split("|") if p.strip()]
+        ok = [p.split()[0] for p in parts if _looks_like_smiles_token(p)]
+        if len(ok) >= 2:
+            return "\n".join(ok)
     return ""
 
 
@@ -342,7 +394,16 @@ class SkillAgent:
                         chosen = p
                         break
                 out["file_path"] = chosen or file_paths[0]
-            elif tool_name in ("sascore_analysis", "lipinski_druglikeness", "drug_similarity_search"):
+            elif tool_name in (
+                "sascore_analysis",
+                "lipinski_druglikeness",
+                "drug_similarity_search",
+                "chem_aromaticity_perception",
+                "chem_lipinski_five",
+                "chem_functional_groups",
+                "chem_kekulization",
+                "chem_pattern_fingerprint",
+            ):
                 chosen_sm: Optional[str] = None
                 for p in file_paths:
                     pl = p.lower()
@@ -366,6 +427,24 @@ class SkillAgent:
                         chosen_g = p
                         break
                 out["file_path"] = chosen_g or file_paths[0]
+            elif tool_name == "chem_openbabel":
+                chosen_ob: Optional[str] = None
+                for p in file_paths:
+                    pl = p.lower()
+                    if pl.endswith(
+                        (".mol", ".sdf", ".smi", ".smiles", ".pdb", ".xyz", ".cml", ".mol2", ".cdx")
+                    ):
+                        chosen_ob = p
+                        break
+                out["file_path"] = chosen_ob or file_paths[0]
+            elif tool_name == "chem_tanimoto_matrix":
+                chosen_tm: Optional[str] = None
+                for p in file_paths:
+                    pl = p.lower()
+                    if pl.endswith((".smi", ".txt", ".csv", ".tsv")):
+                        chosen_tm = p
+                        break
+                out["file_path"] = chosen_tm or file_paths[0]
             else:
                 out.setdefault("file_path", file_paths[0])
 
@@ -373,10 +452,27 @@ class SkillAgent:
             ex = _extract_inline_fasta_for_fallback(clean)
             if ex:
                 out["fasta_content"] = ex
-        if tool_name in ("sascore_analysis", "lipinski_druglikeness", "drug_similarity_search") and "smiles_text" in fields and not file_paths:
+        if tool_name in (
+            "sascore_analysis",
+            "lipinski_druglikeness",
+            "drug_similarity_search",
+            "chem_aromaticity_perception",
+            "chem_lipinski_five",
+            "chem_functional_groups",
+            "chem_kekulization",
+            "chem_pattern_fingerprint",
+        ) and "smiles_text" in fields and not file_paths:
             exs = _extract_inline_smiles_for_fallback(clean)
             if exs:
                 out["smiles_text"] = exs
+        if tool_name == "chem_openbabel" and "smiles_text" in fields and not file_paths:
+            exo = _extract_inline_smiles_for_fallback(clean)
+            if exo:
+                out["smiles_text"] = exo
+        if tool_name == "chem_tanimoto_matrix" and "smiles_text" in fields and not file_paths:
+            exm = _extract_multi_smiles_for_matrix_fallback(clean)
+            if exm:
+                out["smiles_text"] = exm
         if tool_name == "pymol_analysis" and "pdb_content" in fields and not file_paths:
             exp = _extract_inline_pdb_for_fallback(clean)
             if exp:
@@ -405,11 +501,58 @@ class SkillAgent:
         fp = (args.get("file_path") or "").strip() if isinstance(args.get("file_path"), str) else ""
         has_upload = bool(file_paths) or bool(fp)
 
-        if tool_name in ("sascore_analysis", "lipinski_druglikeness", "drug_similarity_search") and "smiles_text" in fields:
+        if tool_name in (
+            "sascore_analysis",
+            "lipinski_druglikeness",
+            "drug_similarity_search",
+            "chem_aromaticity_perception",
+            "chem_lipinski_five",
+            "chem_functional_groups",
+            "chem_kekulization",
+            "chem_pattern_fingerprint",
+        ) and "smiles_text" in fields:
             if _blank(args.get("smiles_text")) and not has_upload:
                 sm = _extract_inline_smiles_for_fallback(clean)
                 if sm:
                     args["smiles_text"] = sm
+        if tool_name == "chem_openbabel":
+            # LLM 偶发使用 smiles 而非 smiles_text
+            sm_alias = args.get("smiles")
+            if isinstance(sm_alias, str) and sm_alias.strip() and _blank(args.get("smiles_text")):
+                args["smiles_text"] = sm_alias.strip()
+            args.pop("smiles", None)
+            fp_ob = (args.get("file_path") or "").strip() if isinstance(args.get("file_path"), str) else ""
+            st_ob = (args.get("smiles_text") or "").strip() if isinstance(args.get("smiles_text"), str) else ""
+            if _blank(fp_ob) and _blank(st_ob):
+                if file_paths:
+                    chosen_ob: Optional[str] = None
+                    for p in file_paths:
+                        pl = p.lower()
+                        if pl.endswith(
+                            (".mol", ".sdf", ".smi", ".smiles", ".pdb", ".xyz", ".cml", ".mol2")
+                        ):
+                            chosen_ob = p
+                            break
+                    args["file_path"] = chosen_ob or file_paths[0]
+                else:
+                    sm2 = _extract_inline_smiles_for_fallback(clean)
+                    if sm2:
+                        args["smiles_text"] = sm2
+        if tool_name == "chem_tanimoto_matrix":
+            fp_tm = (args.get("file_path") or "").strip() if isinstance(args.get("file_path"), str) else ""
+            st_tm = (args.get("smiles_text") or "").strip() if isinstance(args.get("smiles_text"), str) else ""
+            if _blank(fp_tm) and _blank(st_tm) and file_paths:
+                chosen_tm: Optional[str] = None
+                for p in file_paths:
+                    pl = p.lower()
+                    if pl.endswith((".smi", ".txt", ".csv", ".tsv")):
+                        chosen_tm = p
+                        break
+                args["file_path"] = chosen_tm or file_paths[0]
+            elif _blank(fp_tm) and _blank(st_tm) and not file_paths:
+                mm = _extract_multi_smiles_for_matrix_fallback(clean)
+                if mm:
+                    args["smiles_text"] = mm
         if tool_name == "pymol_analysis" and "pdb_content" in fields:
             if _blank(args.get("pdb_content")) and not has_upload:
                 pdb = _extract_inline_pdb_for_fallback(clean)

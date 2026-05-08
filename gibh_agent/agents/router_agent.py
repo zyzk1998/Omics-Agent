@@ -184,6 +184,28 @@ class RouterAgent(BaseAgent):
         file_paths = self.get_file_paths(uploaded_files or [])
         
         logger.debug(f"🔍 快速路由: 查询='{query_lower[:50]}...', 文件数={len(file_paths)}")
+
+        # 技能广场组学编排快车道：[Omics_Route: genomics|proteomics|epigenomics]
+        import re as _re
+
+        _omics_m = _re.search(r"\[Omics_Route:\s*([a-zA-Z0-9_]+)\]", query or "", _re.I)
+        if _omics_m:
+            _tag = _omics_m.group(1).lower()
+            _omics_route = {
+                "genomics": ("genomics", "dna_agent"),
+                "proteomics": ("proteomics", "proteomics_agent"),
+                "epigenomics": ("epigenomics", "epigenomics_agent"),
+            }
+            if _tag in _omics_route:
+                _mod, _route = _omics_route[_tag]
+                logger.info("✅ [Omics_Route] %s → %s", _tag, _route)
+                return {
+                    "modality": _mod,
+                    "intent": self._detect_intent(query) if query else "analysis",
+                    "confidence": 0.99,
+                    "routing": _route,
+                    "reasoning": f"Omics_Route:{_tag}",
+                }
         
         # 🔥 文件优先启发式：在调用 LLM 之前，根据文件扩展名强制路由
         if file_paths:

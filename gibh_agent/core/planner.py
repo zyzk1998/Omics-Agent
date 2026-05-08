@@ -47,6 +47,21 @@ def _has_spatiotemporal_dynamics_keyword(query_lower: str) -> bool:
     return any(kw in query_lower for kw in SPATIOTEMPORAL_DYNAMICS_KEYWORDS)
 
 
+GENOMICS_INTENT_KEYWORDS = [
+    "wgs", "wes", "whole genome", "全基因组", "全外显子", "gatk", "haplotypecaller",
+    "variant calling", "变异检测", "变异注释", "snpeff", "annovar", "vcf", "bwa",
+    "基因组", "genomics",
+]
+PROTEOMICS_INTENT_KEYWORDS = [
+    "proteomics", "蛋白组", "蛋白质组", "质谱", "maxquant", "peptide", "肽段",
+    "dia", "dda", "tmt", "labelfree", "谱图",
+]
+EPIGENOMICS_INTENT_KEYWORDS = [
+    "chip-seq", "atac-seq", "atac", "chip", "表观", "epigenomics", "macs2",
+    "peak calling", "narrowpeak", "motif", "染色质",
+]
+
+
 # Step semantics for Dynamic Planning: LLM uses these to map "skip X" / "no Y" to step IDs.
 SOP_PLANNER_STEP_SEMANTICS = {
     "Spatial": [
@@ -1268,29 +1283,41 @@ From the user query, output a JSON object with "target_steps" and "skip_steps". 
         system_prompt = """You are an Intent Classifier for Bioinformatics Workflows.
 
 Your task is to classify user queries into:
-1. Domain Name: exactly one of "Metabolomics", "RNA", "Spatial", "Radiomics", "STED_EC", "SPATIOTEMPORAL_DYNAMICS"
+1. Domain Name: exactly one of "Metabolomics", "RNA", "Spatial", "Radiomics", "genomics", "proteomics", "epigenomics", "STED_EC", "SPATIOTEMPORAL_DYNAMICS"
 2. Mode: "EXECUTION" or "PLANNING" (determines if user wants to run or preview)
 3. Target Steps: List of specific steps the user wants (e.g., ["pca_analysis"], ["load_image", "preview_slice", "extract_features"])
 
 **Available Domains:**
 - Metabolomics: metabolite CSV / tabular omics
-- RNA: scRNA-seq, FASTQ, generic H5AD when user does NOT ask for trajectory / spatiotemporal dynamics
+- RNA: scRNA-seq, FASTQ, generic H5AD when user does NOT ask for trajectory / spatiotemporal dynamics / WGS-style genomics
 - Spatial: 10x Visium directories, spots, Moran's I, spatial layers
 - Radiomics: NIfTI/DICOM medical imaging, texture, Rad-Score (NOT single-cell trajectory wording)
+- genomics: WGS/WES, alignment, variant calling, VCF/BAM workflow (use lowercase key "genomics")
+- proteomics: mass spectrometry abundance / peptidoform / DEA + enrichment (use "proteomics")
+- epigenomics: ChIP-seq/ATAC-seq, peaks, differential peaks, motif (use "epigenomics")
 - STED_EC: moscot / optimal transport / trajectory inference on time-series h5ad (channel A, 4-step demo pipeline)
 - SPATIOTEMPORAL_DYNAMICS: user explicitly wants full spatiotemporal dynamics pipeline (Chinese e.g. 时空动力学, English spatiotemporal dynamics); channel B, 6-step pipeline
 
 **Available Steps (Metabolomics):**
-- inspect_data, preprocess_data, pca_analysis, metabolomics_plsda, differential_analysis, visualize_volcano, metabolomics_pathway_enrichment
+- metabo_data_validation, inspect_data, preprocess_data, pca_analysis, metabolomics_plsda, metabo_model_comparison, differential_analysis, visualize_volcano, metabolomics_pathway_enrichment
 
 **Available Steps (RNA):**
-- rna_qc_filter, rna_normalize, rna_pca, rna_clustering, rna_find_markers, etc.
+- rna_data_validation, rna_cellranger_count, rna_convert_cellranger_to_h5ad, rna_qc_filter, rna_doublet_detection, rna_normalize, rna_hvg, rna_scale, rna_pca, rna_neighbors, rna_umap, rna_clustering, rna_clustering_comparison, rna_find_markers, rna_cell_annotation
 
 **Available Steps (Spatial):**
-- load_data, qc_norm, dimensionality_reduction, clustering, spatial_neighbors, spatial_autocorr, plot_clusters, plot_genes
+- load_data, spatial_data_validation, qc_norm, dimensionality_reduction, clustering, spatial_clustering_comparison, spatial_neighbors, spatial_autocorr, functional_enrichment, plot_clusters, plot_genes
 
 **Available Steps (Radiomics):**
-- load_image, preprocess, preview_slice, extract_features, calc_score, viz_score
+- radiomics_data_validation, load_image, preprocess, preview_slice, extract_features, radiomics_model_comparison, calc_score, viz_score
+
+**Available Steps (genomics):**
+- step_genomics_raw_qc, step_genomics_read_trim, step_genomics_align, step_genomics_mark_dup, step_genomics_bqsr, step_genomics_germline, step_genomics_cnv, step_genomics_sv, step_genomics_vqsr, step_genomics_anno, step_genomics_acmg, step_genomics_report
+
+**Available Steps (proteomics):**
+- step_prot_raw_qc, step_prot_spectrum_pre, step_prot_db_search, step_prot_fdr_rescore, step_prot_inference, step_prot_quant, step_prot_impute_batch, step_prot_norm_qc, step_prot_dea, step_prot_biomarker, step_prot_enrichment, step_prot_ppi, step_prot_report
+
+**Available Steps (epigenomics):**
+- step_epi_raw_qc, step_epi_align, step_epi_post_filter, step_epi_shift, step_epi_peak, step_epi_idr, step_epi_consensus, step_epi_peak_anno, step_epi_diff, step_epi_motif, step_epi_footprint, step_epi_cis, step_epi_multi
 
 **Available Steps (STED_EC / SPATIOTEMPORAL_DYNAMICS):**
 - sted_ec_data_validation, sted_ec_time_series_formatting, sted_ec_moscot_trajectory, sted_ec_plot_trajectory
@@ -1306,14 +1333,14 @@ Your task is to classify user queries into:
 **Output Format:**
 Return ONLY a JSON object (no markdown fences, no extra text):
 {
-  "domain_name": "Metabolomics" | "RNA" | "Spatial" | "Radiomics" | "STED_EC" | "SPATIOTEMPORAL_DYNAMICS",
+  "domain_name": "Metabolomics" | "RNA" | "Spatial" | "Radiomics" | "genomics" | "proteomics" | "epigenomics" | "STED_EC" | "SPATIOTEMPORAL_DYNAMICS",
   "mode": "EXECUTION" | "PLANNING",
   "target_steps": ["step1", "step2", ...]
 }
 
 **Rules:**
 - If user asks for "full analysis" or "完整分析" or vague "analyze this file", use empty target_steps [].
-- Domain name MUST match one of the six strings above (case-sensitive).
+- Domain name MUST match one of the nine strings above (case-sensitive; genomics/proteomics/epigenomics are lowercase).
 - Mode MUST be exactly "EXECUTION" or "PLANNING" (case-sensitive)."""
 
         # 🔥 TASK 3 FIX: 增强用户查询和文件格式的关联
@@ -1333,6 +1360,9 @@ Return ONLY a JSON object (no markdown fences, no extra text):
         has_radiomics_keyword = any(kw in query_lower for kw in radiomics_keywords)
         has_spatiotemporal_keyword = _has_spatiotemporal_dynamics_keyword(query_lower)
         has_sted_ec_keyword = any(kw in query_lower for kw in STED_EC_INTENT_KEYWORDS)
+        has_genomics_keyword = any(kw in query_lower for kw in GENOMICS_INTENT_KEYWORDS)
+        has_proteomics_keyword = any(kw in query_lower for kw in PROTEOMICS_INTENT_KEYWORDS)
+        has_epigenomics_keyword = any(kw in query_lower for kw in EPIGENOMICS_INTENT_KEYWORDS)
 
         user_prompt = f"""**User Query:**
 {user_query}
@@ -1349,10 +1379,10 @@ File Uploaded: {has_file} ({'True' if has_file else 'False'})
 **CRITICAL ROUTING RULES (User Intent + File Format):**
 1. **Visium/Spatial files** (file_type="visium" or domain="Spatial") MUST route to "Spatial" domain.
 2. **Medical imaging / Radiomics files** (file_type="medical_image" or domain="Radiomics" or extension .nii/.nii.gz/.dcm) MUST route to "Radiomics" domain.
-3. **FASTQ files** (file_type="fastq" or extension=".fastq"/".fq") MUST route to "RNA" domain, regardless of query.
+3. **FASTQ files** (file_type="fastq" or extension=".fastq"/".fq"): Prefer **RNA** for scRNA-seq / Cell Ranger wording; if the user clearly requests **WGS/WES/基因组变异/GATK/BWA** style analysis (genomics), route to **genomics** instead of RNA.
 4. **H5AD/10x files** (file_type="h5ad" or "10x_mtx"): If visium/Spatial → "Spatial". Else if user asks spatiotemporal dynamics / 时空动力学 → "SPATIOTEMPORAL_DYNAMICS". Else if trajectory / moscot / optimal transport (without B-channel wording) → "STED_EC". Else → "RNA".
 5. **CSV/Tabular files** (file_type="tabular" or extension=".csv") MUST route to "Metabolomics" domain, unless user explicitly mentions RNA.
-6. **Upload asset sniffing (authoritative extension labels in metadata):** If `routing_asset_types` or `routing_asset_inventory` lists **protein_structure** (e.g. .pdb/.cif) or **protein_fasta**, you MUST **NOT** choose "RNA", "Spatial", "Radiomics", "STED_EC", or "SPATIOTEMPORAL_DYNAMICS" unless the user query **explicitly** names that modality (e.g. "单细胞", "空间转录组", "影像组学"). Prefer **Metabolomics** only as a last-resort placeholder when forced to pick among the six domains and no other rule applies; the global router may already have sent such sessions to Chat for skill tools (PyMOL, etc.).
+6. **Upload asset sniffing (authoritative extension labels in metadata):** If `routing_asset_types` or `routing_asset_inventory` lists **protein_structure** (e.g. .pdb/.cif) or **protein_fasta**, you MUST **NOT** choose "RNA", "Spatial", "Radiomics", "STED_EC", or "SPATIOTEMPORAL_DYNAMICS" unless the user query **explicitly** names that modality (e.g. "单细胞", "空间转录组", "影像组学"). Prefer **Metabolomics** only as a last-resort placeholder when forced to pick among the standard domains and no other rule applies; the global router may already have sent such sessions to Chat for skill tools (PyMOL, etc.).
 7. **document** / **plain_text** / **generic_unknown** assets: Do **not** assume scRNA-seq or radiomics; follow user wording. If the query is vague and assets are only these types, prefer **Metabolomics** only when the user clearly wants table-like analysis; otherwise prefer the least specific domain consistent with the query.
 8. **User Query Keywords:**
    - If query contains Spatial keywords (visium, spatial, slice, spot, moran): Prefer "Spatial" domain
@@ -1409,6 +1439,8 @@ Classify the intent and return JSON only. Remember:
             return self._fallback_intent_classification(user_query, has_file, file_metadata)
 
         domain_name = intent_raw.get("domain_name", "Metabolomics")
+        if isinstance(domain_name, str) and domain_name in ("Genomics", "Proteomics", "Epigenomics"):
+            domain_name = domain_name.lower()
         mode = intent_raw.get("mode", "PLANNING")
         target_steps = intent_raw.get("target_steps", [])
 
@@ -1435,13 +1467,48 @@ Classify the intent and return JSON only. Remember:
                     domain_name = "Radiomics"
                 else:
                     logger.info("✅ [SOPPlanner] 医学影像已正确分类为 Radiomics")
-            # 1. FASTQ → RNA
+            # 🔥 Genomics: VCF/BAM/SAM 强提示
+            elif file_path and (
+                ".vcf" in file_path.lower()
+                or file_path.lower().endswith(".bam")
+                or file_path.lower().endswith(".sam")
+                or file_path.lower().endswith(".cram")
+            ):
+                if domain_name != "genomics":
+                    logger.warning(
+                        "⚠️ [SOPPlanner] 检测到 VCF/BAM/SAM/CRAM，强制覆盖域名: %s → genomics",
+                        domain_name,
+                    )
+                domain_name = "genomics"
+            # 🔥 Epigenomics: BED / peak 文件强提示
+            elif file_path and any(
+                x in file_path.lower() for x in (".bed", "narrowpeak", "broadpeak", ".narrowpeak", ".broadpeak")
+            ):
+                if domain_name != "epigenomics":
+                    logger.warning(
+                        "⚠️ [SOPPlanner] 检测到 BED/Peak 文件，强制覆盖域名: %s → epigenomics",
+                        domain_name,
+                    )
+                domain_name = "epigenomics"
+            # 1. FASTQ → RNA（除非明确基因组变异/WGS 语义）
             elif file_type == "fastq" or (file_path and any(ext in file_path.lower() for ext in [".fastq", ".fq", "fastq"])):
-                if domain_name != "RNA":
-                    logger.warning(f"⚠️ [SOPPlanner] 检测到FASTQ文件，强制覆盖域名: {domain_name} → RNA")
-                    domain_name = "RNA"
+                scrna_hint = any(
+                    kw in query_lower
+                    for kw in ["scrna", "single cell", "单细胞", "cellranger", "cell ranger", "转录组测序"]
+                )
+                if has_genomics_keyword and not scrna_hint:
+                    if domain_name != "genomics":
+                        logger.warning(
+                            "⚠️ [SOPPlanner] FASTQ + 基因组关键词，强制覆盖域名: %s → genomics",
+                            domain_name,
+                        )
+                    domain_name = "genomics"
                 else:
-                    logger.info("✅ [SOPPlanner] FASTQ文件已正确分类为 RNA")
+                    if domain_name != "RNA":
+                        logger.warning(f"⚠️ [SOPPlanner] 检测到FASTQ文件，强制覆盖域名: {domain_name} → RNA")
+                        domain_name = "RNA"
+                    else:
+                        logger.info("✅ [SOPPlanner] FASTQ文件已正确分类为 RNA")
             # 2. H5AD/10x：B 通道词 → SPATIOTEMPORAL；A 通道词（且无 B）→ STED_EC；否则 RNA
             elif file_type in ["h5ad", "10x_mtx", "anndata"] or (file_path and ".h5ad" in file_path.lower()):
                 if has_spatiotemporal_keyword and domain_name != "SPATIOTEMPORAL_DYNAMICS":
@@ -1507,6 +1574,18 @@ Classify the intent and return JSON only. Remember:
                 if domain_name != "STED_EC":
                     logger.info(f"ℹ️ [SOPPlanner] 用户查询包含 STED-EC/轨迹关键词，调整域名: {domain_name} → STED_EC")
                     domain_name = "STED_EC"
+            elif has_epigenomics_keyword and not has_spatial_keyword and not has_radiomics_keyword:
+                if domain_name != "epigenomics":
+                    logger.info(f"ℹ️ [SOPPlanner] 用户查询包含表观遗传组学关键词，调整域名: {domain_name} → epigenomics")
+                domain_name = "epigenomics"
+            elif has_proteomics_keyword and not has_spatial_keyword and not has_radiomics_keyword:
+                if domain_name != "proteomics":
+                    logger.info(f"ℹ️ [SOPPlanner] 用户查询包含蛋白组学关键词，调整域名: {domain_name} → proteomics")
+                domain_name = "proteomics"
+            elif has_genomics_keyword and not has_spatial_keyword and not has_radiomics_keyword:
+                if domain_name != "genomics":
+                    logger.info(f"ℹ️ [SOPPlanner] 用户查询包含基因组学关键词，调整域名: {domain_name} → genomics")
+                domain_name = "genomics"
             elif (
                 has_rna_keyword
                 and not has_metabolomics_keyword
@@ -1542,6 +1621,9 @@ Classify the intent and return JSON only. Remember:
             "RNA",
             "Spatial",
             "Radiomics",
+            "genomics",
+            "proteomics",
+            "epigenomics",
             "STED_EC",
             "SPATIOTEMPORAL_DYNAMICS",
         ]:
@@ -1766,6 +1848,9 @@ Classify the intent and return JSON only. Remember:
     ) -> Dict[str, Any]:
         """
         填充工作流参数（基于文件元数据）
+
+        file_metadata.file_path 应由编排器在体检前注入；多轮对话无新附件时，
+        orchestrator 会从 session/history 回溯路径后再 inspect，避免此处拿不到路径。
         
         Args:
             workflow_config: 工作流配置

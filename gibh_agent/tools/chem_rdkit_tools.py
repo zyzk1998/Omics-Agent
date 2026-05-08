@@ -713,3 +713,20 @@ def _ensure_chem_misc_tools_registered() -> None:
 
 
 _ensure_chem_misc_tools_registered()
+
+
+def _ensure_chem_rdkit_batch2_registered() -> None:
+    """第二批 RDKit 原子技能（芳香性 / Lipinski / 官能团 / Kekulization / Pattern 指纹 / Tanimoto 矩阵）。"""
+    try:
+        import importlib
+
+        importlib.import_module("gibh_agent.tools.chem_rdkit_batch2_tools")
+    except Exception as e:
+        logger.warning(
+            "chem_rdkit_batch2_tools 侧车注册失败（第二批 RDKit 技能将不可用）: %s",
+            e,
+            exc_info=True,
+        )
+
+
+_ensure_chem_rdkit_batch2_registered()

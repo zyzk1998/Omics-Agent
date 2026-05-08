@@ -17,6 +17,7 @@ from ..core.openai_tools import (
 )
 from ..core.tool_registry import ToolRegistry
 from ..core.diagnosis_param_whitelist import (
+    PIPELINE_PLUMBING_PARAM_KEYS,
     build_diagnosis_whitelist_prompt,
     collect_param_whitelist_for_diagnosis,
     humanize_param_key_as_ui_label,
@@ -404,6 +405,25 @@ class BaseAgent(ABC):
         
         return "unknown"
     
+    def _diagnosis_omics_display_label(self, omics_type: Optional[str]) -> str:
+        """数据诊断 Prompt 中的组学语境标签（防代谢组等串台）。"""
+        t = (omics_type or "").strip().lower()
+        if t in ("genomics", "dna"):
+            return "基因组学 (Genomics)"
+        if t in ("proteomics", "protein", "proteome"):
+            return "蛋白质组学 (Proteomics)"
+        if t in ("epigenomics", "epigenetic"):
+            return "表观遗传组学 (Epigenomics)"
+        if t in ("metabolomics", "metabolomic", "metabonomics"):
+            return "代谢组学 (Metabolomics)"
+        if t in ("radiomics", "medical_image", "medical_imaging", "imaging"):
+            return "医学影像组学 (Radiomics)"
+        if t in ("spatial",):
+            return "空间组学 (Spatial)"
+        if t in ("scrna", "scrna-seq", "single_cell", "single-cell", "rna"):
+            return "转录组 / 单细胞 (RNA/scRNA-seq)"
+        return omics_type.strip() if omics_type else "当前组学任务"
+
     def _format_diagnosis_param_whitelist_prompt(self, names: List[str]) -> str:
         """注入 LLM 的参数名白名单与硬约束（与前端 name=param_{i}_{key} 的 key 一致）。"""
         if not names:
@@ -411,6 +431,7 @@ class BaseAgent(ABC):
                 "\n\n【参数推荐】若无法从上下文确定当前 SOP 已暴露的可调参数字段名，"
                 "请勿输出「### 💡 参数推荐」下的 Markdown 表格（禁止捏造参数名）；"
                 "可仅在正文段落中做定性描述。"
+                "\n【静默规则】若某步仅有 file_path/input_dir 等路径流转、无可调算法阈值，则该步不得在表格中单独占行。"
             )
         shown = ", ".join(names)
         return f"""
@@ -430,6 +451,8 @@ class BaseAgent(ABC):
 若某类参数不在上述列表中，说明前端未开放该字段，**请勿在表格中推荐**；可仅在正文段落中提及。
 每一行都必须填写「步骤名」与「底层调用的算子/工具名」；若无法判断可分别写“未知步骤”“未知工具”，但不可留空。
 第 3 列参数名**禁止**用 Markdown 加粗（**）或反引号（`）包裹，仅写裸参数字符串。
+
+【静默规则】若某步骤仅有 file_path、input_dir、data_path 等基础流转参数且无可推荐的算法阈值，**禁止**为该步骤在表格中单独输出一行（严禁凑数）。
 """
 
     def _extract_editable_params(
@@ -621,6 +644,22 @@ class BaseAgent(ABC):
             omics_type = diagnosis_result.get("omics_type") or ""
             logger.info(f"✅ [DataDiagnostician] 统计计算完成: {len(stats)} 个指标, omics_type={omics_type}")
 
+            _ot_diag = (omics_type or "").lower()
+            _highdim_guard = ""
+            if _ot_diag in (
+                "genomics",
+                "dna",
+                "proteomics",
+                "protein",
+                "epigenomics",
+                "epigenetic",
+            ) or bool(file_metadata.get("non_matrix_omics")):
+                _highdim_guard = (
+                    "【系统最高指令】：当前文件为高维组学原始测序/质谱文件，不需要解析行列数！"
+                    "绝不允许在报告中输出「包含0行0列」或「数据集为空」等字眼！"
+                    "直接判定为「数据完整性校验通过，可进入后续分析」。"
+                )
+
             # Step 2: 构建 LLM Prompt（按领域选择模板，Radiomics 使用影像专用模板）
             # 将统计事实格式化为 JSON 字符串
             import json
@@ -697,13 +736,23 @@ class BaseAgent(ABC):
                         fallback=RADIOMICS_DIAGNOSIS_TEMPLATE
                     )
                 else:
+                    from jinja2 import Template
+                    _omics_label = self._diagnosis_omics_display_label(omics_type)
+                    _hp = head_preview[:500] if head_preview else ""
                     prompt = self.prompt_manager.get_prompt(
                         "data_diagnosis",
                         {
                             "inspection_data": stats_json,
-                            "head_preview": head_preview[:500] if head_preview else "",
+                            "head_preview": _hp,
+                            "omics_label": _omics_label,
+                            "highdim_guard": _highdim_guard,
                         },
-                        fallback=DATA_DIAGNOSIS_PROMPT.format(inspection_data=stats_json)
+                        fallback=Template(DATA_DIAGNOSIS_PROMPT).render(
+                            inspection_data=stats_json,
+                            head_preview=_hp,
+                            omics_label=_omics_label,
+                            highdim_guard=_highdim_guard,
+                        ),
                     )
                 logger.debug(f"📝 [DEBUG] Prompt length: {len(prompt)}")
             except Exception as prompt_err:
@@ -719,26 +768,36 @@ class BaseAgent(ABC):
                         origin_str = str(stats.get("origin", "N/A"))
                         prompt = RADIOMICS_DIAGNOSIS_TEMPLATE.replace("{{ dimensions }}", dimensions).replace("{{ spacing }}", spacing).replace("{{ mask_status }}", mask_status).replace("{{ origin }}", origin_str).replace("{{ inspection_data }}", stats_json)
                     else:
-                        prompt = DATA_DIAGNOSIS_PROMPT.format(inspection_data=stats_json)
+                        from jinja2 import Template
+                        _ol = self._diagnosis_omics_display_label(omics_type)
+                        _hp2 = head_preview[:500] if head_preview else ""
+                        prompt = Template(DATA_DIAGNOSIS_PROMPT).render(
+                            inspection_data=stats_json,
+                            head_preview=_hp2,
+                            omics_label=_ol,
+                            highdim_guard=_highdim_guard,
+                        )
                 except Exception as format_err:
                     logger.error(f"❌ [DataDiagnostician] Prompt 格式化失败: {format_err}")
                     if not isinstance(stats_json, str):
                         stats_json = json.dumps(stats_json, ensure_ascii=False)
-                    prompt = f"""You are a Senior Bioinformatician specializing in {omics_type}.
+                    _ol = self._diagnosis_omics_display_label(omics_type)
+                    prompt = f"""You are a Senior Bioinformatician ({_ol}).
 
 Based on the following data statistics:
 {stats_json}
 
 Please generate a data diagnosis and parameter recommendation report in Simplified Chinese (简体中文).
+**Do not** describe this dataset as metabolomics / LC-MS / metabolites unless the task is metabolomics.
 
 Format:
 ### 🔍 数据报告
-- **数据规模**: [样本数、代谢物数]
+- **数据规模**: [与统计一致；按组学使用「细胞/位点/峰/蛋白」等正确量纲，禁止套用代谢物数]
 - **数据特征**: [缺失值率、数据范围等]
 - **数据质量**: [质量评估]
 
 ### 💡 参数推荐
-Create a Markdown table with 6 columns in this exact order:
+仅当存在可调算法参数时输出 6 列表格；仅 file_path 等路径参数时整表省略。
 | 步骤名 | 底层调用的算子/工具名 | 参数名 | 默认值 | 推荐值 | 推荐理由 |
 The 3rd column (参数名) must use exact allowed param keys for this workflow (see system rules).
 
@@ -760,6 +819,19 @@ Use Simplified Chinese for all content."""
                 n_cells = stats.get("n_cells", 0)
                 n_genes = stats.get("n_genes", 0)
                 stats_facts.append(f"数据集包含 {n_cells} 个细胞和 {n_genes} 个基因。")
+            elif (omics_type or "").lower() in ("genomics", "dna"):
+                stats_facts.append(
+                    f"组学语境为基因组学；文件类型以统计中的 file_type/路径为准，禁止将本任务误写为代谢组学。"
+                )
+            elif (omics_type or "").lower() in ("proteomics", "protein"):
+                stats_facts.append(f"组学语境为蛋白质组学；禁止套用代谢组学术语。")
+            elif (omics_type or "").lower() in ("epigenomics", "epigenetic"):
+                stats_facts.append(f"组学语境为表观遗传组学；禁止套用代谢组学术语。")
+            elif bool(file_metadata.get("non_matrix_omics")):
+                stats_facts.append(
+                    "当前输入为非矩阵通道（原始测序/质谱/二进制组学文件），禁止用「样本×特征」行列数描述规模；"
+                    "应以 inspection_data 中的 file_status、file_format 与路径为准，不得声称数据集为空。"
+                )
             else:
                 n_rows = stats.get("n_rows", stats.get("n_samples", 0))
                 n_cols = stats.get("n_cols", stats.get("n_features", 0))
@@ -778,10 +850,18 @@ Use Simplified Chinese for all content."""
             # 🔥 CRITICAL DEBUGGING: 检查数据是否缺失，如果缺失则注入调试跟踪
             n_samples_value = stats.get("n_samples", stats.get("n_cells", stats.get("n_rows", 0)))
             debug_trace = file_metadata.get("debug_trace")
-            
+            _highdim_ctx = _ot_diag in (
+                "genomics",
+                "dna",
+                "proteomics",
+                "protein",
+                "epigenomics",
+                "epigenetic",
+            ) or bool(file_metadata.get("non_matrix_omics"))
+
             # 如果数据缺失（0 samples），强制注入调试跟踪到系统提示
             debug_section = ""
-            if n_samples_value == 0 and debug_trace:
+            if n_samples_value == 0 and debug_trace and not _highdim_ctx:
                 debug_section = f"""
 
 **🔍 CRITICAL FAILURE: 数据检查返回 0 个样本**
@@ -1151,6 +1231,8 @@ Use Simplified Chinese for all content."""
                     "name": step_name,
                     "status": step_status
                 }
+                if isinstance(step_data.get("qc_metrics"), dict) and step_data["qc_metrics"]:
+                    step_info["qc_metrics"] = step_data["qc_metrics"]
                 
                 # 🔥 修复：只从summary中提取关键指标，不包含data中的其他字段（如file_path、preview等）
                 # 🔥 注意：summary可能是字符串（RNA分析）或字典（代谢组学分析）
@@ -1383,6 +1465,8 @@ Use Simplified Chinese for all content."""
                     "name": step_info.get("name", "Unknown"),
                     "status": step_info.get("status", "unknown")
                 }
+                if "qc_metrics" in step_info:
+                    compact_step["qc_metrics"] = step_info["qc_metrics"]
                 # 🔥 修复：保留RNA分析的关键指标（用于key_findings提取）
                 if "cells_after_qc" in step_info:
                     compact_step["cells_after_qc"] = step_info.get("cells_after_qc", "N/A")
@@ -1439,9 +1523,35 @@ Use Simplified Chinese for all content."""
             
             summary_json = json.dumps(compact_summary, ensure_ascii=False, indent=2)
             logger.info(f"📊 [AnalysisSummary] summary_json长度: {len(summary_json)}字符")
+
+            _ot_low = (omics_type or "").lower()
+            if _ot_low in ("genomics", "dna"):
+                _has_qc = any(
+                    isinstance(s.get("qc_metrics"), dict) and s.get("qc_metrics")
+                    for s in compact_summary.get("steps", [])
+                )
+                if not _has_qc:
+                    return (
+                        "## 错误：无法生成基因组学报告\n\n"
+                        "执行结果中未包含测序质控指标（`qc_metrics`，通常来自首步 `genomics_raw_qc`）。"
+                        "**禁止捏造 Reads、GC 含量或变异统计。** 请确认本次执行已将真实上传路径注入首步并成功完成质控。"
+                    )
             
             # 构建提示词
-            if omics_type.lower() in ["metabolomics", "metabolomic", "metabonomics"]:
+            if omics_type.lower() in ("genomics", "dna"):
+                expert_role = "资深基因组学专家"
+                domain_context = """
+你是一名资深基因组学专家。请根据下方 JSON 中各步骤给出的 **真实测序指标**（尤其是 qc_metrics：总 Reads 数、GC%、平均读长等）撰写中文报告。
+**严格使用以下四级标题（Markdown）：**
+### 1. 测序质控概览
+### 2. 变异检测统计
+### 3. 临床致病性变异
+### 4. 结论与建议
+
+**绝对禁止**：提及代谢物、PCA、VIP、火山图、LC-MS、差异代谢物等代谢组学概念。
+若 JSON 中缺少质控或变异相关数值，须明确写「数据不足 / 未运行该步骤」，**禁止编造**。
+"""
+            elif omics_type.lower() in ["metabolomics", "metabolomic", "metabonomics"]:
                 expert_role = "代谢组学分析专家"
                 domain_context = """
 - 代谢物数据预处理（缺失值处理、Log2转换、标准化）
@@ -1874,10 +1984,9 @@ Use Simplified Chinese for all content."""
 
 **CRITICAL RULES:**
 
-1. **Reasoning Process (DeepSeek-R1)**: 
-   - Use the `<think>` tag to show your reasoning process before generating the final report
-   - Inside `<think>`, analyze the data metrics, connect metabolites to pathways, and reason about biological mechanisms
-   - After reasoning, output the final report outside the `<think>` tags
+1. **面向用户的正文（严禁推理标签泄露）**：
+   - **禁止**在输出中出现 `<think>`、`</think>`、`<thinking>`、`<reasoning>` 等任何内部推理标签或占位。
+   - 直接输出最终 Markdown 报告正文；推理过程留在模型内部，勿写入回复。
 
 2. **Scientific Persona**: You are a Senior Bioinformatics Scientist writing a publication-quality results section for Nature Medicine. Write as if you are describing results in a Methods/Results section of a high-impact research paper.
 
@@ -1914,7 +2023,7 @@ Use Simplified Chinese for all content."""
 
 **CRITICAL**: You MUST provide a detailed Biological Interpretation and Mechanism Analysis. Do NOT just list steps or metrics. Explain the biological meaning, connect findings to known pathways, and discuss mechanisms.
 
-**IMPORTANT**: Use `<think>` tags to show your reasoning process. Analyze the data deeply, then output the final report.
+**IMPORTANT**：不得输出任何推理/思考标签；仅输出最终中文 Markdown 报告正文。
 
 现在生成全面的分析报告（遵循上述结构，详细且专业，包含深度生物学机制解读）："""
             
@@ -1987,7 +2096,7 @@ Use Simplified Chinese for all content."""
 
                 token_and_retrieval_constraints = """
 7. **Token 控制约束（强制）**：
-   - 你的 `<think>` 必须精简，只保留关键推理链路，禁止重复表述。
+   - 禁止在正文中输出推理标签；用简练段落完成机制讨论。
    - 只聚焦 Top 3 标志物（代谢物/基因）做机制深挖，其余结果简述。
 
 8. **检索约束（条件触发）**：
@@ -2174,10 +2283,9 @@ Use Simplified Chinese for all content."""
 
 **CRITICAL RULES:**
 
-1. **Reasoning Process (DeepSeek-R1)**: 
-   - Use the `<think>` tag to show your reasoning process before generating the final report
-   - Inside `<think>`, analyze the data metrics and reason about biological mechanisms
-   - After reasoning, output the final report outside the `<think>` tags
+1. **面向用户的正文（严禁推理标签泄露）**：
+   - **禁止**在输出中出现 `<think>`、`</think>`、`<thinking>`、`<reasoning>` 等任何内部推理标签。
+   - 直接输出最终 Markdown 报告；推理留在模型内部。
 
 2. **Scientific Persona**: You are a Senior Bioinformatics Scientist writing a publication-quality results section for Nature Medicine. Write as if you are describing results in a Methods/Results section of a high-impact research paper.
 
@@ -2210,7 +2318,7 @@ Use Simplified Chinese for all content."""
 
 **CRITICAL**: You MUST provide a detailed Biological Interpretation and Mechanism Analysis. Do NOT just list steps or metrics. Explain the biological meaning and discuss mechanisms.
 
-**IMPORTANT**: Use `<think>` tags to show your reasoning process. Analyze the data deeply, then output the final report.
+**IMPORTANT**：不得输出任何推理/思考标签；仅输出最终中文 Markdown 报告正文。
 
 现在生成全面的分析报告（遵循上述结构，详细且专业，包含深度生物学机制解读）："""
                     
@@ -2231,6 +2339,12 @@ Use Simplified Chinese for all content."""
                         self.context["report_suggestions"] = sug
                     return cleaned
 
+                def _finalize_expert_report(s: str) -> str:
+                    """落库/工作台下发前：剔除思考标签整块（含流式无闭合）、追问块。"""
+                    from gibh_agent.core.stream_utils import strip_think_markup_for_user
+
+                    return strip_think_markup_for_user(_clean_report_content(s))
+
                 if retrieval_context_text:
                     messages[1]["content"] = messages[1]["content"] + "\n\n【前置检索资料】\n" + retrieval_context_text
                 logger.info(f"📞 [AnalysisSummary] 开始LLM调用，max_tokens=8192...")
@@ -2244,19 +2358,16 @@ Use Simplified Chinese for all content."""
                 logger.debug(f"🔍 [AnalysisSummary] original_content 预览: {original_content[:300]}...")
                 logger.debug(f"🔍 [AnalysisSummary] response 预览: {response[:300] if response else 'N/A'}...")
                 
-                # 🔥 修复：如果提取后的response太短，但original_content很长，说明主要内容可能在标签内
-                # 在这种情况下，应该使用original_content（前端会解析标签）
-                if response and len(response.strip()) > 100:  # Ensure meaningful response
+                # 优先使用去标签后的 response；过短时回退 raw，再经后端统一剥离思考块（禁止向前端泄露标签）
+                if response and len(response.strip()) > 100:
                     logger.info(f"✅ [AnalysisSummary] 深度生物学解释生成成功，长度: {len(response)}")
                     logger.debug(f"📝 [DEBUG] Summary preview: {response[:200]}...")
-                    # Return original content with tags so frontend can parse and display reasoning
-                    has_think_tags = any(tag in original_content for tag in ['<think>', '<think>', '<reasoning>', '<thought>', '<thinking>'])
-                    out = original_content if has_think_tags else response
-                    return _clean_report_content(out)
+                    return _finalize_expert_report(response)
                 elif original_content and len(original_content.strip()) > 100:
-                    # 🔥 修复：如果response太短但original_content很长，使用original_content
-                    logger.warning(f"⚠️ [AnalysisSummary] 提取后的内容过短，但原始内容较长，使用原始内容（长度: {len(original_content)}）")
-                    return _clean_report_content(original_content)
+                    logger.warning(
+                        f"⚠️ [AnalysisSummary] 提取后的内容过短，使用原始正文并经消杀（长度: {len(original_content)}）"
+                    )
+                    return _finalize_expert_report(original_content)
                 else:
                     logger.warning(f"⚠️ [AnalysisSummary] LLM 返回内容过短（response: {len(response) if response else 0}字符, original: {len(original_content)}字符），尝试重新生成...")
                     # Retry with simpler prompt if first attempt failed
@@ -2284,14 +2395,12 @@ Minimum 500 words. Be scientific and detailed."""
                     
                     if retry_response and len(retry_response.strip()) > 100:
                         logger.info(f"✅ [AnalysisSummary] 重试成功，生成深度解释，长度: {len(retry_response)}")
-                        # Return original content with tags so frontend can parse and display reasoning
-                        has_think_tags = any(tag in retry_original_content for tag in ['<think>', '<think>', '<reasoning>', '<thought>', '<thinking>', '<think>'])
-                        out = retry_original_content if has_think_tags else retry_response
-                        return _clean_report_content(out)
+                        return _finalize_expert_report(retry_response)
                     elif retry_original_content and len(retry_original_content.strip()) > 100:
-                        # 🔥 修复：如果重试后的response太短但original_content很长，使用original_content
-                        logger.warning(f"⚠️ [AnalysisSummary] 重试后提取的内容过短，但原始内容较长，使用原始内容（长度: {len(retry_original_content)}）")
-                        return _clean_report_content(retry_original_content)
+                        logger.warning(
+                            f"⚠️ [AnalysisSummary] 重试后提取内容过短，使用原始正文并经消杀（长度: {len(retry_original_content)}）"
+                        )
+                        return _finalize_expert_report(retry_original_content)
                     else:
                         logger.error(f"❌ [AnalysisSummary] 重试后仍无法生成有效内容（response: {len(retry_response) if retry_response else 0}字符, original: {len(retry_original_content)}字符）")
                         # 🔥 TASK 3: Return user-friendly error message instead of raw traceback
@@ -2617,6 +2726,9 @@ Evaluate and return ONLY the JSON object:"""
                     # 第一列：去掉反引号与加粗，避免一键应用 name 匹配失败
                     param_name = re.sub(r"^[`\s]+|[`\s]+$", "", param_name)
                     param_name = re.sub(r"\*\*|\*", "", param_name).strip()
+
+                    if param_name in PIPELINE_PLUMBING_PARAM_KEYS:
+                        continue
 
                     if allowed_param_names and param_name not in allowed_param_names:
                         logger.debug(

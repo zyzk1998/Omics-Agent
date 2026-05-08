@@ -480,18 +480,36 @@ def chem_openbabel(
     optimize: bool = False,
     timeout_seconds: int = 180,
 ) -> Dict[str, Any]:
-    _ = ChemOpenbabelInput(
-        file_path=file_path or "",
-        smiles_text=smiles_text or "",
-        in_format=in_format,
-        out_format=out_format,
-        compute_properties=compute_properties,
-        add_hydrogens=add_hydrogens,
-        remove_hydrogens=remove_hydrogens,
-        gen3d=gen3d,
-        optimize=optimize,
-        timeout_seconds=timeout_seconds,
-    )
+    fp = (file_path or "").strip()
+    st = (smiles_text or "").strip()
+    if not fp and not st:
+        return {
+            "status": "error",
+            "message": (
+                "请提供 **file_path**（会话上传列表中的分子文件绝对路径）或 **smiles_text**（内联一条 SMILES/InChI 等）之一。"
+                "若已上传 .mol/.sdf/.smi 等附件，请确认填参 JSON 里包含该 **file_path**；纯文本场景请在正文或表格中写出可识别的 SMILES。"
+            ),
+        }
+    if fp and st:
+        return {
+            "status": "error",
+            "message": "**file_path** 与 **smiles_text** 只能填写其一，请删去多余字段后重试。",
+        }
+    try:
+        _ = ChemOpenbabelInput(
+            file_path=file_path or "",
+            smiles_text=smiles_text or "",
+            in_format=in_format,
+            out_format=out_format,
+            compute_properties=compute_properties,
+            add_hydrogens=add_hydrogens,
+            remove_hydrogens=remove_hydrogens,
+            gen3d=gen3d,
+            optimize=optimize,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
     script = _resolve_script(
         "OPENBABEL_CONVERTER_SCRIPT",
         Path("openbabel_converter") / "openbabel_converter.py",
@@ -500,8 +518,6 @@ def chem_openbabel(
         return {"status": "error", "message": "未找到 openbabel_converter.py"}
     py = sys.executable
     out_dir = _prepare_misc_out_dir("obabel")
-    fp = (file_path or "").strip()
-    st = (smiles_text or "").strip()
 
     def _guess_in_format(pth: str) -> str:
         ext = Path(pth).suffix.lower()
