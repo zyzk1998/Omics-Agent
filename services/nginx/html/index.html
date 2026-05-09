@@ -314,6 +314,7 @@
                     </button>
                 </div>
                 <div class="chat-input-panel" id="chatInputPanel">
+                    <div id="chat-input-resizer" class="input-resizer-bar" aria-hidden="true" title="拖拽调整输入区高度"></div>
                     <div id="attachment-preview-area" class="attachment-preview-area"></div>
                     <div id="filePreviewArea" class="file-chips-area"></div>
                     <div class="chat-input-panel__compose">
@@ -3563,6 +3564,15 @@
                 btn.setAttribute('aria-label', active ? '\u6536\u8d77\u5de5\u4f5c\u53f0' : '\u5c55\u5f00\u5de5\u4f5c\u53f0');
             }
             window.syncWorkspaceExpandButtonUI = syncWorkspaceExpandButtonUI;
+            /** 收起/手动展开前调用：清除拖拽写入的 width/flexBasis，避免「幽灵白板」占位 */
+            function clearWorkspacePaneInlineLayout(wp) {
+                if (!wp) return;
+                wp.style.width = '';
+                wp.style.flexBasis = '';
+                wp.style.minWidth = '';
+                wp.style.maxWidth = '';
+            }
+            window.clearWorkspacePaneInlineLayout = clearWorkspacePaneInlineLayout;
             function showChatView() {
                 window._volatileActiveSessionIdToReturn = null;
                 if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
@@ -3747,6 +3757,40 @@
                 const rzR = document.getElementById('resizer-right');
                 const btnExpand = document.getElementById('btn-expand-workspace');
 
+                /** 与 main.css #sidebar-pane:not(.sidebar-collapsed) 一致：220～330（×1.5） */
+                var SIDEBAR_MIN_PX = 220;
+                var SIDEBAR_MAX_PX = Math.round(220 * 1.5);
+
+                /**
+                 * 工作台动态上限（绝不超出视口）：剩余像素 = inner − 左栏 − 对话极小保底(320) − 左右分隔条 − 右侧本地栏。
+                 * max 取 floor(剩余)，并与拖拽 clamp 配合，避免总和 > innerWidth 引发全局横向滚动。
+                 */
+                function workspaceDragBounds() {
+                    var WORKSPACE_MIN_PX = 350;
+                    var CHAT_PANE_MIN_PX = 320;
+                    var innerW = window.innerWidth;
+                    if (!isFinite(innerW) || innerW <= 0) innerW = window.screen.availWidth || 1024;
+                    var sidebar = document.getElementById('sidebar-pane');
+                    var leftSidebarW = sidebar ? sidebar.offsetWidth : 0;
+                    if (!isFinite(leftSidebarW) || leftSidebarW < 0) leftSidebarW = 0;
+                    var rzLW = rzL ? rzL.offsetWidth : 4;
+                    var rzRW = rzR ? rzR.offsetWidth : 4;
+                    var rex = document.getElementById('right-file-explorer');
+                    var rexW = 0;
+                    if (rex && rex.style.display !== 'none' && !rex.classList.contains('right-sidebar-collapsed')) {
+                        rexW = rex.offsetWidth;
+                    }
+                    if (!isFinite(rexW) || rexW < 0) rexW = 0;
+                    var maxAvailableW = innerW - leftSidebarW - CHAT_PANE_MIN_PX - rzLW - rzRW - rexW;
+                    if (!isFinite(maxAvailableW)) maxAvailableW = 0;
+                    var rawMax = Math.floor(Math.max(0, maxAvailableW));
+                    if (rawMax < WORKSPACE_MIN_PX) {
+                        return { min: rawMax, max: rawMax };
+                    }
+                    return { min: WORKSPACE_MIN_PX, max: rawMax };
+                }
+                try { window.workspaceDragBounds = workspaceDragBounds; } catch (eWs) {}
+
                 function startDrag(resizerEl, onMove) {
                     if (!resizerEl) return;
                     let dragging = false;
@@ -3776,8 +3820,7 @@
 
                 startDrag(rzL, (e) => {
                     if (!sidebar || sidebar.classList.contains('sidebar-collapsed')) return;
-                    const minW = 200, maxW = 400;
-                    const w = Math.max(minW, Math.min(maxW, e.clientX));
+                    const w = Math.max(SIDEBAR_MIN_PX, Math.min(SIDEBAR_MAX_PX, e.clientX));
                     sidebar.style.width = w + 'px';
                 });
 
@@ -3787,10 +3830,12 @@
                         wsPane.classList.add('workspace-active');
                         if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
                     }
-                    const minW = 400;
-                    const maxW = Math.max(minW + 80, Math.floor(window.innerWidth * 0.66));
-                    const w = Math.max(minW, Math.min(maxW, window.innerWidth - e.clientX));
+                    var b = workspaceDragBounds();
+                    var wRaw = window.innerWidth - e.clientX;
+                    var w = Math.max(b.min, Math.min(b.max, wRaw));
+                    if (!isFinite(w)) w = b.min;
                     wsPane.style.width = w + 'px';
+                    wsPane.style.flexBasis = w + 'px';
                 });
             }
             function setWorkspaceTitle(title) {
@@ -4328,7 +4373,10 @@
                     expBtn0.setAttribute('title', '展开输入框以查看或编辑较长内容');
                 }
                 if (userInputEl && typeof autoResize === 'function') autoResize(userInputEl);
-                if (wp) wp.classList.remove('workspace-active');
+                if (wp) {
+                    if (typeof clearWorkspacePaneInlineLayout === 'function') clearWorkspacePaneInlineLayout(wp);
+                    wp.classList.remove('workspace-active');
+                }
                 if (titleEl) titleEl.textContent = '新会话';
                 if (workspaceContent) workspaceContent.innerHTML = '';
                 window.__skillWorkspaceReportEntries = [];
@@ -6948,15 +6996,15 @@
                         var sidebar = document.getElementById('right-file-explorer');
                         if (!sidebar) return;
                         e.preventDefault();
+                        var RIGHT_EXPLORER_MIN = 260;
+                        var RIGHT_EXPLORER_MAX = Math.round(260 * 1.3);
                         var startX = e.clientX;
                         var startWidth = sidebar.getBoundingClientRect().width;
                         function onMouseMove(ev) {
                             var delta = startX - ev.clientX;
                             var next = startWidth + delta;
-                            var minW = 250;
-                            var maxW = Math.floor(window.innerWidth * 0.5);
-                            if (next < minW) next = minW;
-                            if (next > maxW) next = maxW;
+                            if (next < RIGHT_EXPLORER_MIN) next = RIGHT_EXPLORER_MIN;
+                            if (next > RIGHT_EXPLORER_MAX) next = RIGHT_EXPLORER_MAX;
                             sidebar.style.width = next + 'px';
                             sidebar.style.minWidth = next + 'px';
                         }
@@ -7107,8 +7155,8 @@
                 if (btnExpand) btnExpand.onclick = function() {
                     var wp = document.getElementById('workspace-pane');
                     if (!wp) return;
+                    if (typeof clearWorkspacePaneInlineLayout === 'function') clearWorkspacePaneInlineLayout(wp);
                     wp.classList.toggle('workspace-active');
-                    if (!wp.classList.contains('workspace-active')) wp.style.width = '';
                     if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
                 };
                 var btnPrint = document.getElementById('btn-workspace-print');
@@ -7126,7 +7174,10 @@
                 var btnClose = document.getElementById('btn-workspace-close');
                 if (btnClose) btnClose.onclick = function() {
                     var wp = document.getElementById('workspace-pane');
-                    if (wp) { wp.classList.remove('workspace-active'); wp.style.width = ''; }
+                    if (wp) {
+                        if (typeof clearWorkspacePaneInlineLayout === 'function') clearWorkspacePaneInlineLayout(wp);
+                        wp.classList.remove('workspace-active');
+                    }
                     if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
                 };
                 if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
@@ -8515,41 +8566,117 @@
                 if (!_dragEventHasExternalFiles(e)) return;
                 e.preventDefault();
                 dropOverlay.style.display = 'none';
-                var chatHostDrop = document.getElementById('chat-main-host');
-                if (chatHostDrop) chatHostDrop.classList.remove('drag-active');
+                var inputDropStrip = document.getElementById('input-wrapper-bottom');
+                if (inputDropStrip) inputDropStrip.classList.remove('drag-active');
                 if (!isProcessing && e.dataTransfer.files.length > 0) handleFileSelect(e.dataTransfer.files);
             });
-            (function bindChatDragActiveUx() {
-                var host = document.getElementById('chat-main-host');
-                if (!host) return;
-                /** 拖拽计数器：配合 relatedTarget 忽略「仍在 host 内部」的进出，避免子元素边界抖动 */
+            (function bindGlobalInputFileDragHighlight() {
+                var inputDropStrip = document.getElementById('input-wrapper-bottom');
+                if (!inputDropStrip) return;
                 var dragCounter = 0;
                 function hasExtFiles(ev) {
                     return typeof _dragEventHasExternalFiles === 'function' && _dragEventHasExternalFiles(ev);
                 }
-                host.addEventListener('dragenter', function (ev) {
-                    if (!hasExtFiles(ev)) return;
+                /** document 捕获：从浏览器外进入时 relatedTarget 常为 null，计数 +1/-1，防抖闪烁 */
+                document.addEventListener(
+                    'dragenter',
+                    function (ev) {
+                        if (!hasExtFiles(ev)) return;
+                        var rt = ev.relatedTarget;
+                        if (rt != null && document.documentElement.contains(rt)) return;
+                        dragCounter++;
+                        if (dragCounter === 1) inputDropStrip.classList.add('drag-active');
+                    },
+                    true
+                );
+                document.addEventListener(
+                    'dragleave',
+                    function (ev) {
+                        if (!hasExtFiles(ev)) return;
+                        var rt = ev.relatedTarget;
+                        if (rt != null && document.documentElement.contains(rt)) return;
+                        dragCounter--;
+                        if (dragCounter < 0) dragCounter = 0;
+                        if (dragCounter === 0) inputDropStrip.classList.remove('drag-active');
+                    },
+                    true
+                );
+                /** 页面内拖拽（如侧边栏文件）：relatedTarget 始终在文档内，仅靠计数不会点亮 → dragover 无条件强制高亮 */
+                document.addEventListener(
+                    'dragover',
+                    function (ev) {
+                        if (!hasExtFiles(ev)) return;
+                        ev.preventDefault();
+                        try {
+                            ev.dataTransfer.dropEffect = 'copy';
+                        } catch (e1) {}
+                        inputDropStrip.classList.add('drag-active');
+                    },
+                    true
+                );
+                document.addEventListener(
+                    'drop',
+                    function () {
+                        dragCounter = 0;
+                        inputDropStrip.classList.remove('drag-active');
+                    },
+                    true
+                );
+                document.addEventListener(
+                    'dragend',
+                    function () {
+                        dragCounter = 0;
+                        inputDropStrip.classList.remove('drag-active');
+                    },
+                    true
+                );
+            })();
+            (function bindChatInputVerticalResizer() {
+                var bar = document.getElementById('chat-input-resizer');
+                var panel = document.getElementById('chatInputPanel');
+                if (!bar || !panel) return;
+                var CHAT_INPUT_PANEL_MIN_PX = 140;
+                var startY = 0;
+                var startH = 0;
+                var dragging = false;
+                function maxPanelH() {
+                    return Math.floor(window.innerHeight * 0.5);
+                }
+                function applyHeight(px) {
+                    var cap = maxPanelH();
+                    var v = Math.max(CHAT_INPUT_PANEL_MIN_PX, Math.min(px, cap));
+                    panel.style.height = v + 'px';
+                    panel.style.maxHeight = 'none';
+                    panel.classList.add('chat-input-panel--user-sized');
+                    var ta = document.getElementById('userInput');
+                    if (ta && typeof autoResize === 'function') autoResize(ta);
+                }
+                bar.addEventListener('mousedown', function (ev) {
                     ev.preventDefault();
-                    if (ev.relatedTarget != null && host.contains(ev.relatedTarget)) return;
-                    dragCounter++;
-                    if (dragCounter === 1) host.classList.add('drag-active');
+                    ev.stopPropagation();
+                    startY = ev.clientY;
+                    startH = panel.getBoundingClientRect().height;
+                    dragging = true;
+                    document.body.classList.add('no-select');
+                    function onMove(e2) {
+                        if (!dragging) return;
+                        var dy = startY - e2.clientY;
+                        applyHeight(startH + dy);
+                    }
+                    function onUp() {
+                        dragging = false;
+                        document.body.classList.remove('no-select');
+                        document.removeEventListener('mousemove', onMove);
+                        document.removeEventListener('mouseup', onUp);
+                    }
+                    document.addEventListener('mousemove', onMove);
+                    document.addEventListener('mouseup', onUp);
                 });
-                host.addEventListener('dragleave', function (ev) {
-                    if (!hasExtFiles(ev)) return;
-                    ev.preventDefault();
-                    if (ev.relatedTarget != null && host.contains(ev.relatedTarget)) return;
-                    dragCounter--;
-                    if (dragCounter < 0) dragCounter = 0;
-                    if (dragCounter === 0) host.classList.remove('drag-active');
-                });
-                host.addEventListener('dragover', function (ev) {
-                    if (!hasExtFiles(ev)) return;
-                    ev.preventDefault();
-                    ev.dataTransfer.dropEffect = 'copy';
-                });
-                host.addEventListener('drop', function () {
-                    dragCounter = 0;
-                    host.classList.remove('drag-active');
+                window.addEventListener('resize', function () {
+                    if (!panel.classList.contains('chat-input-panel--user-sized')) return;
+                    var h = panel.getBoundingClientRect().height;
+                    if (h > maxPanelH()) applyHeight(maxPanelH());
+                    if (h < CHAT_INPUT_PANEL_MIN_PX) applyHeight(CHAT_INPUT_PANEL_MIN_PX);
                 });
             })();
             window.addEventListener('paste', (e) => { if (!isProcessing && e.clipboardData.files.length > 0) { e.preventDefault(); handleFileSelect(e.clipboardData.files); } });

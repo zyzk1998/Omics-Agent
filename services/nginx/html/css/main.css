@@ -17,12 +17,18 @@
                 --card-border: #e5e7eb;
             }
 
+            html {
+                overflow-x: hidden !important;
+                max-width: 100vw;
+            }
             body {
                 background-color: var(--bg-color);
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
                 height: 100vh;
                 margin: 0;
                 overflow: hidden;
+                overflow-x: hidden !important;
+                max-width: 100vw;
                 color: var(--text-color);
             }
             *::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -34,15 +40,17 @@
                 display: flex;
                 flex-direction: column;
                 height: 100vh;
-                overflow: hidden;
-                overflow-x: hidden;
+                overflow-x: hidden !important;
+                overflow-y: hidden;
+                max-width: 100vw;
             }
             .three-pane-row {
                 display: flex;
                 flex: 1;
                 min-height: 0;
-                overflow: hidden;
                 overflow-x: hidden;
+                overflow-y: hidden;
+                min-width: 0;
             }
             /* ================= IDE 级拖拽分隔条（可调节侧边栏/工作台宽度） ================= */
             .resizer { width: 4px; cursor: col-resize; background: transparent; transition: background 0.2s; z-index: 10; flex-shrink: 0; }
@@ -59,6 +67,11 @@
                 overflow: hidden;
                 color: var(--sidebar-text);
                 transition: width 0.3s ease;
+            }
+            /* 展开态拖拽：物理极限窄约 220px，上限 220×1.5=330px（与 initResizablePanes 一致） */
+            #sidebar-pane:not(.sidebar-collapsed) {
+                min-width: 220px;
+                max-width: 330px;
             }
             #sidebar-pane.sidebar-collapsed {
                 width: 68px;
@@ -264,8 +277,6 @@
             .sidebar-sessions-list, .sidebar-assets-list { margin-top: 4px; }
             .sidebar-session-item, .sidebar-asset-item { position: relative; display: flex; align-items: center; gap: 6px; min-height: 36px; margin: 2px 0; padding: 8px 12px 8px 52px; border-radius: 8px; cursor: pointer; font-size: 13px; overflow: visible; box-sizing: border-box; }
             #sidebar-assets-list { padding-left: 0; }
-            #sidebar-assets-list .sidebar-asset-item { padding-left: 12px; }
-            #sidebar-assets-list .sidebar-asset-item .item-text { padding-left: 0; }
             .asset-modality-group summary { padding-left: 12px; }
             .sidebar-session-item .item-text, .sidebar-asset-item .item-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .sidebar-session-item:hover, .sidebar-asset-item:hover { background: #f3f4f6; }
@@ -310,14 +321,24 @@
             .asset-modality-group .asset-modality-icon-wrap { width: 20px; min-width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
             .asset-modality-group .asset-modality-icon-wrap svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.5; }
             .asset-modality-files { padding-left: 0; margin-top: 2px; }
-            /* 1. 恢复与全局菜单一致的容器基准 (左边距 16px, 间距 12px) */
-            #sidebar-pane #sidebar-assets-list .asset-modality-group summary,
+            /* 一级分类标题（模态名）：与上层「数据资产」summary 左缘对齐（16px）；二级文件名保持 52px 不变 */
+            #sidebar-pane #sidebar-assets-list .asset-modality-group summary {
+                display: flex !important;
+                align-items: center !important;
+                padding: 8px 12px 8px 16px !important;
+                margin: 2px 8px !important;
+                width: calc(100% - 16px) !important;
+                gap: 12px !important;
+                box-sizing: border-box !important;
+            }
+            /* 二级文件名：与 .sidebar-session-item 一致 margin: 2px 0，左侧 padding 52px，文本起点与历史会话同一垂线 */
             #sidebar-pane #sidebar-assets-list .sidebar-asset-item {
                 display: flex !important;
                 align-items: center !important;
                 padding: 8px 12px 8px 52px !important;
-                margin: 2px 8px !important;
-                width: calc(100% - 16px) !important;
+                margin: 2px 0 !important;
+                width: 100% !important;
+                max-width: 100% !important;
                 gap: 12px !important;
                 box-sizing: border-box !important;
             }
@@ -692,30 +713,32 @@
             #sidebar-pane .sidebar-user:hover { background-color: #f3f4f6; }
             #sidebar-pane .sidebar-user .user-name { font-size: 13px; color: #111827; }
             #sidebar-pane .sidebar-user .btn-upgrade { font-size: 12px; color: #6b7280; }
-            /* 中栏 + 右侧本地资源管理器：同行 flex，聊天区 min-width:0 防止被挤出视口
-               说明：作为 .three-pane-row 的中间 flex 子项，必须在交叉轴（竖直方向）显式拉满行高，
-               且子项 #chat-pane 设 min-height:0，否则嵌套 column flex 内 flex:1 的空状态区无法吃到剩余高度，
-               会出现「整块缩成内容高度、输入条不贴底」的断层。 */
+            /* 中栏 + 右侧本地资源管理器：同行 flex。
+               #chat-pane 设最小宽度与 flex-shrink:0，防止左右栏拉宽时对话区被挤碎；总宽超出时由 #app / .three-pane-row 横向滚动。
+               min-height:0 保留：嵌套 column flex 内 flex:1 的空状态区仍需吃到剩余高度。 */
             .chat-main-with-explorer {
                 display: flex;
                 flex-direction: row;
                 align-items: stretch;
                 align-self: stretch;
                 flex: 1 1 0%;
-                min-width: 0;
+                min-width: min-content;
                 min-height: 0;
-                overflow: hidden;
+                /* 允许底部输入区下拉菜单向上溢出；横向仍由 #app / .three-pane-row 约束 */
+                overflow: visible !important;
                 margin-bottom: 0 !important;
                 padding-bottom: 0 !important;
                 gap: 0 !important;
             }
             #chat-pane {
                 flex: 1 1 0%;
-                min-width: 0;
+                min-width: 320px !important;
+                flex-shrink: 0 !important;
                 min-height: 0;
                 display: flex;
                 flex-direction: column;
-                overflow: hidden;
+                /* 与 .chat-scroll-area 的 overflow-y:auto 分工：消息区滚动，不把整块输入下拉裁掉 */
+                overflow: visible !important;
                 position: relative;
                 margin-bottom: 0 !important;
                 padding-bottom: 0 !important;
@@ -724,6 +747,7 @@
             #right-file-explorer.right-sidebar {
                 width: 260px;
                 min-width: 260px;
+                max-width: 338px;
                 flex-shrink: 0;
                 display: none;
                 flex-direction: column;
@@ -832,7 +856,7 @@
                 flex: 1;
                 min-height: 0;
                 overflow-y: auto;
-                overflow-x: hidden;
+                overflow-x: auto;
                 padding: 8px 6px 12px;
                 font-size: 13px;
                 box-sizing: border-box;
@@ -869,14 +893,20 @@
                 gap: 6px;
                 color: #374151;
                 font-size: 12px;
-                overflow: hidden;
-                text-overflow: ellipsis;
                 white-space: nowrap;
+                width: max-content;
+                min-width: 100%;
+                box-sizing: border-box;
+                overflow: visible;
             }
             .file-tree-file[draggable="true"] { cursor: grab; }
             .file-tree-file[draggable="true"]:active { cursor: grabbing; }
             .file-tree-icon { flex-shrink: 0; }
-            .file-tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+            .file-tree-name {
+                flex-shrink: 0;
+                white-space: nowrap;
+                overflow: visible;
+            }
             .custom-context-menu {
                 position: fixed;
                 min-width: 180px;
@@ -1086,7 +1116,7 @@
                 color: #111827;
                 border-radius: 10px;
                 box-shadow: 0 10px 40px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(15, 23, 42, 0.06);
-                z-index: 10050;
+                z-index: 9999 !important;
                 box-sizing: border-box;
             }
             .workspace-menu-item {
@@ -1195,6 +1225,8 @@
                 justify-content: stretch;
                 margin-bottom: 8px;
                 align-self: stretch;
+                min-height: 120px !important;
+                overflow: visible !important;
             }
             #chat-main-host,
             #chat-pane,
@@ -1208,6 +1240,7 @@
                 margin: 0;
                 left: 0;
                 right: 0;
+                overflow: visible !important;
             }
             #chat-pane .input-wrapper.input-bottom,
             #chat-pane .input-wrapper.input-center {
@@ -1785,32 +1818,44 @@
             .science-table .sort-icon { display: inline-flex; align-items: center; margin-left: 4px; color: #111827; }
             .science-table .sort-icon svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; }
             /* ================= 右栏【分析报告工作台】：宽度铁律 + 内容防爆 ================= */
+            /* 折叠态：占位清零（防御内联 style 残留）；展开态仅由 .workspace-active 与可选内联拖拽宽度控制 */
             #workspace-pane {
-                width: 0;
                 flex: none;
-                opacity: 0;
-                overflow: hidden;
-                transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
-                border-left: none;
-                background: #fff;
                 display: flex;
                 flex-direction: column;
-                min-width: 0;
+                background: #fff;
+                transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), flex-basis 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+                box-sizing: border-box;
             }
+            #workspace-pane:not(.workspace-active) {
+                width: 0 !important;
+                flex-basis: 0 !important;
+                min-width: 0 !important;
+                max-width: 0 !important;
+                padding: 0 !important;
+                margin: 0;
+                border: none !important;
+                opacity: 0;
+                overflow: hidden;
+                pointer-events: none;
+            }
+            /* 默认宽度无 !important，便于 JS 拖拽写入 style.width / flexBasis；上下限由 JS 与 min/max 共同约束 */
             #workspace-pane.workspace-active {
-                width: 45vw;
-                max-width: 800px !important;
-                min-width: 400px !important;
-                flex-shrink: 0 !important;
+                width: 35vw;
+                flex-basis: 35vw;
+                max-width: none;
+                min-width: 350px;
+                flex-shrink: 0;
                 opacity: 1;
                 border-left: 1px solid #e5e7eb;
                 overflow-x: hidden;
                 overflow-y: auto;
             }
             #workspace-pane.workspace-active.panel-report-width {
-                width: 45vw;
-                max-width: 800px !important;
-                min-width: 400px !important;
+                width: 35vw;
+                flex-basis: 35vw;
+                max-width: none;
+                min-width: 350px;
             }
             #workspace-pane .workspace-scroll {
                 flex: 1;
@@ -3166,6 +3211,7 @@
             .input-wrapper { position: fixed; bottom: 8px; left: 0; width: 100%; display: flex; justify-content: center; padding: 0 16px max(8px, env(safe-area-inset-bottom, 0px)); z-index: 100; pointer-events: none; }
             .input-wrapper > .chat-input-panel { pointer-events: auto; }
             .chat-input-panel {
+                position: relative;
                 width: 100%;
                 margin: 0 auto;
                 margin-bottom: 0 !important;
@@ -3181,7 +3227,7 @@
                 display: flex;
                 flex-direction: column;
                 gap: 0;
-                overflow: hidden;
+                overflow: visible !important;
             }
             .chat-input-panel:focus-within {
                 border-color: rgba(15, 23, 42, 0.13);
@@ -3205,7 +3251,7 @@
                 position: absolute;
                 top: 0;
                 right: 0;
-                z-index: 3;
+                z-index: 220;
                 width: 52px;
                 height: 44px;
                 display: flex;
@@ -3245,8 +3291,40 @@
                 background: #f3f4f6;
                 color: #111827;
             }
-            .chat-input-expand-icon {
-                display: block;
+            .input-resizer-bar {
+                position: absolute;
+                top: -3px;
+                left: 0;
+                right: 60px !important;
+                height: 6px;
+                cursor: ns-resize;
+                z-index: 119;
+                background: transparent;
+                pointer-events: auto;
+            }
+            .input-resizer-bar:hover {
+                background: rgba(15, 23, 42, 0.06);
+            }
+            .chat-input-panel--user-sized {
+                min-height: 140px !important;
+            }
+            .chat-input-panel--user-sized .chat-input-panel__compose {
+                flex: 1 1 auto;
+                min-height: 0;
+                display: flex;
+                flex-direction: column;
+            }
+            .chat-input-panel--user-sized .chat-input-compose-area {
+                flex: 1 1 auto;
+                min-height: 0;
+                display: flex;
+                flex-direction: column;
+            }
+            .chat-input-panel--user-sized .chat-input-panel__compose .main-input.chat-input {
+                flex: 1 1 auto;
+                min-height: 48px !important;
+                max-height: none !important;
+                height: 100% !important;
             }
             .chat-input-panel.chat-input-panel--expanded .chat-input-panel__compose .main-input.chat-input {
                 min-height: 264px;
@@ -3266,6 +3344,7 @@
                 box-shadow: none !important;
                 background: transparent !important;
                 resize: none;
+                overflow-y: auto;
             }
             .chat-input-panel .chat-toolbar-right-cluster {
                 display: inline-flex;
@@ -3288,9 +3367,14 @@
                 margin-top: 8px;
                 padding: 6px 10px 8px;
                 background: #ffffff;
+                overflow: visible !important;
+            }
+            .workspace-dropdown-wrapper {
+                overflow: visible !important;
             }
             .chat-input-toolbar-row .toolbar.input-toolbar {
                 padding-top: 0;
+                flex-wrap: nowrap;
             }
             .chat-input-panel > .attachment-preview-area,
             .chat-input-panel > .file-chips-area {
@@ -4077,38 +4161,29 @@
     max-width: 100%;
 }
 
-/* ================= 拖拽工作区引导（聊天主栏） ================= */
-#chat-main-host.drag-active {
+/* ================= 拖拽引导：底部输入区（桌面 / 侧栏文件拖拽全局可见） ================= */
+#input-wrapper-bottom.drag-active {
     position: relative;
-    z-index: 2;
-}
-#chat-main-host.drag-active::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    z-index: 40;
-    pointer-events: none;
-    box-sizing: border-box;
-    border: 3px dashed rgba(59, 130, 246, 0.95);
+    z-index: 10060 !important;
+    isolation: isolate;
     border-radius: 12px;
-    background: rgba(59, 130, 246, 0.12);
 }
-#chat-main-host.drag-active::after {
-    content: '➕ 释放鼠标添加到工作区';
+#input-wrapper-bottom.drag-active::after {
+    content: '➕ 拖拽文件至此处添加';
     position: absolute;
     inset: 0;
-    z-index: 41;
-    pointer-events: none;
+    z-index: 9999 !important;
+    border-radius: inherit;
+    background: rgba(59, 130, 246, 0.15) !important;
+    border: 3px dashed #3b82f6 !important;
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 16px;
-    font-size: 15px;
-    font-weight: 600;
+    font-size: 16px;
+    font-weight: 700;
     color: #1d4ed8;
-    text-align: center;
-    line-height: 1.45;
-    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
+    pointer-events: none;
 }
 
 /* ================= Toast / 弹窗 / 告警：长路径强制换行 ================= */
