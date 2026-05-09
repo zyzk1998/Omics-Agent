@@ -54,12 +54,18 @@ function ensureAdminModal() {
           <li class="nav-item" role="presentation">
             <button type="button" class="nav-link" data-admin-tab="users" id="admin-tab-btn-users">用户审核</button>
           </li>
+          <li class="nav-item" role="presentation">
+            <button type="button" class="nav-link" data-admin-tab="feedbacks" id="admin-tab-btn-feedbacks">用户反馈</button>
+          </li>
         </ul>
         <div id="admin-panel-skills" class="admin-console-panel flex-fill" style="min-height: 0;">
           <div id="admin-console-table-wrap"><p class="text-muted mb-0">加载中…</p></div>
         </div>
         <div id="admin-panel-users" class="admin-console-panel flex-fill d-none" style="min-height: 0;">
           <div id="admin-users-table-wrap"><p class="text-muted mb-0">加载中…</p></div>
+        </div>
+        <div id="admin-panel-feedbacks" class="admin-console-panel flex-fill d-none" style="min-height: 0;">
+          <div id="admin-feedbacks-table-wrap"><p class="text-muted mb-0">加载中…</p></div>
         </div>
       </div>
     </div>
@@ -90,7 +96,7 @@ function ensureAdminModal() {
         const b = ev.target.closest('[data-admin-tab]');
         if (!b) return;
         const tab = b.getAttribute('data-admin-tab');
-        if (tab === 'skills' || tab === 'users') {
+        if (tab === 'skills' || tab === 'users' || tab === 'feedbacks') {
             setAdminConsoleTab(tab);
         }
     });
@@ -100,18 +106,24 @@ function setAdminConsoleTab(tab) {
     _adminActiveTab = tab;
     const skillsBtn = document.getElementById('admin-tab-btn-skills');
     const usersBtn = document.getElementById('admin-tab-btn-users');
+    const fbBtn = document.getElementById('admin-tab-btn-feedbacks');
     const panelSkills = document.getElementById('admin-panel-skills');
     const panelUsers = document.getElementById('admin-panel-users');
+    const panelFb = document.getElementById('admin-panel-feedbacks');
     if (skillsBtn) skillsBtn.classList.toggle('active', tab === 'skills');
     if (usersBtn) usersBtn.classList.toggle('active', tab === 'users');
+    if (fbBtn) fbBtn.classList.toggle('active', tab === 'feedbacks');
     if (panelSkills) panelSkills.classList.toggle('d-none', tab !== 'skills');
     if (panelUsers) panelUsers.classList.toggle('d-none', tab !== 'users');
+    if (panelFb) panelFb.classList.toggle('d-none', tab !== 'feedbacks');
     if (tab === 'skills') void refreshAdminTable();
-    else void refreshAdminUsersTable();
+    else if (tab === 'users') void refreshAdminUsersTable();
+    else if (tab === 'feedbacks') void refreshAdminFeedbacksTable();
 }
 
 let _adminLoadSeq = 0;
 let _adminUsersLoadSeq = 0;
+let _adminFeedbackLoadSeq = 0;
 
 async function fetchPendingSkills() {
     const res = await fetch('/api/admin/skills', { method: 'GET', headers: getAuthHeadersMerged() });
@@ -273,6 +285,75 @@ async function refreshAdminTable() {
             '</tbody></table>';
     } catch (e) {
         if (seq !== _adminLoadSeq) return;
+        wrap.innerHTML = '';
+        const msg = e && e.message ? String(e.message) : '加载失败';
+        setInlineError(errEl, msg);
+    }
+}
+
+async function refreshAdminFeedbacksTable() {
+    const wrap = document.getElementById('admin-feedbacks-table-wrap');
+    const errEl = document.getElementById('admin-console-error');
+    if (!wrap) return;
+    const seq = ++_adminFeedbackLoadSeq;
+    setInlineError(errEl, '');
+    wrap.innerHTML = '<p class="text-muted mb-0">加载中…</p>';
+    try {
+        const res = await fetch('/api/admin/feedbacks', { method: 'GET', headers: getAuthHeadersMerged() });
+        if (res.status === 403) throw new Error('无管理员权限');
+        if (!res.ok) {
+            let detail = '加载失败';
+            try {
+                const j = await res.json();
+                if (j && j.detail != null) detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
+            } catch (_) {
+                /* ignore */
+            }
+            throw new Error(detail);
+        }
+        const list = await res.json();
+        if (seq !== _adminFeedbackLoadSeq) return;
+        if (!Array.isArray(list) || list.length === 0) {
+            wrap.innerHTML = '<p class="text-muted mb-0">暂无反馈记录</p>';
+            return;
+        }
+        const rows = list
+            .map((r) => {
+                const id = r.id;
+                const oid = escapeHtml(r.owner_id || '');
+                const tp = escapeHtml(r.feedback_type || '');
+                const ct = escapeHtml((r.content || '').slice(0, 500));
+                const ell = (r.content || '').length > 500 ? '…' : '';
+                const ec = escapeHtml((r.error_context || '').slice(0, 240));
+                const ell2 = (r.error_context || '').length > 240 ? '…' : '';
+                const ts = escapeHtml(String(r.created_at || '').slice(0, 19));
+                return (
+                    '<tr><td>' +
+                    id +
+                    '</td><td><small>' +
+                    oid +
+                    '</small></td><td>' +
+                    tp +
+                    '</td><td><small class="omics-feedback-cell">' +
+                    ct +
+                    ell +
+                    '</small></td><td><small class="omics-feedback-cell text-secondary">' +
+                    ec +
+                    ell2 +
+                    '</small></td><td><small>' +
+                    ts +
+                    '</small></td></tr>'
+                );
+            })
+            .join('');
+        wrap.innerHTML =
+            '<table class="table table-hover table-sm align-middle mb-0">' +
+            '<thead><tr><th>ID</th><th>用户</th><th>类型</th><th>内容</th><th>错误上下文</th><th>时间</th></tr></thead>' +
+            '<tbody>' +
+            rows +
+            '</tbody></table>';
+    } catch (e) {
+        if (seq !== _adminFeedbackLoadSeq) return;
         wrap.innerHTML = '';
         const msg = e && e.message ? String(e.message) : '加载失败';
         setInlineError(errEl, msg);

@@ -315,8 +315,8 @@
             #sidebar-pane #sidebar-assets-list .sidebar-asset-item {
                 display: flex !important;
                 align-items: center !important;
-                padding: 4px 16px !important;
-                margin: 1px 8px !important;
+                padding: 8px 12px 8px 52px !important;
+                margin: 2px 8px !important;
                 width: calc(100% - 16px) !important;
                 gap: 12px !important;
                 box-sizing: border-box !important;
@@ -347,9 +347,9 @@
                 align-items: center !important;
             }
 
-            /* 3. 文件名补偿取消 (直接对齐上方分类的图标边界) */
+            /* 与历史会话 .sidebar-session-item 同一文本基准线：不再叠加额外 padding-left */
             #sidebar-pane #sidebar-assets-list .sidebar-asset-item .item-text {
-                padding-left: 8px !important;
+                padding-left: 0 !important;
                 margin: 0 !important;
             }
 
@@ -1784,7 +1784,7 @@
             .science-table .op-cell .fm-op-btn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; vertical-align: middle; }
             .science-table .sort-icon { display: inline-flex; align-items: center; margin-left: 4px; color: #111827; }
             .science-table .sort-icon svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; }
-            /* ================= 右栏按需滑出 ================= */
+            /* ================= 右栏【分析报告工作台】：宽度铁律 + 内容防爆 ================= */
             #workspace-pane {
                 width: 0;
                 flex: none;
@@ -1795,26 +1795,73 @@
                 background: #fff;
                 display: flex;
                 flex-direction: column;
+                min-width: 0;
             }
-            /* 工作台宽度：默认舒适挡；含表格/大图报告时由 JS 添加 .panel-report-width */
             #workspace-pane.workspace-active {
-                width: 35vw;
-                min-width: 420px;
-                max-width: 66vw;
+                width: 45vw;
+                max-width: 800px !important;
+                min-width: 400px !important;
+                flex-shrink: 0 !important;
                 opacity: 1;
                 border-left: 1px solid #e5e7eb;
-                overflow: hidden;
+                overflow-x: hidden;
+                overflow-y: auto;
             }
             #workspace-pane.workspace-active.panel-report-width {
-                width: 50vw;
-                min-width: 800px;
-                max-width: min(1200px, 94vw);
+                width: 45vw;
+                max-width: 800px !important;
+                min-width: 400px !important;
             }
             #workspace-pane .workspace-scroll {
                 flex: 1;
+                overflow-x: hidden;
                 overflow-y: auto;
                 min-height: 0;
+                min-width: 0;
+                max-width: 100%;
                 padding: 20px;
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+            }
+            #workspace-pane #active-workspace-content,
+            #workspace-pane #active-workspace-content .markdown-body,
+            #workspace-pane #active-workspace-content .report-content-box,
+            #workspace-pane #active-workspace-content .card-body {
+                min-width: 0;
+                max-width: 100%;
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+            }
+            #workspace-pane #active-workspace-content pre,
+            #workspace-pane #active-workspace-content code.hljs {
+                white-space: pre-wrap;
+                word-break: break-word;
+                max-width: 100%;
+            }
+            #workspace-pane #active-workspace-content pre {
+                overflow-x: auto;
+            }
+            #workspace-pane #active-workspace-content .table-responsive {
+                display: block;
+                width: 100%;
+                max-width: 100%;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            #workspace-pane #active-workspace-content table {
+                max-width: 100% !important;
+                display: block;
+                overflow-x: auto;
+                white-space: nowrap;
+                border-collapse: collapse;
+                table-layout: auto;
+            }
+            #workspace-pane #active-workspace-content img {
+                max-width: 100% !important;
+                height: auto !important;
+                object-fit: contain;
+                cursor: zoom-in;
+                vertical-align: middle;
             }
             #workspace-pane:has(#active-workspace-content .unified-report-container) #workspace-placeholder { display: none; }
             /* 技能快车道：万能渲染挂载于 #skill-tool-workspace-root，与组学 .unified-report-container 并列，也需隐藏占位文案 */
@@ -4028,4 +4075,53 @@
 .markdown-body code {
     overflow-x: auto;
     max-width: 100%;
+}
+
+/* ================= 拖拽工作区引导（聊天主栏） ================= */
+#chat-main-host.drag-active {
+    position: relative;
+    z-index: 2;
+}
+#chat-main-host.drag-active::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    pointer-events: none;
+    box-sizing: border-box;
+    border: 3px dashed rgba(59, 130, 246, 0.95);
+    border-radius: 12px;
+    background: rgba(59, 130, 246, 0.12);
+}
+#chat-main-host.drag-active::after {
+    content: '➕ 释放鼠标添加到工作区';
+    position: absolute;
+    inset: 0;
+    z-index: 41;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #1d4ed8;
+    text-align: center;
+    line-height: 1.45;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+/* ================= Toast / 弹窗 / 告警：长路径强制换行 ================= */
+.omics-toast,
+.toast,
+.toast-body,
+.alert,
+.modal-body,
+.modal-title,
+.popover-body,
+.feedback-textarea,
+.form-control.feedback-textarea {
+    word-break: break-all;
+    overflow-wrap: anywhere;
+    white-space: normal;
 }

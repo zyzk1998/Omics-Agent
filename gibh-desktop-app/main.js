@@ -32,7 +32,14 @@ const { spawn, execSync } = require('child_process');
   }
 })();
 
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu } = require('electron');
+
+/** 主窗口引用（托盘唤起 / second-instance 聚焦） */
+let mainWindow = null;
+/** 系统托盘；图标不可用时为 null，窗口关闭行为保持默认 */
+let tray = null;
+/** 为 true 时允许窗口真正关闭（托盘菜单退出） */
+let forceQuit = false;
 
 /** 禁止多开：第二实例直接退出，避免重复拉起 Sidecar 导致 8019 端口冲突（Windows: Errno 10048） */
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -40,12 +47,12 @@ if (!gotSingleInstanceLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    const wins = BrowserWindow.getAllWindows();
-    if (wins.length && wins[0] && !wins[0].isDestroyed()) {
-      const w = wins[0];
-      if (w.isMinimized()) w.restore();
-      w.show();
-      w.focus();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    } else {
+      createMainWindow();
     }
   });
 }
@@ -727,6 +734,45 @@ async function startLocalSidecarIfNeeded() {
   await waitForSidecarReady(14000);
 }
 
+function showMainWindowFromTray() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  } else {
+    createMainWindow();
+  }
+}
+
+function createTray() {
+  if (tray) return;
+  const iconPath = getWindowIconPath();
+  if (!iconPath || !fs.existsSync(iconPath)) {
+    console.warn('[Omics Agent] 未找到托盘图标文件，已跳过系统托盘（可放置 gibh-desktop-app/app-icon.png 或 build/icon.ico）');
+    return;
+  }
+  try {
+    tray = new Tray(iconPath);
+    tray.setToolTip('Omics Agent');
+    const menu = Menu.buildFromTemplate([
+      { label: '显示主界面', click: () => showMainWindowFromTray() },
+      { type: 'separator' },
+      {
+        label: '退出',
+        click: () => {
+          forceQuit = true;
+          app.quit();
+        },
+      },
+    ]);
+    tray.setContextMenu(menu);
+    tray.on('double-click', () => showMainWindowFromTray());
+  } catch (e) {
+    console.warn('[Omics Agent] 创建系统托盘失败:', e && e.message);
+    tray = null;
+  }
+}
+
 function createMainWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -806,6 +852,16 @@ function createMainWindow() {
     }
   });
 
+  mainWindow = win;
+  win.on('close', (e) => {
+    if (!forceQuit && tray) {
+      e.preventDefault();
+      try {
+        win.hide();
+      } catch (_hide) {}
+    }
+  });
+
 }
 
 if (gotSingleInstanceLock) {
@@ -874,6 +930,7 @@ if (gotSingleInstanceLock) {
     await startLocalSidecarIfNeeded();
     hookAutoUpdaterEventsOnce();
     createMainWindow();
+    createTray();
     scheduleAutoUpdateCheck();
   });
 

@@ -175,6 +175,14 @@ try:
 except Exception as e:
     logger.warning("⚠️ Admin 路由注册失败（控制台 404）: %s", e)
 
+try:
+    from gibh_agent.api.routers import feedback as feedback_router_module
+
+    app.include_router(feedback_router_module.router)
+    logger.info("✅ Feedback 路由已注册: POST /api/feedbacks, GET /api/admin/feedbacks")
+except Exception as e:
+    logger.warning("⚠️ Feedback 路由注册失败: %s", e)
+
 # Phase 4: 侧栏数据读取（会话/消息/资产）
 try:
     from gibh_agent.api.routers.user_data import router as user_data_router

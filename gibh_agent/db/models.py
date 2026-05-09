@@ -101,3 +101,17 @@ class UserSavedSkill(Base):
     owner_id = Column(String(255), nullable=False, index=True)
     skill_id = Column(Integer, nullable=False, index=True)  # 逻辑关联 skills.id，不设 FK 保持与项目风格一致
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class UserFeedback(Base):
+    """用户反馈（帮助台）：支持游客与注册用户 owner_id。"""
+
+    __tablename__ = "user_feedbacks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_id = Column(String(255), nullable=False, index=True)
+    feedback_type = Column(String(64), nullable=False, default="other")
+    content = Column(Text, nullable=False)
+    error_context = Column(Text, nullable=True)
+    client_timestamp = Column(String(64), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
