@@ -52,12 +52,35 @@
 
             <div class="changelog-history">
                 <div style="margin-bottom: 1rem;">
-                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.14.2（当前推荐）</div>
+                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.14.5（当前推荐）</div>
                     <ul class="changelog">
-                        <li><strong>【V0.14 发行线补丁】</strong>客户端 semver <strong>0.14.2</strong>；Windows NSIS（<code>Omics Agent Setup 0.14.2.exe</code>）与 Linux AppImage（<code>Omics Agent-0.14.2.AppImage</code>）同步至本站 <code>/downloads/</code>。</li>
+                        <li><strong>【V0.14 发行线补丁】</strong>客户端 semver <strong>0.14.5</strong>；<strong>Windows</strong> NSIS（<code>Omics Agent Setup 0.14.5.exe</code>）与 <strong>Linux</strong> AppImage（<code>Omics Agent-0.14.5.AppImage</code>）同步至本站 <code>/downloads/</code>；自动更新元数据与安装包同源构建。</li>
+                        <li><strong>Web 端：</strong>头像菜单恢复「下载客户端」弹窗，版本与安装包链接与下载页 <code>client-release.json</code> 同步。</li>
+                        <li><strong>内置网页 / 后端技能：</strong>第三批生物医药科学计算（ITC、细胞周期、酶/蛋白酶动力学、序列保守性）及蛋白同源结构评估、抗体人源性（OASis）等能力接入技能广场。</li>
+                    </ul>
+                </div>
+
+                <div style="margin-bottom: 1rem;">
+                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.14.4</div>
+                    <ul class="changelog">
+                        <li><strong>【V0.14 发行线补丁】</strong>客户端 semver <strong>0.14.4</strong>；Windows / Linux 双端同步；自动更新源与网页同源；版本中心 Modal。</li>
+                    </ul>
+                </div>
+
+                                <div style="margin-bottom: 1rem;">
+                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.14.3</div>
+                    <ul class="changelog">
+                        <li><strong>【V0.14 发行线补丁】</strong>客户端 semver <strong>0.14.3</strong>；Windows / Linux 双端同步；版本中心与右侧栏工作台互斥等。</li>
+                    </ul>
+                </div>
+
+                <div style="margin-bottom: 1rem;">
+                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.14.2</div>
+                    <ul class="changelog">
+                        <li><strong>【V0.14 发行线补丁】</strong>客户端 semver <strong>0.14.2</strong>；Windows NSIS 与 Linux AppImage 同步至本站 <code>/downloads/</code>。</li>
                         <li><strong>桌面：</strong>系统托盘与单实例锁、关闭隐藏到托盘、双击托盘唤起主窗口（需有效托盘图标文件）。</li>
-                        <li><strong>网页：</strong>拖拽上传 dragCounter 防抖闪烁；工作流卡片添加的文件并入全局输入区文件预览；Toast/Modal 长路径换行；帮助与反馈闭环等。</li>
-                        <li><strong>自动更新：</strong><code>latest.yml</code>、<code>latest-linux.yml</code> 与 <code>.blockmap</code> 与安装包同源构建。</li>
+                        <li><strong>网页：</strong>拖拽上传 dragCounter 防抖；工作流卡片文件并入全局输入区预览；Toast/Modal 长路径换行；问题反馈闭环等。</li>
+                        <li><strong>自动更新：</strong>元数据与安装包同源构建。</li>
                     </ul>
                 </div>
 
@@ -122,11 +145,11 @@
             var verLine = document.getElementById('ver-line');
 
             var staticFallback = {
-                version: '0.14.2',
-                displayVersion: 'V0.14.2',
+                version: '0.14.5',
+                displayVersion: 'V0.14.5',
                 productName: 'Omics Agent',
-                winSetupFile: 'Omics Agent Setup 0.14.2.exe',
-                linuxAppImageFile: 'Omics Agent-0.14.2.AppImage'
+                winSetupFile: 'Omics Agent Setup 0.14.5.exe',
+                linuxAppImageFile: 'Omics Agent-0.14.5.AppImage'
             };
 
             function setVersion(meta) {

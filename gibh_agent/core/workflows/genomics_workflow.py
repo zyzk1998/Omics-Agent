@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class GenomicsWorkflow(BaseWorkflow):
-    """WGS/WES 胚系变异主线占位（工具层 Mock）。"""
+    """WGS/WES 胚系变异主线：步骤 tool_id 与 `omics_genomics_pipeline_tools` / Registry 对齐。"""
 
     def __init__(self) -> None:
         super().__init__()
@@ -79,6 +79,7 @@ class GenomicsWorkflow(BaseWorkflow):
                 "default_params": {
                     "file_path": "",
                     "reference_id": "hg38",
+                    "threads": 8,
                     "mismatch_penalty": 4,
                     "gap_open_penalty": 6,
                 },
@@ -101,8 +102,10 @@ class GenomicsWorkflow(BaseWorkflow):
                 "tool_id": "genomics_germline_calling",
                 "default_params": {
                     "file_path": "",
+                    "reference_id": "hg38",
                     "min_base_quality": 20,
                     "min_mapping_quality": 20,
+                    "stand_call_conf": 30.0,
                 },
             },
             "step_genomics_cnv": {
@@ -121,7 +124,11 @@ class GenomicsWorkflow(BaseWorkflow):
                 "name": "变异质量校准、过滤与位点标准化",
                 "description": "VQSR/VQSLOD 过滤；常与 bcftools norm 左对齐、多等位拆分同管线执行",
                 "tool_id": "genomics_vqsr_filtering",
-                "default_params": {"file_path": "", "tranche_sensitivity": 99.0},
+                "default_params": {
+                    "file_path": "",
+                    "reference_id": "hg38",
+                    "tranche_sensitivity": 99.0,
+                },
             },
             "step_genomics_anno": {
                 "name": "多维多态性注释",

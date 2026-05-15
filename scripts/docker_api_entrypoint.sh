@@ -60,4 +60,19 @@ if [ ! -x /opt/chem-rdkit-venv/bin/python ] || \
   echo "[entrypoint] chem-rdkit：/opt/chem-rdkit-venv 已就绪。"
 fi
 
+# 第三批生物医药：Biopython / promb（旧镜像未重建时在此补齐）
+BIOML_SCI_BOOT="${BIOML_SCI_ENTRYPOINT_BOOTSTRAP:-1}"
+if [ "$BIOML_SCI_BOOT" != "0" ] && [ "$BIOML_SCI_BOOT" != "false" ]; then
+  if ! python3 -c "from Bio import AlignIO, Phylo, SeqIO" >/dev/null 2>&1; then
+    echo "[entrypoint] Biopython 缺失，尝试 pip install biopython…"
+    pip install --no-cache-dir 'biopython>=1.83' || \
+      echo "[entrypoint] 警告：biopython 安装失败。请重建：docker compose build --no-cache api-server"
+  fi
+  if ! python3 -c "import promb" >/dev/null 2>&1; then
+    echo "[entrypoint] promb 缺失（OASis 人源性），尝试 pip install promb…"
+    pip install --no-cache-dir 'promb>=0.1.0' || \
+      echo "[entrypoint] 警告：promb 安装失败。请重建 api-server 镜像。"
+  fi
+fi
+
 exec gosu appuser "$@"

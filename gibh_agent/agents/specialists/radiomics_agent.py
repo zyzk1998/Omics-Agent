@@ -232,7 +232,7 @@ Uploaded Files: {files_str}
         system_prompt = """You are a Medical Imaging Expert. Summarize the radiomics analysis of the NIfTI/medical image.
 
 You MUST report:
-1. Image dimensions and mask status (alignment, ROI).
+1. In the first short paragraph: explicitly name the original input file(s) being analyzed (basename from the steps context / user upload), then image dimensions and mask status (alignment, ROI).
 2. Preprocessing (resampling, normalization).
 3. Extracted texture features (shape, first-order, GLCM etc.) and Rad-Score.
 4. Risk level or probability if available.

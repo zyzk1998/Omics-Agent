@@ -1877,7 +1877,24 @@ class AgentOrchestrator:
                     
                     logger.info(f"🎯 [Orchestrator] 选择智能体: {domain_name}, target_agent: {target_agent.__class__.__name__ if target_agent else 'None'}")
                 
-                if target_agent and hasattr(target_agent, '_generate_analysis_summary'):
+                workflow_tripped = bool(results.get("circuit_breaker"))
+                summary: Optional[str] = None
+                evaluation = None
+                
+                if workflow_tripped:
+                    summary = (
+                        "⚠️ 核心分析流程因环境或数据问题提前终止。无法生成有效的专家解读报告。"
+                        "请查看上方执行记录中的具体报错信息。\n\n"
+                        + (results.get("circuit_breaker_markdown") or "")
+                    )
+                    evaluation = None
+                    yield self._emit_sse(state_snapshot,"status", {
+                        "content": "核心步骤失败：已跳过 AI 专家解读（防幻觉熔断）",
+                        "state": "completed",
+                    })
+                    await asyncio.sleep(0.01)
+                    logger.warning("[Orchestrator] circuit_breaker 已触发，不调用 LLM 生成专家报告")
+                elif target_agent and hasattr(target_agent, '_generate_analysis_summary'):
                     start_time = time.time()
                     yield self._emit_sse(state_snapshot,"status", {
                         "content": "正在生成专家解读报告...",
@@ -1900,7 +1917,8 @@ class AgentOrchestrator:
                             "failed_steps": failed_steps,
                             "warning_steps": warning_steps,
                             "successful_steps": successful_steps,
-                            "workflow_status": results.get("status", "unknown")
+                            "workflow_status": results.get("status", "unknown"),
+                            "file_paths": list(file_paths or []),
                         }
                         
                         try:
@@ -2022,16 +2040,19 @@ class AgentOrchestrator:
                         summary = "分析完成（无步骤执行）"
                         evaluation = None
                 else:
-                    # 🔥 CRITICAL FIX: Generate basic summary even without agent
-                    failed_steps = [s for s in steps_details if s.get("status") == "error"]
-                    warning_steps = [s for s in steps_details if s.get("status") == "warning"]
-                    successful_steps = [s for s in steps_details if s.get("status") == "success"]
-                    
-                    if len(steps_details) > 0:
-                        summary = self._generate_fallback_summary(successful_steps, warning_steps, failed_steps, steps_details)
+                    # 无可用 Agent：结构化后备摘要（熔断分支已设置 summary，禁止覆盖）
+                    if workflow_tripped:
+                        pass
                     else:
-                        summary = "分析完成（无步骤执行）"
-                    evaluation = None
+                        failed_steps = [s for s in steps_details if s.get("status") == "error"]
+                        warning_steps = [s for s in steps_details if s.get("status") == "warning"]
+                        successful_steps = [s for s in steps_details if s.get("status") == "success"]
+                        
+                        if len(steps_details) > 0:
+                            summary = self._generate_fallback_summary(successful_steps, warning_steps, failed_steps, steps_details)
+                        else:
+                            summary = "分析完成（无步骤执行）"
+                        evaluation = None
                 
                 # 🔥 TASK 3: Yield Execution Results FIRST (step_result events)
                 # This allows frontend to render the Accordion with step results
@@ -2088,7 +2109,11 @@ class AgentOrchestrator:
                 # This ensures the Expert Report appears after the execution results
                 if summary:
                     yield self._emit_sse(state_snapshot,"status", {
-                        "content": "正在生成专家解读报告...",
+                        "content": (
+                            "正在写入熔断说明（未调用大模型）..."
+                            if workflow_tripped
+                            else "正在生成专家解读报告..."
+                        ),
                         "state": "generating_report"
                     })
                     await asyncio.sleep(0.01)

@@ -70,7 +70,12 @@ class EpigenomicsWorkflow(BaseWorkflow):
                 "name": "参考基因组定向比对",
                 "description": "ATAC/ChIP 等读段比对（Bowtie2/BWA；本主线不含亚硫酸氢盐/Hi-C）",
                 "tool_id": "epigenomics_alignment",
-                "default_params": {"file_path": "", "reference_id": "hg38", "mismatch_penalty": 4},
+                "default_params": {
+                    "file_path": "",
+                    "reference_id": "hg38",
+                    "threads": 8,
+                    "mismatch_penalty": 4,
+                },
             },
             "step_epi_post_filter": {
                 "name": "比对后过滤与去重",
@@ -88,7 +93,11 @@ class EpigenomicsWorkflow(BaseWorkflow):
                 "name": "染色质开放区/结合位点检测",
                 "description": "ATAC/DNase 或 ChIP 组蛋白/TF（MACS2/Genrich）",
                 "tool_id": "epigenomics_peak_calling",
-                "default_params": {"file_path": "", "q_value_cutoff": 0.05},
+                "default_params": {
+                    "file_path": "",
+                    "qvalue_threshold": 0.05,
+                    "broad_peak": False,
+                },
             },
             "step_epi_idr": {
                 "name": "生物学重复一致性检验",

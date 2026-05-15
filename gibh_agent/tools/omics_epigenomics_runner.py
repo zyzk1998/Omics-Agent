@@ -1,4 +1,4 @@
-"""表观组学下游：Bowtie2 / samtools / MACS2 等 CLI 骨架与仿真降级。"""
+"""表观组学下游：Bowtie2 / samtools / MACS2 真实 CLI；失败输出 stderr，不再静默仿真生物学表。"""
 from __future__ import annotations
 
 import logging
@@ -15,22 +15,64 @@ from .omics_mock_ui import (
     attach_visual_contract,
     simple_rows_table,
 )
-from .omics_derived_analysis import (
-    epigenomics_proxy_alignment,
-    epigenomics_proxy_peak,
-    epigenomics_proxy_post_filter,
-    epigenomics_proxy_shift,
-    fastq_bundle_from_path,
-)
 from .omics_pipeline_env import (
-    degraded_banner_md,
+    clip_omics_log,
+    exe_available,
+    omics_frontend_error_from_exception,
+    omics_host_prerequisite_blocked,
+    omics_subprocess_failed,
     resolve_bowtie2_index_prefix,
-    run_or_degrade,
+    run_omics_without_synthetic_fallback,
     smoke_subprocess,
     write_temp_mock_artifact,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def build_bowtie2_single_end_command(
+    bowtie2_exe: str,
+    index_prefix: str,
+    fastq_path: str,
+    *,
+    threads: int,
+    mismatch_penalty: int,
+) -> List[str]:
+    mp_pair = f"{mismatch_penalty},{mismatch_penalty}"
+    return [
+        bowtie2_exe,
+        "-x",
+        index_prefix,
+        "-U",
+        fastq_path,
+        "--threads",
+        str(threads),
+        "--mp",
+        mp_pair,
+    ]
+
+
+def build_macs2_callpeak_command(
+    macs2_exe: str,
+    treatment_bam: str,
+    name_prefix: str,
+    *,
+    qvalue_threshold: float,
+    broad_peak: bool,
+) -> List[str]:
+    cmd = [
+        macs2_exe,
+        "callpeak",
+        "-t",
+        treatment_bam,
+        "-n",
+        name_prefix,
+        "-q",
+        str(qvalue_threshold),
+    ]
+    if broad_peak:
+        cmd.append("--broad")
+    return cmd
 
 
 def _contract(
@@ -61,46 +103,34 @@ def _contract(
     )
 
 
-def _degraded_alignment(reference_id: str, file_path: str = "") -> Dict[str, Any]:
-    b = fastq_bundle_from_path(file_path)
-    if b:
-        md, tbl, msg = epigenomics_proxy_alignment(b, reference_id)
-        out = _contract(
-            "e_aln",
-            msg,
-            markdown=md,
-            image_urls=[IMG_CHIP_WORKFLOW],
-            table_data=tbl,
-            extra={"omics_analysis_mode": "fastq_stream_proxy", "proxy_metrics": b},
-            tool_id="epigenomics_alignment",
-        )
-        out["bam_path"] = out["output_path"]
-        return out
-    md = degraded_banner_md("Bowtie2 / BWA 与索引前缀（GIBH_BOWTIE2_*）") + (
-        "### ATAC/ChIP 比对（仿真）\n\n"
-        f"- 参考：`{reference_id}`\n"
-        "- 比对率（仿真）：**96.8%**\n"
-        "- 线粒体占比（仿真）：**2.1%**\n"
-    )
-    out = _contract(
-        "e_aln",
-        f"Epigenomics alignment simulated ref={reference_id}",
-        markdown=md,
-        image_urls=[IMG_CHIP_WORKFLOW],
-        table_data=simple_rows_table(
-            ("metric", "value"),
-            [
-                {"metric": "mapped_rate", "value": "96.8%"},
-                {"metric": "mitochondrial_frac", "value": "2.1%"},
-            ],
+def _blocked_epi_alignment(reference_id: str, file_path: str = "") -> Dict[str, Any]:
+    fq = (file_path or "").strip()
+    idx = resolve_bowtie2_index_prefix(reference_id)
+    checks = [
+        ("bowtie2", "present" if exe_available("bowtie2") else "missing"),
+        ("samtools", "present" if exe_available("samtools") else "missing"),
+        (
+            f"Bowtie2 index ({reference_id})",
+            "resolved" if idx else "set GIBH_BOWTIE2_*",
         ),
+        ("FASTQ", "ok" if fq and os.path.isfile(fq) else "missing"),
+    ]
+    return omics_host_prerequisite_blocked(
+        context="epigenomics_alignment",
         tool_id="epigenomics_alignment",
+        title="比对（bowtie2）未满足运行条件",
+        checks=checks,
+        extra_md="需 export Bowtie2 索引前缀（若 `.1.bt2` 存在）。",
     )
-    out["bam_path"] = out["output_path"]
-    return out
 
 
-def _try_bowtie2_alignment(file_path: str, reference_id: str) -> Optional[Dict[str, Any]]:
+def _try_bowtie2_alignment(
+    file_path: str,
+    reference_id: str,
+    *,
+    threads: int = 8,
+    mismatch_penalty: int = 4,
+) -> Optional[Dict[str, Any]]:
     bt2 = shutil.which("bowtie2")
     samtools = shutil.which("samtools")
     idx = resolve_bowtie2_index_prefix(reference_id)
@@ -118,89 +148,93 @@ def _try_bowtie2_alignment(file_path: str, reference_id: str) -> Optional[Dict[s
     work = tempfile.mkdtemp(prefix="e_bt2_")
     sam_p = os.path.join(work, "aligned.sam")
     bam_p = os.path.join(work, "aligned.bam")
+    cmd = build_bowtie2_single_end_command(
+        bt2, idx, fq, threads=threads, mismatch_penalty=mismatch_penalty
+    )
     try:
         with open(sam_p, "wb") as sf:
-            subprocess.run(
-                [bt2, "-x", idx, "-U", fq, "--threads", "4"],
+            cp = subprocess.run(
+                cmd,
                 stdout=sf,
                 stderr=subprocess.PIPE,
-                check=True,
+                text=True,
                 timeout=7200,
             )
-        subprocess.run(
-            [samtools, "view", "-bS", sam_p, "-o", bam_p],
-            check=True,
-            timeout=3600,
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return omics_frontend_error_from_exception("bowtie2", exc)
+    if cp.returncode != 0:
+        return omics_subprocess_failed("bowtie2", cmd, cp, tool_id="epigenomics_alignment")
+    st_cmd = [samtools, "view", "-bS", sam_p, "-o", bam_p]
+    try:
+        cp2 = subprocess.run(st_cmd, capture_output=True, text=True, timeout=3600)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return omics_frontend_error_from_exception("samtools view", exc)
+    if cp2.returncode != 0:
+        return omics_subprocess_failed(
+            "samtools view", st_cmd, cp2, tool_id="epigenomics_alignment"
         )
-        md = (
-            "### ATAC/ChIP 比对（bowtie2 + samtools）\n\n"
-            f"- **BAM**: `{bam_p}`\n"
-        )
-        out = {
-            "status": "success",
-            "message": "比对完成（bowtie2）",
-            "output_path": bam_p,
-            "file_path": bam_p,
-            "bam_path": bam_p,
-        }
-        return attach_visual_contract(
-            out,
-            markdown=md,
-            image_urls=[IMG_CHIP_WORKFLOW],
-            table_data=simple_rows_table(
-                ("artifact", "path"),
-                [
-                    {"artifact": "SAM", "path": sam_p},
-                    {"artifact": "BAM", "path": bam_p},
-                ],
-            ),
-            tool_id="epigenomics_alignment",
-        )
-    except (subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired) as exc:
-        logger.warning("bowtie2 alignment failed: %s", exc)
-        return None
+    md = (
+        "### ATAC/ChIP 比对（bowtie2 + samtools）\n\n"
+        f"- **threads**: {threads}, **--mp**: {mismatch_penalty}\n"
+        f"- **BAM**: `{bam_p}`\n"
+        "#### bowtie2 stderr（节选）\n\n```\n"
+        f"{clip_omics_log(cp.stderr or '', 8000)}\n```\n"
+        "#### samtools stderr\n\n```\n"
+        f"{clip_omics_log(cp2.stderr or '', 4000)}\n```\n"
+    )
+    out = {
+        "status": "success",
+        "message": "比对完成（bowtie2）",
+        "output_path": bam_p,
+        "file_path": bam_p,
+        "bam_path": bam_p,
+    }
+    return attach_visual_contract(
+        out,
+        markdown=md,
+        image_urls=[IMG_CHIP_WORKFLOW],
+        table_data=simple_rows_table(
+            ("artifact", "path"),
+            [
+                {"artifact": "SAM", "path": sam_p},
+                {"artifact": "BAM", "path": bam_p},
+            ],
+        ),
+        tool_id="epigenomics_alignment",
+    )
 
 
-def epigenomics_alignment_impl(file_path: str = "", reference_id: str = "hg38") -> Dict[str, Any]:
-    return run_or_degrade(
-        lambda: _try_bowtie2_alignment(file_path, reference_id),
-        lambda: _degraded_alignment(reference_id, file_path),
+def epigenomics_alignment_impl(
+    file_path: str = "",
+    reference_id: str = "hg38",
+    *,
+    threads: int = 8,
+    mismatch_penalty: int = 4,
+) -> Dict[str, Any]:
+    return run_omics_without_synthetic_fallback(
+        lambda: _try_bowtie2_alignment(
+            file_path,
+            reference_id,
+            threads=threads,
+            mismatch_penalty=mismatch_penalty,
+        ),
+        lambda: _blocked_epi_alignment(reference_id, file_path),
         ctx="epigenomics_alignment",
     )
 
 
-def _degraded_post_filter(file_path: str = "") -> Dict[str, Any]:
-    b = fastq_bundle_from_path(file_path)
-    if b:
-        md, tbl, msg = epigenomics_proxy_post_filter(b)
-        return _contract(
-            "e_post_filt",
-            msg,
-            markdown=md,
-            image_urls=[IMG_CHIP_WORKFLOW],
-            table_data=tbl,
-            extra={"omics_analysis_mode": "fastq_stream_proxy", "proxy_metrics": b},
-            tool_id="epigenomics_post_align_filtering",
-        )
-    md = degraded_banner_md("samtools view/filter 与排序 BAM") + (
-        "### MAPQ 过滤与去重（仿真）\n\n"
-        "| 项目 | 剩余 reads |\n|------|------------|\n"
-        "| 去 chrM | 98.2% |\n"
-        "| MAPQ≥30 | 96.5% |\n"
-    )
-    return _contract(
-        "e_post_filt",
-        "Post-align filtering (simulated)",
-        markdown=md,
-        image_urls=[IMG_CHIP_WORKFLOW],
-        table_data=simple_rows_table(
-            ("filter_stage", "fraction_remaining"),
-            [
-                {"filter_stage": "MAPQ>=30", "fraction_remaining": "0.965"},
-                {"filter_stage": "dedup", "fraction_remaining": "0.822"},
-            ],
-        ),
+def _blocked_epi_post_filter(file_path: str = "") -> Dict[str, Any]:
+    bam = (file_path or "").strip()
+    checks = [
+        ("samtools", "present" if exe_available("samtools") else "missing"),
+        ("BAM", "ok" if bam and os.path.isfile(bam) and bam.lower().endswith(".bam") else "invalid"),
+    ]
+    return omics_host_prerequisite_blocked(
+        context="epigenomics_post_align_filtering",
         tool_id="epigenomics_post_align_filtering",
+        title="MAPQ 过滤（samtools）未满足条件",
+        checks=checks,
+        extra_md="",
     )
 
 
@@ -211,138 +245,151 @@ def _try_post_filter(file_path: str) -> Optional[Dict[str, Any]]:
         return None
     work = tempfile.mkdtemp(prefix="e_sfilt_")
     filt_bam = os.path.join(work, "filtered.bam")
+    cmd = [samtools, "view", "-b", "-q", "30", bam, "-o", filt_bam]
     try:
-        subprocess.run(
-            [
-                samtools,
-                "view",
-                "-b",
-                "-q",
-                "30",
-                bam,
-                "-o",
-                filt_bam,
-            ],
-            check=True,
-            timeout=7200,
+        cp = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return omics_frontend_error_from_exception("samtools view -q30", exc)
+    if cp.returncode != 0:
+        return omics_subprocess_failed(
+            "samtools view -q30", cmd, cp, tool_id="epigenomics_post_align_filtering"
         )
-        md = "### MAPQ 过滤（samtools view -q 30）\n\n" f"- **BAM**: `{filt_bam}`\n"
-        return _contract(
-            "e_post_filt",
-            "samtools filter ok",
-            markdown=md,
-            image_urls=[IMG_CHIP_WORKFLOW],
-            table_data=simple_rows_table(
-                ("artifact", "path"),
-                [{"artifact": "filtered_bam", "path": filt_bam}],
-            ),
-            tool_id="epigenomics_post_align_filtering",
-        )
-    except (subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired) as exc:
-        logger.warning("post filter failed: %s", exc)
-        return None
+    md = (
+        "### MAPQ 过滤（samtools view -q 30）\n\n"
+        f"- **BAM**: `{filt_bam}`\n"
+        "#### stderr\n\n```\n"
+        f"{clip_omics_log(cp.stderr or '', 6000)}\n```\n"
+    )
+    return _contract(
+        "e_post_filt",
+        "samtools filter ok",
+        markdown=md,
+        image_urls=[IMG_CHIP_WORKFLOW],
+        table_data=simple_rows_table(
+            ("artifact", "path"),
+            [{"artifact": "filtered_bam", "path": filt_bam}],
+        ),
+        tool_id="epigenomics_post_align_filtering",
+    )
 
 
 def epigenomics_post_align_filtering_impl(file_path: str = "") -> Dict[str, Any]:
-    return run_or_degrade(
+    return run_omics_without_synthetic_fallback(
         lambda: _try_post_filter(file_path),
-        lambda: _degraded_post_filter(file_path),
+        lambda: _blocked_epi_post_filter(file_path),
         ctx="epigenomics_post_align_filtering",
     )
 
 
-def _degraded_peak(file_path: str = "") -> Dict[str, Any]:
-    b = fastq_bundle_from_path(file_path)
-    if b:
-        md, tbl, msg = epigenomics_proxy_peak(b)
-        out = _contract(
-            "e_peak",
-            msg,
-            markdown=md,
-            image_urls=[IMG_PEAK_GENOME_PIE, IMG_CHIP_WORKFLOW],
-            table_data=tbl,
-            extra={"omics_analysis_mode": "fastq_stream_proxy", "proxy_metrics": b},
-            tool_id="epigenomics_peak_calling",
-        )
-        out["bed_path"] = out["output_path"]
-        return out
-    md = degraded_banner_md("MACS2 / Genrich 与配对对照 BAM") + (
-        "### Peak calling（仿真）\n\n"
-        "| 指标 | 仿真值 |\n|------|--------|\n"
-        "| Peaks | 28,420 |\n"
+def _blocked_epi_peak(file_path: str = "") -> Dict[str, Any]:
+    return omics_host_prerequisite_blocked(
+        context="epigenomics_peak_calling",
+        tool_id="epigenomics_peak_calling",
+        title="Peak calling（MACS2）未满足条件",
+        checks=[
+            ("macs2", "present" if exe_available("macs2") else "missing"),
+            ("treatment BAM", "required"),
+        ],
+        extra_md=(f"表单路径: `{file_path}`\n" if file_path else ""),
     )
-    out = _contract(
-        "e_peak",
-        "Peak calling (simulated)",
+
+
+def _try_macs2_peak(
+    file_path: str,
+    *,
+    qvalue_threshold: float = 0.05,
+    broad_peak: bool = False,
+) -> Optional[Dict[str, Any]]:
+    macs2 = shutil.which("macs2")
+    if not macs2 or not smoke_subprocess([macs2, "--help"], timeout=120):
+        return None
+    bam = (file_path or "").strip()
+    if not (bam and os.path.isfile(bam) and bam.lower().endswith(".bam")):
+        return None
+    work = tempfile.mkdtemp(prefix="e_macs2_")
+    prefix = os.path.join(work, "macs2_run")
+    cmd = build_macs2_callpeak_command(
+        macs2,
+        bam,
+        prefix,
+        qvalue_threshold=qvalue_threshold,
+        broad_peak=broad_peak,
+    )
+    try:
+        cp = subprocess.run(cmd, capture_output=True, text=True, timeout=86400)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return omics_frontend_error_from_exception("macs2 callpeak", exc)
+    if cp.returncode != 0:
+        return omics_subprocess_failed(
+            "macs2 callpeak", cmd, cp, tool_id="epigenomics_peak_calling"
+        )
+    bed_guess = prefix + "_peaks.narrowPeak"
+    if broad_peak:
+        bed_guess = prefix + "_peaks.broadPeak"
+    out_path = bed_guess if os.path.isfile(bed_guess) else prefix + "_summits.bed"
+    macs_logs = (cp.stdout or "") + "\n" + (cp.stderr or "")
+    md = (
+        "### Peak calling（MACS2）\n\n"
+        f"- **输出前缀**: `{prefix}`\n"
+        f"- **-q**: {qvalue_threshold}\n"
+        f"- **--broad**: {broad_peak}\n"
+        "#### MACS2 stdout/stderr（节选）\n\n```\n"
+        f"{clip_omics_log(macs_logs, 12000)}\n```\n"
+    )
+    out = {
+        "status": "success",
+        "message": "MACS2 callpeak completed",
+        "output_path": out_path,
+        "file_path": out_path,
+        "bed_path": out_path,
+    }
+    return attach_visual_contract(
+        out,
         markdown=md,
         image_urls=[IMG_PEAK_GENOME_PIE, IMG_CHIP_WORKFLOW],
         table_data=simple_rows_table(
-            ("chrom", "peaks"),
+            ("setting", "value"),
             [
-                {"chrom": "chr1", "peaks": "4120"},
-                {"chrom": "chr17", "peaks": "2888"},
+                {"setting": "qvalue_threshold", "value": str(qvalue_threshold)},
+                {"setting": "broad_peak", "value": str(broad_peak)},
             ],
         ),
         tool_id="epigenomics_peak_calling",
     )
-    out["bed_path"] = out["output_path"]
-    return out
 
 
-def _try_macs2_peak(file_path: str) -> Optional[Dict[str, Any]]:
-    macs2 = shutil.which("macs2")
-    if not macs2:
-        return None
-    if not smoke_subprocess([macs2, "--help"], timeout=120):
-        return None
-    logger.info("MACS2 可用；完整 peak calling 需 treatment/control BAM；仿真降级。")
-    return None
-
-
-def epigenomics_peak_calling_impl(file_path: str = "") -> Dict[str, Any]:
-    return run_or_degrade(
-        lambda: _try_macs2_peak(file_path),
-        lambda: _degraded_peak(file_path),
+def epigenomics_peak_calling_impl(
+    file_path: str = "",
+    *,
+    qvalue_threshold: float = 0.05,
+    broad_peak: bool = False,
+) -> Dict[str, Any]:
+    return run_omics_without_synthetic_fallback(
+        lambda: _try_macs2_peak(
+            file_path,
+            qvalue_threshold=qvalue_threshold,
+            broad_peak=broad_peak,
+        ),
+        lambda: _blocked_epi_peak(file_path),
         ctx="epigenomics_peak_calling",
     )
 
 
-def _degraded_shift(file_path: str = "") -> Dict[str, Any]:
-    b = fastq_bundle_from_path(file_path)
-    if b:
-        md, tbl, msg = epigenomics_proxy_shift(b)
-        return _contract(
-            "e_shift",
-            msg,
-            markdown=md,
-            image_urls=[IMG_DNA_HELIX],
-            table_data=tbl,
-            extra={"omics_analysis_mode": "fastq_stream_proxy", "proxy_metrics": b},
-            tool_id="epigenomics_shift_fragment_analysis",
-        )
-    md = degraded_banner_md("alignmentSieve/deepTools 等片段统计工具") + (
-        "### Tn5 移位校正与片段分布（仿真）\n\n"
-        "- 主峰间距：**~200 bp**\n"
-    )
-    return _contract(
-        "e_shift",
-        "Shift analysis (simulated)",
-        markdown=md,
-        image_urls=[IMG_DNA_HELIX],
-        table_data=simple_rows_table(
-            ("fragment_bp", "density_peak"),
-            [
-                {"fragment_bp": "120", "density_peak": "low"},
-                {"fragment_bp": "200", "density_peak": "high"},
-            ],
-        ),
+def _blocked_epi_shift(file_path: str = "") -> Dict[str, Any]:
+    return omics_host_prerequisite_blocked(
+        context="epigenomics_shift_fragment_analysis",
         tool_id="epigenomics_shift_fragment_analysis",
+        title="Tn5 移位 / 片段分布分析未在宿主接入自动化",
+        checks=[
+            ("deepTools alignmentSieve / other", "not wired in this runner"),
+        ],
+        extra_md=(f"表单路径: `{file_path}`\n" if file_path else ""),
     )
 
 
 def epigenomics_shift_fragment_analysis_impl(file_path: str = "") -> Dict[str, Any]:
-    return run_or_degrade(
+    return run_omics_without_synthetic_fallback(
         lambda: None,
-        lambda: _degraded_shift(file_path),
+        lambda: _blocked_epi_shift(file_path),
         ctx="epigenomics_shift_fragment_analysis",
     )

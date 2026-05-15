@@ -37,7 +37,25 @@ class ErrorFormatter:
         """
         error_lower = error.lower()
         
-        # 1. 数据问题类错误
+        # 0. 宿主环境 / 组学 CLI 缺失（不可静默「跳过」）
+        if any(
+            tok in error_lower
+            for tok in (
+                "前置条件",
+                "未满足",
+                "host_env_prereq",
+                "fatal_env_prereq",
+                "missing from path",
+                "不在注册表",
+            )
+        ) or any(tok in error for tok in ("GIBH_REF_", "PATH", "宿主环境")):
+            return {
+                "user_message": error if len(error.strip()) > 12 else f"宿主运行环境不满足：{step_name} 无法执行。",
+                "error_category": "host_env_prereq",
+                "suggestion": "请为后端 Python 进程配置与运维终端一致的 Conda PATH，并设置 GIBH_REF_HG38 等变量；参见 scripts/install_omics_real_env.sh。",
+                "can_skip": False,
+                "technical_details": error,
+            }
         if any(keyword in error_lower for keyword in [
             "file not found", "文件不存在", "path does not exist", "no such file",
             "empty", "空", "no data", "没有数据", "missing", "缺失"

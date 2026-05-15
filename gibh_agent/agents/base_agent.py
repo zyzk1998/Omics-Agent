@@ -608,7 +608,13 @@ class BaseAgent(ABC):
                 if cached_diagnosis:
                     logger.info(f"✅ [DataDiagnostician] 使用缓存的诊断结果: {file_path}")
                     # 返回缓存的诊断报告
-                    return cached_diagnosis.get("diagnosis_report")
+                    _cached_rep = cached_diagnosis.get("diagnosis_report")
+                    if not _cached_rep:
+                        return None
+                    _bn = DataDiagnostician.build_data_lineage_markdown_banner(file_metadata)
+                    if _bn and "当前分析目标文件" not in str(_cached_rep)[:500]:
+                        return _bn + _cached_rep
+                    return _cached_rep
             
             logger.info(f"🔍 [DataDiagnostician] 开始数据诊断 - 组学类型: {omics_type}")
 
@@ -940,6 +946,9 @@ Use Simplified Chinese for all content."""
                 if response:
                     logger.info(f"✅ [DataDiagnostician] 诊断报告生成成功，长度: {len(response)}")
                     logger.debug(f"📝 [DEBUG] Diagnosis report preview: {response[:200]}...")
+                    _lineage_top = DataDiagnostician.build_data_lineage_markdown_banner(file_metadata)
+                    if _lineage_top and "当前分析目标文件" not in str(response)[:500]:
+                        response = _lineage_top + response
                 else:
                     logger.warning(f"⚠️ [DataDiagnostician] 诊断报告为空")
                     logger.warning(f"⚠️ [DEBUG] Think content: {think_content[:200] if think_content else 'None'}")
@@ -1178,6 +1187,12 @@ Use Simplified Chinese for all content."""
         
         try:
             logger.info(f"📝 [AnalysisSummary] 开始生成分析摘要 - 组学类型: {omics_type}")
+            
+            if summary_context and summary_context.get("circuit_breaker"):
+                return (
+                    "⚠️ 核心分析流程因环境或数据问题提前终止。无法生成有效的专家解读报告。"
+                    "请查看上方执行记录中的具体报错信息。"
+                )
             
             # 🔥 STED_EC / SPATIOTEMPORAL_DYNAMICS：与 RNA、Metabolomics 一致，统一走本方法 + LLM（无 DAG 内 expert 节点）
             
@@ -1886,6 +1901,61 @@ Use Simplified Chinese for all content."""
             else:
                 critical_instruction_text = "Based on the provided metrics above, interpret the biological significance. Use your internal knowledge base (PubMed/Literature) to explain **WHY** these specific metabolites/pathways might be altered in this context. Generate a structured Markdown report with deep biological interpretation."
 
+            from ..core.workflows.report_lineage_instructions import EXPERT_REPORT_DATA_LINEAGE_RULE_ZH
+
+            critical_instruction_text = (
+                f"{critical_instruction_text}\n\n{EXPERT_REPORT_DATA_LINEAGE_RULE_ZH}"
+            )
+
+            # 数据血缘：从步骤结果与 summary_context 提取原始文件名，注入专家报告 Prompt
+            _lineage_names: List[str] = []
+            _seen_ln: set[str] = set()
+            import os as _os_ln
+
+            for _sr in steps_results or []:
+                if not isinstance(_sr, dict):
+                    continue
+                _dat = _sr.get("data") if isinstance(_sr.get("data"), dict) else {}
+                for _k in (
+                    "image_path",
+                    "file_path",
+                    "mask_path",
+                    "data_path",
+                    "h5ad_path",
+                    "adata_path",
+                    "features_csv",
+                    "features_csv_path",
+                    "csv_path",
+                ):
+                    _v = _dat.get(_k)
+                    if not isinstance(_v, str) or not _v.strip():
+                        continue
+                    if _v.strip().startswith("<") and _v.strip().endswith(">"):
+                        continue
+                    for _part in _v.replace(";", ",").split(","):
+                        _pp = _part.strip()
+                        if not _pp:
+                            continue
+                        _bn = _os_ln.path.basename(_pp)
+                        if _bn and _bn not in _seen_ln:
+                            _seen_ln.add(_bn)
+                            _lineage_names.append(_bn)
+            if summary_context and isinstance(summary_context.get("file_paths"), list):
+                for _fp in summary_context["file_paths"]:
+                    if isinstance(_fp, str) and _fp.strip():
+                        _bn = _os_ln.path.basename(_fp.strip())
+                        if _bn and _bn not in _seen_ln:
+                            _seen_ln.add(_bn)
+                            _lineage_names.append(_bn)
+            _lineage_names = _lineage_names[:24]
+            _context_data_json = json.dumps(
+                {"primary_source_files": _lineage_names},
+                ensure_ascii=False,
+            )
+            if _lineage_names:
+                key_findings["primary_source_files"] = _lineage_names
+                key_findings_json = json.dumps(key_findings, ensure_ascii=False, indent=2)
+
             # 空间/影像/STED-EC 使用专用输出结构，禁止出现其他领域术语
             if is_sted_ec_analysis:
                 output_structure_section = OUTPUT_STRUCTURE_STED_EC_FOR_PARENT
@@ -1967,6 +2037,9 @@ Use Simplified Chinese for all content."""
 **User Goal:**
 {workflow_name}
 
+**context_data（数据血缘，必须在报告第一段写出原始文件名）:**
+{_context_data_json}
+
 **Execution Results (Successful Steps):**
 {summary_json}
 
@@ -1991,7 +2064,8 @@ Use Simplified Chinese for all content."""
 2. **Scientific Persona**: You are a Senior Bioinformatics Scientist writing a publication-quality results section for Nature Medicine. Write as if you are describing results in a Methods/Results section of a high-impact research paper.
 
 3. **NO Technical Debugging**: 
-   - DO NOT mention step names, tool names, file paths, or technical errors
+   - DO NOT mention internal step names, tool IDs, full server file paths, or stack traces.
+   - **例外**：必须在第一段用用户上传文件的**原始文件名（basename）**建立数据血缘（与 context_data 一致），这不属于「技术调试」。
    - DO NOT say "Step X failed" or "Tool Y encountered an error"
    - DO NOT mention Python errors, missing libraries, or code issues
    - If a step failed, simply state the biological limitation (e.g., "Pathway enrichment analysis could not be performed due to insufficient significant features" or "Functional annotation was not available for this dataset")
@@ -2266,6 +2340,9 @@ Use Simplified Chinese for all content."""
 **User Goal:**
 {workflow_name}
 
+**context_data（数据血缘，必须在报告第一段写出原始文件名）:**
+{_context_data_json}
+
 **Execution Results Summary:**
 {summary_json}
 
@@ -2290,7 +2367,8 @@ Use Simplified Chinese for all content."""
 2. **Scientific Persona**: You are a Senior Bioinformatics Scientist writing a publication-quality results section for Nature Medicine. Write as if you are describing results in a Methods/Results section of a high-impact research paper.
 
 3. **NO Technical Debugging**: 
-   - DO NOT mention step names, tool names, file paths, or technical errors
+   - DO NOT mention internal step names, tool IDs, full server file paths, or stack traces.
+   - **例外**：必须在第一段写出用户上传文件的**原始文件名（basename）**（与 context_data 一致）。
    - DO NOT say "Step X failed" or "Tool Y encountered an error"
    - DO NOT mention Python errors, missing libraries, or code issues
    - If a step failed, simply state the biological limitation
@@ -2345,6 +2423,15 @@ Use Simplified Chinese for all content."""
 
                     return strip_think_markup_for_user(_clean_report_content(s))
 
+                def _wrap_expert_lineage(s: str) -> str:
+                    out = _finalize_expert_report(s)
+                    if not out or not _lineage_names:
+                        return out
+                    hdr = "> 📁 **当前分析目标文件**：" + ", ".join(f"`{n}`" for n in _lineage_names[:20]) + "\n\n"
+                    if "当前分析目标文件" in out[:600]:
+                        return out
+                    return hdr + out
+
                 if retrieval_context_text:
                     messages[1]["content"] = messages[1]["content"] + "\n\n【前置检索资料】\n" + retrieval_context_text
                 logger.info(f"📞 [AnalysisSummary] 开始LLM调用，max_tokens=8192...")
@@ -2362,12 +2449,12 @@ Use Simplified Chinese for all content."""
                 if response and len(response.strip()) > 100:
                     logger.info(f"✅ [AnalysisSummary] 深度生物学解释生成成功，长度: {len(response)}")
                     logger.debug(f"📝 [DEBUG] Summary preview: {response[:200]}...")
-                    return _finalize_expert_report(response)
+                    return _wrap_expert_lineage(response)
                 elif original_content and len(original_content.strip()) > 100:
                     logger.warning(
                         f"⚠️ [AnalysisSummary] 提取后的内容过短，使用原始正文并经消杀（长度: {len(original_content)}）"
                     )
-                    return _finalize_expert_report(original_content)
+                    return _wrap_expert_lineage(original_content)
                 else:
                     logger.warning(f"⚠️ [AnalysisSummary] LLM 返回内容过短（response: {len(response) if response else 0}字符, original: {len(original_content)}字符），尝试重新生成...")
                     # Retry with simpler prompt if first attempt failed
@@ -2395,12 +2482,12 @@ Minimum 500 words. Be scientific and detailed."""
                     
                     if retry_response and len(retry_response.strip()) > 100:
                         logger.info(f"✅ [AnalysisSummary] 重试成功，生成深度解释，长度: {len(retry_response)}")
-                        return _finalize_expert_report(retry_response)
+                        return _wrap_expert_lineage(retry_response)
                     elif retry_original_content and len(retry_original_content.strip()) > 100:
                         logger.warning(
                             f"⚠️ [AnalysisSummary] 重试后提取内容过短，使用原始正文并经消杀（长度: {len(retry_original_content)}）"
                         )
-                        return _finalize_expert_report(retry_original_content)
+                        return _wrap_expert_lineage(retry_original_content)
                     else:
                         logger.error(f"❌ [AnalysisSummary] 重试后仍无法生成有效内容（response: {len(retry_response) if retry_response else 0}字符, original: {len(retry_original_content)}字符）")
                         # 🔥 TASK 3: Return user-friendly error message instead of raw traceback

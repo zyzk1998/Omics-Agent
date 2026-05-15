@@ -3,6 +3,7 @@
 支持多种组学类型：scRNA-seq, Metabolomics, Bulk RNA-seq 等
 """
 import logging
+import os
 from typing import Dict, Any, Optional, List
 import pandas as pd
 import numpy as np
@@ -61,6 +62,40 @@ class DataDiagnostician:
     def __init__(self):
         """初始化数据诊断器"""
         pass
+
+    @staticmethod
+    def build_data_lineage_markdown_banner(
+        file_metadata: Optional[Dict[str, Any]],
+        extra_paths: Optional[List[str]] = None,
+    ) -> str:
+        """
+        在诊断报告 Markdown 顶部拼接「当前分析目标文件」血缘声明（basename 列表）。
+        """
+        raw_paths: List[str] = []
+        if file_metadata:
+            for key in ("file_path", "real_data_path", "mask_path"):
+                val = file_metadata.get(key)
+                if isinstance(val, str) and val.strip():
+                    first = val.strip().replace(";", ",").split(",")[0].strip()
+                    if first:
+                        raw_paths.append(first)
+        if extra_paths:
+            for p in extra_paths:
+                if isinstance(p, str) and p.strip():
+                    first = p.strip().replace(";", ",").split(",")[0].strip()
+                    if first:
+                        raw_paths.append(first)
+        names: List[str] = []
+        seen: set[str] = set()
+        for p in raw_paths:
+            bn = os.path.basename(p)
+            if bn and bn not in seen:
+                seen.add(bn)
+                names.append(bn)
+        if not names:
+            return ""
+        quoted = ", ".join(f"`{n}`" for n in names[:20])
+        return f"> 📁 **当前分析目标文件**：{quoted}\n\n"
     
     def analyze(
         self,
@@ -403,6 +438,25 @@ class DataDiagnostician:
             stats["presentation"] = file_metadata.get("message") or "有效组学文件（非矩阵预览通道）。"
 
         stats["data_quality"] = stats["presentation"]
+
+        fp = file_metadata.get("file_path")
+        if fp and isinstance(fp, str):
+            lowp = fp.lower()
+            try:
+                if ft == "fastq" or lowp.endswith((".fastq", ".fq", ".fastq.gz", ".fq.gz")):
+                    from gibh_agent.tools.omics_real_io import compute_fastq_stream_bundle
+
+                    bundle = compute_fastq_stream_bundle(fp, max_reads=50_000)
+                    stats["fastq_stream_metrics"] = bundle
+                    stats["approx_mean_quality"] = bundle.get("qual_mean")
+                    stats["approx_q30_fraction"] = bundle.get("q30_fraction")
+                    stats["approx_mean_read_length"] = bundle.get("mean_read_length")
+                elif lowp.endswith(".mzml"):
+                    from gibh_agent.tools.omics_real_io import compute_mzml_basic_stats
+
+                    stats["mzml_basic_metrics"] = compute_mzml_basic_stats(fp)
+            except Exception as exc:
+                logger.debug("highdim omics optional metrics skipped: %s", exc)
 
         label_map = {
             "genomics": "genomics",

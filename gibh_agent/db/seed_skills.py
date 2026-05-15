@@ -245,7 +245,25 @@ GGGGAUAGGUUCAACCUCCUU
         "prompt_template": "您好。请协助检索基因 **TP53** 的权威注释信息，包括官方全称、染色体定位及已知主要生物学功能。",
     },
     {"name": "蛋白质资料提取工具", "sub_category": "信息检索", "description": "基于蛋白质ID快速获取其功能注释、亚细胞定位、组织表达及疾病关联信息。"},
-    {"name": "蛋白同源结构评估器", "sub_category": "数据分析", "description": "集成 BLAST 序列比对与结构相似性分析，用于精准判定蛋白质同源关系与三维结构差异。"},
+    {
+        "name": "蛋白同源结构评估器",
+        "sub_category": "数据分析",
+        "description": "集成 BLAST 序列比对与结构相似性分析，用于精准判定蛋白质同源关系与三维结构差异。",
+        "prompt_template": """[Skill_Route: protein_homology_structure_assessment]
+您好。我将对指定 **UniProt 靶蛋白** 执行 BLAST 同源检索，并综合 **结构相似性** 与 **PTM 位点保守性** 给出加权综合评分表。
+
+**参数**
+- **uniprot_id**：靶蛋白 UniProt 登录号（如 `O95292`）。
+- **blast_evalue** / **struct_threshold** / **ptm_threshold** / **top_n**：可选，默认 `1e-5` / `0.8` / `0.6` / `10`。
+- **test_mode**：`true` 时使用脚本内模拟 BLAST（无 NCBI 远程，适合演示）；真实分析请设为 `false` 并确保容器可访问 UniProt/NCBI。
+
+**示例**
+- uniprot_id: `O95292`
+- test_mode: `true`（快速演示）
+
+（助手侧：将用户给出的登录号写入 `uniprot_id`；未说明 test_mode 时，无网络或用户要求演示则 `test_mode=true`。）
+""",
+    },
     {"name": "蛋白质结构渲染工具", "sub_category": "数据可视化", "description": "支持从PDB格式导入并可视化蛋白质三维结构。"},
     {"name": "RNA二级结构可视化工具", "sub_category": "数据可视化", "description": "基于RNA碱基序列生成其对应的二级结构图示。"},
     {"name": "抗体人源化", "sub_category": "预测与建模", "description": "使用对天然抗体库（Sapiens）或 CDR 移植的深度学习来实现抗体人源化。"},
@@ -259,7 +277,28 @@ GGGGAUAGGUUCAACCUCCUU
     {"name": "PubMed数据库查询", "sub_category": "信息检索", "description": "生物医学文献信息检索系统。"},
     {"name": "GWAS catalog 数据库查询", "sub_category": "信息检索", "description": "遗传学研究的重要资源，收录了许多基因组关联数据。"},
     {"name": "dbSNP 数据库查询", "sub_category": "信息检索", "description": "单核苷酸多态性（SNP）数据库，快速检索SNP信息。"},
-    {"name": "CRISPR-Cas9 基因编辑工具", "sub_category": "预测与建模", "description": "模拟 CRISPR-Cas9 基因组编辑流程，包含向导RNA验证、目标位点识别等。"},
+    {
+        "name": "CRISPR-Cas9 基因编辑工具",
+        "sub_category": "预测与建模",
+        "description": "模拟 CRISPR-Cas9 基因组编辑流程，包含向导RNA验证、目标位点识别等。",
+        "prompt_template": """[Skill_Route: crispr_cas9_simulation]
+您好。我将使用 **CRISPR-Cas9 编辑流程仿真器**，对给定 **gRNA** 与 **靶标基因组 DNA** 执行：gRNA 校验 → PAM（NGG）扫描 → 递送效率估计 → DSB 与修复路径（NHEJ/HDR）模拟，并给出可读摘要与序列输出。
+
+**参数与生物学含义**
+- **guides_text**：向导序列（以 DNA 字母书写的 20 nt gRNA 同源区）；多条以英文逗号 `,` 分隔。
+- **target_sequence**：拟分析的基因组 DNA 片段（建议长度 ≥40 bp，便于覆盖多个潜在切割位点）。
+- **cell_line**：细胞背景（如 HEK293、K562），影响递送效率先验；未指定时由助手使用 HEK293。
+- **result_format**：`markdown`（默认）或 `json`；一般保持 Markdown 以便右侧工作台展示。
+- **random_seed**：可选整数，用于固定随机 NHEJ/HDR 细节以便复现实验室记录。
+
+**示范输入（整段可替换为您的实验设计）**
+- guides_text: `GACGTCAGTCTAGCTAGCTA`
+- target_sequence: `ATCGGACGTCAGTCTAGCTAGCTAGGCTAGCTAGCTAAGG`
+- cell_line: `HEK293`
+
+（助手侧：将用户正文中的 gRNA 与靶序列填入 `guides_text`、`target_sequence`；cell_line 默认 HEK293；禁止编造不存在的 file_path。）
+""",
+    },
     {"name": "ADMET性质预测工具", "sub_category": "预测与建模", "description": "预测一组化合物的 ADMET 药代动力学属性，包括溶解性、吸收、代谢、毒性等。"},
     {"name": "LigandMPNN", "sub_category": "预测与建模", "description": "深度学习驱动的蛋白质序列设计模型，能够显式考虑小分子、核酸等非蛋白质环境的作用。"},
 ]
@@ -273,7 +312,35 @@ for skill in BIOMEDICINE_SKILLS:
 # 补全遗漏的生物医药技能 (Phase 2)
 ADDITIONAL_BIOMED_SKILLS = [
     {"name": "ESM-Variants", "sub_category": "预测与建模", "description": "交互式可视化蛋白质序列中的氨基酸变化。"},
-    {"name": "人源性评估", "sub_category": "数据分析", "description": "使用天然抗体库（OASis）中的肽搜索和种系序列同一性来评估抗体的人性。"},
+    {
+        "name": "人源性评估",
+        "sub_category": "数据分析",
+        "description": "使用天然抗体库（OASis）中的肽搜索和种系序列同一性来评估抗体的人性。",
+        "prompt_template": """[Skill_Route: antibody_humanness_oasis_evaluation]
+您好。我将基于 **OAS（Observed Antibody Space）** 与 **promb** 内置 human-oas 库，评估抗体 **重链（VH）/ 轻链（VL）** 的 OASis 人源性分数；若环境已安装 **ANARCI**，将额外给出 CDR 与 Framework 分区得分。
+
+**必填参数（助手调用工具时 JSON 中不得为空）**
+- **heavy_chain**：重链可变区氨基酸序列（仅 ACDEFGHIKLMNPQRSTVWY，无空格、无 FASTA 头）。
+- **light_chain**：轻链可变区氨基酸序列（格式同上）。
+- 亦可改用 **antibody_sequences_json** 单行 JSON（与上分字段二选一即可）：
+  {"heavy_chain":"<重链>","light_chain":"<轻链>"}
+
+**可选参数**
+- **antibody_name**：默认 Antibody；**scheme**：kabat（默认）| chothia | imgt；**cdr_definition**：kabat（默认）| chothia | imgt | north；**threshold**：relaxed（默认）| loose | medium | strict。
+
+**演示序列（一键体验：未提供序列时助手须将下列两条写入 heavy_chain / light_chain）**
+- heavy_chain:
+EVQLVESGGGLVQPGGSLRLSCAASGFTFSSYAMSWVRQAPGKGLEWVSAISGSGGSTYYADSVKGRFTISRDNSKNTLYLQMNSLRAEDTAVYYCARDYGDYWGQGTLVTVSS
+- light_chain:
+DIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLYSGVPSRFSGSRSGTDFTLTISSLQPEDFATYYCQQHYTTPPTFGQGTKVEIK
+
+**助手侧填参纪律**
+1. heavy_chain 与 light_chain 必须为非空字符串；禁止只填 antibody_name。
+2. 用户正文或本模板已含演示序列时原样提取；用户给出其它序列时替换演示序列。
+3. 推荐 JSON 示例（可直接用于工具调用）：
+{"heavy_chain":"EVQLVESGGGLVQPGGSLRLSCAASGFTFSSYAMSWVRQAPGKGLEWVSAISGSGGSTYYADSVKGRFTISRDNSKNTLYLQMNSLRAEDTAVYYCARDYGDYWGQGTLVTVSS","light_chain":"DIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLYSGVPSRFSGSRSGTDFTLTISSLQPEDFATYYCQQHYTTPPTFGQGTKVEIK","antibody_name":"DemoAb","scheme":"kabat","cdr_definition":"kabat","threshold":"relaxed"}
+""",
+    },
     {"name": "抗体序列生成", "sub_category": "预测与建模", "description": "对抗体序列进行突变，同时实时监测序列特性。"},
     {
         "name": "AlphaFold数据库查询",
@@ -292,12 +359,94 @@ ADDITIONAL_BIOMED_SKILLS = [
     },
     {"name": "InterPro 数据库查询", "sub_category": "信息检索", "description": "整合了多个蛋白质家族、结构域和功能位点的数据库系统。"},
     {"name": "获取mRNA序列工具", "sub_category": "信息检索", "description": "根据目标疾病靶点基因名称检索 mRNA 序列，并返回 FASTA 文件。"},
-    {"name": "圆二色谱分析工具", "sub_category": "数据分析", "description": "用于分析圆二色性(CD)光谱数据以确定二级结构和热稳定性。"},
-    {"name": "蛋白质序列保守性分析工具", "sub_category": "数据分析", "description": "进行蛋白质多序列比对、系统发育树构建与保守性分析。"},
-    {"name": "ITC结合热力学分析工具", "sub_category": "数据分析", "description": "分析等温滴定量热 (ITC) 数据，返回 Kd、ΔH、ΔS 等热力学参数。"},
-    {"name": "蛋白酶动力学分析工具", "sub_category": "数据分析", "description": "基于荧光读数拟合 Michaelis-Menten 模型分析蛋白酶动力学数据。"},
-    {"name": "酶动力学分析工具", "sub_category": "数据分析", "description": "执行酶动力学实验分析，模拟并拟合酶在不同底物浓度下的反应速率。"},
-    {"name": "RNA二级结构分析工具", "sub_category": "数据分析", "description": "分析 RNA 的二级结构特征，包括碱基配对、茎区、环区数量与大小。"},
+    {
+        "name": "圆二色谱分析工具",
+        "sub_category": "数据分析",
+        "description": "用于分析圆二色性(CD)光谱数据以确定二级结构和热稳定性。",
+        "prompt_template": """[Skill_Route: circular_dichroism_analysis]
+您好。我将对 **圆二色谱（CD）** 数据进行二级结构相关解读（蛋白/核酸模式），并在提供热变性曲线时给出 Tm 趋势与折叠分数估计。
+
+**参数**
+- **spectrum_json**：单行 JSON 字符串，字段包括 `sample_name`、`sample_type`（`protein` 或 `nucleic_acid`）、`wavelength_data`（nm 数组）、`cd_signal_data`（与波长等长的椭圆度数组）；若做热变性，可附加 `temperature_data` 与 `thermal_cd_data` 等长数组。
+- **output_format**：`text`（默认，人类可读报告）或 `json`。
+
+**示例 spectrum_json（可整体替换为您的实验数据）**
+{"sample_name":"DemoProtein","sample_type":"protein","wavelength_data":[190,200,210,220],"cd_signal_data":[0.1,-0.2,0.3,-0.4]}
+
+（助手侧：将用户表格或 JSON 规范化为上述字段写入 `spectrum_json`；未指定时 `output_format=text`。）
+""",
+    },
+    {"name": "蛋白质序列保守性分析工具", "sub_category": "数据分析", "description": "进行蛋白质多序列比对、系统发育树构建与保守性分析。", "prompt_template": """[Skill_Route: protein_sequence_conservation_analysis]
+您好。我将对多条蛋白质序列执行**渐进式多序列比对**、距离矩阵与**邻接法系统发育树**，并给出位点熵与保守性剖面。
+
+**参数**
+- **alignment_json**：单行 JSON，**必填** `protein_sequences`（字符串数组）；每条可为纯序列或含 `>` 头的 FASTA 片段。
+
+**示例 alignment_json**
+{"protein_sequences":["MKTLLL","MKTLLL","MKALLL"]}
+
+（助手侧：将用户 FASTA 或序列列表规范为上述 JSON 字符串写入 `alignment_json`。）
+""",
+    },
+    {"name": "ITC结合热力学分析工具", "sub_category": "数据分析", "description": "分析等温滴定量热 (ITC) 数据，返回 Kd、ΔH、ΔS 等热力学参数。", "prompt_template": """[Skill_Route: itc_binding_thermodynamic_analysis]
+您好。我将对 ITC 滴定数据拟合**一结合位点模型**，输出 Kd、ΔH、n、ΔG、ΔS 及拟合优度，并在报告中嵌入**拟合曲线图（Base64 PNG）**。
+
+**参数**
+- **protein_conc** / **ligand_conc**：池中蛋白浓度（M）、针筒配体浓度（M）。
+- **itc_injections_json**：内联 JSON 数组 `[[injection#, volume_L, heat], ...]`（与 `file_path` 二选一）。
+- **file_path**：上传 CSV/TSV（三列：injection, volume, heat）。
+- **cell_volume**：池体积（L），默认 `1.4e-3`。
+- **temperature**：摄氏温度，默认 `25`。
+- **volume_unit**：`L`（默认）| `mL` | `uL` | `µL`（与原始体积列一致）。
+
+**示例 itc_injections_json（演示用，可替换为真实滴定）**
+[[1,2e-6,-1200],[2,2e-6,-2100],[3,2e-6,-2800],[4,2e-6,-3100],[5,2e-6,-2900]]
+
+（助手侧：有上传文件时只填 `file_path`；无上传时将滴定表写入 `itc_injections_json`。）
+""",
+    },
+    {"name": "蛋白酶动力学分析工具", "sub_category": "数据分析", "description": "基于荧光读数拟合 Michaelis-Menten 模型分析蛋白酶动力学数据。", "prompt_template": """[Skill_Route: protease_kinetics_analysis]
+您好。我将由荧光时间曲线估计各底物浓度的**初速率**，拟合 **Michaelis-Menten**，给出 Vmax、Km、kcat、kcat/Km，并在报告中嵌入 **MM 拟合曲线图（Base64 PNG）**。
+
+**参数**
+- **kinetics_input_json**：单行 JSON，**必填** `time_points`（s）、`substrate_concentrations`（μM）、`fluorescence_data`（与底物行数一致的二维数组）、`enzyme_concentration`（μM）。
+
+**示例 kinetics_input_json**
+{"time_points":[0,30,60,90],"substrate_concentrations":[10,40],"fluorescence_data":[[100,150,180,200],[100,130,150,165]],"enzyme_concentration":0.1}
+
+（助手侧：将实验表整理为合法 JSON 写入 `kinetics_input_json`。）
+""",
+    },
+    {"name": "酶动力学分析工具", "sub_category": "数据分析", "description": "执行酶动力学实验分析，模拟并拟合酶在不同底物浓度下的反应速率。", "prompt_template": """[Skill_Route: enzyme_kinetics_analysis]
+您好。我将基于底物列表仿真时间历程与底物饱和曲线，拟合 **Michaelis-Menten** 参数，并在报告中嵌入**底物动力学拟合图（Base64 PNG）**。
+
+**参数**
+- **kinetics_input_json**：单行 JSON，**必填** `enzyme_name`、`substrate_concentrations`（μM 列表）、`enzyme_concentration`（nM）；可选 `time_points`（min）、`temperature`、`pH`、`modulators` 等。
+
+**示例 kinetics_input_json**
+{"enzyme_name":"DemoEnzyme","enzyme_concentration":50,"substrate_concentrations":[5,10,25,50,100]}
+
+（助手侧：将用户实验设计整理为合法 JSON 写入 `kinetics_input_json`。）
+""",
+    },
+    {
+        "name": "RNA二级结构分析工具",
+        "sub_category": "数据分析",
+        "description": "分析 RNA 的二级结构特征，包括碱基配对、茎区、环区数量与大小。",
+        "prompt_template": """[Skill_Route: rna_secondary_structure_analysis]
+您好。我将对 RNA **点括号二级结构**（及可选一级序列）做配对校验、茎/环统计，并给出简化的自由能与 GC 含量估计。
+
+**参数**
+- **structure_json**：内联 JSON，至少含 `structure`（点括号串），可选 `sequence`（AUCG）。
+- **file_path**：若用户上传 `.fa` / `.txt` / 点括号文件，使用会话附件列表中的**绝对路径**（与 `structure_json` 二选一）。
+- **result_format**：`json`（默认，便于机器摘要）、`txt`、`csv` 或 `all`。
+
+**内联示例**
+{"structure":"..((..))","sequence":"AAGGCCUU"}
+
+（助手侧：有上传文件时只填 `file_path`；无上传时将正文中的结构 JSON 写入 `structure_json`。）
+""",
+    },
     {
         "name": "基因集富集分析工具",
         "sub_category": "数据分析",
@@ -333,8 +482,41 @@ STAT3,0.9
 （助手侧：未上传文件时将上表全文写入 `table_content`，换行用 \\n；已上传时仅用附件列表中的路径写入 `file_path`。）
 """,
     },
-    {"name": "免疫细胞分离与纯化", "sub_category": "临床应用", "description": "模拟免疫细胞的分离与纯化流程。"},
-    {"name": "估计细胞周期各阶段持续时间", "sub_category": "数据分析", "description": "基于双核苷脉冲标记的流式细胞术数据，估算细胞周期各阶段时长。"},
+    {
+        "name": "免疫细胞分离与纯化",
+        "sub_category": "临床应用",
+        "description": "模拟免疫细胞的分离与纯化流程。",
+        "prompt_template": """[Skill_Route: immune_cell_isolation_simulation]
+您好。我将基于组织类型、靶细胞与酶解方案，**仿真**免疫细胞分离、纯化与质控指标（产量、活率、纯度、回收率等），并生成 CSV 步骤表。
+
+**参数**
+- **simulation_json**：单行 JSON，**必填** `tissue_type`（如 spleen、liver、tumor）、`target_cell_type`（如 macrophages、t_cells）；可选 `enzyme_type`（默认 collagenase）、`digestion_time_min`（默认 45）。
+- **output_format**：`text`（默认，完整日志）或 `json`。
+- **random_seed**：可选整数，固定随机细节。
+
+**示例 simulation_json**
+{"tissue_type":"spleen","target_cell_type":"macrophages","enzyme_type":"collagenase","digestion_time_min":60}
+
+（助手侧：将用户实验设计整理为合法 JSON 字符串写入 `simulation_json`。）
+""",
+    },
+    {
+        "name": "估计细胞周期各阶段持续时间",
+        "sub_category": "数据分析",
+        "description": "基于双核苷脉冲标记的流式细胞术数据，估算细胞周期各阶段时长。",
+        "prompt_template": """[Skill_Route: cell_cycle_phase_duration_estimation]
+您好。我将基于 **EdU/BrdU 双脉冲标记**流式百分比曲线，用数值优化估计 **G1 / S / G2M 时长**、**死亡率**与标记效率等参数。
+
+**参数**
+- **flow_cytometry_json**：单行 JSON，**必填**等长数组 `time_points`（h）、`edu_positive`、`brdu_positive`、`double_positive`（单位均为**百分比 0–100**）。
+- **initial_estimates_json**：可选；含 `g1_duration`、`s_duration`、`g2m_duration`、`death_rate`；可留空，系统使用默认初值 `{"g1_duration":6,"s_duration":8,"g2m_duration":4,"death_rate":0.02}`。
+
+**示例 flow_cytometry_json**
+{"time_points":[0,2,4,6,8],"edu_positive":[5,15,28,35,38],"brdu_positive":[3,12,30,40,42],"double_positive":[1,8,18,25,28]}
+
+（助手侧：将流式导出表整理为上述 JSON 写入 `flow_cytometry_json`；初值可省略。）
+""",
+    },
     {"name": "查询GSEA支持的数据库工具", "sub_category": "信息检索", "description": "返回 gene set enrichment analysis 支持的数据库名称列表。"},
 ]
 for skill in ADDITIONAL_BIOMED_SKILLS:

@@ -12,6 +12,103 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# 组学三模态：LLM 参数推荐「硬兜底」——与 Genomics/Proteomics/Epigenomics 工作流
+# get_step_metadata.default_params 及工具签名对齐；在 generate_template 偶发无参时仍保证白名单非空。
+# ---------------------------------------------------------------------------
+OMICS_GENOMICS_ALGO_PARAM_KEYS: frozenset = frozenset(
+    {
+        "min_read_length",
+        "quality_cutoff",
+        "threads",
+        "mismatch_penalty",
+        "gap_open_penalty",
+        "optical_duplicate_distance",
+        "bqsr_max_cycles",
+        "min_base_quality",
+        "min_mapping_quality",
+        "stand_call_conf",
+        "cnv_bin_width",
+        "min_sv_len",
+        "tranche_sensitivity",
+        "pick_allele",
+        "pp2_ba1_threshold",
+        "report_style",
+    }
+)
+OMICS_PROTEOMICS_ALGO_PARAM_KEYS: frozenset = frozenset(
+    {
+        "mz_tolerance_ppm",
+        "snr_threshold",
+        "fragment_tol_da",
+        "missed_cleavages",
+        "peptide_fdr",
+        "target_fdr",
+        "razor_min_peptides",
+        "lfq_ratio_type",
+        "knn_neighbors",
+        "norm_method",
+        "group_column",
+        "log2fc_cutoff",
+        "n_top_features",
+        "enrich_padj",
+        "string_score_cutoff",
+        "report_depth",
+    }
+)
+OMICS_EPIGENOMICS_ALGO_PARAM_KEYS: frozenset = frozenset(
+    {
+        "trim_quality_threshold",
+        "threads",
+        "mismatch_penalty",
+        "min_mapq",
+        "shift_correction_bp",
+        "qvalue_threshold",
+        "broad_peak",
+        "idr_threshold",
+        "merge_distance_bp",
+        "promoter_window_bp",
+        "padj_cutoff",
+        "motif_e_value",
+        "nuc_resolution_bp",
+        "max_distance_bp",
+        "min_correlation",
+    }
+)
+
+OMICS_DOMAIN_ALGO_KEYS: Dict[str, frozenset] = {
+    "genomics": OMICS_GENOMICS_ALGO_PARAM_KEYS,
+    "proteomics": OMICS_PROTEOMICS_ALGO_PARAM_KEYS,
+    "epigenomics": OMICS_EPIGENOMICS_ALGO_PARAM_KEYS,
+}
+
+
+def _workflow_domain_name(workflow: Any) -> str:
+    try:
+        n = workflow.get_name()
+        return n if isinstance(n, str) else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def merge_omics_static_whitelist_keys(workflow: Any, keys: List[str]) -> List[str]:
+    """将三模态硬编码算法键并入列表（去重保序）。"""
+    dom = _workflow_domain_name(workflow)
+    extra = OMICS_DOMAIN_ALGO_KEYS.get(dom) or frozenset()
+    if not extra:
+        return list(keys)
+    seen = set(keys)
+    out = list(keys)
+    for k in sorted(extra):
+        if k in seen:
+            continue
+        if not _is_algorithmic_param_key(k):
+            continue
+        seen.add(k)
+        out.append(k)
+    return out
+
+
 # 仅路径/资产流转类参数：不应出现在「💡 参数推荐」表格中凑数（无可调算法语义时整步静默）
 PIPELINE_PLUMBING_PARAM_KEYS = frozenset(
     {
@@ -139,6 +236,16 @@ def build_diagnosis_whitelist_prompt(
                     f"  - Key: {k}  |  UI 标签（仅作阅读，表格第一列禁止写标签）: {lbl}"
                 )
 
+    dom = _workflow_domain_name(workflow)
+    extra_dom = OMICS_DOMAIN_ALGO_KEYS.get(dom)
+    if extra_dom:
+        step_lines.append(
+            f"- **{dom} 模态·诊断兜底 Key 列表（与 workflow 工具 default_params / 签名对齐；仅当该步骤实际暴露此键时可推荐）**: "
+            + ", ".join(sorted(extra_dom))
+        )
+
+    flat_ordered = merge_omics_static_whitelist_keys(workflow, flat_ordered)
+
     body = "\n".join(step_lines) if step_lines else "(当前未能解析出任何可调参数；请勿输出参数推荐表)"
     prompt = f"""
 
@@ -212,7 +319,7 @@ def collect_param_whitelist_for_diagnosis(
         tmpl = workflow.generate_template(ts, file_metadata)
         names = collect_param_names_from_plan_result(tmpl)
         if names:
-            return names
+            return merge_omics_static_whitelist_keys(workflow, names)
     except Exception as e:
         logger.debug("collect_param_whitelist_for_diagnosis: generate_template 失败，回退 DAG: %s", e)
 
@@ -246,4 +353,4 @@ def collect_param_whitelist_for_diagnosis(
                 ):
                     seen.add(k)
                     ordered.append(k)
-    return ordered
+    return merge_omics_static_whitelist_keys(workflow, ordered)

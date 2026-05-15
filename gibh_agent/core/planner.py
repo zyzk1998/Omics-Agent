@@ -1379,19 +1379,20 @@ File Uploaded: {has_file} ({'True' if has_file else 'False'})
 **CRITICAL ROUTING RULES (User Intent + File Format):**
 1. **Visium/Spatial files** (file_type="visium" or domain="Spatial") MUST route to "Spatial" domain.
 2. **Medical imaging / Radiomics files** (file_type="medical_image" or domain="Radiomics" or extension .nii/.nii.gz/.dcm) MUST route to "Radiomics" domain.
-3. **FASTQ files** (file_type="fastq" or extension=".fastq"/".fq"): Prefer **RNA** for scRNA-seq / Cell Ranger wording; if the user clearly requests **WGS/WES/基因组变异/GATK/BWA** style analysis (genomics), route to **genomics** instead of RNA.
-4. **H5AD/10x files** (file_type="h5ad" or "10x_mtx"): If visium/Spatial → "Spatial". Else if user asks spatiotemporal dynamics / 时空动力学 → "SPATIOTEMPORAL_DYNAMICS". Else if trajectory / moscot / optimal transport (without B-channel wording) → "STED_EC". Else → "RNA".
-5. **CSV/Tabular files** (file_type="tabular" or extension=".csv") MUST route to "Metabolomics" domain, unless user explicitly mentions RNA.
-6. **Upload asset sniffing (authoritative extension labels in metadata):** If `routing_asset_types` or `routing_asset_inventory` lists **protein_structure** (e.g. .pdb/.cif) or **protein_fasta**, you MUST **NOT** choose "RNA", "Spatial", "Radiomics", "STED_EC", or "SPATIOTEMPORAL_DYNAMICS" unless the user query **explicitly** names that modality (e.g. "单细胞", "空间转录组", "影像组学"). Prefer **Metabolomics** only as a last-resort placeholder when forced to pick among the standard domains and no other rule applies; the global router may already have sent such sessions to Chat for skill tools (PyMOL, etc.).
-7. **document** / **plain_text** / **generic_unknown** assets: Do **not** assume scRNA-seq or radiomics; follow user wording. If the query is vague and assets are only these types, prefer **Metabolomics** only when the user clearly wants table-like analysis; otherwise prefer the least specific domain consistent with the query.
-8. **User Query Keywords:**
+3. **Mass spectrometry proteomics** (file_type="proteomics_ms" or "proteomics_raw_ms", or extension **.mzml** / **.raw**) MUST route to **proteomics** (not RNA / Metabolomics).
+4. **FASTQ files** (file_type="fastq" or extension=".fastq"/".fq"): Default **RNA** for scRNA-seq / Cell Ranger wording; if user clearly requests **WGS/WES/变异检测/GATK/BWA** → **genomics**; if user clearly requests **ATAC-seq/ChIP-seq/表观/MACS2/peak** → **epigenomics** (not RNA).
+5. **H5AD/10x files** (file_type="h5ad" or "10x_mtx"): If visium/Spatial → "Spatial". Else if user asks spatiotemporal dynamics / 时空动力学 → "SPATIOTEMPORAL_DYNAMICS". Else if trajectory / moscot / optimal transport (without B-channel wording) → "STED_EC". Else → "RNA".
+6. **CSV/Tabular files** (file_type="tabular" or extension=".csv") MUST route to "Metabolomics" domain, unless user explicitly mentions RNA.
+7. **Upload asset sniffing (authoritative extension labels in metadata):** If `routing_asset_types` or `routing_asset_inventory` lists **protein_structure** (e.g. .pdb/.cif) or **protein_fasta**, you MUST **NOT** choose "RNA", "Spatial", "Radiomics", "STED_EC", or "SPATIOTEMPORAL_DYNAMICS" unless the user query **explicitly** names that modality (e.g. "单细胞", "空间转录组", "影像组学"). Prefer **Metabolomics** only as a last-resort placeholder when forced to pick among the standard domains and no other rule applies; the global router may already have sent such sessions to Chat for skill tools (PyMOL, etc.).
+8. **document** / **plain_text** / **generic_unknown** assets: Do **not** assume scRNA-seq or radiomics; follow user wording. If the query is vague and assets are only these types, prefer **Metabolomics** only when the user clearly wants table-like analysis; otherwise prefer the least specific domain consistent with the query.
+9. **User Query Keywords:**
    - If query contains Spatial keywords (visium, spatial, slice, spot, moran): Prefer "Spatial" domain
    - If query contains Radiomics keywords (CT scan, MRI, radiomics, texture, nifti, dicom): Prefer "Radiomics" domain
    - If query contains RNA keywords ({', '.join(rna_keywords[:5])}): Prefer "RNA" domain
    - If query contains Metabolomics keywords ({', '.join(metabolomics_keywords[:3])}): Prefer "Metabolomics" domain
    - If query contains spatiotemporal dynamics / 时空动力学 keywords: Prefer "SPATIOTEMPORAL_DYNAMICS" over STED_EC and RNA when file is h5ad
    - If query contains trajectory / moscot / optimal transport: Prefer "STED_EC" when file is h5ad (unless B-channel wording above wins)
-9. **Priority Order:** File format (visium→Spatial, medical_image→Radiomics) > **routing_asset_types / routing_asset_inventory** > User query keywords > LLM inference
+10. **Priority Order:** File format (visium→Spatial, medical_image→Radiomics, mzML→proteomics) > **routing_asset_types / routing_asset_inventory** > User query keywords > LLM inference
 
 **Task:**
 Classify the intent and return JSON only. Remember:
@@ -1490,8 +1491,20 @@ Classify the intent and return JSON only. Remember:
                         domain_name,
                     )
                 domain_name = "epigenomics"
-            # 1. FASTQ → RNA（除非明确基因组变异/WGS 语义）
-            elif file_type == "fastq" or (file_path and any(ext in file_path.lower() for ext in [".fastq", ".fq", "fastq"])):
+            # 🔥 Proteomics：mzML / Thermo RAW（与 FileInspector file_type 对齐）
+            elif file_type in ("proteomics_ms", "proteomics_raw_ms") or (
+                file_path and file_path.lower().endswith((".mzml", ".raw"))
+            ):
+                if domain_name != "proteomics":
+                    logger.warning(
+                        "⚠️ [SOPPlanner] 检测到质谱蛋白组入口（mzML/RAW），强制覆盖域名: %s → proteomics",
+                        domain_name,
+                    )
+                domain_name = "proteomics"
+            # 1. FASTQ → RNA / genomics / epigenomics（依赖关键词）
+            elif file_type == "fastq" or (
+                file_path and any(ext in file_path.lower() for ext in [".fastq", ".fq", "fastq"])
+            ):
                 scrna_hint = any(
                     kw in query_lower
                     for kw in ["scrna", "single cell", "单细胞", "cellranger", "cell ranger", "转录组测序"]
@@ -1503,6 +1516,13 @@ Classify the intent and return JSON only. Remember:
                             domain_name,
                         )
                     domain_name = "genomics"
+                elif has_epigenomics_keyword and not scrna_hint and not has_genomics_keyword:
+                    if domain_name != "epigenomics":
+                        logger.warning(
+                            "⚠️ [SOPPlanner] FASTQ + 表观遗传组学关键词，强制覆盖域名: %s → epigenomics",
+                            domain_name,
+                        )
+                    domain_name = "epigenomics"
                 else:
                     if domain_name != "RNA":
                         logger.warning(f"⚠️ [SOPPlanner] 检测到FASTQ文件，强制覆盖域名: {domain_name} → RNA")
@@ -1680,6 +1700,28 @@ Classify the intent and return JSON only. Remember:
             elif file_type in ("medical_image", "medical_imaging") or file_domain == "Radiomics":
                 domain_name = "Radiomics"
                 logger.info("✅ [SOPPlanner] Fallback: 检测到医学影像/Radiomics 文件，使用 Radiomics 域名")
+            elif file_type in ("proteomics_ms", "proteomics_raw_ms") or (
+                file_path and file_path.lower().endswith((".mzml", ".raw"))
+            ):
+                domain_name = "proteomics"
+                logger.info("✅ [SOPPlanner] Fallback: mzML/RAW 质谱 → proteomics")
+            elif file_type == "fastq" or (
+                file_path
+                and file_path.lower().endswith((".fastq.gz", ".fq.gz", ".fastq", ".fq"))
+            ):
+                scrna_fb = any(
+                    kw in query_lower
+                    for kw in ["scrna", "single cell", "单细胞", "cellranger", "cell ranger", "转录组"]
+                )
+                if any(kw in query_lower for kw in GENOMICS_INTENT_KEYWORDS) and not scrna_fb:
+                    domain_name = "genomics"
+                    logger.info("✅ [SOPPlanner] Fallback: FASTQ + 基因组关键词 → genomics")
+                elif any(kw in query_lower for kw in EPIGENOMICS_INTENT_KEYWORDS) and not scrna_fb:
+                    domain_name = "epigenomics"
+                    logger.info("✅ [SOPPlanner] Fallback: FASTQ + 表观关键词 → epigenomics")
+                else:
+                    domain_name = "RNA"
+                    logger.info("✅ [SOPPlanner] Fallback: FASTQ → RNA（默认）")
             elif file_type == "anndata" or (file_path and file_path.lower().endswith((".h5ad", ".h5", ".loom"))):
                 if file_path and file_path.lower().endswith(".h5ad") and _has_spatiotemporal_dynamics_keyword(query_lower):
                     domain_name = "SPATIOTEMPORAL_DYNAMICS"
@@ -1931,6 +1973,12 @@ Classify the intent and return JSON only. Remember:
                 params["image_path"] = file_path
             if "mask_path" in params and file_metadata.get("mask_path"):
                 params["mask_path"] = file_metadata["mask_path"]
+            # 首步 data_path（如 radiomics_data_validation）：与主上传路径对齐，避免仅注入 file_path 而工具签名不认
+            if "data_path" in params and file_path:
+                cur_dp = params.get("data_path")
+                if not cur_dp or str(cur_dp).strip() in ("", "<PENDING_UPLOAD>", "<待上传数据>", "<user_input>", "<USER_INPUT>"):
+                    params["data_path"] = file_path
+                    logger.info("✅ [SOPPlanner] 填充 data_path <- file_metadata.file_path (%s)", step_id)
 
             # 🔥 CRITICAL FIX: 填充 file_path 或 adata_path（覆盖占位符）
             if "file_path" in params or "adata_path" in params:

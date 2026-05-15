@@ -22,6 +22,14 @@ logger = logging.getLogger(__name__)
 PYSKILLS_BASE_URL = (os.getenv("PYSKILLS_BASE_URL") or "http://worker-pyskills:8000").rstrip("/")
 _RAD_TIMEOUT = float(os.getenv("PYSKILLS_RAD_TIMEOUT", "600"))
 
+# 无标签 / 单样本端到端：不调用 worker 伪造 ROC，返回 skipped 供前端黄标展示
+_RAD_MIN_MODELING_SAMPLES = 5
+_RAD_MODELING_SKIP_MARKDOWN = (
+    "### ⚠️ 机器学习建模已自动跳过\n\n"
+    "当前分析未指定临床结局标签列（`label_col`），或输入为单样本测试数据。多算法诊断效能对比（LR/SVM/RF）需要包含临床标签的队列数据集。\n\n"
+    "**此跳过为预期行为，不影响已成功执行的影像组学高维特征提取。**您可以下载特征 CSV 用于后续的队列分析。"
+)
+
 
 def _radiomics_paths_from_resolved(resolved: Dict[str, List[str]]) -> Tuple[List[str], Optional[str], Optional[str]]:
     images = resolved.get("images") or []
@@ -86,6 +94,29 @@ def radiomics_data_validation(data_path: str) -> Dict[str, Any]:
     """
     极速影像组学数据校验：读取特征 CSV 或图像/目录（本地轻量 pandas/numpy）。
     """
+    raw_dp = (data_path or "").strip()
+    if not raw_dp:
+        return {
+            "status": "error",
+            "error_category": "data_issue",
+            "message": "严重错误：动态流程传入的 data_path 为空，CLI 拒绝空转！",
+            "user_message": "未收到有效数据路径，请从侧栏添加数据资产或重新上传影像/掩膜后再执行。",
+        }
+    try:
+        p0 = Path(raw_dp.split(",")[0].split(";")[0].strip())
+        if not p0.exists():
+            return {
+                "status": "error",
+                "error_category": "data_issue",
+                "message": f"严重错误：动态流程传入的文件路径 {raw_dp!r} 在磁盘上不存在，CLI 拒绝空转！",
+                "user_message": "容器内找不到该文件，请确认上传目录挂载与路径是否一致。",
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error_category": "data_issue",
+            "message": f"严重错误：无法校验路径 {raw_dp!r}: {e}",
+        }
     try:
         import numpy as np
         import pandas as pd
@@ -211,9 +242,15 @@ def extract_radiomics_features(
     )
     if data.get("status") != "success":
         return data
+    _csv = data.get("features_csv_path") or ""
+    _bn = Path(str(ip_abs)).name
+    _msg = f"已成功从 `{_bn}`（及掩膜）经 TaaS 提取 {data.get('n_features', '?')} 个组学特征。"
+    _md = f"**{_msg}**\n\n输出特征表：`{Path(str(_csv)).name}`\n"
     return {
         "status": "success",
-        "message": data.get("message", ""),
+        "message": _msg,
+        "summary": _md,
+        "markdown": _md,
         "output_path": data.get("features_csv_path"),
         "features_csv_path": data.get("features_csv_path"),
         "features_csv_url": data.get("features_csv_url"),
@@ -326,30 +363,59 @@ def radiomics_model_comparison(
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+    try:
+        import pandas as pd
+
+        df = pd.read_csv(csv_abs)
+    except Exception as e:
+        return {"status": "error", "message": f"无法读取特征表 CSV: {e}"}
+
+    n_rows = int(df.shape[0])
+    if n_rows < _RAD_MIN_MODELING_SAMPLES:
+        short = "队列样本量不足（少于 5 例），自动跳过建模"
+        return {
+            "status": "skipped",
+            "message": short,
+            "summary": short,
+            "markdown": _RAD_MODELING_SKIP_MARKDOWN,
+            "can_skip": True,
+            "features_csv_path": csv_abs,
+        }
+
     lc = (label_col or "").strip()
     if not lc:
-        try:
-            import pandas as pd
+        candidate_cols = [
+            "label", "target", "class", "y",
+            "group", "status", "diagnosis", "type", "condition", "cohort",
+        ]
+        cand_lower = {c.lower() for c in candidate_cols}
+        candidates = [c for c in df.columns if str(c).strip().lower() in cand_lower]
+        candidates = [c for c in candidates if df[c].nunique() >= 2]
+        if len(candidates) == 1:
+            lc = candidates[0]
+        elif len(candidates) > 1:
+            cand_txt = ", ".join(str(c) for c in candidates)
+            extra = f"检测到多个候选标签列（{cand_txt}），请显式指定 `label_col`。"
+            short = "存在多个候选标签列，已跳过建模"
+            return {
+                "status": "skipped",
+                "message": short,
+                "summary": short,
+                "markdown": f"{_RAD_MODELING_SKIP_MARKDOWN}\n\n{extra}",
+                "can_skip": True,
+                "features_csv_path": csv_abs,
+            }
 
-            df = pd.read_csv(csv_abs, nrows=5)
-            candidate_cols = [
-                "label", "target", "class", "y",
-                "group", "status", "diagnosis", "type", "condition", "cohort",
-            ]
-            cand_lower = {c.lower() for c in candidate_cols}
-            candidates = [c for c in df.columns if str(c).strip().lower() in cand_lower]
-            candidates = [c for c in candidates if df[c].nunique() >= 2]
-            if len(candidates) == 1:
-                lc = candidates[0]
-            elif len(candidates) > 1:
-                return {
-                    "status": "error",
-                    "message": f"存在多个可能标签列 {candidates}，请显式传入 label_col。",
-                }
-        except Exception as e:
-            return {"status": "error", "message": f"无法推断 label_col: {e}"}
     if not lc:
-        return {"status": "error", "message": "请指定 label_col（分类标签列名）。"}
+        short = "缺乏临床标签，自动跳过建模"
+        return {
+            "status": "skipped",
+            "message": short,
+            "summary": short,
+            "markdown": _RAD_MODELING_SKIP_MARKDOWN,
+            "can_skip": True,
+            "features_csv_path": csv_abs,
+        }
 
     data = _post_radiomics("/model", {"features_csv_path": csv_abs, "label_col": lc})
     if data.get("status") != "success":

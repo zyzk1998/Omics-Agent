@@ -1,5 +1,5 @@
 /**
- * 帮助与反馈：Modal + 管理员列表数据源（POST /api/feedbacks）
+ * 问题反馈：Modal + 管理员列表数据源（POST /api/feedbacks）
  */
 (function () {
     'use strict';
@@ -37,7 +37,7 @@
             '  <div class="modal-dialog modal-dialog-centered">' +
             '    <div class="modal-content feedback-modal-content">' +
             '      <div class="modal-header">' +
-            '        <h5 class="modal-title" id="feedback-modal-label">💡 帮助与反馈</h5>' +
+            '        <h5 class="modal-title" id="feedback-modal-label">💡 问题反馈</h5>' +
             '        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>' +
             '      </div>' +
             '      <div class="modal-body">' +

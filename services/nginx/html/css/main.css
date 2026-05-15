@@ -4200,3 +4200,67 @@
     overflow-wrap: anywhere;
     white-space: normal;
 }
+
+/* ================= 版本更新弹框（桌面端：用户菜单 → 更新应用） ================= */
+.omics-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 10050;
+    align-items: center;
+    justify-content: center;
+}
+.omics-update-dialog {
+    background: #fff;
+    width: 600px;
+    max-width: 90vw;
+    border-radius: 12px;
+    padding: 24px;
+    position: relative;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+.omics-update-dialog .update-header {
+    position: relative;
+    padding-right: 8px;
+}
+.omics-update-dialog .close-btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    border: none;
+    background: transparent;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    color: #666;
+    padding: 0 4px;
+}
+.omics-update-dialog .close-btn:hover {
+    color: #111;
+}
+.omics-update-dialog .update-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 1px solid #eaeaea;
+    border-radius: 12px;
+    padding: 20px;
+    margin-top: 20px;
+    background: #fafafa;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+.omics-update-dialog .update-info {
+    flex: 1;
+    min-width: 200px;
+}
+.omics-update-dialog .update-action {
+    flex-shrink: 0;
+}
+.omics-update-dialog .omics-update-check-btn {
+    border-radius: 20px;
+    padding: 6px 20px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}

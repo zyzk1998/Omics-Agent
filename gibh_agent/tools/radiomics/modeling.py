@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List, Union
 
 from ...core.tool_registry import registry
+from .nifti_preview import build_radiomics_nifti_preview_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -128,12 +129,21 @@ def radiomics_preprocessing(
         out_p.parent.mkdir(parents=True, exist_ok=True)
         sitk.WriteImage(resampled, str(out_p))
 
+        _pv = ""
+        if out_p.suffix.lower() in (".gz", ".nii") or ".nii" in out_p.name.lower():
+            _pv = build_radiomics_nifti_preview_markdown(str(out_p), title="预处理后体数据 — 中心轴位预览")
+        _base = Path(image_path).name
+        _meta = f"- **输入**：`{_base}`\n- **输出**：`{out_p.name}`\n- **体素尺寸（预处理后）**：{list(resampled.GetSize())}\n"
+        _md = (_pv + "### 预处理结果\n" + _meta) if _pv else ("### 预处理结果\n" + _meta)
         return {
             "status": "success",
             "preprocessed_path": str(out_p),
             "image_path": image_path,
             "spacing_mm": target_spacing,
             "size_after": list(resampled.GetSize()),
+            "markdown": _md,
+            "summary": _md,
+            "message": f"已对 `{_base}` 完成重采样/归一化，输出 `{out_p.name}`。",
         }
     except Exception as e:
         logger.exception("radiomics_preprocessing failed: %s", e)

@@ -131,12 +131,18 @@ def extract_radiomics_features(
                     writer.writerow([k, v])
 
         n_features = sum(1 for k in result if not k.startswith("diagnostics"))
+        _img_bn = img_p.name
+        _msg = f"已成功从 `{_img_bn}` 提取 {n_features} 个组学特征（PyRadiomics）。"
+        _md = f"**{_msg}**\n\n特征表：`{csv_path.name}`\n"
         out_result = {
             "status": "success",
             "csv_path": str(csv_path),
             "n_features": n_features,
             "image_path": image_path,
             "mask_path": str(mask_to_use),
+            "message": _msg,
+            "summary": _md,
+            "markdown": _md,
         }
         if temp_mask and temp_mask.exists():
             try:

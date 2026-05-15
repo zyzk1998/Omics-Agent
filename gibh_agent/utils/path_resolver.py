@@ -219,7 +219,8 @@ def validate_inspector_file_format(path_str: str) -> Optional[Dict[str, Any]]:
             "error": (
                 "不支持该文件扩展名（已禁止 .txt 作为数据入口）。\n\n"
                 "支持格式：单细胞 RNA 请上传 .h5ad 或解压后的 10x 目录（含 matrix.mtx、barcodes.tsv、features.tsv）；"
-                "代谢组学请上传 CSV；影像组学请上传 .nii / .nii.gz / .dcm。"
+                "代谢组学请上传 CSV；影像组学请上传 .nii / .nii.gz / .dcm；"
+                "蛋白组学请上传 .mzML / .raw；基因组/表观组测序请上传 .fastq.gz / .fq.gz（或按流程上传 BAM/VCF）。"
             ),
             "file_type": "unknown",
             "file_path": raw,
@@ -235,7 +236,8 @@ def validate_inspector_file_format(path_str: str) -> Optional[Dict[str, Any]]:
         "error": (
             f"不支持的文件扩展名: {suf}\n\n"
             "支持格式：单细胞 RNA 请上传 .h5ad 或解压后的 10x 目录（含 matrix.mtx、barcodes.tsv、features.tsv）；"
-            "代谢组学请上传 CSV；影像组学请上传 .nii / .nii.gz / .dcm。"
+            "代谢组学请上传 CSV；影像组学请上传 .nii / .nii.gz / .dcm；"
+            "蛋白组学请上传 .mzML / .raw；基因组/表观组测序请上传 .fastq.gz / .fq.gz（或按流程上传 BAM/VCF）。"
         ),
         "file_type": "unknown",
         "file_path": raw,

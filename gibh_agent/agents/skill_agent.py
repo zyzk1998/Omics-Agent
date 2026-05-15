@@ -35,6 +35,16 @@ except Exception:
         "chem_gi_absorption_tools / chem_misc_tools 预加载失败（若仅使用其它化学工具可忽略）",
         exc_info=True,
     )
+try:
+    import importlib as _importlib_bioml
+
+    _importlib_bioml.import_module("gibh_agent.tools.crispr_cas9_tool")
+    _importlib_bioml.import_module("gibh_agent.tools.bioml_batch3_tools")
+except Exception:
+    logger.warning(
+        "crispr_cas9_tool / bioml_batch3_tools 预加载失败（快车道 CRISPR/第三批生医仿真将不可用）",
+        exc_info=True,
+    )
 
 # 药物相似性技能（逻辑 ID drug_similarity）：双工具 persona，供填参 LLM 对齐科学叙事
 DRUG_SIM_PERSONA_LIPINSKI = (
@@ -184,6 +194,107 @@ def _extract_inline_csv_table_for_fallback(text: str) -> str:
             if len(lines) >= 12:
                 break
     return "\n".join(lines) if lines else ""
+
+
+# 人源性评估（OASis）技能广场默认演示序列（与 seed_skills / index.html 一致）
+_OASIS_DEMO_HEAVY = (
+    "EVQLVESGGGLVQPGGSLRLSCAASGFTFSSYAMSWVRQAPGKGLEWVSAISGSGGSTYYADSVKGRFTISRDNSKNTLYLQMNSLRAEDTAVYYCARDYGDYWGQGTLVTVSS"
+)
+_OASIS_DEMO_LIGHT = (
+    "DIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLYSGVPSRFSGSRSGTDFTLTISSLQPEDFATYYCQQHYTTPPTFGQGTKVEIK"
+)
+_AA_ONLY = re.compile(r"^[ACDEFGHIKLMNPQRSTVWY]+$", re.I)
+
+
+def _extract_antibody_chains_for_fallback(text: str) -> Dict[str, str]:
+    """从用户正文 / 技能模板中解析抗体重链、轻链氨基酸序列。"""
+    raw = text or ""
+    out: Dict[str, str] = {}
+
+    # 1) 单行 JSON：antibody_sequences_json 或内联 {"heavy_chain":...,"light_chain":...}
+    for blob_m in re.finditer(r"\{[^{}]*heavy[^{}]*light[^{}]*\}", raw, re.I | re.S):
+        try:
+            obj = json.loads(blob_m.group(0))
+            hc = (
+                obj.get("heavy_chain")
+                or obj.get("heavy")
+                or obj.get("H")
+                or obj.get("heavyChain")
+                or ""
+            )
+            lc = (
+                obj.get("light_chain")
+                or obj.get("light")
+                or obj.get("L")
+                or obj.get("lightChain")
+                or ""
+            )
+            if isinstance(hc, str) and isinstance(lc, str):
+                hc, lc = hc.strip().upper(), lc.strip().upper()
+                if len(hc) >= 20 and len(lc) >= 20 and _AA_ONLY.match(hc) and _AA_ONLY.match(lc):
+                    return {"heavy_chain": hc, "light_chain": lc}
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    # 2) 显式键值：heavy_chain / light_chain（含反引号、中英文标签）
+    kv_patterns = [
+        (r"(?:heavy[_\s-]*chain|重链|H\s*链)\s*[:：=]\s*`?([ACDEFGHIKLMNPQRSTVWY]{20,})`?", "heavy_chain"),
+        (r"(?:light[_\s-]*chain|轻链|L\s*链)\s*[:：=]\s*`?([ACDEFGHIKLMNPQRSTVWY]{20,})`?", "light_chain"),
+    ]
+    for pat, key in kv_patterns:
+        m = re.search(pat, raw, re.I)
+        if m:
+            out[key] = m.group(1).strip().upper()
+
+    if out.get("heavy_chain") and out.get("light_chain"):
+        return out
+
+    # 3) FASTA：>heavy / >light 或链类型在 header
+    current: Optional[str] = None
+    buf_h: List[str] = []
+    buf_l: List[str] = []
+    for ln in raw.splitlines():
+        s = ln.strip()
+        if not s:
+            continue
+        if s.startswith(">"):
+            header = s[1:].lower()
+            if any(x in header for x in ("heavy", "h_chain", "vh", "重链")):
+                current = "h"
+            elif any(x in header for x in ("light", "l_chain", "vl", "轻链", "kappa", "lambda")):
+                current = "l"
+            else:
+                current = None
+            continue
+        seq = re.sub(r"[^A-Za-z]", "", s).upper()
+        if len(seq) < 20 or not _AA_ONLY.match(seq):
+            continue
+        if current == "h":
+            buf_h.append(seq)
+        elif current == "l":
+            buf_l.append(seq)
+    if buf_h and buf_l:
+        return {"heavy_chain": "".join(buf_h), "light_chain": "".join(buf_l)}
+
+    # 4) 技能模板内嵌的两条长肽段（按长度降序取前两条）
+    candidates: List[str] = []
+    for m in re.finditer(r"`([ACDEFGHIKLMNPQRSTVWY]{80,})`", raw, re.I):
+        candidates.append(m.group(1).upper())
+    for m in re.finditer(r"\b([ACDEFGHIKLMNPQRSTVWY]{80,})\b", raw):
+        candidates.append(m.group(1).upper())
+    uniq: List[str] = []
+    for c in candidates:
+        if c not in uniq:
+            uniq.append(c)
+    if len(uniq) >= 2:
+        uniq.sort(key=len, reverse=True)
+        return {"heavy_chain": uniq[0], "light_chain": uniq[1]}
+
+    norm = raw.replace(" ", "").upper()
+    if _OASIS_DEMO_HEAVY in norm and _OASIS_DEMO_LIGHT in norm:
+        return {"heavy_chain": _OASIS_DEMO_HEAVY, "light_chain": _OASIS_DEMO_LIGHT}
+
+    return out
 
 
 def strip_skill_route_tag(query: str) -> str:
@@ -349,6 +460,20 @@ class SkillAgent:
             "对 PySkills 类工具请改用内联字段（勿写 /app/uploads/demo_*.fa 等虚构路径）："
             "rnafold_analysis→fasta_content；sascore_analysis→smiles_text；lipinski_druglikeness→smiles_text；"
             "drug_similarity_search→smiles_text；pymol_analysis→pdb_content；gseapy_analysis→table_content。"
+            "crispr_cas9_simulation→guides_text、target_sequence、cell_line（可选）、result_format、random_seed（可选）；"
+            "无上传文件时从正文提取 gRNA 与靶序列填入 guides_text/target_sequence，禁止编造 file_path。"
+            "immune_cell_isolation_simulation→simulation_json、output_format、random_seed（可选）。"
+            "rna_secondary_structure_analysis→structure_json 或 file_path（二选一）、result_format。"
+            "circular_dichroism_analysis→spectrum_json、output_format。"
+            "itc_binding_thermodynamic_analysis→protein_conc、ligand_conc、itc_injections_json 或 file_path、cell_volume（可选）、temperature（可选）、volume_unit（可选）；"
+            "cell_cycle_phase_duration_estimation→flow_cytometry_json、initial_estimates_json（可选 JSON，可留空使用默认初值）；"
+            "protease_kinetics_analysis→kinetics_input_json；enzyme_kinetics_analysis→kinetics_input_json；"
+            "protein_sequence_conservation_analysis→alignment_json（含 protein_sequences 数组）。"
+            "protein_homology_structure_assessment→uniprot_id、blast_evalue（可选）、struct_threshold、ptm_threshold、top_n、test_mode（可选布尔）；"
+            "antibody_humanness_oasis_evaluation→**必填** heavy_chain 与 light_chain（各为一条氨基酸串，无空格）；"
+            "或 antibody_sequences_json 单行 JSON {\"heavy_chain\":\"...\",\"light_chain\":\"...\"}；"
+            "禁止留空；用户未提供序列时从正文/FASTA/模板示例中提取，仍无则使用技能模板内演示 H/L 序列。"
+            "antibody_name、scheme、cdr_definition、threshold 可选。"
             "有上传文件时优先 file_path 并用列表中的绝对路径。"
             "若用户未单独写一行 SMILES，但正文中用反引号标出参考分子 SMILES（或列表项中带 SMILES），"
             "须将**第一个**可解析的 SMILES 填入 smiles_text，不得留空导致工具失败。"
@@ -481,6 +606,29 @@ class SkillAgent:
             exc = _extract_inline_csv_table_for_fallback(clean)
             if exc:
                 out["table_content"] = exc
+        if tool_name == "rna_secondary_structure_analysis" and "file_path" in fields and file_paths:
+            chosen_rna: Optional[str] = None
+            for p in file_paths:
+                pl = p.lower()
+                if pl.endswith((".fa", ".fasta", ".fna", ".txt", ".db", ".dot")):
+                    chosen_rna = p
+                    break
+            if chosen_rna:
+                out["file_path"] = chosen_rna
+            elif not out.get("file_path"):
+                out["file_path"] = file_paths[0]
+        if tool_name == "antibody_humanness_oasis_evaluation":
+            pairs = _extract_antibody_chains_for_fallback(clean)
+            if pairs:
+                out["heavy_chain"] = pairs["heavy_chain"]
+                out["light_chain"] = pairs["light_chain"]
+            else:
+                out["heavy_chain"] = _OASIS_DEMO_HEAVY
+                out["light_chain"] = _OASIS_DEMO_LIGHT
+            out.setdefault("scheme", "kabat")
+            out.setdefault("cdr_definition", "kabat")
+            out.setdefault("threshold", "relaxed")
+            out.setdefault("antibody_name", "Antibody")
         return out
 
     def _augment_args_from_user_text(
@@ -563,6 +711,61 @@ class SkillAgent:
                 tb = _extract_inline_csv_table_for_fallback(clean)
                 if tb:
                     args["table_content"] = tb
+        if tool_name == "crispr_cas9_simulation":
+            if "cell_line" in fields and _blank(args.get("cell_line")):
+                args["cell_line"] = "HEK293"
+            if "result_format" in fields and _blank(args.get("result_format")):
+                args["result_format"] = "markdown"
+        if tool_name == "immune_cell_isolation_simulation":
+            if "output_format" in fields and _blank(args.get("output_format")):
+                args["output_format"] = "text"
+        if tool_name == "rna_secondary_structure_analysis":
+            if "result_format" in fields and _blank(args.get("result_format")):
+                args["result_format"] = "json"
+        if tool_name == "circular_dichroism_analysis":
+            if "output_format" in fields and _blank(args.get("output_format")):
+                args["output_format"] = "text"
+        if tool_name == "antibody_humanness_oasis_evaluation":
+            js = (args.get("antibody_sequences_json") or "").strip()
+            if js and isinstance(js, str):
+                try:
+                    obj = json.loads(js)
+                    if _blank(args.get("heavy_chain")):
+                        args["heavy_chain"] = (
+                            obj.get("heavy_chain") or obj.get("heavy") or obj.get("H") or ""
+                        )
+                    if _blank(args.get("light_chain")):
+                        args["light_chain"] = (
+                            obj.get("light_chain") or obj.get("light") or obj.get("L") or ""
+                        )
+                except json.JSONDecodeError:
+                    pass
+            for alias_h, alias_l in (
+                ("heavy", "light"),
+                ("Heavy_chain", "Light_chain"),
+                ("H_chain", "L_chain"),
+            ):
+                if _blank(args.get("heavy_chain")) and isinstance(args.get(alias_h), str):
+                    args["heavy_chain"] = args[alias_h]
+                if _blank(args.get("light_chain")) and isinstance(args.get(alias_l), str):
+                    args["light_chain"] = args[alias_l]
+            pairs = _extract_antibody_chains_for_fallback(clean)
+            if pairs:
+                if _blank(args.get("heavy_chain")):
+                    args["heavy_chain"] = pairs["heavy_chain"]
+                if _blank(args.get("light_chain")):
+                    args["light_chain"] = pairs["light_chain"]
+            if _blank(args.get("heavy_chain")) or _blank(args.get("light_chain")):
+                args["heavy_chain"] = _OASIS_DEMO_HEAVY
+                args["light_chain"] = _OASIS_DEMO_LIGHT
+            if "scheme" in fields and _blank(args.get("scheme")):
+                args["scheme"] = "kabat"
+            if "cdr_definition" in fields and _blank(args.get("cdr_definition")):
+                args["cdr_definition"] = "kabat"
+            if "threshold" in fields and _blank(args.get("threshold")):
+                args["threshold"] = "relaxed"
+            if "antibody_name" in fields and _blank(args.get("antibody_name")):
+                args["antibody_name"] = "Antibody"
         return args
 
     async def _llm_extract_args(

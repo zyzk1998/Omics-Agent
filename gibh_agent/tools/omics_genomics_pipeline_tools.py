@@ -3,7 +3,7 @@
 
 与 GenomicsWorkflow 的 tool_id 一一对应。
 首步 `genomics_raw_qc`：对 FASTQ/FASTQ.GZ 做真实流式统计（reads、GC、读长）。
-下游步骤在 `omics_genomics_runner` 中提供真实 CLI 骨架；缺依赖时返回仿真可视化，避免 Task 崩溃。
+下游步骤在 `omics_genomics_runner` 中提供真实 CLI；缺依赖时返回 error 与诊断 Markdown（不伪造生物学表）。
 """
 from __future__ import annotations
 
@@ -151,7 +151,7 @@ def genomics_raw_qc(
 
 @registry.register(
     name="genomics_read_trimming",
-    description="动态切除低质量末端、接头过滤与短读段过滤（Mock；fastp）",
+    description="动态切除低质量末端、接头过滤与短读段过滤（fastp；宿主缺 CLI 时返回 error+诊断）",
     category="Genomics",
     output_type="file_path",
 )
@@ -159,12 +159,12 @@ def genomics_raw_qc(
 def genomics_read_trimming(
     file_path: str = "", input_dir: str = "", quality_cutoff: int = 20
 ) -> Dict[str, Any]:
-    return genomics_read_trimming_impl(file_path, input_dir)
+    return genomics_read_trimming_impl(file_path, input_dir, quality_cutoff)
 
 
 @registry.register(
     name="genomics_alignment",
-    description="高精度比对生成 BAM（Mock；BWA-MEM / DRAGEN）",
+    description="高精度比对生成 BAM（BWA-MEM；宿主缺 CLI/参考序列时返回 error+诊断）",
     category="Genomics",
     output_type="file_path",
 )
@@ -172,15 +172,22 @@ def genomics_read_trimming(
 def genomics_alignment(
     file_path: str = "",
     reference_id: str = "hg38",
+    threads: int = 8,
     mismatch_penalty: int = 4,
     gap_open_penalty: int = 6,
 ) -> Dict[str, Any]:
-    return genomics_alignment_impl(file_path, reference_id)
+    return genomics_alignment_impl(
+        file_path,
+        reference_id,
+        threads=threads,
+        mismatch_penalty=mismatch_penalty,
+        gap_open_penalty=gap_open_penalty,
+    )
 
 
 @registry.register(
     name="genomics_mark_duplicates",
-    description="坐标排序与 PCR 重复标记（Mock；Picard MarkDuplicates）",
+    description="坐标排序与 PCR 重复标记（骨架未全自动接入 Picard 时返回阻断说明）",
     category="Genomics",
     output_type="file_path",
 )
@@ -193,7 +200,7 @@ def genomics_mark_duplicates(
 
 @registry.register(
     name="genomics_bqsr",
-    description="碱基质量重校准 BQSR（Mock；GATK BaseRecalibrator）",
+    description="碱基质量重校准 BQSR（ApplyBQSR 未串联时返回阻断说明）",
     category="Genomics",
     output_type="file_path",
 )
@@ -204,22 +211,30 @@ def genomics_bqsr(file_path: str = "", bqsr_max_cycles: int = 2) -> Dict[str, An
 
 @registry.register(
     name="genomics_germline_calling",
-    description="胚系 SNP/Indel（Mock；HaplotypeCaller / DeepVariant）",
+    description="胚系 SNP/Indel（GATK HaplotypeCaller；宿主缺 gatk/参考序列时返回 error+诊断）",
     category="Genomics",
     output_type="file_path",
 )
 @safe_tool_execution
 def genomics_germline_calling(
     file_path: str = "",
+    reference_id: str = "hg38",
     min_base_quality: int = 20,
     min_mapping_quality: int = 20,
+    stand_call_conf: float = 30.0,
 ) -> Dict[str, Any]:
-    return genomics_germline_calling_impl(file_path)
+    return genomics_germline_calling_impl(
+        file_path,
+        reference_id=reference_id,
+        min_base_quality=min_base_quality,
+        min_mapping_quality=min_mapping_quality,
+        stand_call_conf=stand_call_conf,
+    )
 
 
 @registry.register(
     name="genomics_cnv_calling",
-    description="拷贝数变异（Mock；GATK CNV / depth+HMM）",
+    description="拷贝数变异（宿主未接入 GATK CNV 全自动时返回阻断说明）",
     category="Genomics",
     output_type="file_path",
 )
@@ -230,7 +245,7 @@ def genomics_cnv_calling(file_path: str = "", cnv_bin_width: int = 1000) -> Dict
 
 @registry.register(
     name="genomics_sv_calling",
-    description="结构变异（Mock；Manta split-read/discordant）",
+    description="结构变异（宿主未接入 Manta 等全自动时返回阻断说明）",
     category="Genomics",
     output_type="file_path",
 )
@@ -241,20 +256,26 @@ def genomics_sv_calling(file_path: str = "", min_sv_len: int = 50) -> Dict[str, 
 
 @registry.register(
     name="genomics_vqsr_filtering",
-    description="VQSR/VQSLOD 过滤 + 位点标准化（bcftools norm 等，常与过滤同管线；Mock）",
+    description="变异过滤：无 VQSR 训练集时 GATK VariantFiltration 硬过滤；产出 filtered VCF 供注释衔接",
     category="Genomics",
     output_type="file_path",
 )
 @safe_tool_execution
 def genomics_vqsr_filtering(
-    file_path: str = "", tranche_sensitivity: float = 99.0
+    file_path: str = "",
+    tranche_sensitivity: float = 99.0,
+    reference_id: str = "hg38",
 ) -> Dict[str, Any]:
-    return genomics_vqsr_filtering_impl(file_path)
+    return genomics_vqsr_filtering_impl(
+        file_path,
+        reference_id=reference_id,
+        tranche_sensitivity=tranche_sensitivity,
+    )
 
 
 @registry.register(
     name="genomics_variant_annotation",
-    description="VEP/SnpEff 多维注释（Mock）",
+    description="VEP/SnpEff 多维注释（宿主未接入 VEP/SnpEff 时返回前置阻断说明）",
     category="Genomics",
     output_type="file_path",
 )
@@ -267,7 +288,7 @@ def genomics_variant_annotation(
 
 @registry.register(
     name="genomics_acmg_classification",
-    description="ACMG/AMP 致病性分级（Mock；ClinVar/dbSNP）",
+    description="ACMG/AMP 致病性分级（宿主未接入规则引擎时返回前置阻断说明）",
     category="Genomics",
     output_type="file_path",
 )
@@ -357,6 +378,13 @@ def genomics_clinical_reporting(
     out["summary"] = (
         f"Reads={reads_txt}, GC%={gc_txt}" if primary_qc else "缺少上游 qc_metrics"
     )
+    if not primary_qc and not qc_bundle:
+        # 禁止「成功」外壳下输出空的结构化幻觉结题
+        out["status"] = "error"
+        out["message"] = (
+            "缺少上游 genomics_raw_qc 的 qc_metrics（pipeline_metrics_json 为空），"
+            "无法生成可信临床摘要。请确认质控步骤已成功执行。"
+        )
     out["image_urls"] = [IMG_DNA_HELIX]
     out["json_url"] = None
     out["table_data"] = {

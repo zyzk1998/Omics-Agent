@@ -35,6 +35,10 @@ tavily-python>=0.5.0
 ddgs>=9.0.0
 # 科学计算库（metabolomics_tool 需要）
 scipy>=1.11.0
+# 第三批生物医药技能：MSA / 系统发育（sequence_conservation 等，Biopython）
+biopython>=1.83
+# 第三批：OASis 抗体人源性（oasis_analysis.py，可选 ANARCI 需系统 hmmer）
+promb>=0.1.0
 scikit-learn>=1.3.0
 seaborn>=0.12.0
 statsmodels>=0.14.0

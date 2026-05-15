@@ -1,7 +1,7 @@
 {
   "name": "gibh-desktop-app",
-  "version": "0.14.2",
-  "description": "GIBH-AGENT-V2 Electron thin-client (V0.14.2)",
+  "version": "0.14.5",
+  "description": "GIBH-AGENT-V2 Electron thin-client (V0.14.5)",
   "author": "GIBH Omics Agent",
   "main": "main.js",
   "private": true,
@@ -42,6 +42,7 @@
     "icon": "build/icon.ico",
     "files": [
       "main.js",
+      "preload.js",
       "package.json",
       "app-icon.png",
       "build/icon.ico",
@@ -136,7 +137,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://YOUR_SERVER_URL/downloads/"
+        "url": "http://127.0.0.1:8018/downloads/"
       }
     ]
   }

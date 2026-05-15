@@ -37,6 +37,7 @@ RUN apt-get update && apt-get install -y \
     libxft2 \
     libcairo2 \
     openbabel \
+    hmmer \
     && rm -rf /var/lib/apt/lists/*
 
 # 配置 pip 使用国内镜像源（清华大学镜像，速度更快）
@@ -50,7 +51,10 @@ COPY requirements.txt .
 # 安装 Python 依赖（层缓存失效时用 BuildKit 缓存挂载加速 pip 下载；需 DOCKER_BUILDKIT=1）
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip && \
-    pip install -r requirements.txt
+    pip install -r requirements.txt && \
+    pip install --no-cache-dir 'biopython>=1.83' 'promb>=0.1.0' && \
+    python3 -c "from Bio import SeqIO; import promb; print('biopython+promb ok')" && \
+    pip install --no-cache-dir 'anarci' || true
 
 # RDKit 化学原子工具（chem_*）：独立 venv；须固定 numpy<2（与仓库 requirements 一致，避免 rdInfoTheory _ARRAY_API / NumPy 2 ABI 崩溃）
 # 系统库 libxrender 等：MolToImage / Draw 依赖 libXrender.so.1（无头容器亦需安装）

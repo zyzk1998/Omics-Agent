@@ -82,6 +82,7 @@ class WorkflowExecutor:
         self.upload_dir = upload_dir or os.getenv("UPLOAD_DIR", "/app/uploads")
         self.results_dir = os.getenv("RESULTS_DIR", "/app/results")
         self.step_results: Dict[str, Any] = {}  # 存储步骤结果，用于数据流传递
+        self._workflow_circuit_breaker: Optional[Dict[str, Any]] = None
 
     def _serialize_prior_qc_metrics(self) -> str:
         """聚合前几步工具返回的 qc_metrics（如 genomics_raw_qc），供报告步骤透传。"""
@@ -860,6 +861,9 @@ class WorkflowExecutor:
                     formatted_error["user_message"] = user_message  # 优先保留工具侧用户向文案
                 else:
                     formatted_error = ErrorFormatter.format_error(error_msg, tool_id, step_name)
+                if result.get("fatal_env_prereq") or result.get("error_category") == "host_env_prereq":
+                    formatted_error["can_skip"] = False
+                    formatted_error["error_category"] = "host_env_prereq"
                 
                 # 存储结果供后续步骤使用（即使失败也存储，用于调试）
                 self.step_results[step_id] = result
@@ -1368,6 +1372,7 @@ class WorkflowExecutor:
                                 step_result.get("output_path") or
                                 step_result.get("file_path") or
                                 step_result.get("csv_path") or
+                                step_result.get("features_csv_path") or
                                 step_result.get("output_csv_path") or
                                 step_result.get("plot_path") or
                                 step_result.get("result_path") or
@@ -2096,6 +2101,7 @@ class WorkflowExecutor:
 
         self._enabled_mcps: List[Any] = list(enabled_mcps or [])
         self._tool_log_sink: Optional[Callable[[str, str], None]] = tool_log_sink
+        self._workflow_circuit_breaker = None
         
         # 初始化步骤结果列表
         steps_details = []
@@ -2450,6 +2456,9 @@ class WorkflowExecutor:
             # 专家报告等：工具返回 result.report_data（含 references），同步到 step_result 顶层供 SSE/前端「参考文献」Tab
             if isinstance(result_data, dict) and isinstance(result_data.get("report_data"), dict):
                 _sr_inner["report_data"] = result_data["report_data"]
+            for _mk in ("markdown", "html_content"):
+                if isinstance(result_data, dict) and result_data.get(_mk) and _mk not in _sr_inner:
+                    _sr_inner[_mk] = result_data[_mk]
             step_detail = {
                 "step_id": step_id,
                 "tool_id": step.get("tool_id"),
@@ -2468,6 +2477,20 @@ class WorkflowExecutor:
                 step_detail["technical_details"] = step_result.get("technical_details", "")
                 step_detail["traceback"] = step_result.get("traceback", "") or step_result.get("debug_info", "")
                 step_detail["debug_info"] = step_result.get("debug_info", "") or step_result.get("traceback", "")
+            elif step_result.get("status") == "skipped":
+                # 与前端 checklist 对齐：step.error / step.message 供「⏭ 步骤已跳过」折叠区展示
+                _inner = step_result.get("result")
+                _sk_msg = (step_result.get("message") or "").strip()
+                if isinstance(_inner, dict) and not _sk_msg:
+                    _sk_msg = (str(_inner.get("message") or "")).strip()
+                if not _sk_msg:
+                    _sk_msg = "条件不足，此步骤已跳过"
+                step_detail["message"] = _sk_msg
+                step_detail["error"] = _sk_msg
+                if isinstance(_inner, dict) and _inner.get("can_skip") is not None:
+                    step_detail["can_skip"] = bool(_inner.get("can_skip"))
+                else:
+                    step_detail["can_skip"] = True
             
             # 🔥 提取图片路径（如果有）- 优先 result，再顶层；支持 plot_path / output_plot_path
             result_data = step_result.get("result", {}) or {}
@@ -2505,14 +2528,25 @@ class WorkflowExecutor:
                     step_detail["job_id"] = step_result["job_id"]
                 break  # STOP HERE - Do not execute next steps
             
-            # 🔥 CRITICAL FIX: 即使步骤失败，也继续执行后续步骤
-            # 这样可以确保前面的步骤结果正常显示，不会因为后续步骤失败而影响前面的显示
+            # 失败处理：不可跳过（如宿主环境致命缺失）时熔断，防止下游与 LLM 对空结果幻觉结题
             if step_result.get("status") == "error":
                 error_msg = step_result.get("error") or step_result.get("message") or "未知错误"
                 logger.error(f"❌ 步骤 {step_id} 失败: {error_msg}")
-                logger.warning(f"⚠️ 继续执行后续步骤，确保前面的步骤结果正常返回")
-                # 不 break，继续执行后续步骤
-                # 注意：如果后续步骤依赖于当前失败的步骤，它们可能会失败，但至少会尝试执行
+                if step_result.get("can_skip") is False:
+                    logger.error(
+                        "🛑 [Executor] 熔断：本步标记为不可跳过（致命错误），终止后续步骤"
+                    )
+                    self._workflow_circuit_breaker = {
+                        "failed_step_id": step_id,
+                        "failed_tool_id": step.get("tool_id"),
+                        "message": error_msg,
+                        "user_message": step_result.get("user_message") or error_msg,
+                        "error_category": step_result.get("error_category"),
+                    }
+                    break
+                logger.warning(
+                    "⚠️ [Executor] 本步错误但允许跳过（can_skip≠False），继续执行后续步骤"
+                )
         
         # 确定最终状态：success 与 skipped 均视为非失败（skipped 为依赖未满足时的优雅跳过）
         all_ok = all(
@@ -2536,6 +2570,15 @@ class WorkflowExecutor:
             "steps_results": steps_results,
             "output_dir": self.output_dir
         }
+        cb = getattr(self, "_workflow_circuit_breaker", None)
+        if cb:
+            report_data["circuit_breaker"] = cb
+            report_data["circuit_breaker_markdown"] = (
+                "\n### 工作流熔断说明\n\n"
+                f"- **失败步骤**: `{cb.get('failed_step_id')}`\n"
+                f"- **工具**: `{cb.get('failed_tool_id')}`\n"
+                f"- **原因**: {cb.get('user_message') or cb.get('message')}\n"
+            )
         
         if final_plot:
             report_data["final_plot"] = final_plot

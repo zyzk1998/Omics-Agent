@@ -1,8 +1,9 @@
 'use strict';
 /**
- * 自动更新：electron-updater 的 generic 根地址内嵌自 package.json → build.publish[0].url。
- * 发版前请将该行中的 YOUR_SERVER_URL 换成公网可解析的域名或 IP（勿提交真实内网段入公开仓库时遵守团队 Git 规范）。
- * 也可在环境变量中设置 OMICS_AUTO_UPDATE_BASE_URL（指向 …/downloads/）或 OMICS_AGENT_WEB_URL（将自动追加 /downloads/），优先级高于内嵌 URL。
+ * 自动更新：运行时优先 `resolveGenericUpdateBaseUrl()`（环境变量 → 与 Web 同源 getWebBase()/downloads/），
+ * 并通过 autoUpdater.setFeedURL 覆盖 electron-builder 写入的内嵌 generic 地址。
+ * 打包默认 publish.url 见 package.json（占位为本机 8018，合规且不指向虚构域名）；生产请务必通过环境变量配置真实站点。
+ * OMICS_AUTO_UPDATE_BASE_URL（指向 …/downloads/）或 OMICS_AGENT_WEB_URL（将自动追加 /downloads/）优先级最高。
  *
  * 本地大文件/附件分流：业务逻辑在打包的 Web UI（services/nginx/html/index.html）的 sendMessage 前闸
  * `runLocalAttachmentSmartGate` + Sidecar `POST /api/tools/upload_to_cloud`；此处无重复实现。
@@ -232,18 +233,42 @@ function broadcastAutoUpdate(channel, payload) {
   });
 }
 
+/** 统一推送到渲染进程（preload `onUpdaterMessage`），与既有 app-auto-update-* 频道并行 */
+function broadcastUpdaterMessage(payload) {
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (win.isDestroyed()) return;
+    try {
+      win.webContents.send('updater-message', payload);
+    } catch (err) {
+      console.warn('[Omics Agent] updater-message 发送失败', err && err.message);
+    }
+  });
+}
+
 /**
  * generic 更新包根目录（须能通过 GET 访问到 latest.yml / latest-linux.yml 及安装包与 .blockmap）。
- * 优先环境变量 OMICS_AUTO_UPDATE_BASE_URL；否则若已配置 OMICS_AGENT_WEB_URL，则回退为 {OMICS_AGENT_WEB_URL}/downloads/。
+ * 优先级：OMICS_AUTO_UPDATE_BASE_URL → OMICS_AGENT_WEB_URL/downloads/ → 与主窗口同源（getWebBase + /downloads/）。
+ * 避免未配置环境变量时落回 electron-builder 内嵌的 https://YOUR_SERVER_URL/… 导致 DNS 失败。
  */
 function resolveGenericUpdateBaseUrl() {
   const explicit = process.env.OMICS_AUTO_UPDATE_BASE_URL && String(process.env.OMICS_AUTO_UPDATE_BASE_URL).trim();
-  if (explicit) return explicit.replace(/\/?$/, '/');
+  if (explicit) {
+    const u = explicit.replace(/\/?$/, '/');
+    if (!/your_server_url/i.test(u)) return u;
+  }
   const web = process.env.OMICS_AGENT_WEB_URL && String(process.env.OMICS_AGENT_WEB_URL).trim();
   if (web) {
     const base = web.replace(/\/$/, '');
-    return `${base}/downloads/`;
+    const out = `${base}/downloads/`;
+    if (!/your_server_url/i.test(out)) return out;
   }
+  try {
+    const wb = getWebBase();
+    if (wb && /^https?:\/\//i.test(wb)) {
+      const aligned = `${wb.replace(/\/$/, '')}/downloads/`;
+      if (!/your_server_url/i.test(aligned)) return aligned;
+    }
+  } catch (_e) {}
   return '';
 }
 
@@ -255,18 +280,18 @@ function friendlyAutoUpdateMessage(raw) {
   const msg = String((raw && raw.message) || raw || '');
   const lower = msg.toLowerCase();
   if (/err_name_not_resolved|enotfound|getaddrinfo|name not resolved/i.test(lower)) {
-    return '无法连接更新服务器，请检查网络或稍后再试；也可在官网下载页获取最新安装包。';
+    return '暂时无法连接更新服务，请检查网络后重试。若问题依旧，可到官网下载页获取安装包，或联系运维确认更新地址是否已配置。';
   }
   if (/etimedout|timeout|econnrefused|enetunreach|ehostunreach/i.test(lower)) {
-    return '连接更新服务器超时，请稍后再试或前往官网下载最新版。';
+    return '连接更新服务超时，请稍后重试，或前往官网下载页获取最新安装包。';
   }
   if (/certificate|ssl|tls|unable to verify/i.test(lower)) {
-    return '更新通道安全校验失败，请联系管理员或手动从官网下载安装包。';
+    return '更新通道安全校验未通过，请联系管理员或从官网下载页获取安装包。';
   }
   if (/404|not found|status code 404/i.test(lower)) {
-    return '未找到更新描述文件（latest.yml），请确认服务端已发布对应平台的更新元数据。';
+    return '当前服务器上暂未找到更新说明文件，请稍后再试或使用官网下载页获取安装包。';
   }
-  return '暂时无法检查更新，您可在官网下载页获取最新安装包。';
+  return '暂时无法完成更新检查，请稍后重试，或使用官网下载页获取最新安装包。';
 }
 
 function hookAutoUpdaterEventsOnce() {
@@ -279,17 +304,24 @@ function hookAutoUpdaterEventsOnce() {
     autoUpdater.setFeedURL({ provider: 'generic', url: base });
     console.log('[Omics Agent] 自动更新 feed（generic）:', base);
   } else {
-    console.log(
-      '[Omics Agent] 未设置 OMICS_AUTO_UPDATE_BASE_URL / OMICS_AGENT_WEB_URL，将使用 electron-builder 打包时写入的 generic URL（见 gibh-desktop-app/package.json → build.publish[0].url，须将 YOUR_SERVER_URL 替换为真实域名或 IP）'
+    console.warn(
+      '[Omics Agent] 未能解析 generic 更新根 URL（请配置 OMICS_AUTO_UPDATE_BASE_URL / OMICS_AGENT_WEB_URL / PROD_SERVER_URL）；仍将依赖安装包内嵌 publish 地址，可能导致更新检查失败'
     );
   }
 
   autoUpdater.on('checking-for-update', () => {
     broadcastAutoUpdate('app-auto-update-checking', {});
+    broadcastUpdaterMessage({ type: 'checking-for-update' });
   });
 
   autoUpdater.on('update-available', (info) => {
     broadcastAutoUpdate('app-auto-update-available', {
+      version: info.version,
+      releaseDate: info.releaseDate,
+      releaseNotes: info.releaseNotes,
+    });
+    broadcastUpdaterMessage({
+      type: 'update-available',
       version: info.version,
       releaseDate: info.releaseDate,
       releaseNotes: info.releaseNotes,
@@ -300,12 +332,20 @@ function hookAutoUpdaterEventsOnce() {
     broadcastAutoUpdate('app-auto-update-not-available', {
       version: (info && info.version) || '',
     });
+    broadcastUpdaterMessage({
+      type: 'update-not-available',
+      version: (info && info.version) || '',
+    });
   });
 
   autoUpdater.on('error', (err) => {
     const raw = (err && err.message) || String(err);
     console.warn('[Omics Agent] autoUpdater error（详情仅日志）:', raw, err && err.stack);
     broadcastAutoUpdate('app-auto-update-error', {
+      userMessage: friendlyAutoUpdateMessage(err),
+    });
+    broadcastUpdaterMessage({
+      type: 'error',
       userMessage: friendlyAutoUpdateMessage(err),
     });
   });
@@ -317,14 +357,49 @@ function hookAutoUpdaterEventsOnce() {
       total: p.total,
       bytesPerSecond: p.bytesPerSecond,
     });
+    broadcastUpdaterMessage({
+      type: 'download-progress',
+      percent: p.percent,
+      transferred: p.transferred,
+      total: p.total,
+      bytesPerSecond: p.bytesPerSecond,
+    });
   });
 
-  autoUpdater.on('update-downloaded', (info) => {
+  autoUpdater.on('update-downloaded', async (info) => {
     broadcastAutoUpdate('app-auto-update-downloaded', {
       version: info.version,
       releaseDate: info.releaseDate,
       releaseNotes: info.releaseNotes,
     });
+    broadcastUpdaterMessage({
+      type: 'update-downloaded',
+      version: info.version,
+      releaseDate: info.releaseDate,
+      releaseNotes: info.releaseNotes,
+    });
+
+    const ver = (info && info.version) || '';
+    try {
+      const win =
+        mainWindow && !mainWindow.isDestroyed()
+          ? mainWindow
+          : BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+      const { response } = await dialog.showMessageBox(win || undefined, {
+        type: 'question',
+        buttons: ['立即重启', '稍后'],
+        defaultId: 0,
+        cancelId: 1,
+        title: '更新就绪',
+        message: '新版本已下载，是否立即重启安装？',
+        detail: ver ? `版本：${ver}` : undefined,
+      });
+      if (response === 0) {
+        autoUpdater.quitAndInstall(false, true);
+      }
+    } catch (e) {
+      console.error('[Omics Agent] update-downloaded dialog:', e && e.message);
+    }
   });
 }
 
@@ -782,6 +857,7 @@ function createMainWindow() {
     icon: getWindowIconPath(),
     show: false,
     webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: true,
       contextIsolation: false,
     },
@@ -867,6 +943,30 @@ function createMainWindow() {
 if (gotSingleInstanceLock) {
   if (!globalThis.__OMICS_IPC_REGISTERED__) {
     globalThis.__OMICS_IPC_REGISTERED__ = true;
+    ipcMain.handle('get-app-version', () => app.getVersion());
+
+    ipcMain.on('check-for-updates', () => {
+      if (!autoUpdater) {
+        broadcastUpdaterMessage({ type: 'error', userMessage: '自动更新模块未启用' });
+        return;
+      }
+      if (!app.isPackaged) {
+        broadcastUpdaterMessage({
+          type: 'update-not-available',
+          version: app.getVersion(),
+          devMode: true,
+        });
+        return;
+      }
+      autoUpdater.checkForUpdates().catch((err) => {
+        console.warn('[Omics Agent] checkForUpdates（手动）', err && err.message);
+        broadcastUpdaterMessage({
+          type: 'error',
+          userMessage: friendlyAutoUpdateMessage(err),
+        });
+      });
+    });
+
     ipcMain.on('omics-retry-load', (event) => {
       const w = BrowserWindow.fromWebContents(event.sender);
       if (w && !w.isDestroyed()) loadRemote(w);

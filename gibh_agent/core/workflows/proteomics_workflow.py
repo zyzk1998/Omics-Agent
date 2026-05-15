@@ -76,7 +76,12 @@ class ProteomicsWorkflow(BaseWorkflow):
                 "name": "搜索引擎比对与肽段鉴定",
                 "description": "DDA/DIA 与序列库或谱图库匹配（MaxQuant/DIA-NN 逻辑）",
                 "tool_id": "proteomics_database_search",
-                "default_params": {"file_path": "", "fragment_tol_da": 0.05},
+                "default_params": {
+                    "file_path": "",
+                    "fragment_tol_da": 0.05,
+                    "missed_cleavages": 2,
+                    "peptide_fdr": 0.01,
+                },
             },
             "step_prot_fdr_rescore": {
                 "name": "假阳性控制与重打分",

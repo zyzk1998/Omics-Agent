@@ -115,9 +115,10 @@
 
             <!-- 用户头像悬浮菜单（Kimi 风格，position:fixed 防侧栏 overflow 裁剪） -->
             <div id="user-profile-menu" class="popover-menu" aria-hidden="true">
-                <div class="popover-item" data-action="client"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg></span>下载客户端</div>
+                <div class="popover-item" id="menu-item-download-client" data-action="client-download" role="menuitem" tabindex="0"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg></span>下载客户端</div>
                 <div class="popover-item" data-action="help-whotowork"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></span>帮助文档</div>
-                <div class="popover-item" data-action="feedback-help"><span class="sidebar-icon-wrap" aria-hidden="true">💡</span>帮助与反馈</div>
+                <div class="popover-item" data-action="feedback-help"><span class="sidebar-icon-wrap" aria-hidden="true">💡</span>问题反馈</div>
+                <div class="popover-item" id="menu-item-update-app" data-action="app-update" style="display:none;" role="menuitem" tabindex="0"><span class="sidebar-icon-wrap"><i class="bi bi-cloud-arrow-down"></i></span>更新应用</div>
                 <div class="popover-item" data-action="help-api"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></span>API 文档</div>
                 <div class="popover-item" id="user-menu-admin-console" data-action="admin-console" style="display: none;" title="管理员审核技能"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg></span>管理员控制台</div>
                 <div class="popover-item" data-action="settings"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span>设置</div>
@@ -1389,6 +1390,7 @@
             window.appendTurnToChatHistory = appendTurnToChatHistory;
             window.rebuildChatHistoryFromDom = rebuildChatHistoryFromDom;
             let uploadedFiles = []; // 已上传的文件（用于聊天请求）
+            window.uploadedFiles = uploadedFiles; // 与闭包同一引用，便于调试与单一数据源
             let isProcessing = false; 
             window.DEMO_STATE = window.DEMO_STATE || 'IDLE';
             window._immersiveDemoActive = false;
@@ -2272,6 +2274,214 @@
                     prompt_template: ''
                 },
                 {
+                    id: 'feat_crispr_cas9',
+                    name: 'CRISPR-Cas9 基因编辑工具',
+                    main_category: '生物医药',
+                    sub_category: '预测与建模',
+                    description: '模拟 CRISPR-Cas9 基因组编辑流程，包含向导RNA验证、目标位点识别等。',
+                    tags: ['CRISPR', 'Cas9', 'gRNA', '仿真'],
+                    prompt_template: [
+                        '[Skill_Route: crispr_cas9_simulation]',
+                        '您好。我将使用 **CRISPR-Cas9 编辑流程仿真器**，对给定 **gRNA** 与 **靶标基因组 DNA** 执行：gRNA 校验 → PAM（NGG）扫描 → 递送效率估计 → DSB 与修复路径（NHEJ/HDR）模拟，并给出可读摘要与序列输出。',
+                        '',
+                        '**参数与生物学含义**',
+                        '- **guides_text**：向导序列（以 DNA 字母书写的 20 nt gRNA 同源区）；多条以英文逗号 , 分隔。',
+                        '- **target_sequence**：拟分析的基因组 DNA 片段（建议长度 ≥40 bp，便于覆盖多个潜在切割位点）。',
+                        '- **cell_line**：细胞背景（如 HEK293、K562），影响递送效率先验；未指定时由助手使用 HEK293。',
+                        '- **result_format**：markdown（默认）或 json；一般保持 Markdown 以便右侧工作台展示。',
+                        '- **random_seed**：可选整数，用于固定随机 NHEJ/HDR 细节以便复现实验室记录。',
+                        '',
+                        '**示范输入（整段可替换为您的实验设计）**',
+                        '- guides_text: GACGTCAGTCTAGCTAGCTA',
+                        '- target_sequence: ATCGGACGTCAGTCTAGCTAGCTAGGCTAGCTAGCTAAGG',
+                        '- cell_line: HEK293',
+                        '',
+                        '（助手侧：将用户正文中的 gRNA 与靶序列填入 guides_text、target_sequence；cell_line 默认 HEK293；禁止编造不存在的 file_path。）'
+                    ].join('\n')
+                },
+                {
+                    id: 'feat_immune_cell',
+                    name: '免疫细胞分离与纯化',
+                    main_category: '生物医药',
+                    sub_category: '临床应用',
+                    description: '模拟免疫细胞的分离与纯化流程。',
+                    tags: ['免疫细胞', 'MACS', '酶解', '仿真'],
+                    prompt_template: [
+                        '[Skill_Route: immune_cell_isolation_simulation]',
+                        '您好。我将基于组织类型、靶细胞与酶解方案，仿真免疫细胞分离、纯化与质控指标，并生成 CSV 步骤表。',
+                        '',
+                        '**参数**：simulation_json（单行 JSON，必填 tissue_type、target_cell_type；可选 enzyme_type、digestion_time_min）；output_format 为 text 或 json；random_seed 可选。',
+                        '',
+                        '**示例** {"tissue_type":"spleen","target_cell_type":"macrophages","enzyme_type":"collagenase","digestion_time_min":60}',
+                        '',
+                        '（助手侧：将用户实验条件整理为合法 JSON 写入 simulation_json。）'
+                    ].join('\n')
+                },
+                {
+                    id: 'feat_rna_secondary',
+                    name: 'RNA二级结构分析工具',
+                    main_category: '生物医药',
+                    sub_category: '数据分析',
+                    description: '分析 RNA 的二级结构特征，包括碱基配对、茎区、环区数量与大小。',
+                    tags: ['RNA', '二级结构', '点括号', '自由能'],
+                    prompt_template: [
+                        '[Skill_Route: rna_secondary_structure_analysis]',
+                        '您好。我将对 RNA 点括号二级结构及可选序列做配对校验、茎/环统计，并给出简化的自由能与 GC 含量估计。',
+                        '',
+                        '**参数**：structure_json（内联 JSON，含 structure 与可选 sequence）或上传文件的 file_path；result_format 为 json、txt、csv 或 all。',
+                        '',
+                        '**内联示例** {"structure":"..((..))","sequence":"AAGGCCUU"}',
+                        '',
+                        '（助手侧：有上传文件时只填 file_path；无上传时写 structure_json。）'
+                    ].join('\n')
+                },
+                {
+                    id: 'feat_circular_dichroism',
+                    name: '圆二色谱分析工具',
+                    main_category: '生物医药',
+                    sub_category: '数据分析',
+                    description: '用于分析圆二色性(CD)光谱数据以确定二级结构和热稳定性。',
+                    tags: ['CD', '圆二色谱', '二级结构', '热变性'],
+                    prompt_template: [
+                        '[Skill_Route: circular_dichroism_analysis]',
+                        '您好。我将对圆二色谱数据进行二级结构相关解读，并在提供热曲线时给出 Tm 趋势与折叠分数估计。',
+                        '',
+                        '**参数**：spectrum_json（单行 JSON：sample_name、sample_type 为 protein 或 nucleic_acid、wavelength_data、cd_signal_data 等长数组；可选 temperature_data+thermal_cd_data）；output_format 为 text 或 json。',
+                        '',
+                        '**示例** {"sample_name":"Demo","sample_type":"protein","wavelength_data":[190,200,210,220],"cd_signal_data":[0.1,-0.2,0.3,-0.4]}',
+                        '',
+                        '（助手侧：将用户谱数据规范为 spectrum_json。）'
+                    ].join('\n')
+                },
+                {
+                    id: 'feat_itc_thermo',
+                    name: 'ITC结合热力学分析工具',
+                    main_category: '生物医药',
+                    sub_category: '数据分析',
+                    description: '一结合位点模型拟合 Kd、ΔH、ΔS、ΔG；报告内嵌拟合曲线 Base64 图。',
+                    tags: ['ITC', '热力学', 'Kd', '拟合'],
+                    prompt_template: [
+                        '[Skill_Route: itc_binding_thermodynamic_analysis]',
+                        '您好。请对我的 ITC 滴定数据做一结合位点拟合，给出 Kd、ΔH、n、ΔG、ΔS 及拟合曲线图。',
+                        '',
+                        '**参数**：protein_conc、ligand_conc（M）；itc_injections_json（[[inj,vol_L,heat],...]）或上传 CSV 的 file_path；可选 cell_volume、temperature、volume_unit。',
+                        '',
+                        '**演示数据** [[1,2e-6,-1200],[2,2e-6,-2100],[3,2e-6,-2800],[4,2e-6,-3100],[5,2e-6,-2900]]，protein_conc=1e-6，ligand_conc=10e-6。',
+                        '',
+                        '（助手侧：有文件用 file_path；否则将滴定 JSON 写入 itc_injections_json。）'
+                    ].join('\n')
+                },
+                {
+                    id: 'feat_cell_cycle',
+                    name: '估计细胞周期各阶段持续时间',
+                    main_category: '生物医药',
+                    sub_category: '数据分析',
+                    description: 'EdU/BrdU 双标流式曲线估计 G1/S/G2M 时长与死亡率。',
+                    tags: ['细胞周期', '流式', 'EdU', 'BrdU'],
+                    prompt_template: [
+                        '[Skill_Route: cell_cycle_phase_duration_estimation]',
+                        '您好。请根据双标流式百分比曲线估计 G1、S、G2/M 时长与死亡率。',
+                        '',
+                        '**参数**：flow_cytometry_json（time_points、edu_positive、brdu_positive、double_positive）；initial_estimates_json 可省略。',
+                        '',
+                        '**示例** {"time_points":[0,2,4,6],"edu_positive":[5,15,28,35],"brdu_positive":[3,12,30,40],"double_positive":[1,8,18,25]}',
+                        '',
+                        '（助手侧：将表格规范为 flow_cytometry_json。）'
+                    ].join('\n')
+                },
+                {
+                    id: 'feat_protease_kinetics',
+                    name: '蛋白酶动力学分析工具',
+                    main_category: '生物医药',
+                    sub_category: '数据分析',
+                    description: '荧光时间曲线求初速率并拟合 Michaelis-Menten；报告内嵌 MM 拟合 Base64 图。',
+                    tags: ['蛋白酶', 'MM', 'Vmax', 'Km'],
+                    prompt_template: [
+                        '[Skill_Route: protease_kinetics_analysis]',
+                        '您好。请根据荧光动力学数据拟合 MM 参数并给出拟合曲线图。',
+                        '',
+                        '**参数**：kinetics_input_json（time_points、substrate_concentrations、fluorescence_data、enzyme_concentration）。',
+                        '',
+                        '**示例** {"time_points":[0,30,60,90],"substrate_concentrations":[10,40],"fluorescence_data":[[100,150,180,200],[100,130,150,165]],"enzyme_concentration":0.1}',
+                        '',
+                        '（助手侧：整理为 kinetics_input_json。）'
+                    ].join('\n')
+                },
+                {
+                    id: 'feat_enzyme_kinetics',
+                    name: '酶动力学分析工具',
+                    main_category: '生物医药',
+                    sub_category: '数据分析',
+                    description: '底物浓度扫描与时间历程仿真，MM 拟合；报告内嵌底物动力学拟合 Base64 图。',
+                    tags: ['酶动力学', 'MM', 'Km', 'Vmax'],
+                    prompt_template: [
+                        '[Skill_Route: enzyme_kinetics_analysis]',
+                        '您好。请对给定酶与底物浓度列表做动力学仿真与 MM 拟合，并展示底物饱和拟合图。',
+                        '',
+                        '**参数**：kinetics_input_json（enzyme_name、substrate_concentrations、enzyme_concentration nM；可选 time_points 等）。',
+                        '',
+                        '**示例** {"enzyme_name":"DemoEnzyme","enzyme_concentration":50,"substrate_concentrations":[5,10,25,50,100]}',
+                        '',
+                        '（助手侧：整理为 kinetics_input_json。）'
+                    ].join('\n')
+                },
+                {
+                    id: 'feat_sequence_conservation',
+                    name: '蛋白质序列保守性分析工具',
+                    main_category: '生物医药',
+                    sub_category: '数据分析',
+                    description: '多序列比对、邻接树与位点保守性（Biopython）。',
+                    tags: ['MSA', '保守性', '系统发育', 'Biopython'],
+                    prompt_template: [
+                        '[Skill_Route: protein_sequence_conservation_analysis]',
+                        '您好。请对以下蛋白质序列做多序列比对、建树与保守性分析。',
+                        '',
+                        '**参数**：alignment_json，含 protein_sequences 数组。',
+                        '',
+                        '**示例** {"protein_sequences":["MKTLLL","MKTLLL","MKALLL"]}',
+                        '',
+                        '（助手侧：将 FASTA 或序列列表写入 alignment_json。）'
+                    ].join('\n')
+                },
+                {
+                    id: 'feat_protein_homology',
+                    name: '蛋白同源结构评估器',
+                    main_category: '生物医药',
+                    sub_category: '数据分析',
+                    description: 'BLAST 同源 + 结构相似性与 PTM 保守性综合评分（UniProt）。',
+                    tags: ['BLAST', '同源', 'PTM', 'UniProt'],
+                    prompt_template: [
+                        '[Skill_Route: protein_homology_structure_assessment]',
+                        '您好。请对 UniProt 靶蛋白做同源与结构/PTM 综合评估。',
+                        '',
+                        '**参数**：uniprot_id（如 O95292）；可选 test_mode=true 做离线演示。',
+                        '',
+                        '（助手侧：写入 uniprot_id；演示时 test_mode=true。）'
+                    ].join('\n')
+                },
+                {
+                    id: 'feat_oasis_humanness',
+                    name: '人源性评估',
+                    main_category: '生物医药',
+                    sub_category: '数据分析',
+                    description: 'OASis 抗体重/轻链人源性评分（promb + 可选 ANARCI）。',
+                    tags: ['OASis', '抗体', '人源化', '免疫原性'],
+                    prompt_template: [
+                        '[Skill_Route: antibody_humanness_oasis_evaluation]',
+                        '您好。请评估抗体 VH/VL 的 OASis 人源性分数（promb human-oas；可选 ANARCI 分区）。',
+                        '',
+                        '**必填**：heavy_chain、light_chain（各一条氨基酸串，无空格）；或 antibody_sequences_json 单行 JSON。',
+                        '**可选**：antibody_name、scheme（默认 kabat）、cdr_definition（默认 kabat）、threshold（默认 relaxed）。',
+                        '',
+                        '**演示重链**',
+                        'EVQLVESGGGLVQPGGSLRLSCAASGFTFSSYAMSWVRQAPGKGLEWVSAISGSGGSTYYADSVKGRFTISRDNSKNTLYLQMNSLRAEDTAVYYCARDYGDYWGQGTLVTVSS',
+                        '**演示轻链**',
+                        'DIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLYSGVPSRFSGSRSGTDFTLTISSLQPEDFATYYCQQHYTTPPTFGQGTKVEIK',
+                        '',
+                        '（助手侧：未改序列时须将上两条写入 heavy_chain/light_chain；禁止留空。）'
+                    ].join('\n')
+                },
+                {
                     id: 'sted_ec_trajectory',
                     name: '单细胞时空轨迹推断 (STED-EC)',
                     main_category: '特色科研流程',
@@ -2621,6 +2831,9 @@
                 var toggleBtn = document.getElementById('btn-right-sidebar-toggle');
                 if (!rex) return;
                 if (visible) {
+                    if (typeof collapseWorkspacePaneWhenOpeningRightFileExplorer === 'function') {
+                        collapseWorkspacePaneWhenOpeningRightFileExplorer();
+                    }
                     rex.style.display = 'flex';
                     rex.classList.remove('right-sidebar-collapsed');
                     rex.setAttribute('aria-hidden', 'false');
@@ -3212,6 +3425,181 @@
                 showToast('工作区已初始化：' + ((workspace && workspace.workspace_name) || selection.workspace_name), 'success');
             }
 
+            /** 桌面端更新：Modal 文案 / Release Notes / 升级后欢迎（与 preload onUpdaterMessage、auto-update IPC 共用） */
+            (function () {
+                var LS_LAST_VER = 'omics_last_version';
+                var LS_PENDING_VER = 'omics_pending_post_update_version';
+                var LS_PENDING_NOTES = 'omics_pending_post_update_notes';
+
+                function normalizeReleaseNotes(rn) {
+                    if (rn == null || rn === '') return '';
+                    if (typeof rn === 'string') return rn.trim();
+                    if (Array.isArray(rn)) {
+                        return rn.map(function (item) {
+                            if (typeof item === 'string') return item;
+                            if (item && typeof item.note === 'string') return item.note;
+                            return '';
+                        }).filter(Boolean).join('\n');
+                    }
+                    return String(rn);
+                }
+
+                window.__omicsModalUpdateBtnMode = 'idle';
+
+                window.OmicsDesktopUpdateUiHelpers = {
+                    normalizeReleaseNotes: normalizeReleaseNotes,
+                    clearReleaseNotes: function () {
+                        var wrap = document.getElementById('update-release-notes-container');
+                        var content = document.getElementById('update-release-notes-content');
+                        if (content) content.textContent = '';
+                        if (wrap) wrap.style.display = 'none';
+                    },
+                    fillReleaseNotes: function (rn) {
+                        var text = normalizeReleaseNotes(rn);
+                        var wrap = document.getElementById('update-release-notes-container');
+                        var content = document.getElementById('update-release-notes-content');
+                        if (!content || !wrap) return;
+                        if (!text) {
+                            wrap.style.display = 'none';
+                            content.textContent = '';
+                            return;
+                        }
+                        content.textContent = text;
+                        wrap.style.display = 'block';
+                    },
+                    setModalPrimaryButton: function (mode, extra) {
+                        var btn = document.getElementById('modal-check-update-btn');
+                        if (!btn) return;
+                        extra = extra || {};
+                        window.__omicsModalUpdateBtnMode = mode || 'idle';
+                        btn.onclick = null;
+                        if (mode === 'idle') {
+                            btn.disabled = false;
+                            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> 检查更新';
+                            btn.onclick = function () {
+                                if (typeof window.triggerUpdateCheck === 'function') window.triggerUpdateCheck();
+                            };
+                        } else if (mode === 'checking') {
+                            btn.disabled = true;
+                            btn.innerHTML = '<i class="bi bi-hourglass-split"></i> 检查中...';
+                        } else if (mode === 'downloading') {
+                            btn.disabled = true;
+                            var pct = (extra && typeof extra.percent === 'number') ? Math.round(extra.percent) : null;
+                            btn.innerHTML = pct != null
+                                ? ('<i class="bi bi-cloud-download"></i> 下载中 ' + pct + '%')
+                                : '<i class="bi bi-cloud-download"></i> 下载中…';
+                        } else if (mode === 'restart') {
+                            btn.disabled = false;
+                            btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 重启安装';
+                            btn.onclick = function () {
+                                try {
+                                    var ipcInv = require('electron').ipcRenderer;
+                                    if (ipcInv && ipcInv.send) ipcInv.send('app-install-update');
+                                } catch (_e) {}
+                            };
+                        }
+                    },
+                    persistPendingPostUpdate: function (version, releaseNotes) {
+                        try {
+                            var v = version != null ? String(version) : '';
+                            var notes = normalizeReleaseNotes(releaseNotes);
+                            if (v) localStorage.setItem(LS_PENDING_VER, v);
+                            if (notes) localStorage.setItem(LS_PENDING_NOTES, notes);
+                            else localStorage.removeItem(LS_PENDING_NOTES);
+                        } catch (_e) {}
+                    },
+                    clearPendingPostUpdate: function () {
+                        try {
+                            localStorage.removeItem(LS_PENDING_VER);
+                            localStorage.removeItem(LS_PENDING_NOTES);
+                        } catch (_e2) {}
+                    },
+                    syncFromAutoUpdateInfo: function (info) {
+                        if (!info) return;
+                        var rnRaw = info.releaseNotes;
+                        var v = info.version;
+                        var rnText = normalizeReleaseNotes(rnRaw);
+                        if (rnText) {
+                            this.fillReleaseNotes(rnRaw);
+                            this.persistPendingPostUpdate(v, rnRaw);
+                        } else if (v) {
+                            this.persistPendingPostUpdate(v, '');
+                        }
+                    },
+                };
+
+                window.closePostUpdateWelcomeModal = function () {
+                    var overlay = document.getElementById('post-update-welcome-modal');
+                    if (overlay) overlay.style.display = 'none';
+                };
+
+                window.showPostUpdateWelcome = function (version, notesText) {
+                    var v = version != null ? String(version) : '';
+                    var overlay = document.getElementById('post-update-welcome-modal');
+                    if (overlay) {
+                        var titleEl = document.getElementById('post-update-welcome-title');
+                        var notesEl = document.getElementById('post-update-welcome-notes');
+                        var notesWrap = document.getElementById('post-update-welcome-notes-wrap');
+                        if (titleEl) titleEl.textContent = '已成功更新至 v' + v;
+                        if (notesEl && notesWrap) {
+                            var nt = notesText != null ? String(notesText).trim() : '';
+                            if (nt) {
+                                notesEl.textContent = nt;
+                                notesWrap.style.display = 'block';
+                            } else {
+                                notesEl.textContent = '';
+                                notesWrap.style.display = 'none';
+                            }
+                        }
+                        overlay.style.display = 'flex';
+                        return;
+                    }
+                    if (typeof showToast === 'function') {
+                        showToast('应用已成功升级至最新版本 v' + v + (notesText ? ('\n' + notesText) : ''), 'success');
+                    }
+                };
+
+                window.checkPostUpdateGreeting = async function checkPostUpdateGreeting() {
+                    if (!window.electronAPI || typeof window.electronAPI.getAppVersion !== 'function') return;
+                    var currentVer = '';
+                    try {
+                        currentVer = await Promise.resolve(window.electronAPI.getAppVersion());
+                        currentVer = currentVer != null ? String(currentVer) : '';
+                    } catch (_e) {
+                        return;
+                    }
+                    var lastVer = '';
+                    try {
+                        lastVer = localStorage.getItem(LS_LAST_VER) || '';
+                    } catch (_e2) {
+                        lastVer = '';
+                    }
+                    var pendingNotes = '';
+                    var pendingTargetVer = '';
+                    try {
+                        pendingNotes = localStorage.getItem(LS_PENDING_NOTES) || '';
+                        pendingTargetVer = localStorage.getItem(LS_PENDING_VER) || '';
+                    } catch (_e3) {}
+
+                    var upgraded = !!(lastVer && currentVer && lastVer !== currentVer);
+                    if (upgraded) {
+                        var notesMatch = !!(pendingTargetVer && currentVer && pendingTargetVer === currentVer);
+                        var bodyText = (notesMatch && pendingNotes) ? pendingNotes : '';
+                        if (typeof window.showPostUpdateWelcome === 'function') {
+                            window.showPostUpdateWelcome(currentVer, bodyText);
+                        } else if (typeof showToast === 'function') {
+                            showToast('应用已成功升级至最新版本 v' + currentVer, 'success');
+                        }
+                        try {
+                            window.OmicsDesktopUpdateUiHelpers.clearPendingPostUpdate();
+                        } catch (_c) {}
+                    }
+                    try {
+                        localStorage.setItem(LS_LAST_VER, currentVer);
+                    } catch (_e4) {}
+                };
+            })();
+
             /** 桌面客户端：订阅主进程 autoUpdater 广播，展示进度与重启安装 */
             window.initDesktopAutoUpdateUi = function () {
                 if (window.__desktopAutoUpdateBound) return;
@@ -3268,6 +3656,12 @@
                     if (progWrap) progWrap.style.display = 'block';
                     if (progBar) progBar.style.width = '0%';
                     if (restartBtn) restartBtn.style.display = 'none';
+                    var H = window.OmicsDesktopUpdateUiHelpers;
+                    if (H) {
+                        H.syncFromAutoUpdateInfo(info);
+                        H.setModalPrimaryButton('downloading');
+                    }
+                    if (typeof window.openUpdateModal === 'function') window.openUpdateModal();
                 }
                 function onProgress(p) {
                     showBanner();
@@ -3275,6 +3669,8 @@
                     var pct = (p && typeof p.percent === 'number') ? Math.min(100, Math.max(0, p.percent)) : 0;
                     if (progBar) progBar.style.width = pct + '%';
                     setText('正在下载新版本… ' + Math.round(pct) + '%');
+                    var H = window.OmicsDesktopUpdateUiHelpers;
+                    if (H) H.setModalPrimaryButton('downloading', { percent: pct });
                 }
                 function onDownloaded(info) {
                     showBanner();
@@ -3283,9 +3679,16 @@
                     if (progWrap) progWrap.style.display = 'block';
                     if (progBar) progBar.style.width = '100%';
                     if (restartBtn) restartBtn.style.display = 'inline-block';
+                    var H = window.OmicsDesktopUpdateUiHelpers;
+                    if (H) {
+                        H.syncFromAutoUpdateInfo(info);
+                        H.setModalPrimaryButton('restart');
+                    }
                 }
                 function onNotAvailable() {
                     hideBanner();
+                    var H = window.OmicsDesktopUpdateUiHelpers;
+                    if (H && window.__omicsModalUpdateBtnMode === 'checking') H.setModalPrimaryButton('idle');
                 }
                 function onError(payload) {
                     /** 主进程已映射 net::ERR_* 等为 userMessage，此处不再展示原始 Chromium 网络错误 */
@@ -3294,6 +3697,8 @@
                         ? String(payload.userMessage)
                         : '暂时无法检查更新，请稍后再试或前往官网下载页。';
                     if (typeof showToast === 'function') showToast(msg, 'warning');
+                    var H = window.OmicsDesktopUpdateUiHelpers;
+                    if (H) H.setModalPrimaryButton('idle');
                 }
 
                 ipc.on('app-auto-update-checking', function () { onChecking(); });
@@ -3302,6 +3707,236 @@
                 ipc.on('app-auto-update-error', function (_e, payload) { onError(payload); });
                 ipc.on('app-auto-update-download-progress', function (_e, p) { onProgress(p); });
                 ipc.on('app-auto-update-downloaded', function (_e, info) { onDownloaded(info); });
+            };
+
+            /** 桌面端：用户菜单「更新应用」入口 + 弹框（preload IPC）；Toast 仍走 onUpdaterMessage */
+            window.initDesktopVersionCenterUi = function () {
+                if (window.__desktopVersionCenterBound) return;
+                var menuItem = document.getElementById('menu-item-update-app');
+                var uaElectron = false;
+                try { uaElectron = /electron/i.test(navigator.userAgent || ''); } catch (_u) { uaElectron = false; }
+                var hasPreload = typeof window.getAppVersion === 'function' && typeof window.checkForUpdates === 'function';
+                if (!uaElectron && !hasPreload) return;
+                window.__desktopVersionCenterBound = true;
+                if (menuItem) menuItem.style.display = 'flex';
+
+                if (typeof window.getAppVersion === 'function') {
+                    window.electronAPI = window.electronAPI || {};
+                    if (typeof window.electronAPI.getAppVersion !== 'function') {
+                        window.electronAPI.getAppVersion = function () { return window.getAppVersion(); };
+                    }
+                    if (typeof window.electronAPI.checkForUpdates !== 'function') {
+                        window.electronAPI.checkForUpdates = function () { window.checkForUpdates(); };
+                    }
+                }
+
+                if (hasPreload && typeof window.onUpdaterMessage === 'function') {
+                    window.onUpdaterMessage(function (payload) {
+                        var t = payload && payload.type;
+                        var H = window.OmicsDesktopUpdateUiHelpers;
+                        if (t === 'checking-for-update') {
+                            if (typeof showToast === 'function') showToast('正在检查更新…', 'info');
+                        } else if (t === 'update-not-available') {
+                            if (payload && payload.devMode) {
+                                if (typeof showToast === 'function') showToast('开发模式下跳过线上更新检查（版本 ' + String(payload.version || '') + '）', 'info');
+                            } else if (typeof showToast === 'function') {
+                                showToast('已经是最新版本', 'success');
+                            }
+                            if (H && window.__omicsModalUpdateBtnMode === 'checking') H.setModalPrimaryButton('idle');
+                        } else if (t === 'update-available') {
+                            if (H) {
+                                H.persistPendingPostUpdate(payload.version, payload.releaseNotes);
+                                H.fillReleaseNotes(payload.releaseNotes);
+                                H.setModalPrimaryButton('downloading');
+                            }
+                            if (typeof window.openUpdateModal === 'function') window.openUpdateModal();
+                            if (typeof showToast === 'function') showToast('发现新版本，正在下载…', 'info');
+                        } else if (t === 'download-progress') {
+                            if (H) H.setModalPrimaryButton('downloading', { percent: payload && payload.percent });
+                        } else if (t === 'update-downloaded') {
+                            if (H) {
+                                H.persistPendingPostUpdate(payload.version, payload.releaseNotes);
+                                H.fillReleaseNotes(payload.releaseNotes);
+                                H.setModalPrimaryButton('restart');
+                            }
+                            if (typeof showToast === 'function') showToast('新版本已下载完成，可在弹窗或顶部条点击「重启安装」', 'success');
+                        } else if (t === 'error') {
+                            var um = payload && payload.userMessage ? String(payload.userMessage) : '暂时无法检查更新';
+                            if (typeof showToast === 'function') showToast(um, 'warning');
+                            if (H) H.setModalPrimaryButton('idle');
+                        }
+                    });
+                }
+            };
+
+            window.openUpdateModal = function () {
+                var modal = document.getElementById('update-modal');
+                var verEl = document.getElementById('modal-current-version');
+                if (typeof closeAllPopovers === 'function') closeAllPopovers();
+                var userProfileMenu = document.getElementById('user-profile-menu');
+                if (userProfileMenu) {
+                    userProfileMenu.classList.remove('show');
+                    userProfileMenu.setAttribute('aria-hidden', 'true');
+                }
+                if (modal) modal.style.display = 'flex';
+                var modeOpen = window.__omicsModalUpdateBtnMode || 'idle';
+                if (modeOpen === 'idle') {
+                    var Ho = window.OmicsDesktopUpdateUiHelpers;
+                    if (Ho) {
+                        Ho.clearReleaseNotes();
+                        Ho.setModalPrimaryButton('idle');
+                    }
+                }
+                if (!verEl) return;
+                verEl.textContent = '获取中...';
+                function fill(v) {
+                    verEl.textContent = v || '未知版本';
+                }
+                if (typeof window.getAppVersion === 'function') {
+                    window.getAppVersion().then(fill).catch(function () { fill('未知版本'); });
+                } else if (window.electronAPI && typeof window.electronAPI.getAppVersion === 'function') {
+                    Promise.resolve(window.electronAPI.getAppVersion()).then(fill).catch(function () { fill('未知版本'); });
+                } else {
+                    try {
+                        var ipcInv = require('electron').ipcRenderer;
+                        if (ipcInv && typeof ipcInv.invoke === 'function') {
+                            ipcInv.invoke('get-app-version').then(fill).catch(function () { fill('未知版本'); });
+                        } else {
+                            verEl.textContent = 'Web 端无需更新';
+                        }
+                    } catch (_e) {
+                        verEl.textContent = 'Web 端无需更新';
+                    }
+                }
+            };
+
+            window.closeUpdateModal = function () {
+                var modal = document.getElementById('update-modal');
+                if (modal) modal.style.display = 'none';
+            };
+
+            /** Web 端：头像菜单「下载客户端」弹窗（Electron 内隐藏入口，改走「更新应用」） */
+            window.openClientDownloadModal = function () {
+                var modal = document.getElementById('client-download-modal');
+                if (typeof closeAllPopovers === 'function') closeAllPopovers();
+                var userProfileMenu = document.getElementById('user-profile-menu');
+                if (userProfileMenu) {
+                    userProfileMenu.classList.remove('show');
+                    userProfileMenu.setAttribute('aria-hidden', 'true');
+                }
+                if (!modal) {
+                    window.open('/downloads/', '_blank');
+                    return;
+                }
+                modal.style.display = 'flex';
+                if (typeof window.refreshClientDownloadModal === 'function') window.refreshClientDownloadModal();
+            };
+            window.closeClientDownloadModal = function () {
+                var modal = document.getElementById('client-download-modal');
+                if (modal) modal.style.display = 'none';
+            };
+            window.refreshClientDownloadModal = function () {
+                var base = '/downloads/';
+                var verEl = document.getElementById('client-dl-ver-line');
+                var winA = document.getElementById('client-dl-win');
+                var linuxA = document.getElementById('client-dl-linux');
+                var winMiss = document.getElementById('client-dl-win-missing');
+                var linuxMiss = document.getElementById('client-dl-linux-missing');
+                function probe(url, onOk, onFail) {
+                    var xhr = new XMLHttpRequest();
+                    xhr.open('HEAD', url, true);
+                    xhr.onload = function () { (xhr.status >= 200 && xhr.status < 400) ? onOk() : onFail(); };
+                    xhr.onerror = onFail;
+                    xhr.send();
+                }
+                function fileUrl(name) { return base + encodeURIComponent(name); }
+                function bindLink(a, url, missEl, labelOk, fileLabel) {
+                    if (!a) return;
+                    if (!url) {
+                        a.classList.add('missing');
+                        a.setAttribute('href', '#');
+                        a.removeAttribute('download');
+                        a.textContent = '暂不可下载';
+                        if (missEl) { missEl.style.display = 'block'; missEl.textContent = '服务器尚未提供 ' + (fileLabel || '') + '。'; }
+                        return;
+                    }
+                    probe(url, function () {
+                        a.classList.remove('missing');
+                        a.setAttribute('href', url);
+                        a.setAttribute('download', '');
+                        a.textContent = labelOk;
+                        if (missEl) missEl.style.display = 'none';
+                    }, function () {
+                        a.classList.add('missing');
+                        a.setAttribute('href', '#');
+                        a.removeAttribute('download');
+                        a.textContent = '暂不可下载';
+                        if (missEl) {
+                            missEl.style.display = 'block';
+                            missEl.textContent = '未找到安装包文件：' + fileLabel;
+                        }
+                    });
+                }
+                var fallback = {
+                    version: '0.14.5',
+                    displayVersion: 'V0.14.5',
+                    winSetupFile: 'Omics Agent Setup 0.14.5.exe',
+                    linuxAppImageFile: 'Omics Agent-0.14.5.AppImage'
+                };
+                function apply(meta) {
+                    if (verEl) {
+                        var dv = meta.displayVersion || ('V' + meta.version);
+                        verEl.textContent = '当前推荐版本 ' + dv + '（' + (meta.version || '') + '）';
+                    }
+                    bindLink(winA, meta.winSetupFile ? fileUrl(meta.winSetupFile) : '', winMiss, '下载 Windows 安装包', meta.winSetupFile);
+                    bindLink(linuxA, meta.linuxAppImageFile ? fileUrl(meta.linuxAppImageFile) : '', linuxMiss, '下载 Linux AppImage', meta.linuxAppImageFile);
+                }
+                if (verEl) verEl.textContent = '正在获取版本信息…';
+                fetch(base + 'client-release.json?t=' + Date.now(), { cache: 'no-store' })
+                    .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+                    .then(apply)
+                    .catch(function () { apply(fallback); });
+            };
+            window.initWebClientDownloadUi = function () {
+                if (window.__webClientDownloadUiBound) return;
+                var menuItem = document.getElementById('menu-item-download-client');
+                var isElectron = false;
+                try { isElectron = /electron/i.test(navigator.userAgent || ''); } catch (_e) { isElectron = false; }
+                try {
+                    if (!isElectron && typeof process !== 'undefined' && process.versions && process.versions.electron) isElectron = true;
+                } catch (_e2) { }
+                window.__webClientDownloadUiBound = true;
+                if (menuItem) menuItem.style.display = isElectron ? 'none' : 'flex';
+            };
+
+            window.triggerUpdateCheck = function () {
+                var modeTr = window.__omicsModalUpdateBtnMode || 'idle';
+                if (modeTr === 'downloading' || modeTr === 'restart') return;
+                window.__omicsModalUpdateBtnMode = 'checking';
+                var Ht = window.OmicsDesktopUpdateUiHelpers;
+                if (Ht) Ht.setModalPrimaryButton('checking');
+                try {
+                    if (typeof window.checkForUpdates === 'function') {
+                        window.checkForUpdates();
+                    } else if (window.electronAPI && typeof window.electronAPI.checkForUpdates === 'function') {
+                        window.electronAPI.checkForUpdates();
+                    } else {
+                        if (typeof showToast === 'function') showToast('当前环境不支持自动更新检查', 'warning');
+                        window.__omicsModalUpdateBtnMode = 'idle';
+                        if (Ht) Ht.setModalPrimaryButton('idle');
+                        return;
+                    }
+                } catch (e1) {
+                    if (typeof showToast === 'function') showToast('无法发起更新检查', 'warning');
+                    window.__omicsModalUpdateBtnMode = 'idle';
+                    if (Ht) Ht.setModalPrimaryButton('idle');
+                    return;
+                }
+                window.setTimeout(function () {
+                    if (window.__omicsModalUpdateBtnMode !== 'checking') return;
+                    window.__omicsModalUpdateBtnMode = 'idle';
+                    if (window.OmicsDesktopUpdateUiHelpers) window.OmicsDesktopUpdateUiHelpers.setModalPrimaryButton('idle');
+                }, 3000);
             };
 
             function toggleSkillBookmark(skillId, btnElement) {
@@ -3573,6 +4208,18 @@
                 wp.style.maxWidth = '';
             }
             window.clearWorkspacePaneInlineLayout = clearWorkspacePaneInlineLayout;
+            /** 手动展开右侧文件栏时强制收起分析报告工作台，避免双栏挤占 */
+            function collapseWorkspacePaneWhenOpeningRightFileExplorer() {
+                var wsPane = document.getElementById('workspace-pane');
+                if (wsPane && wsPane.classList.contains('workspace-active')) {
+                    if (typeof window.clearWorkspacePaneInlineLayout === 'function') {
+                        window.clearWorkspacePaneInlineLayout(wsPane);
+                    }
+                    wsPane.classList.remove('workspace-active');
+                }
+                if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
+            }
+            window.collapseWorkspacePaneWhenOpeningRightFileExplorer = collapseWorkspacePaneWhenOpeningRightFileExplorer;
             function showChatView() {
                 window._volatileActiveSessionIdToReturn = null;
                 if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
@@ -5884,20 +6531,7 @@
                     addPathAsAttachment(filesPath, 'files');
                 }
             });
-            // 任务3：点击数据资产挂载为输入框上方附件标签，不清空当前对话
-            function ensureAssetTagsRow() {
-                var iw = document.getElementById('inputWrapper');
-                if (!iw) return null;
-                var row = iw.querySelector('.asset-tags-row');
-                if (!row) {
-                    row = document.createElement('div');
-                    row.className = 'asset-tags-row';
-                    var panel = iw.querySelector('.chat-input-panel');
-                    var fileArea = iw.querySelector('#filePreviewArea');
-                    if (panel) panel.insertBefore(row, fileArea ? fileArea.nextSibling : panel.firstChild);
-                }
-                return row;
-            }
+            // 任务3：从侧栏「数据资产」添加文件 — 仅写入 uploadedFiles + renderFilePreviewArea（禁止旧版 .asset-tag 药丸 DOM）
             function addAssetAsAttachment(filePath, fileName) {
                 if (!filePath) return;
                 var norm = String(filePath).replace(/\/+$/, '') || String(filePath);
@@ -5909,33 +6543,6 @@
                     if (typeof showToast === 'function') showToast('该文件已在待发送列表中');
                     return;
                 }
-                var row = ensureAssetTagsRow();
-                if (!row) return;
-                var tags = row.querySelectorAll('.asset-tag');
-                for (var ti = 0; ti < tags.length; ti++) {
-                    var dp = tags[ti].dataset.filepath || '';
-                    if ((String(dp).replace(/\/+$/, '') || dp) === norm) {
-                        console.warn('文件已展示在资产标签栏，跳过重复添加:', fileName || filePath);
-                        if (typeof showToast === 'function') showToast('该文件已在待发送列表中');
-                        return;
-                    }
-                }
-                var tag = document.createElement('div');
-                tag.className = 'asset-tag';
-                tag.dataset.filepath = filePath;
-                tag.dataset.fileName = fileName || filePath;
-                var displayName = (fileName || filePath || '文件').replace(/</g, '&lt;').replace(/&/g, '&amp;');
-                if (displayName.length > 24) displayName = displayName.slice(0, 24) + '...';
-                tag.innerHTML = '📄 ' + displayName + ' <span class="remove-tag" title="移除">✕</span>';
-                var removeSpan = tag.querySelector('.remove-tag');
-                if (removeSpan) removeSpan.onclick = function(e) {
-                    e.stopPropagation();
-                    tag.remove();
-                    var idx = uploadedFiles.findIndex(function(f) { return (f.path || f.file_path) === filePath; });
-                    if (idx >= 0) { uploadedFiles.splice(idx, 1); if (typeof renderFilePreviewArea === 'function') renderFilePreviewArea(); }
-                    checkInput();
-                };
-                row.appendChild(tag);
                 uploadedFiles.push({ path: filePath, file_path: filePath, name: fileName || filePath, file_name: fileName || filePath });
                 if (typeof renderFilePreviewArea === 'function') renderFilePreviewArea();
                 checkInput();
@@ -6828,6 +7435,11 @@
                 // 任务1：有 Token 时不再生成 guest_uuid；先恢复侧栏登录态再拉取数据
                 if (!window.GUEST_UUID) initAuthState();
                 if (typeof window.initDesktopAutoUpdateUi === 'function') window.initDesktopAutoUpdateUi();
+                if (typeof window.initDesktopVersionCenterUi === 'function') window.initDesktopVersionCenterUi();
+                if (typeof window.initWebClientDownloadUi === 'function') window.initWebClientDownloadUi();
+                if (typeof window.checkPostUpdateGreeting === 'function') {
+                    window.checkPostUpdateGreeting().catch(function () {});
+                }
                 (function restoreWorkspaceFileExplorer() {
                     try {
                         var sel = typeof getCachedWorkspaceSelection === 'function' ? getCachedWorkspaceSelection() : null;
@@ -7344,7 +7956,6 @@
                         item.onclick = function(ev) {
                             ev.stopPropagation();
                             closeAllPopovers();
-                            if (action === 'client') window.location.href = '/downloads/';
                             if (action === 'help-whotowork') window.open('/whotowork.html', '_blank');
                             if (action === 'help-api') window.open('/api-doc.html', '_blank');
                             if (action === 'feedback-help') {
@@ -7361,6 +7972,13 @@
                                 if (typeof switchToAdminView === 'function') switchToAdminView();
                             }
                             if (action === 'settings') { if (typeof openSettingsModal === 'function') openSettingsModal(); }
+                            if (action === 'app-update') {
+                                if (typeof window.openUpdateModal === 'function') window.openUpdateModal();
+                            }
+                            if (action === 'client-download') {
+                                if (typeof window.openClientDownloadModal === 'function') window.openClientDownloadModal();
+                                else window.open('/downloads/', '_blank');
+                            }
                         };
                     });
                     var btnLogout = document.getElementById('btn-logout-action');
@@ -8727,6 +9345,11 @@
             }
             // 🔥 统一渲染：输入框上方展示「待上传 chips + 已上传卡片」（打样：卡片在输入框上方，输入框占位符不变）
             function renderFilePreviewArea() {
+                var _iwRm = document.getElementById('inputWrapper');
+                if (_iwRm) {
+                    var _legacyTags = _iwRm.querySelector('.asset-tags-row');
+                    if (_legacyTags) _legacyTags.remove();
+                }
                 filePreviewArea.innerHTML = '';
                 pendingFiles.forEach((file, index) => {
                     const div = document.createElement('div');
@@ -9064,9 +9687,8 @@
                     });
                 } else {
                     // 🔥 更新：检查文本、待上传文件、已上传文件、hiddenPayload 或历史资产标签
-                    var hasAssetTags = document.querySelectorAll('#inputWrapper .asset-tag').length > 0;
                     var hasPathAttachments = Array.isArray(window.currentAttachments) && window.currentAttachments.length > 0;
-                    if (!text && pendingFiles.length === 0 && uploadedFiles.length === 0 && !workflowData && !useHistoryFiles && !hasAssetTags && !hiddenPayload && !hasPathAttachments) {
+                    if (!text && pendingFiles.length === 0 && uploadedFiles.length === 0 && !workflowData && !useHistoryFiles && !hiddenPayload && !hasPathAttachments) {
                         toggleLoadingState(false);
                         return;
                     }
@@ -9252,18 +9874,6 @@
 
                 currentAbortController = new AbortController();
 
-                // 合并左侧栏 .asset-tag 到 uploaded_files；不修改用户输入框文案（禁止向 message 注入「系统注入」路径串）
-                var assetTags = document.querySelectorAll('#inputWrapper .asset-tag');
-                if (assetTags && assetTags.length > 0) {
-                    var assetFiles = [];
-                    assetTags.forEach(function(t) {
-                        var p = t.dataset.filepath;
-                        if (p) { assetFiles.push({ path: p, name: (t.dataset.fileName || p) }); }
-                    });
-                    if (assetFiles.length) {
-                        filesToSend = (filesToSend || []).concat(assetFiles);
-                    }
-                }
                 // uploaded_files 去重（按 path/file_path 规范化），与资产总线多文件一致
                 if (filesToSend && filesToSend.length > 0) {
                     var _seenPaths = Object.create(null);
@@ -11051,7 +11661,7 @@
                                 const stepName = (window.STEP_NAME_MAP && window.STEP_NAME_MAP[tid]) || step.step_name || step.name || tid || `步骤 ${index + 1}`;
                                 const rawStatus = ((step.status || 'pending') + '').toLowerCase();
                                 const isSuccess = ['success', 'completed', 'done', 'warning'].includes(rawStatus);
-                                const isSkipped = (rawStatus === 'error' || rawStatus === 'failed') && (step.can_skip || (step.step_result && step.step_result.can_skip));
+                                const isSkipped = rawStatus === 'skipped';
                                 const stepStatus = isSkipped ? 'skipped' : (isSuccess ? 'success' : (rawStatus === 'error' || rawStatus === 'failed' ? 'error' : rawStatus === 'running' ? 'running' : 'pending'));
                                 const stepError = step.error || step.message || '';
                                 const stepId = `step-${index}-${accordionId}`;
@@ -11100,6 +11710,8 @@
                                 // 🔥 PHASE 1: Enhanced result data extraction
                                 const stepResult = step.step_result || {};
                                 const stepData = stepResult.data || step.data || {};
+                                var _metricsRaw = (stepData && stepData.metrics !== undefined) ? stepData.metrics : ((stepResult && stepResult.metrics !== undefined) ? stepResult.metrics : null);
+                                var metrics = (_metricsRaw && typeof _metricsRaw === 'object' && !Array.isArray(_metricsRaw)) ? _metricsRaw : null;
                                 const _baseRd = stepResult.report_data || stepData.report_data || {};
                                 const reportData = Object.assign({}, _baseRd);
                                 var _dlFallback = stepData.download_links || stepResult.download_links;
@@ -11116,7 +11728,7 @@
                                 const summary = (typeof stepData.summary === 'string' && stepData.summary.trim())
                                     ? stepData.summary
                                     : (step.summary || stepResult.summary || '');
-                                const metrics = stepData.metrics || stepResult.metrics || {};
+                                const diagMarkdown = String(stepResult.markdown || stepData.markdown || '').trim();
                                 
                                 // Build result content HTML
                                 let resultContentHtml = '';
@@ -11138,9 +11750,22 @@
                                             </div>
                                         `;
                                     }
+                                    if (diagMarkdown && (stepStatus === 'success' || stepStatus === 'warning')) {
+                                        var dTrim = diagMarkdown.trim();
+                                        var sTrim = (summary || '').trim();
+                                        if (dTrim && dTrim !== sTrim) {
+                                        let lineageHtml = '';
+                                        try {
+                                            lineageHtml = (typeof safeMarkedParse === 'function') ? safeMarkedParse(diagMarkdown) : escapeHtml(diagMarkdown);
+                                        } catch (e) {
+                                            lineageHtml = escapeHtml(diagMarkdown);
+                                        }
+                                        resultContentHtml += '<div class="mt-2 radiomics-step-markdown markdown-body">' + lineageHtml + '</div>';
+                                        }
+                                    }
                                     
-                                    // Render metrics as badges
-                                    if (Object.keys(metrics).length > 0) {
+                                    // Render metrics as badges（错误步骤无 data.metrics 时 metrics 为 null，禁止裸引用 metrics）
+                                    if (metrics && Object.keys(metrics).length > 0) {
                                         const metricsHtml = Object.entries(metrics).map(([key, val]) => 
                                             `<span class="badge bg-secondary me-1">${escapeHtml(key)}: ${escapeHtml(String(val))}</span>`
                                         ).join('');
@@ -11290,6 +11915,15 @@
                                             </div>
                                         `;
                                     }
+                                }
+                                if ((stepStatus === 'error' || stepStatus === 'skipped') && diagMarkdown) {
+                                    let mdHtmlErr = '';
+                                    try {
+                                        mdHtmlErr = (typeof safeMarkedParse === 'function') ? safeMarkedParse(diagMarkdown) : escapeHtml(diagMarkdown);
+                                    } catch (e) {
+                                        mdHtmlErr = escapeHtml(diagMarkdown);
+                                    }
+                                    resultContentHtml += '<div class="mt-3 p-2 rounded border border-danger omics-host-env-md markdown-body bg-light" style="font-size:13px;line-height:1.65;"><h6 class="text-danger mb-2 small fw-bold">宿主环境诊断详情（Markdown）</h6>' + mdHtmlErr + '</div>';
                                 }
                                 
                                 // 🔥 QoderWork Checklist：.checklist-icon + .icon-* | .checklist-title | .checklist-subtitle
@@ -11474,13 +12108,6 @@
                             if (filePaths.length === 0 && typeof uploadedFiles !== 'undefined' && uploadedFiles.length > 0) {
                                 filePaths.push(...uploadedFiles.map(f => f.path || f.file_path || f.name).filter(p => p));
                             }
-                            if (filePaths.length === 0) {
-                                var assetTags = document.querySelectorAll('#inputWrapper .asset-tag');
-                                for (var a = 0; a < assetTags.length; a++) {
-                                    var fp = assetTags[a].getAttribute('data-filepath');
-                                    if (fp && fp !== '<待上传数据>' && fp !== '<PENDING_UPLOAD>') filePaths.push(fp);
-                                }
-                            }
                             if (filePaths.length === 0 && window.workflowCache && window.workflowCache[formId]) {
                                 var cachedData = window.workflowCache[formId].workflowData;
                                 var cachedFilePaths = cachedData?.file_paths || cachedData?.workflow_data?.file_paths || [];
@@ -11567,15 +12194,7 @@
                             if (filePaths.length === 0 && uploadedFiles.length > 0) {
                                 filePaths.push(...uploadedFiles.map(f => f.path || f.file_path || f.name).filter(p => p));
                             }
-                            // 3. 从输入框上方【数据资产】标签 .asset-tag 提取
-                            if (filePaths.length === 0) {
-                                var assetTags = document.querySelectorAll('#inputWrapper .asset-tag');
-                                for (var a = 0; a < assetTags.length; a++) {
-                                    var fp = assetTags[a].getAttribute('data-filepath');
-                                    if (fp && fp !== '<待上传数据>' && fp !== '<PENDING_UPLOAD>') filePaths.push(fp);
-                                }
-                            }
-                            // 4. 从工作流缓存中提取（如果存在）
+                            // 3. 从工作流缓存中提取（如果存在）
                             if (filePaths.length === 0 && window.workflowCache && window.workflowCache[formId]) {
                                 const cachedData = window.workflowCache[formId].workflowData;
                                 const cachedFilePaths = cachedData?.file_paths || cachedData?.workflow_data?.file_paths || [];
@@ -11583,7 +12202,7 @@
                                     filePaths.push(...cachedFilePaths.filter(p => p && p !== '<PENDING_UPLOAD>' && p !== '<待上传数据>'));
                                 }
                             }
-                            // 5. 从当前消息的文件中提取
+                            // 4. 从当前消息的文件中提取
                             if (filePaths.length === 0) {
                                 const messageRow = formElement.closest('.message-row');
                                 if (messageRow) {
@@ -11609,10 +12228,10 @@
                             filePaths = flattenedPaths.length ? flattenedPaths : filePaths;
                             // 🔥 空弹夹拦截：无上传、无资产选择则禁止执行
                             var hasUploaded = uploadedFiles.length > 0;
-                            var hasAssetTag = document.querySelectorAll('#inputWrapper .asset-tag').length > 0;
+                            var hasSideAttachments = Array.isArray(window.currentAttachments) && window.currentAttachments.length > 0;
                             if (filePaths.length === 0) {
                                 alert("⚠️ 缺少数据文件！请先上传文件，或从左侧【数据资产】中选择一个文件作为输入，然后再执行工作流。");
-                                if (!hasUploaded && !hasAssetTag) document.getElementById('fileInput')?.click();
+                                if (!hasUploaded && !hasSideAttachments) document.getElementById('fileInput')?.click();
                                 return;
                             }
                             var uniquePaths = [...new Set(filePaths.filter(Boolean))];
@@ -14451,6 +15070,7 @@
                     
                     // 使用本次上传的完整列表更新全局状态（多文件场景不丢失）
                     uploadedFiles = fileInfos;
+                    window.uploadedFiles = uploadedFiles;
                     console.log('✅ [Template Upload] 更新全局 uploadedFiles 数量:', uploadedFiles.length, uploadedFiles);
                     
                     const queryToSend = originalQuery || window.pendingOriginalQuery || userInput.value.trim();
@@ -14655,7 +15275,7 @@
                 const container = document.getElementById(selectorId);
                 const checkboxes = container.querySelectorAll('input:checked');
                 if (checkboxes.length === 0) { alert("请至少选择一个文件"); return; }
-                uploadedFiles = []; let selectedNames = [];
+                uploadedFiles = []; window.uploadedFiles = uploadedFiles; let selectedNames = [];
                 checkboxes.forEach(cb => { const name = cb.getAttribute('data-name'); uploadedFiles.push({ id: cb.value, name: name }); selectedNames.push(name); });
                 const btn = container.querySelector('button'); btn.disabled = true; btn.innerText = "已选择";
                 const userMsg = `我已选择以下文件：\n${selectedNames.join('\n')}\n\n请基于这些文件，继续规划 Seurat 单细胞分析工作流。`;
@@ -15008,6 +15628,78 @@
         <script src="/js/components/settings_modal.js" defer></script>
         <script src="/js/feedback_ui.js"></script>
         <script type="module" src="/js/components/admin_console.js"></script>
+        <div id="client-download-modal" class="omics-modal-overlay" style="display: none;" aria-modal="true" role="dialog" aria-labelledby="client-download-modal-title" onclick="if (event.target === this && typeof closeClientDownloadModal === 'function') closeClientDownloadModal();">
+            <div class="omics-update-dialog" style="max-width: 480px;" onclick="event.stopPropagation();">
+                <div class="update-header">
+                    <h3 id="client-download-modal-title" style="font-weight: bold; margin: 0 0 8px; padding-right: 36px;">下载桌面客户端</h3>
+                    <p class="text-muted" style="font-size: 13px; margin: 0; color: #64748b;">本地挂载工作区、系统托盘与自动更新仅在桌面版提供；浏览器端可在此下载安装包。</p>
+                    <button type="button" class="close-btn" onclick="closeClientDownloadModal()" aria-label="关闭">&times;</button>
+                </div>
+                <div class="update-card" style="flex-direction: column; align-items: stretch;">
+                    <p id="client-dl-ver-line" style="font-size: 14px; margin: 0 0 12px; color: #334155;">正在获取版本信息…</p>
+                    <div style="margin-bottom: 14px;">
+                        <div style="font-size: 13px; font-weight: 600; margin-bottom: 6px;">Windows（64 位）</div>
+                        <a id="client-dl-win" class="btn btn-dark omics-update-check-btn" href="#" download style="display: inline-block; text-decoration: none;">下载 Windows 安装包</a>
+                        <p id="client-dl-win-missing" style="display: none; font-size: 12px; color: #dc2626; margin: 8px 0 0;">暂不可下载</p>
+                    </div>
+                    <div style="margin-bottom: 14px;">
+                        <div style="font-size: 13px; font-weight: 600; margin-bottom: 6px;">Linux（x86_64 AppImage）</div>
+                        <a id="client-dl-linux" class="btn btn-dark omics-update-check-btn" href="#" download style="display: inline-block; text-decoration: none;">下载 Linux AppImage</a>
+                        <p id="client-dl-linux-missing" style="display: none; font-size: 12px; color: #dc2626; margin: 8px 0 0;">暂不可下载</p>
+                    </div>
+                    <div style="padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 12px; color: #475569; line-height: 1.55; margin-bottom: 12px;">
+                        <div style="font-weight: 600; margin-bottom: 6px; color: #1e293b;">V0.14.5 更新摘要</div>
+                        <ul style="margin: 0; padding-left: 1.15rem;">
+                            <li>浏览器端恢复头像菜单「下载客户端」弹窗，版本与下载链接与官网同步。</li>
+                            <li>内置网页集成第三批生物医药科学计算技能（ITC、酶动力学、序列保守性、蛋白同源与人源性评估等）。</li>
+                            <li>桌面版支持自动检查更新；安装后可在头像菜单使用「更新应用」。</li>
+                        </ul>
+                    </div>
+                    <a href="/downloads/" target="_blank" rel="noopener" style="font-size: 13px; color: #2563eb;">查看完整下载页与历史版本 →</a>
+                </div>
+            </div>
+        </div>
+        <div id="update-modal" class="omics-modal-overlay" style="display: none;" aria-modal="true" role="dialog" aria-labelledby="update-modal-title" onclick="if (event.target === this && typeof closeUpdateModal === 'function') closeUpdateModal();">
+            <div class="omics-update-dialog" onclick="event.stopPropagation();">
+                <div class="update-header">
+                    <h3 id="update-modal-title" style="font-weight: bold; margin: 0 0 8px; padding-right: 36px;">更新应用</h3>
+                    <p class="text-muted" style="font-size: 13px; margin: 0 0 0; color: #64748b;">在此查看当前版本，并在联网时检查是否有可供安装的更新。</p>
+                    <button type="button" class="close-btn" onclick="closeUpdateModal()" aria-label="关闭">&times;</button>
+                </div>
+                <div class="update-card">
+                    <div class="update-info">
+                        <div style="font-size: 15px; font-weight: 500; margin-bottom: 8px;">当前版本</div>
+                        <div id="modal-current-version" style="font-family: ui-monospace, monospace; font-size: 14px; margin-bottom: 8px;">获取中...</div>
+                        <div id="update-release-notes-container" style="display: none; margin-top: 15px; padding: 12px; background: #f8f9fa; border-radius: 8px; border: 1px solid #eee;">
+                            <div style="font-size: 13px; font-weight: bold; margin-bottom: 6px; color: #333;">✨ 新版特性</div>
+                            <div id="update-release-notes-content" style="font-size: 12px; color: #666; line-height: 1.5; white-space: pre-wrap;"></div>
+                        </div>
+                        <div class="text-muted" style="font-size: 12px; color: #64748b;">有新版本时会自动提示下载与安装；已是最新版本时会显示提示。</div>
+                    </div>
+                    <div class="update-action">
+                        <button type="button" id="modal-check-update-btn" class="btn btn-dark omics-update-check-btn" onclick="triggerUpdateCheck();">
+                            <i class="bi bi-arrow-repeat"></i> 检查更新
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="post-update-welcome-modal" class="omics-modal-overlay" style="display: none;" aria-modal="true" role="dialog" aria-labelledby="post-update-welcome-title" onclick="if (event.target === this && typeof closePostUpdateWelcomeModal === 'function') closePostUpdateWelcomeModal();">
+            <div class="omics-update-dialog" style="max-width: 440px;" onclick="event.stopPropagation();">
+                <div class="update-header">
+                    <h3 id="post-update-welcome-title" style="font-weight: bold; margin: 0 0 8px; padding-right: 36px;">已成功更新</h3>
+                    <p class="text-muted" style="font-size: 13px; margin: 0 0 0; color: #64748b;">欢迎使用新版本，以下为本次更新摘要。</p>
+                    <button type="button" class="close-btn" onclick="closePostUpdateWelcomeModal()" aria-label="关闭">&times;</button>
+                </div>
+                <div id="post-update-welcome-notes-wrap" style="display: none; margin-top: 16px; padding: 12px; background: #f8f9fa; border-radius: 8px; border: 1px solid #eee;">
+                    <div style="font-size: 13px; font-weight: bold; margin-bottom: 6px; color: #333;">✨ 新版特性</div>
+                    <div id="post-update-welcome-notes" style="font-size: 12px; color: #666; line-height: 1.5; white-space: pre-wrap;"></div>
+                </div>
+                <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
+                    <button type="button" class="btn btn-dark omics-update-check-btn" onclick="closePostUpdateWelcomeModal();">开始使用</button>
+                </div>
+            </div>
+        </div>
         <div id="asset-picker-modal" class="modal-overlay" style="display: none; position: fixed; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 10001; align-items: center; justify-content: center;" onclick="if(event.target===this) this.style.display='none';">
             <div class="modal-content asset-picker-modal-content" style="width: 500px; max-height: 60vh; display: flex; flex-direction: column; background: #fff; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.15); padding: 16px;" onclick="event.stopPropagation();">
                 <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 10px;">

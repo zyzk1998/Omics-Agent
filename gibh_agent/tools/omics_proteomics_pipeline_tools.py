@@ -17,7 +17,6 @@ from ..core.tool_registry import registry
 from ..core.utils import safe_tool_execution
 from .omics_derived_analysis import (
     mzml_derived_from_path,
-    proteomics_modal_proxy,
     proteomics_report_markdown,
 )
 from .omics_pipeline_env import modal_tool_with_degradation, write_temp_mock_artifact
@@ -35,6 +34,30 @@ from .omics_real_io import compute_mzml_basic_stats, format_mzml_qc_markdown
 logger = logging.getLogger(__name__)
 
 
+def build_proteomics_database_search_cli(
+    mzml_path: str,
+    *,
+    fragment_tol_da: float,
+    missed_cleavages: int,
+    peptide_fdr: float,
+) -> List[str]:
+    """
+    DDA/DIA 搜库管线占位 CLI（MaxQuant / DIA-NN / MSFragger 语义对齐，供 Worker 与单测校验）。
+    宿主环境未必安装二进制；仅保证参数字符串与业界工具字段一致。
+    """
+    return [
+        "diann",
+        "--f",
+        mzml_path,
+        "--frag-mass-tolerance",
+        str(fragment_tol_da),
+        "--missed-cleavages",
+        str(missed_cleavages),
+        "--peptide-fdr",
+        str(peptide_fdr),
+    ]
+
+
 def _proteomics_derived_or_modal(
     prefix: str,
     msg: str,
@@ -48,25 +71,7 @@ def _proteomics_derived_or_modal(
     candidate_exes: Optional[List[str]] = None,
     tool_id: str = "",
 ) -> Dict[str, Any]:
-    m = mzml_derived_from_path(file_path)
-    if m:
-        md_body, tbl = proteomics_modal_proxy(step_key, m)
-        path = write_temp_mock_artifact(prefix, msg)
-        out: Dict[str, Any] = {
-            "status": "success",
-            "message": msg + " (mzML-derived proxy)",
-            "output_path": path,
-            "file_path": path,
-            "omics_analysis_mode": "mzml_derived_proxy",
-            "derived_mzml_metrics": m,
-        }
-        return attach_visual_contract(
-            out,
-            markdown=md_body,
-            image_urls=image_urls,
-            table_data=tbl,
-            tool_id=tool_id or None,
-        )
+    del step_key  # 保留签名兼容；下游禁止 mzML 统计代理冒充搜库真值
     return modal_tool_with_degradation(
         prefix,
         msg,
@@ -217,13 +222,16 @@ def proteomics_spectrum_preprocessing(
 
 @registry.register(
     name="proteomics_database_search",
-    description="DDA/DIA 搜库与谱图库匹配（Mock；MaxQuant/DIA-NN 逻辑）",
+    description="DDA/DIA 搜库（MaxQuant/DIA-NN：fragment_tol、missed_cleavages、peptide_fdr）",
     category="Proteomics",
     output_type="file_path",
 )
 @safe_tool_execution
 def proteomics_database_search(
-    file_path: str = "", fragment_tol_da: float = 0.05
+    file_path: str = "",
+    fragment_tol_da: float = 0.05,
+    missed_cleavages: int = 2,
+    peptide_fdr: float = 0.01,
 ) -> Dict[str, Any]:
     return _proteomics_derived_or_modal(
         "p_db",

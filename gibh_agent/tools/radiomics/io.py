@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 from ...core.tool_registry import registry
+from .nifti_preview import build_radiomics_nifti_preview_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,19 @@ def load_medical_image(
             else:
                 out["mask_path"] = None
                 out["mask_warning"] = f"Mask not found: {mask_path}"
+        suf = p.suffix.lower()
+        _is_vol = suf in (".nii", ".gz") or ".nii" in p.name.lower() or suf == ".dcm"
+        _preview_md = ""
+        if _is_vol:
+            _preview_md = build_radiomics_nifti_preview_markdown(str(p.resolve()), title="中心轴位预览（Axial）")
+        _meta_lines = (
+            f"- **文件**：`{p.name}`\n"
+            f"- **体素尺寸**：{size}\n"
+            f"- **间距 (mm)**：{spacing}\n"
+        )
+        out["markdown"] = (_preview_md + "### 影像元数据\n" + _meta_lines) if _preview_md else ("### 影像元数据\n" + _meta_lines)
+        out["summary"] = out["markdown"]
+        out["message"] = f"已从 `{p.name}` 加载医学影像（维度 {size}）。"
         return out
     except Exception as e:
         logger.exception("load_medical_image failed: %s", e)

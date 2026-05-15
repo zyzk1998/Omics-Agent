@@ -22,7 +22,6 @@ from .omics_epigenomics_runner import (
     epigenomics_shift_fragment_analysis_impl,
 )
 from .omics_derived_analysis import (
-    epigenomics_modal_proxy,
     epigenomics_multiomics_markdown,
     fastq_bundle_from_path,
 )
@@ -53,26 +52,7 @@ def _epigenomics_modal_derived(
     table_data: Dict[str, Any],
     tool_id: str = "",
 ) -> Dict[str, Any]:
-    """FASTQ 可用时走读段统计代理；否则保留原 modal 降级。"""
-    b = fastq_bundle_from_path(file_path)
-    if b:
-        md_body, tbl = epigenomics_modal_proxy(step, b)
-        path = write_temp_mock_artifact(prefix, msg)
-        out: Dict[str, Any] = {
-            "status": "success",
-            "message": msg + " (stream-derived proxy)",
-            "output_path": path,
-            "file_path": path,
-            "omics_analysis_mode": "fastq_stream_proxy",
-            "proxy_metrics": b,
-        }
-        return attach_visual_contract(
-            out,
-            markdown=md_body,
-            image_urls=image_urls,
-            table_data=tbl,
-            tool_id=tool_id or None,
-        )
+    """禁止 FASTQ 读段代理冒充 Peak/Motif 等真结果；统一走 modal（缺 CLI 则 error）。"""
     return modal_tool_with_degradation(
         prefix,
         msg,
@@ -194,15 +174,23 @@ def epigenomics_raw_qc_trimming(
 
 @registry.register(
     name="epigenomics_alignment",
-    description="ATAC/ChIP 读段比对（Bowtie2/BWA；Mock；与 WGBS/Hi-C 不同路线）",
+    description="ATAC/ChIP 读段比对（Bowtie2：threads、--mp；缺索引时降级仿真）",
     category="Epigenomics",
     output_type="file_path",
 )
 @safe_tool_execution
 def epigenomics_alignment(
-    file_path: str = "", reference_id: str = "hg38", mismatch_penalty: int = 4
+    file_path: str = "",
+    reference_id: str = "hg38",
+    threads: int = 8,
+    mismatch_penalty: int = 4,
 ) -> Dict[str, Any]:
-    return epigenomics_alignment_impl(file_path, reference_id)
+    return epigenomics_alignment_impl(
+        file_path,
+        reference_id,
+        threads=threads,
+        mismatch_penalty=mismatch_penalty,
+    )
 
 
 @registry.register(
@@ -233,15 +221,21 @@ def epigenomics_shift_fragment_analysis(
 
 @registry.register(
     name="epigenomics_peak_calling",
-    description="MACS2/Genrich Peak calling（Mock）",
+    description="MACS2 callpeak（-q qvalue、broad peak；缺对照 BAM 时降级仿真）",
     category="Epigenomics",
     output_type="file_path",
 )
 @safe_tool_execution
 def epigenomics_peak_calling(
-    file_path: str = "", q_value_cutoff: float = 0.05
+    file_path: str = "",
+    qvalue_threshold: float = 0.05,
+    broad_peak: bool = False,
 ) -> Dict[str, Any]:
-    return epigenomics_peak_calling_impl(file_path)
+    return epigenomics_peak_calling_impl(
+        file_path,
+        qvalue_threshold=qvalue_threshold,
+        broad_peak=broad_peak,
+    )
 
 
 @registry.register(

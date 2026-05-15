@@ -370,4 +370,42 @@ PYTHONPATH=. python -c "from gibh_agent.core.workflows.registry import registry 
 
 ---
 
-*文档版本：与 `gibh_agent/core/workflows/base.py`、`registry.py`、`executor.py`、`planner.py`（`_classify_intent`）、`orchestrator.py`（domain 路由）、`diagnosis_param_whitelist.py`、四模态 workflow 实现及 `index.html` 中 `STEP_NAME_MAP` 对齐；若实现变更，请同步更新 **§8 速查表** 与 **§3.1 Planner 同步** 条款。*
+## 11. 三大组学工具链（基因组 / 表观遗传 / 蛋白质组）参数与业界软件映射
+
+下列 `**tool_id`** 对应 `gibh_agent/tools/omics_*_pipeline_tools.py` 中 `@registry.register(name=...)`；**可调参数键**与 `get_step_metadata(...).default_params`、ToolRegistry 生成的 **Pydantic args_schema** 一致（路径类键仍遵守宪法词汇表）。重型 CLI 在宿主侧优先 **探测工具 → 组装命令 → 失败则降级仿真**，完整吞吐建议在 Worker/TaaS 执行。
+
+### 11.1 基因组学（`domain_name`: `genomics`）
+
+
+| tool_id                     | 业界参考软件                     | 代表性参数（默认值）                                                                                    | 说明                                                                                                       |
+| --------------------------- | -------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `genomics_read_trimming`    | fastp                      | `quality_cutoff`（20）                                                                          | `-q` 质量阈值                                                                                                |
+| `genomics_alignment`        | **BWA-MEM**                | `threads`（8）、`mismatch_penalty`（4）、`gap_open_penalty`（6）                                      | 映射 `-t`、`-B`、`-O`（open/extension 同值占位）                                                                   |
+| `genomics_mark_duplicates`  | Picard / samtools markdup  | `optical_duplicate_distance`（2500）                                                            | 光学重复距离（仿真管线）                                                                                             |
+| `genomics_bqsr`             | GATK BaseRecalibrator      | `bqsr_max_cycles`（2）                                                                          | 宿主缺资源位点集时常降级                                                                                             |
+| `genomics_germline_calling` | **GATK 4 HaplotypeCaller** | `stand_call_conf`（30.0）、`min_mapping_quality`（20）、`min_base_quality`（20）、`reference_id`（hg38） | CLI 组装 `--standard-min-confidence-threshold-for-calling`、`--minimum-mapping-quality`；BQ 阈值保留给上游过滤/Worker |
+| `genomics_cnv_calling`      | GATK CNV                   | `cnv_bin_width`（1000）                                                                         | 深度分箱                                                                                                     |
+| `genomics_sv_calling`       | Manta 等                    | `min_sv_len`（50）                                                                              | SV 最小长度                                                                                                  |
+| `genomics_vqsr_filtering`   | GATK VQSR / bcftools       | `tranche_sensitivity`（99.0）                                                                   | VQSLOD / tranche                                                                                         |
+
+
+### 11.2 表观遗传组学（`domain_name`: `epigenomics`）
+
+
+| tool_id                    | 业界参考软件             | 代表性参数（默认值）                                   | 说明                    |
+| -------------------------- | ------------------ | -------------------------------------------- | --------------------- |
+| `epigenomics_alignment`    | **Bowtie2**（SE 骨架） | `threads`（8）、`mismatch_penalty`（4）           | `--threads`、`--mp`    |
+| `epigenomics_peak_calling` | **MACS2** callpeak | `qvalue_threshold`（0.05）、`broad_peak`（false） | `-q`、`--broad`（组蛋白宽峰） |
+
+
+### 11.3 蛋白质组学（`domain_name`: `proteomics`）
+
+
+| tool_id                      | 业界参考软件                                   | 代表性参数（默认值）                                                        | 说明                                                                         |
+| ---------------------------- | ---------------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `proteomics_database_search` | **MaxQuant** / **DIA-NN** / MSFragger 语义 | `fragment_tol_da`（0.05）、`missed_cleavages`（2）、`peptide_fdr`（0.01） | 宿主侧 `build_proteomics_database_search_cli` 以 **diann** 风格占位组装，便于 Worker 对齐 |
+
+
+---
+
+*文档版本：与 `gibh_agent/core/workflows/base.py`、`registry.py`、`executor.py`、`planner.py`（`_classify_intent`）、`orchestrator.py`（domain 路由）、`diagnosis_param_whitelist.py`、四模态 workflow 实现及 `index.html` 中 `STEP_NAME_MAP` 对齐；若实现变更，请同步更新 **§8 速查表**、**§11 三大组学映射** 与 **§3.1 Planner 同步** 条款。*

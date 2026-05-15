@@ -119,7 +119,12 @@ async def _run_domain(domain: str, abs_file: str, prompt: str) -> Dict[str, Any]
     assert wf is not None, domain
 
     planner = SOPPlanner(ToolRetriever(), _DummyLLM())  # type: ignore[arg-type]
-    keys = list(wf.steps_dag.keys())
+    qc_first = {
+        "genomics": "step_genomics_raw_qc",
+        "proteomics": "step_prot_raw_qc",
+        "epigenomics": "step_epi_raw_qc",
+    }
+    keys = [qc_first[domain]]
 
     plan_result: Optional[Dict[str, Any]] = None
     async for ev, data in planner.generate_plan(
@@ -194,8 +199,8 @@ async def main_async() -> int:
     print()
     print("=" * 80)
     print(
-        f"结束：{ok}/3 组域 planner→executor 跑通，首步质控由真实 I/O 计算；"
-        " 下游在缺 CLI 时输出基于输入的轻量代理指标。重型真管线请在 Worker 环境验收。"
+        f"结束：{ok}/3 组域 planner→executor 跑通首步质控（真实 I/O）；"
+        " 下游步骤需安装 `scripts/install_omics_real_env.sh` 所列 CLI 与参考序列，否则工具返回 error 与环境诊断 Markdown。"
     )
     print("=" * 80)
     return 0

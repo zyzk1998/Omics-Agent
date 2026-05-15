@@ -14,11 +14,14 @@ from .metabolomics import MetabolomicsWorkflow
 from .rna import RNAWorkflow
 from .spatial_workflow import SpatialWorkflow
 
+from .report_lineage_instructions import EXPERT_REPORT_DATA_LINEAGE_RULE_ZH
+
 __all__ = [
     "BaseWorkflow",
     "WorkflowRegistry",
     "MetabolomicsWorkflow",
     "RNAWorkflow",
     "SpatialWorkflow",
+    "EXPERT_REPORT_DATA_LINEAGE_RULE_ZH",
 ]
 
