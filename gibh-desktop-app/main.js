@@ -48,13 +48,7 @@ if (!gotSingleInstanceLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-    } else {
-      createMainWindow();
-    }
+    showMainWindowFromTray();
   });
 }
 
@@ -294,10 +288,53 @@ function friendlyAutoUpdateMessage(raw) {
   return '暂时无法完成更新检查，请稍后重试，或使用官网下载页获取最新安装包。';
 }
 
+function getUpdateDialogParentWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && !focused.isDestroyed()) return focused;
+  const wins = BrowserWindow.getAllWindows();
+  return wins.find((w) => w && !w.isDestroyed()) || undefined;
+}
+
+/** 用户确认后再下载；同一 version 仅弹一次确认框（避免重复检查重复打扰） */
+function promptUserThenDownloadUpdate(info) {
+  if (!autoUpdater) return Promise.resolve();
+  const ver = (info && info.version) ? String(info.version) : '';
+  if (ver && globalThis.__OMICS_UPDATE_PROMPTED_VERSION__ === ver) {
+    return Promise.resolve();
+  }
+  if (ver) globalThis.__OMICS_UPDATE_PROMPTED_VERSION__ = ver;
+  return dialog
+    .showMessageBox(getUpdateDialogParentWindow(), {
+      type: 'info',
+      buttons: ['下载更新', '稍后'],
+      defaultId: 0,
+      cancelId: 1,
+      title: '发现新版本',
+      message: '发现新版本，是否现在下载？',
+      detail: ver ? `版本：${ver}\n下载完成后将提示您重启以完成安装。` : '下载完成后将提示您重启以完成安装。',
+      noLink: true,
+    })
+    .then(({ response }) => {
+      if (response !== 0) return undefined;
+      return autoUpdater.downloadUpdate();
+    })
+    .catch((err) => {
+      console.warn('[Omics Agent] prompt/download update', err && err.message);
+      broadcastUpdaterMessage({
+        type: 'error',
+        userMessage: friendlyAutoUpdateMessage(err),
+      });
+    });
+}
+
 function hookAutoUpdaterEventsOnce() {
   if (!autoUpdater || !app.isPackaged) return;
   if (globalThis.__OMICS_AUTO_UPDATER_EVENTS__) return;
   globalThis.__OMICS_AUTO_UPDATER_EVENTS__ = true;
+
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
 
   const base = resolveGenericUpdateBaseUrl();
   if (base) {
@@ -319,13 +356,16 @@ function hookAutoUpdaterEventsOnce() {
       version: info.version,
       releaseDate: info.releaseDate,
       releaseNotes: info.releaseNotes,
+      awaitingUserConfirm: true,
     });
     broadcastUpdaterMessage({
       type: 'update-available',
       version: info.version,
       releaseDate: info.releaseDate,
       releaseNotes: info.releaseNotes,
+      awaitingUserConfirm: true,
     });
+    promptUserThenDownloadUpdate(info);
   });
 
   autoUpdater.on('update-not-available', (info) => {
@@ -809,13 +849,31 @@ async function startLocalSidecarIfNeeded() {
   await waitForSidecarReady(14000);
 }
 
+function navigateRendererAppHome() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const js = `(function(){try{if(typeof navigateAppHome==='function')navigateAppHome();else if(typeof showChatView==='function'){showChatView();if(typeof clearChatAndReset==='function')clearChatAndReset();}}catch(e){console.warn('[tray] navigate home',e);}})();`;
+  const run = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.executeJavaScript(js).catch(() => {});
+  };
+  if (mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.once('did-finish-load', run);
+  } else {
+    run();
+  }
+}
+
 function showMainWindowFromTray() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
+    navigateRendererAppHome();
   } else {
     createMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.once('did-finish-load', () => navigateRendererAppHome());
+    }
   }
 }
 
@@ -840,7 +898,12 @@ function createTray() {
         },
       },
     ]);
-    tray.setContextMenu(menu);
+    if (process.platform === 'win32') {
+      tray.on('right-click', () => tray.popUpContextMenu(menu));
+    } else {
+      tray.setContextMenu(menu);
+    }
+    tray.on('click', () => showMainWindowFromTray());
     tray.on('double-click', () => showMainWindowFromTray());
   } catch (e) {
     console.warn('[Omics Agent] 创建系统托盘失败:', e && e.message);
@@ -999,6 +1062,17 @@ if (gotSingleInstanceLock) {
         console.error('PDF 导出失败:', error);
       }
     });
+    ipcMain.on('app-download-update', () => {
+      if (!autoUpdater || !app.isPackaged) return;
+      autoUpdater.downloadUpdate().catch((err) => {
+        console.warn('[Omics Agent] downloadUpdate（手动）', err && err.message);
+        broadcastUpdaterMessage({
+          type: 'error',
+          userMessage: friendlyAutoUpdateMessage(err),
+        });
+      });
+    });
+
     ipcMain.on('app-install-update', () => {
       if (!autoUpdater) return;
       try {

@@ -129,11 +129,24 @@ CHEM_PROMPTS_BY_SKILL_NAME: dict[str, str] = {
 若通过附件提供单行结构文件，请在正文中粘贴首条结构以便核对。
 """,
     "Open Babel": """[Skill_Route: chem_openbabel]
-您好。本工具用于分子结构的格式互转、氢原子处理、三维构象生成或几何弛豫，以及部分理化性质的批量计算。请明确任务是「性质计算」还是「格式转换及输出形式」，并给出输入结构的线性表示或说明已上传的结构文件类型。
+您好。本工具用于分子结构的格式互转、加氢、三维构象生成或几何弛豫，以及 Open Babel 支持的理化性质批量计算。
 
-单条结构建议在消息中用引号标出。若需由 InChI 等非常规线性编码输入，请在正文中标明输入类型。转换任务请写明目标输出形式；性质任务请说明侧重分子量、脂水性或极性表面积等指标中的哪些项。
+**无需上传即可演示（默认走性质计算）**
+请对阿司匹林执行 Open Babel 理化性质汇总：结构为 `CC(=O)Oc1ccccc1C(=O)O`，开启 `compute_properties`。
 
-若使用会话附件，请在消息中指明「使用刚上传的文件」并避免虚构路径。请勿与本会话中其他分子描述符评估工具混淆用途。
+**可复制一句直接发送**
+「请对 `CC(=O)Oc1ccccc1C(=O)O` 执行 Open Babel 理化性质计算。」
+
+**演示参数（助手侧：用户未改需求、未上传附件时须写入工具 JSON，禁止留空 file_path / smiles_text）**
+```json
+{"smiles_text":"CC(=O)Oc1ccccc1C(=O)O","compute_properties":true,"in_format":"smi"}
+```
+
+**格式转换（可选，替换演示任务时）**
+- 在消息中写明目标格式，例如将 `CC(=O)O` 转为 mol：`out_format` 设为 `mol`，`compute_properties` 设为 `false`。
+- 若已上传 `.mol` / `.sdf` / `.smi` 等附件，仅用会话解析得到的绝对路径写入 `file_path`，禁止臆造路径。
+
+（助手侧：`file_path` 与 `smiles_text` 二选一；无上传时从反引号内 SMILES 或上表 JSON 填入 `smiles_text`；广场一键体验且正文无其它分子时，默认 `smiles_text=CC(=O)Oc1ccccc1C(=O)O` 且 `compute_properties=true`。）
 """,
     "分子芳香性感知操作工具": """[Skill_Route: chem_aromaticity_perception]
 您好。本工具用于将含显式单双键交替记法的结构表示，规范为环内共轭体系常用的简洁记法，便于在数据库与检索中保持表示一致。适用于需要统一芳香环书写形式、或从键线式回读后的线性串整理。

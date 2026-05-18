@@ -181,12 +181,31 @@ def _md_metrics_table(tool: str, summary: Optional[Dict[str, Any]]) -> str:
         ]
     elif tool == "openbabel":
         props = res.get("properties") if isinstance(res.get("properties"), dict) else {}
+        _prop_labels = {
+            "molwt": "分子量 (MW, g/mol)",
+            "MW": "分子量 (MW, g/mol)",
+            "logP": "logP",
+            "TPSA": "TPSA (Å²)",
+            "HBA1": "氢键受体 (HBA1)",
+            "HBD": "氢键供体 (HBD)",
+            "nrot": "可旋转键 (rotors)",
+            "rotors": "可旋转键 (rotors)",
+        }
         rows = [
             ("输入", str(res.get("input") or "—")),
             ("输出格式", str(res.get("output_format") or "—")),
         ]
-        for k, v in list(props.items())[:8]:
-            rows.append((k, str(v)))
+        seen: set[str] = set()
+        for k, v in props.items():
+            if k == "error" or k in seen:
+                continue
+            if k in ("MW", "rotors") and k == "MW" and "molwt" in props:
+                continue
+            if k == "rotors" and "nrot" in props:
+                continue
+            seen.add(k)
+            label = _prop_labels.get(k, str(k))
+            rows.append((label, str(v)))
     else:
         return ""
     lines = ["| 指标 | 数值 |", "| --- | --- |"]
@@ -598,6 +617,16 @@ def chem_openbabel(
         }
 
     inner = {k: v for k, v in flat.items() if k not in ("Status", "Message")}
+    json_fence_md = ""
+    if inner:
+        try:
+            json_fence_md = (
+                "\n\n#### 完整结果 JSON\n\n```json\n"
+                + json.dumps(inner, ensure_ascii=False, indent=2)
+                + "\n```\n"
+            )
+        except (TypeError, ValueError):
+            json_fence_md = ""
     summary = {
         "tool": "openbabel",
         "canonical_smiles": st or None,
@@ -613,7 +642,7 @@ def chem_openbabel(
     artifacts = _collect_artifacts(out_dir)
     image_urls, json_url = _public_urls_from_artifacts(artifacts)
     summary_obj = _safe_load_chem_summary_json(out_dir)
-    core_md = _md_metrics_table("openbabel", summary_obj)
+    core_md = (_md_metrics_table("openbabel", summary_obj) or "") + json_fence_md
     md = _markdown_chem_report(
         "Open Babel 转换 / 性质",
         image_urls,
@@ -621,6 +650,8 @@ def chem_openbabel(
         ("输出文件",),
         None,
         core_metrics_md=core_md or None,
+        engine="Open Babel",
+        image_alt="Open Babel Structure",
     )
     return {
         "status": "success",

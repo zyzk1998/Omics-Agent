@@ -14,6 +14,10 @@ window.checkForUpdates = function checkForUpdates() {
   ipcRenderer.send('check-for-updates');
 };
 
+window.downloadAppUpdate = function downloadAppUpdate() {
+  ipcRenderer.send('app-download-update');
+};
+
 /**
  * @param {(payload: {
  *   type: 'checking-for-update'|'update-available'|'update-not-available'|'download-progress'|'update-downloaded'|'error',

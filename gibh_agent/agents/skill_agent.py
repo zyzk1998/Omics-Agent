@@ -200,6 +200,9 @@ def _extract_inline_csv_table_for_fallback(text: str) -> str:
 _OASIS_DEMO_HEAVY = (
     "EVQLVESGGGLVQPGGSLRLSCAASGFTFSSYAMSWVRQAPGKGLEWVSAISGSGGSTYYADSVKGRFTISRDNSKNTLYLQMNSLRAEDTAVYYCARDYGDYWGQGTLVTVSS"
 )
+# Open Babel 广场一键演示（须 len≥4 以满足 SMILES 启发式；勿用 CCO 等过短串）
+_OPENBABEL_DEMO_SMILES = "CC(=O)Oc1ccccc1C(=O)O"
+
 _OASIS_DEMO_LIGHT = (
     "DIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLYSGVPSRFSGSRSGTDFTLTISSLQPEDFATYYCQQHYTTPPTFGQGTKVEIK"
 )
@@ -459,7 +462,9 @@ class SkillAgent:
             "禁止编造 file_path：路径必须逐字来自【可用本地文件绝对路径】列表；若列表为空或用户未上传，"
             "对 PySkills 类工具请改用内联字段（勿写 /app/uploads/demo_*.fa 等虚构路径）："
             "rnafold_analysis→fasta_content；sascore_analysis→smiles_text；lipinski_druglikeness→smiles_text；"
-            "drug_similarity_search→smiles_text；pymol_analysis→pdb_content；gseapy_analysis→table_content。"
+            "drug_similarity_search→smiles_text；chem_openbabel→smiles_text 或 file_path（二选一，禁止同时填）；"
+            "广场默认演示：smiles_text=模板中阿司匹林 SMILES、compute_properties=true；格式转换则 compute_properties=false 且必填 out_format；"
+            "pymol_analysis→pdb_content；gseapy_analysis→table_content。"
             "crispr_cas9_simulation→guides_text、target_sequence、cell_line（可选）、result_format、random_seed（可选）；"
             "无上传文件时从正文提取 gRNA 与靶序列填入 guides_text/target_sequence，禁止编造 file_path。"
             "immune_cell_isolation_simulation→simulation_json、output_format、random_seed（可选）。"
@@ -590,10 +595,14 @@ class SkillAgent:
             exs = _extract_inline_smiles_for_fallback(clean)
             if exs:
                 out["smiles_text"] = exs
-        if tool_name == "chem_openbabel" and "smiles_text" in fields and not file_paths:
-            exo = _extract_inline_smiles_for_fallback(clean)
-            if exo:
-                out["smiles_text"] = exo
+        if tool_name == "chem_openbabel":
+            if "compute_properties" in fields:
+                out.setdefault("compute_properties", True)
+            if "in_format" in fields:
+                out.setdefault("in_format", "smi")
+            if "smiles_text" in fields and not file_paths:
+                exo = _extract_inline_smiles_for_fallback(clean)
+                out["smiles_text"] = exo or _OPENBABEL_DEMO_SMILES
         if tool_name == "chem_tanimoto_matrix" and "smiles_text" in fields and not file_paths:
             exm = _extract_multi_smiles_for_matrix_fallback(clean)
             if exm:
@@ -684,8 +693,19 @@ class SkillAgent:
                     args["file_path"] = chosen_ob or file_paths[0]
                 else:
                     sm2 = _extract_inline_smiles_for_fallback(clean)
-                    if sm2:
-                        args["smiles_text"] = sm2
+                    args["smiles_text"] = sm2 or _OPENBABEL_DEMO_SMILES
+            if "compute_properties" in fields:
+                cp = args.get("compute_properties")
+                if cp is None or (isinstance(cp, str) and not str(cp).strip()):
+                    args["compute_properties"] = True
+                elif isinstance(cp, str):
+                    args["compute_properties"] = cp.strip().lower() in ("1", "true", "yes", "on")
+            fp_ob2 = (args.get("file_path") or "").strip() if isinstance(args.get("file_path"), str) else ""
+            st_ob2 = (args.get("smiles_text") or "").strip() if isinstance(args.get("smiles_text"), str) else ""
+            if st_ob2 and fp_ob2:
+                args.pop("file_path", None)
+            if "in_format" in fields and _blank(args.get("in_format")) and st_ob2 and not fp_ob2:
+                args["in_format"] = "smi"
         if tool_name == "chem_tanimoto_matrix":
             fp_tm = (args.get("file_path") or "").strip() if isinstance(args.get("file_path"), str) else ""
             st_tm = (args.get("smiles_text") or "").strip() if isinstance(args.get("smiles_text"), str) else ""
@@ -792,6 +812,7 @@ class SkillAgent:
             "function 参数字段须可被服务端严格校验：字符串用双引号、布尔为小写 true/false；"
             "FASTA/PDB/CSV 整段作为字符串时，换行在参数里须为 \\n。"
             "若用户仅在模板中列出带反引号的参考 SMILES，须任选第一个合法 SMILES 写入 smiles_text。"
+            "chem_openbabel：无上传时 smiles_text 必填（可取模板演示阿司匹林 SMILES），广场一键体验默认 compute_properties=true。"
         )
         user_msg = (
             f"【用户原文（可含 FASTA）】\n{clean}\n\n"

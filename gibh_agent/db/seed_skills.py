@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from gibh_agent.db.chem_skill_prompt_templates import CHEM_PROMPTS_BY_SKILL_NAME
 from gibh_agent.db.omics_skill_prompt_templates import OMICS_FAST_LANE_PROMPTS
 from gibh_agent.db.models import Skill as SkillModel
+from gibh_agent.db.panshi_skill_meta import apply_panshi_official_descriptions
 
 OMICS_FAST_LANE_SKILLS = [
     {
@@ -248,7 +249,7 @@ GGGGAUAGGUUCAACCUCCUU
     {
         "name": "蛋白同源结构评估器",
         "sub_category": "数据分析",
-        "description": "集成 BLAST 序列比对与结构相似性分析，用于精准判定蛋白质同源关系与三维结构差异。",
+        "description": "集成 BLAST 序列比对与结构相似性分析，用于精准判定蛋白质同源关系与三维结构差异，支持功能预测和修饰位点评估。",
         "prompt_template": """[Skill_Route: protein_homology_structure_assessment]
 您好。我将对指定 **UniProt 靶蛋白** 执行 BLAST 同源检索，并综合 **结构相似性** 与 **PTM 位点保守性** 给出加权综合评分表。
 
@@ -280,7 +281,7 @@ GGGGAUAGGUUCAACCUCCUU
     {
         "name": "CRISPR-Cas9 基因编辑工具",
         "sub_category": "预测与建模",
-        "description": "模拟 CRISPR-Cas9 基因组编辑流程，包含向导RNA验证、目标位点识别等。",
+        "description": "模拟 CRISPR-Cas9 基因组编辑流程，包含向导RNA验证、目标位点识别、递送效率与编辑结果模拟。",
         "prompt_template": """[Skill_Route: crispr_cas9_simulation]
 您好。我将使用 **CRISPR-Cas9 编辑流程仿真器**，对给定 **gRNA** 与 **靶标基因组 DNA** 执行：gRNA 校验 → PAM（NGG）扫描 → 递送效率估计 → DSB 与修复路径（NHEJ/HDR）模拟，并给出可读摘要与序列输出。
 
@@ -376,7 +377,7 @@ DIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLYSGVPSRFSGSRSGTDFTLTISSLQP
 （助手侧：将用户表格或 JSON 规范化为上述字段写入 `spectrum_json`；未指定时 `output_format=text`。）
 """,
     },
-    {"name": "蛋白质序列保守性分析工具", "sub_category": "数据分析", "description": "进行蛋白质多序列比对、系统发育树构建与保守性分析。", "prompt_template": """[Skill_Route: protein_sequence_conservation_analysis]
+    {"name": "蛋白质序列保守性分析工具", "sub_category": "数据分析", "description": "可以进行蛋白质多序列比对、系统发育树构建与保守性分析。", "prompt_template": """[Skill_Route: protein_sequence_conservation_analysis]
 您好。我将对多条蛋白质序列执行**渐进式多序列比对**、距离矩阵与**邻接法系统发育树**，并给出位点熵与保守性剖面。
 
 **参数**
@@ -388,7 +389,7 @@ DIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLYSGVPSRFSGSRSGTDFTLTISSLQP
 （助手侧：将用户 FASTA 或序列列表规范为上述 JSON 字符串写入 `alignment_json`。）
 """,
     },
-    {"name": "ITC结合热力学分析工具", "sub_category": "数据分析", "description": "分析等温滴定量热 (ITC) 数据，返回 Kd、ΔH、ΔS 等热力学参数。", "prompt_template": """[Skill_Route: itc_binding_thermodynamic_analysis]
+    {"name": "ITC结合热力学分析工具", "sub_category": "数据分析", "description": "可以分析等温滴定量热 (ITC) 数据，采用一位点结合模型拟合，返回 Kd、ΔH、ΔS、ΔG 等热力学参数。", "prompt_template": """[Skill_Route: itc_binding_thermodynamic_analysis]
 您好。我将对 ITC 滴定数据拟合**一结合位点模型**，输出 Kd、ΔH、n、ΔG、ΔS 及拟合优度，并在报告中嵌入**拟合曲线图（Base64 PNG）**。
 
 **参数**
@@ -405,7 +406,7 @@ DIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLYSGVPSRFSGSRSGTDFTLTISSLQP
 （助手侧：有上传文件时只填 `file_path`；无上传时将滴定表写入 `itc_injections_json`。）
 """,
     },
-    {"name": "蛋白酶动力学分析工具", "sub_category": "数据分析", "description": "基于荧光读数拟合 Michaelis-Menten 模型分析蛋白酶动力学数据。", "prompt_template": """[Skill_Route: protease_kinetics_analysis]
+    {"name": "蛋白酶动力学分析工具", "sub_category": "数据分析", "description": "可以基于荧光读数拟合 Michaelis-Menten 模型分析蛋白酶动力学数据。", "prompt_template": """[Skill_Route: protease_kinetics_analysis]
 您好。我将由荧光时间曲线估计各底物浓度的**初速率**，拟合 **Michaelis-Menten**，给出 Vmax、Km、kcat、kcat/Km，并在报告中嵌入 **MM 拟合曲线图（Base64 PNG）**。
 
 **参数**
@@ -417,7 +418,7 @@ DIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLYSGVPSRFSGSRSGTDFTLTISSLQP
 （助手侧：将实验表整理为合法 JSON 写入 `kinetics_input_json`。）
 """,
     },
-    {"name": "酶动力学分析工具", "sub_category": "数据分析", "description": "执行酶动力学实验分析，模拟并拟合酶在不同底物浓度下的反应速率。", "prompt_template": """[Skill_Route: enzyme_kinetics_analysis]
+    {"name": "酶动力学分析工具", "sub_category": "数据分析", "description": "可以执行酶动力学实验分析，模拟并拟合酶在不同底物浓度下的反应速率。", "prompt_template": """[Skill_Route: enzyme_kinetics_analysis]
 您好。我将基于底物列表仿真时间历程与底物饱和曲线，拟合 **Michaelis-Menten** 参数，并在报告中嵌入**底物动力学拟合图（Base64 PNG）**。
 
 **参数**
@@ -432,7 +433,7 @@ DIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLYSGVPSRFSGSRSGTDFTLTISSLQP
     {
         "name": "RNA二级结构分析工具",
         "sub_category": "数据分析",
-        "description": "分析 RNA 的二级结构特征，包括碱基配对、茎区、环区数量与大小。",
+        "description": "可以分析 RNA 的二级结构特征，包括碱基配对、茎区、环区数量与大小。",
         "prompt_template": """[Skill_Route: rna_secondary_structure_analysis]
 您好。我将对 RNA **点括号二级结构**（及可选一级序列）做配对校验、茎/环统计，并给出简化的自由能与 GC 含量估计。
 
@@ -450,7 +451,7 @@ DIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLYSGVPSRFSGSRSGTDFTLTISSLQP
     {
         "name": "基因集富集分析工具",
         "sub_category": "数据分析",
-        "description": "对基因列表执行基因集富集分析。",
+        "description": "可以对基因列表执行基因集富集分析。",
         "prompt_template": """[Skill_Route: gseapy_analysis]
 您好。我将为您启动 **基因集富集分析（GSEApy）** 数据接收与预处理：系统将对您提交的基因列表及可选排序统计量进行格式校验，并作为后续富集检验（如 Over-Representation Analysis 等）的标准输入。
 
@@ -503,7 +504,7 @@ STAT3,0.9
     {
         "name": "估计细胞周期各阶段持续时间",
         "sub_category": "数据分析",
-        "description": "基于双核苷脉冲标记的流式细胞术数据，估算细胞周期各阶段时长。",
+        "description": "基于双核苷（EdU/BrdU）脉冲标记的流式细胞术数据，估算细胞周期各阶段（G1、S、G2/M）的时长，以及细胞死亡率。",
         "prompt_template": """[Skill_Route: cell_cycle_phase_duration_estimation]
 您好。我将基于 **EdU/BrdU 双脉冲标记**流式百分比曲线，用数值优化估计 **G1 / S / G2M 时长**、**死亡率**与标记效率等参数。
 
@@ -531,7 +532,7 @@ ADDITIONAL_CHEMISTRY_SKILLS = [
     {
         "name": "合成可行性分析工具",
         "sub_category": "数据分析",
-        "description": "对输入的候选分子 SMILES 文本计算 RDKit 合成可行性分数（SA Score）。",
+        "description": "对输入的候选分子 SDF 文件（URL）逐一分子计算合成可行性分数（SA Score），基于 RDKit SA_Score 算法，直接以 JSON 列表形式返回每个分子的评分，",
         "prompt_template": """[Skill_Route: sascore_analysis]
 您好。我需要进行小分子**合成可行性（SA Score，Synthetic Accessibility Score）**评估：该指标基于分子图复杂度启发式打分，**数值越低通常表示合成路线越可行**（具体阈值需结合化学类型与文献经验解读）。
 
@@ -795,13 +796,14 @@ def run_seed_core_skills(db: Session) -> int:
 
 def get_all_system_skills_list() -> list:
     """返回合并后的系统技能列表（编排快车道 + CORE …），供幂等 Upsert 使用。"""
-    return (
+    merged = (
         OMICS_FAST_LANE_SKILLS
         + CORE_OMICS_SKILLS
         + BIOMEDICINE_SKILLS
         + ADDITIONAL_BIOMED_SKILLS
         + CHEMISTRY_SKILLS
     )
+    return apply_panshi_official_descriptions(merged)
 
 
 def get_slim_system_skills_list() -> list:

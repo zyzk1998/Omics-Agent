@@ -52,45 +52,12 @@
 
             <div class="changelog-history">
                 <div style="margin-bottom: 1rem;">
-                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.14.5（当前推荐）</div>
+                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.14.x（当前推荐 · 系列汇总）</div>
                     <ul class="changelog">
-                        <li><strong>【V0.14 发行线补丁】</strong>客户端 semver <strong>0.14.5</strong>；<strong>Windows</strong> NSIS（<code>Omics Agent Setup 0.14.5.exe</code>）与 <strong>Linux</strong> AppImage（<code>Omics Agent-0.14.5.AppImage</code>）同步至本站 <code>/downloads/</code>；自动更新元数据与安装包同源构建。</li>
-                        <li><strong>Web 端：</strong>头像菜单恢复「下载客户端」弹窗，版本与安装包链接与下载页 <code>client-release.json</code> 同步。</li>
-                        <li><strong>内置网页 / 后端技能：</strong>第三批生物医药科学计算（ITC、细胞周期、酶/蛋白酶动力学、序列保守性）及蛋白同源结构评估、抗体人源性（OASis）等能力接入技能广场。</li>
-                    </ul>
-                </div>
-
-                <div style="margin-bottom: 1rem;">
-                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.14.4</div>
-                    <ul class="changelog">
-                        <li><strong>【V0.14 发行线补丁】</strong>客户端 semver <strong>0.14.4</strong>；Windows / Linux 双端同步；自动更新源与网页同源；版本中心 Modal。</li>
-                    </ul>
-                </div>
-
-                                <div style="margin-bottom: 1rem;">
-                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.14.3</div>
-                    <ul class="changelog">
-                        <li><strong>【V0.14 发行线补丁】</strong>客户端 semver <strong>0.14.3</strong>；Windows / Linux 双端同步；版本中心与右侧栏工作台互斥等。</li>
-                    </ul>
-                </div>
-
-                <div style="margin-bottom: 1rem;">
-                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.14.2</div>
-                    <ul class="changelog">
-                        <li><strong>【V0.14 发行线补丁】</strong>客户端 semver <strong>0.14.2</strong>；Windows NSIS 与 Linux AppImage 同步至本站 <code>/downloads/</code>。</li>
-                        <li><strong>桌面：</strong>系统托盘与单实例锁、关闭隐藏到托盘、双击托盘唤起主窗口（需有效托盘图标文件）。</li>
-                        <li><strong>网页：</strong>拖拽上传 dragCounter 防抖；工作流卡片文件并入全局输入区预览；Toast/Modal 长路径换行；问题反馈闭环等。</li>
-                        <li><strong>自动更新：</strong>元数据与安装包同源构建。</li>
-                    </ul>
-                </div>
-
-                <div style="margin-bottom: 1rem;">
-                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.14.0</div>
-                    <ul class="changelog">
-                        <li><strong>【V0.14 发行线】</strong>客户端 semver <strong>0.14.0</strong>；Windows NSIS（<code>Omics Agent Setup 0.14.0.exe</code>）与 Linux AppImage（<code>Omics Agent-0.14.0.AppImage</code>）已同步至本站 <code>/downloads/</code>。</li>
-                        <li><strong>自动更新：</strong><code>latest.yml</code>、<code>latest-linux.yml</code> 与对应 <code>.blockmap</code> 与安装包同源构建，electron-updater（generic）可按哈希校验增量。</li>
-                        <li><strong>内置网页：</strong>与主仓库同步；含 Markdown 表格渲染修复（诊断区「参数推荐」等表格正常展示）、流式与排版类改进（以当前打包内 <code>bundled-web-ui</code> 为准）。</li>
-                        <li><strong>运维提示：</strong>若在本机构建新平台包，请在对应环境执行 <code>npm run dist:win</code> / <code>dist:linux</code> 后务必再运行 <code>npm run sync:download-page</code>，避免 <code>sha512</code> 与文件名漂移。</li>
+                        <li><strong>【当前推荐】</strong>客户端 semver <strong>0.14.6</strong>；<strong>Windows</strong> NSIS 与 <strong>Linux</strong> AppImage 同步至本站 <code>/downloads/</code>；<code>client-release.json</code>、<code>latest.yml</code> / <code>latest-linux.yml</code> 与安装包同源构建。</li>
+                        <li><strong>Web / 内置网页：</strong>右侧「技能报告」展示技能广场中文名（<code>tool_id</code> 友好映射）；Open Babel 等化学技能参数抽取与结果解析修复；数据诊断血缘 Banner 仅引用用户 uploads 原始文件；反馈与帮助 UI 优化。</li>
+                        <li><strong>桌面端：</strong>自动更新须用户确认后再下载/重启；托盘二次唤起聚焦主界面；内置 <code>bundled-web-ui</code> 与主站同步（含拖拽上传、工作流文件预览、下载弹窗等 0.14 线能力）。</li>
+                        <li><strong>后端技能：</strong>第三批生物医药科学计算、磐石文案对齐、化学 RDKit/Open Babel 工具链与技能广场模板更新（0.14.0～0.14.5 补丁细节合并于此，不再分补丁号展开）。</li>
                     </ul>
                 </div>
 
@@ -145,11 +112,11 @@
             var verLine = document.getElementById('ver-line');
 
             var staticFallback = {
-                version: '0.14.5',
-                displayVersion: 'V0.14.5',
+                version: '0.14.6',
+                displayVersion: 'V0.14.6',
                 productName: 'Omics Agent',
-                winSetupFile: 'Omics Agent Setup 0.14.5.exe',
-                linuxAppImageFile: 'Omics Agent-0.14.5.AppImage'
+                winSetupFile: 'Omics Agent Setup 0.14.6.exe',
+                linuxAppImageFile: 'Omics Agent-0.14.6.AppImage'
             };
 
             function setVersion(meta) {

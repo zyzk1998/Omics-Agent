@@ -29,12 +29,31 @@
         return { 'X-Guest-UUID': g };
     }
 
+    function patchExistingFeedbackModal() {
+        const modal = document.getElementById('feedback-modal');
+        if (!modal) return;
+        const dialog = modal.querySelector('.feedback-modal-dialog, .modal-dialog');
+        if (dialog) dialog.classList.remove('modal-lg');
+        const sel = document.getElementById('feedback-type-select');
+        if (sel && !sel.querySelector('option[value="ui"]')) {
+            const opt = document.createElement('option');
+            opt.value = 'ui';
+            opt.textContent = 'UI建议';
+            const after = sel.querySelector('option[value="suggestion"]');
+            if (after && after.nextSibling) sel.insertBefore(opt, after.nextSibling);
+            else sel.appendChild(opt);
+        }
+    }
+
     function ensureFeedbackModal() {
-        if (document.getElementById('feedback-modal')) return;
+        if (document.getElementById('feedback-modal')) {
+            patchExistingFeedbackModal();
+            return;
+        }
         const holder = document.createElement('div');
         holder.innerHTML =
             '<div class="modal fade" id="feedback-modal" tabindex="-1" aria-labelledby="feedback-modal-label" aria-hidden="true">' +
-            '  <div class="modal-dialog modal-dialog-centered">' +
+            '  <div class="modal-dialog modal-dialog-centered feedback-modal-dialog">' +
             '    <div class="modal-content feedback-modal-content">' +
             '      <div class="modal-header">' +
             '        <h5 class="modal-title" id="feedback-modal-label">💡 问题反馈</h5>' +
@@ -45,11 +64,12 @@
             '        <select id="feedback-type-select" class="form-select form-select-sm mb-3">' +
             '          <option value="issue">遇到问题</option>' +
             '          <option value="suggestion">功能建议</option>' +
+            '          <option value="ui">UI建议</option>' +
             '          <option value="error">报错 / 异常</option>' +
             '          <option value="other">其他</option>' +
             '        </select>' +
             '        <label class="form-label small text-muted" for="feedback-content-text">详细描述</label>' +
-            '        <textarea id="feedback-content-text" class="form-control feedback-textarea" rows="5" placeholder="请描述现象、复现步骤或建议…"></textarea>' +
+            '        <textarea id="feedback-content-text" class="form-control feedback-textarea" rows="9" placeholder="请描述现象、复现步骤或建议…"></textarea>' +
             '        <input type="hidden" id="feedback-error-context" value="" />' +
             '      </div>' +
             '      <div class="modal-footer">' +

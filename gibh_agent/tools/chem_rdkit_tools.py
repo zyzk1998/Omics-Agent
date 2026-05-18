@@ -336,8 +336,17 @@ def _markdown_chem_report(
     html_summary: Optional[str] = None,
     *,
     core_metrics_md: Optional[str] = None,
+    engine: str = "RDKit",
+    image_alt: Optional[str] = None,
 ) -> str:
-    chunks: List[str] = [f"### {title}", "", "以下为 **RDKit** 计算结果（同源 `/results/` 静态资源）。", ""]
+    engine_label = (engine or "RDKit").strip()
+    alt_text = (image_alt or f"{engine_label} Structure").strip()
+    chunks: List[str] = [
+        f"### {title}",
+        "",
+        f"以下为 **{engine_label}** 计算结果（同源 `/results/` 静态资源）。",
+        "",
+    ]
     link_parts: List[str] = []
     if json_url:
         link_parts.append(f"数值摘要 JSON：[下载/打开]({json_url})（`chem_summary.json`）")
@@ -360,7 +369,7 @@ def _markdown_chem_report(
             'border: 1px solid #e5e7eb; border-radius: 8px; display: flex; '
             "justify-content: center; align-items: center; background-color: #f8fafc; "
             f'margin-top: 16px;">\n'
-            f'    <img src="{src}" alt="RDKit Structure" '
+            f'    <img src="{src}" alt="{alt_text}" '
             'style="max-width: 100%; max-height: 450px; object-fit: contain; cursor: zoom-in;" '
             'onclick="window.open(this.src, \'_blank\')" />\n'
             "</div>\n"

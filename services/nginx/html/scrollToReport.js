@@ -12,7 +12,8 @@ window.scrollToReport = function(messageId) {
 
         // 激活右侧工作台
         var wp = document.getElementById('workspace-pane');
-        if (wp) wp.classList.add('workspace-active');
+        if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
+        else if (wp) wp.classList.add('workspace-active');
         if (typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
 
         // 滚动右侧报告容器到可见区域

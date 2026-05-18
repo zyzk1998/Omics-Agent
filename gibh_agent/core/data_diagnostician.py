@@ -4,6 +4,7 @@
 """
 import logging
 import os
+import re
 from typing import Dict, Any, Optional, List
 import pandas as pd
 import numpy as np
@@ -63,6 +64,78 @@ class DataDiagnostician:
         """初始化数据诊断器"""
         pass
 
+    _DERIVATIVE_BASENAME_RE = re.compile(
+        r"(_preprocessed|_processed|_normalized|_filtered|_intermediate|_tmp)(\.|$)",
+        re.IGNORECASE,
+    )
+
+    @staticmethod
+    def is_user_primary_upload_path(path: str) -> bool:
+        """
+        判定是否为用户最初上传的原始数据路径（用于血缘 Banner）。
+        排除 results/ 工作流中间产物及常见衍生文件名。
+        """
+        if not path or not isinstance(path, str):
+            return False
+        p = path.strip().replace("\\", "/")
+        if not p or p.startswith("<"):
+            return False
+        low = p.lower()
+        if "/results/" in low or low.startswith("results/"):
+            return False
+        if "/output/" in low or "/temp/" in low or "/tmp/" in low:
+            return False
+        if "/uploads/" not in low and not low.startswith("uploads/"):
+            return False
+        bn = os.path.basename(low)
+        if DataDiagnostician._DERIVATIVE_BASENAME_RE.search(bn):
+            return False
+        return True
+
+    @staticmethod
+    def filter_user_primary_upload_paths(paths: Optional[List[str]]) -> List[str]:
+        out: List[str] = []
+        seen: set[str] = set()
+        for raw in paths or []:
+            if not isinstance(raw, str) or not raw.strip():
+                continue
+            for part in raw.strip().replace(";", ",").split(","):
+                p = part.strip()
+                if not p or p in seen:
+                    continue
+                if not DataDiagnostician.is_user_primary_upload_path(p):
+                    continue
+                seen.add(p)
+                out.append(p)
+        return out
+
+    @staticmethod
+    def collect_primary_upload_basenames(
+        file_metadata: Optional[Dict[str, Any]] = None,
+        extra_paths: Optional[List[str]] = None,
+    ) -> List[str]:
+        """仅从用户上传区路径收集 Banner 用 basename（不含步骤 results 产物）。"""
+        raw_paths: List[str] = []
+        if file_metadata:
+            for key in ("file_path", "real_data_path"):
+                val = file_metadata.get(key)
+                if isinstance(val, str) and val.strip():
+                    raw_paths.append(val.strip())
+            mask_val = file_metadata.get("mask_path")
+            if isinstance(mask_val, str) and mask_val.strip():
+                raw_paths.append(mask_val.strip())
+        if extra_paths:
+            raw_paths.extend(extra_paths)
+        filtered = DataDiagnostician.filter_user_primary_upload_paths(raw_paths)
+        names: List[str] = []
+        seen_bn: set[str] = set()
+        for p in filtered:
+            bn = os.path.basename(p)
+            if bn and bn not in seen_bn:
+                seen_bn.add(bn)
+                names.append(bn)
+        return names[:20]
+
     @staticmethod
     def build_data_lineage_markdown_banner(
         file_metadata: Optional[Dict[str, Any]],
@@ -70,31 +143,15 @@ class DataDiagnostician:
     ) -> str:
         """
         在诊断报告 Markdown 顶部拼接「当前分析目标文件」血缘声明（basename 列表）。
+        仅包含用户 uploads 区原始文件，禁止混入 results/ 中间产物。
         """
-        raw_paths: List[str] = []
-        if file_metadata:
-            for key in ("file_path", "real_data_path", "mask_path"):
-                val = file_metadata.get(key)
-                if isinstance(val, str) and val.strip():
-                    first = val.strip().replace(";", ",").split(",")[0].strip()
-                    if first:
-                        raw_paths.append(first)
-        if extra_paths:
-            for p in extra_paths:
-                if isinstance(p, str) and p.strip():
-                    first = p.strip().replace(";", ",").split(",")[0].strip()
-                    if first:
-                        raw_paths.append(first)
-        names: List[str] = []
-        seen: set[str] = set()
-        for p in raw_paths:
-            bn = os.path.basename(p)
-            if bn and bn not in seen:
-                seen.add(bn)
-                names.append(bn)
+        names = DataDiagnostician.collect_primary_upload_basenames(
+            file_metadata=file_metadata,
+            extra_paths=extra_paths,
+        )
         if not names:
             return ""
-        quoted = ", ".join(f"`{n}`" for n in names[:20])
+        quoted = ", ".join(f"`{n}`" for n in names)
         return f"> 📁 **当前分析目标文件**：{quoted}\n\n"
     
     def analyze(

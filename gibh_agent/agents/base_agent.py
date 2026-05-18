@@ -1907,47 +1907,17 @@ Use Simplified Chinese for all content."""
                 f"{critical_instruction_text}\n\n{EXPERT_REPORT_DATA_LINEAGE_RULE_ZH}"
             )
 
-            # 数据血缘：从步骤结果与 summary_context 提取原始文件名，注入专家报告 Prompt
-            _lineage_names: List[str] = []
-            _seen_ln: set[str] = set()
-            import os as _os_ln
-
-            for _sr in steps_results or []:
-                if not isinstance(_sr, dict):
-                    continue
-                _dat = _sr.get("data") if isinstance(_sr.get("data"), dict) else {}
-                for _k in (
-                    "image_path",
-                    "file_path",
-                    "mask_path",
-                    "data_path",
-                    "h5ad_path",
-                    "adata_path",
-                    "features_csv",
-                    "features_csv_path",
-                    "csv_path",
-                ):
-                    _v = _dat.get(_k)
-                    if not isinstance(_v, str) or not _v.strip():
-                        continue
-                    if _v.strip().startswith("<") and _v.strip().endswith(">"):
-                        continue
-                    for _part in _v.replace(";", ",").split(","):
-                        _pp = _part.strip()
-                        if not _pp:
-                            continue
-                        _bn = _os_ln.path.basename(_pp)
-                        if _bn and _bn not in _seen_ln:
-                            _seen_ln.add(_bn)
-                            _lineage_names.append(_bn)
-            if summary_context and isinstance(summary_context.get("file_paths"), list):
-                for _fp in summary_context["file_paths"]:
-                    if isinstance(_fp, str) and _fp.strip():
-                        _bn = _os_ln.path.basename(_fp.strip())
-                        if _bn and _bn not in _seen_ln:
-                            _seen_ln.add(_bn)
-                            _lineage_names.append(_bn)
-            _lineage_names = _lineage_names[:24]
+            # 数据血缘 Banner：仅用户 uploads 原始文件，禁止从 steps_results 注入中间产物
+            _ctx_meta = self.context.get("file_metadata")
+            _summary_fps = (
+                summary_context.get("file_paths")
+                if summary_context and isinstance(summary_context.get("file_paths"), list)
+                else None
+            )
+            _lineage_names = DataDiagnostician.collect_primary_upload_basenames(
+                file_metadata=_ctx_meta if isinstance(_ctx_meta, dict) else None,
+                extra_paths=_summary_fps,
+            )
             _context_data_json = json.dumps(
                 {"primary_source_files": _lineage_names},
                 ensure_ascii=False,

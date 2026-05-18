@@ -203,6 +203,12 @@ def guess_format(filepath: str) -> str:
     return format_map.get(ext, 'mol')
 
 
+# ``obabel -L descriptors`` 中的合法名称；勿使用 molwt / nrot（会输出 ??）
+_OBABEL_APPEND_DESCRIPTORS = ("MW", "logP", "TPSA", "HBA1", "HBD", "rotors")
+# 对外 JSON / Markdown 键名（与历史 UI 字段对齐）
+_OBABEL_PROPERTY_OUTPUT_KEYS = ("molwt", "logP", "TPSA", "HBA1", "HBD", "nrot")
+
+
 def _parse_obabel_append_line(line: str, n_props: int) -> list:
     """
     解析 ``obabel -o smi --append ...`` 的首行输出。
@@ -229,44 +235,47 @@ def _parse_obabel_append_line(line: str, n_props: int) -> list:
 
 def calculate_properties(input_data: str, input_format: str = None) -> dict:
     """计算分子基础性质（依赖系统 ``obabel`` 的 ``--append`` 描述符列）。"""
-    props = {}
-    
+    props: dict = {}
+
     try:
         is_file = os.path.isfile(input_data)
         fmt = input_format if input_format else (guess_format(input_data) if is_file else "smi")
-        
-        # 使用 obabel --append 计算性质
-        # 支持的性质: molwt, logP, TPSA, HBA1, HBD, nrot 等
-        properties_to_calc = ["molwt", "logP", "TPSA", "HBA1", "HBD", "nrot"]
-        append_str = " ".join(properties_to_calc)
-        
+
+        append_str = " ".join(_OBABEL_APPEND_DESCRIPTORS)
+        n_props = len(_OBABEL_APPEND_DESCRIPTORS)
+
         if is_file:
             cmd = ["obabel", "-i", fmt, input_data, "-o", "smi", "--append", append_str]
         else:
             cmd = ["obabel", "-i", fmt, "-o", "smi", "--append", append_str]
-        
+
         process = subprocess.run(
             cmd,
             input=(input_data + "\n") if not is_file else None,
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
         )
-        
+
         if process.returncode == 0:
             output = process.stdout.strip()
             if output:
                 first_line = output.splitlines()[0]
-                vals = _parse_obabel_append_line(first_line, len(properties_to_calc))
-                for i, prop_name in enumerate(properties_to_calc):
+                vals = _parse_obabel_append_line(first_line, n_props)
+                for i, out_key in enumerate(_OBABEL_PROPERTY_OUTPUT_KEYS):
                     if i < len(vals):
-                        props[prop_name] = vals[i]
-        
+                        raw = (vals[i] or "").strip()
+                        if raw in ("??", "?", ""):
+                            continue
+                        props[out_key] = raw
+        elif process.stderr:
+            props["error"] = process.stderr.strip()[-500:]
+
     except FileNotFoundError:
         props["error"] = "obabel not found"
     except Exception as e:
         props["error"] = str(e)
-    
+
     return props
 
 

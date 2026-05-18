@@ -94,7 +94,37 @@
             #sidebar-pane.sidebar-collapsed .sidebar-more-btn,
             #sidebar-pane.sidebar-collapsed .sidebar-asset-refresh-btn { display: none !important; }
             #sidebar-pane.sidebar-collapsed .sidebar-user { justify-content: center; }
-            #sidebar-pane.sidebar-collapsed .sidebar-user-icon { flex-shrink: 0 !important; min-width: 32px !important; }
+            #sidebar-pane .sidebar-user-icon {
+                flex: 0 0 32px;
+                flex-shrink: 0;
+                width: 32px;
+                height: 32px;
+                min-width: 32px;
+                min-height: 32px;
+                max-width: 32px;
+                max-height: 32px;
+                aspect-ratio: 1 / 1;
+                box-sizing: border-box;
+                line-height: 1;
+                overflow: hidden;
+            }
+            #sidebar-pane .sidebar-user-icon.bi-person-circle {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 1.75rem;
+            }
+            #sidebar-pane.sidebar-collapsed .sidebar-user-icon {
+                flex: 0 0 32px !important;
+                flex-shrink: 0 !important;
+                width: 32px !important;
+                height: 32px !important;
+                min-width: 32px !important;
+                min-height: 32px !important;
+                max-width: 32px !important;
+                max-height: 32px !important;
+                aspect-ratio: 1 / 1 !important;
+            }
             #sidebar-pane.sidebar-collapsed .btn-new-session { justify-content: center; padding: 10px; }
             #sidebar-pane.sidebar-collapsed .sidebar-item,
             #sidebar-pane.sidebar-collapsed summary,
@@ -235,6 +265,147 @@
             .sidebar-item-unified::-webkit-details-marker { display: none; }
             .sidebar-item-unified::marker { content: none; }
             .sidebar-item-unified:hover { background-color: #f3f4f6; }
+            /* 技能广场 · 使用中子项：宽度与 .btn-new-session 一致（top 右 16px / middle 右 8px → -8px） */
+            #sidebar-active-skill-container {
+                margin: 0;
+                padding: 0 !important;
+                list-style: none;
+                /* 与 .sidebar-top 内 .btn-new-session 同宽：middle 右内边距 8px，top 为 16px */
+                width: calc(100% - 8px);
+                max-width: calc(100% - 8px);
+                box-sizing: border-box;
+            }
+            #sidebar-active-skill-container > .nav-item {
+                padding: 0;
+                margin: 0;
+                width: 100%;
+            }
+            #sidebar-pane .sidebar-active-skill-wrapper {
+                cursor: pointer;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: space-between !important;
+                gap: 4px !important;
+                box-sizing: border-box !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                height: 28px !important;
+                min-height: 28px !important;
+                max-height: 28px !important;
+                margin: 2px 0 4px 0 !important;
+                /* 15px = 收藏夹块 -9 + 子项 margin 8 + padding 16，绿点与星号同列 */
+                padding: 0 4px 0 15px !important;
+                border-radius: 8px !important;
+                background-color: #f3f4f6 !important;
+                cursor: pointer;
+                overflow: hidden !important;
+                transition: background-color 0.15s ease;
+            }
+            #sidebar-pane .sidebar-active-skill-wrapper:hover {
+                background-color: #e5e7eb !important;
+            }
+            #sidebar-pane .sidebar-active-skill-text-container {
+                display: flex !important;
+                align-items: center !important;
+                min-width: 0 !important;
+                flex: 1 1 0 !important;
+                overflow: hidden !important;
+                padding-right: 2px;
+            }
+            #sidebar-pane .sidebar-active-skill-dot-wrap {
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+            }
+            #sidebar-pane .sidebar-active-skill-dot-wrap .sidebar-active-skill-dot-icon {
+                font-size: 5px !important;
+                line-height: 1 !important;
+                width: auto !important;
+                min-width: 0 !important;
+                color: #22c55e !important;
+            }
+            #sidebar-pane #sidebar-active-skill-name,
+            #sidebar-pane .sidebar-active-skill-name {
+                font-size: 12px !important;
+                font-weight: 400 !important;
+                line-height: 1.2 !important;
+                color: #4b5563 !important;
+                flex: 1 1 auto !important;
+                min-width: 0 !important;
+                max-width: 100% !important;
+                overflow: hidden !important;
+                text-overflow: ellipsis !important;
+                white-space: nowrap !important;
+            }
+            #sidebar-pane .sidebar-active-skill-wrapper button.btn-close-active-skill {
+                flex: 0 0 18px !important;
+                width: 18px !important;
+                height: 18px !important;
+                min-width: 18px !important;
+                max-width: 18px !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                background: none !important;
+                background-color: transparent !important;
+                border: 0 !important;
+                border-width: 0 !important;
+                outline: none !important;
+                box-shadow: none !important;
+                -webkit-appearance: none !important;
+                appearance: none !important;
+                color: #9ca3af !important;
+                opacity: 0 !important;
+                visibility: hidden !important;
+                pointer-events: none !important;
+                transition: opacity 0.15s ease, visibility 0.15s ease, color 0.15s ease !important;
+                cursor: pointer !important;
+            }
+            #sidebar-pane .sidebar-active-skill-wrapper:hover button.btn-close-active-skill {
+                opacity: 1 !important;
+                visibility: visible !important;
+                pointer-events: auto !important;
+            }
+            #sidebar-pane .sidebar-active-skill-wrapper button.btn-close-active-skill:hover {
+                color: #374151 !important;
+                background: none !important;
+                border: 0 !important;
+            }
+            #sidebar-pane .sidebar-active-skill-wrapper button.btn-close-active-skill:focus,
+            #sidebar-pane .sidebar-active-skill-wrapper button.btn-close-active-skill:focus-visible,
+            #sidebar-pane .sidebar-active-skill-wrapper button.btn-close-active-skill:active {
+                outline: none !important;
+                box-shadow: none !important;
+                border: 0 !important;
+            }
+            #sidebar-pane .sidebar-active-skill-wrapper .btn-close-active-skill-icon {
+                display: block;
+                width: 14px;
+                height: 14px;
+                flex-shrink: 0;
+                pointer-events: none;
+            }
+            #btn-skills-square.sidebar-skills-plaza-active {
+                background-color: #f3f4f6;
+            }
+            #sidebar-pane.sidebar-collapsed #sidebar-active-skill-container { display: none !important; }
+            #sidebar-pane.sidebar-collapsed #btn-skills-square.sidebar-skill-in-use .sidebar-icon-wrap {
+                position: relative;
+            }
+            #sidebar-pane.sidebar-collapsed #btn-skills-square.sidebar-skill-in-use .sidebar-icon-wrap::after {
+                content: "";
+                position: absolute;
+                top: -2px;
+                right: -2px;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: #22c55e;
+                border: 2px solid #f9fafb;
+                box-sizing: border-box;
+            }
             #sidebar-pane .sidebar-item i,
             #sidebar-pane .sidebar-item .icon { font-size: 1rem; flex-shrink: 0; width: 1rem; text-align: center; }
             #sidebar-pane .sidebar-middle .sidebar-item-unified .sidebar-icon-wrap svg,
@@ -708,7 +879,13 @@
                 display: flex;
                 align-items: center;
                 gap: 10px;
+                min-width: 0;
                 transition: background-color 0.2s ease;
+            }
+            #sidebar-pane .sidebar-user .sidebar-user-text {
+                flex: 1 1 auto;
+                min-width: 0;
+                overflow: hidden;
             }
             #sidebar-pane .sidebar-user:hover { background-color: #f3f4f6; }
             #sidebar-pane .sidebar-user .user-name { font-size: 13px; color: #111827; }
@@ -1657,40 +1834,97 @@
                 opacity: 0.55;
                 flex-shrink: 0;
             }
+            .skill-card-footer-row {
+                position: relative;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                width: 100%;
+                margin-top: auto;
+                padding-top: 12px;
+                border-top: 1px solid #f9fafb;
+            }
+            .skill-card-footer-row .skill-footer-tools {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                color: #9ca3af;
+            }
             .skill-dropdown-container {
                 position: relative;
                 display: inline-block;
                 flex-shrink: 0;
                 text-align: left;
             }
-            /* 技能「使用」下拉：向上展开 bottom-full + mb-1；显隐 .show / .hidden */
-            .skill-dropdown-container > .popover-menu.skill-sq-use-menu {
+            /* 技能「使用」下拉：相对卡片底栏右缘对齐；加深阴影 */
+            .skill-card-footer-row > .popover-menu.skill-sq-use-menu {
                 position: absolute !important;
                 left: auto !important;
                 right: 0 !important;
                 top: auto !important;
                 bottom: 100% !important;
                 margin-top: 0 !important;
+                margin-bottom: 6px !important;
                 margin-left: 0 !important;
-                min-width: 9rem;
+                min-width: 10.5rem;
                 width: max-content;
-                max-width: 220px;
+                max-width: none;
+                padding: 5px !important;
+                background: #fff !important;
+                border: 1px solid #e5e7eb !important;
+                border-radius: 10px !important;
+                box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.1) !important;
+                z-index: 99999;
+                overflow: visible !important;
             }
-            .skill-dropdown-container > .popover-menu.skill-sq-use-menu.show {
+            .skill-dropdown-container > .popover-menu.skill-sq-use-menu {
+                display: none;
+            }
+            .skill-card-footer-row > .popover-menu.skill-sq-use-menu.show {
                 display: flex !important;
                 flex-direction: column;
             }
-            .skill-dropdown-container > .popover-menu.skill-sq-use-menu.hidden:not(.show) {
+            .skill-card-footer-row > .popover-menu.skill-sq-use-menu.hidden:not(.show) {
                 display: none !important;
             }
-            .skill-dropdown-container > .popover-menu.skill-sq-use-menu .popover-item {
-                width: 100%;
+            .skill-card-footer-row > .popover-menu.skill-sq-use-menu .popover-item {
+                display: flex;
+                align-items: center;
+                gap: 14px;
+                width: calc(100% - 4px);
+                margin: 2px;
                 box-sizing: border-box;
                 justify-content: flex-start;
                 text-align: left;
                 border: none;
                 background: transparent;
                 font: inherit;
+                padding: 8px 10px;
+                color: #374151;
+                border-radius: 8px;
+                transition: background 0.15s ease, color 0.15s ease;
+            }
+            .skill-card-footer-row > .popover-menu.skill-sq-use-menu .popover-item:hover:not(:disabled):not(.is-disabled) {
+                background: #e5e7eb;
+            }
+            .skill-sq-menu-icon {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 16px;
+                min-width: 16px;
+                height: 16px;
+                color: #4d6bfe;
+                flex-shrink: 0;
+            }
+            .skill-sq-menu-icon svg {
+                width: 16px;
+                height: 16px;
+                stroke: currentColor;
+                fill: none;
+                stroke-width: 1.75;
+                stroke-linecap: round;
+                stroke-linejoin: round;
             }
             .skill-dropdown-container > .popover-menu.skill-sq-use-menu .popover-item:disabled,
             .skill-dropdown-container > .popover-menu.skill-sq-use-menu .popover-item.is-disabled {
@@ -1841,8 +2075,8 @@
             }
             /* 默认宽度无 !important，便于 JS 拖拽写入 style.width / flexBasis；上下限由 JS 与 min/max 共同约束 */
             #workspace-pane.workspace-active {
-                width: 35vw;
-                flex-basis: 35vw;
+                width: 28vw;
+                flex-basis: 28vw;
                 max-width: none;
                 min-width: 350px;
                 flex-shrink: 0;
@@ -1852,8 +2086,8 @@
                 overflow-y: auto;
             }
             #workspace-pane.workspace-active.panel-report-width {
-                width: 35vw;
-                flex-basis: 35vw;
+                width: 28vw;
+                flex-basis: 28vw;
                 max-width: none;
                 min-width: 350px;
             }
@@ -1989,7 +2223,10 @@
             }
             #workspace-pane .smart-content-wrapper:has(.code-block-wrapper),
             .markdown-body .smart-content-wrapper:has(.code-block-wrapper),
-            .unified-report-container .smart-content-wrapper:has(.code-block-wrapper) {
+            .unified-report-container .smart-content-wrapper:has(.code-block-wrapper),
+            #skill-tool-workspace-root .smart-content-wrapper:has(.code-block-wrapper),
+            .skill-mm-json-block .smart-content-wrapper:has(.code-block-wrapper),
+            .skill-mm-markdown .smart-content-wrapper:has(.code-block-wrapper) {
                 width: 100%;
                 max-width: 100%;
             }
@@ -3171,12 +3408,32 @@
             .checklist-content { display: flex; flex-direction: column; min-width: 0; flex: 1; }
             .checklist-title { font-size: 14px; font-weight: 600; color: #1f2329; }
             .checklist-subtitle { font-size: 12px; color: #6b7280; margin-top: 4px; }
-            .checklist-item .step-body { margin-top: 8px; margin-left: 28px; width: calc(100% - 28px); }
-            .checklist-item .step-body .accordion { margin: 0; }
-            .checklist-item .step-body .accordion-item { border: none; border-top: 1px solid #eee; }
-            .checklist-item .step-body .accordion-button { font-size: 13px; padding: 8px 12px; }
-            .checklist-item .step-body .accordion-collapse { font-size: 13px; }
-            .checklist-item .step-body .accordion-body { padding: 12px; }
+            .checklist-item .step-body {
+                margin-top: 8px;
+                margin-left: 0 !important;
+                padding-left: 0 !important;
+                width: 100% !important;
+                max-width: 100%;
+                box-sizing: border-box;
+            }
+            .checklist-item .step-body .accordion { margin: 0; padding-left: 0; }
+            .checklist-item .step-body .accordion-item { border: none; border-top: 1px solid #eee; margin-left: 0; }
+            .checklist-item .step-body .accordion-button {
+                font-size: 13px;
+                padding: 8px 12px 8px 0;
+                margin-left: 0;
+            }
+            .checklist-item .step-body .accordion-collapse { font-size: 13px; margin-left: 0; padding-left: 0; }
+            .checklist-item .step-body .accordion-body {
+                padding: 12px 12px 12px 0;
+                margin-left: 0;
+            }
+            #workspace-pane .checklist-item .step-body,
+            #workspace-pane .checklist-item .step-body .accordion-body,
+            #workspace-pane .exec-result-accordion-header .accordion-button {
+                margin-left: 0 !important;
+                padding-left: 0 !important;
+            }
 
             /* 任务3：数据资产附件标签（输入框上方） */
             .asset-tags-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; min-height: 0; }
@@ -3622,24 +3879,79 @@
                 color: #4b5563;
                 pointer-events: none;
             }
-            .model-select-wrap--icon-only .model-select-native {
+            .model-select-wrap--icon-only .model-select-hit {
                 position: absolute;
                 inset: 0;
+                margin: 0;
+                padding: 0;
+                border: none;
+                background: transparent;
+                cursor: pointer;
+                border-radius: 8px;
+                z-index: 1;
+            }
+            .model-select-wrap--icon-only .model-select-sync {
+                position: absolute;
+                width: 0;
+                height: 0;
                 opacity: 0;
-                min-width: 0 !important;
-                width: 100%;
-                height: 100%;
-                padding: 0 !important;
+                pointer-events: none;
+                overflow: hidden;
             }
             .model-select-wrap--icon-only .model-chevron { display: none; }
-            /* \u56de\u7b54\u6a21\u5f0f\uff1a\u4e0e\u6a21\u578b\u9009\u62e9\u5668\u540c\u6b3e wrapper\uff0c\u4e0b\u62c9\u4e3a\u9875\u5185\u5df2\u6709 popover-menu */
-            .model-select-wrap > .popover-menu {
+            /* 输入栏：模型 / 回答模式 — 统一下拉（圆角项 + selected） */
+            .chat-input-panel .model-select-wrap > .popover-menu.chat-toolbar-popover {
                 position: absolute;
                 left: 0;
                 bottom: 100%;
                 margin-bottom: 6px;
-                min-width: 100%;
                 z-index: 10001;
+                min-width: 100%;
+                width: max-content;
+                max-width: min(220px, calc(100vw - 2rem));
+                padding: 5px !important;
+                border-radius: 10px !important;
+                box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12) !important;
+                overflow: visible !important;
+            }
+            .chat-input-panel .model-select-wrap--icon-only > .popover-menu.chat-toolbar-popover {
+                left: 0;
+                right: auto;
+            }
+            .chat-toolbar-popover .popover-item {
+                margin: 2px;
+                padding: 7px 10px;
+                border-radius: 8px;
+                font-size: 12px;
+                line-height: 1.35;
+                white-space: nowrap;
+                transition: background 0.15s ease, color 0.15s ease;
+            }
+            .chat-toolbar-popover .popover-item:hover:not(.is-selected):not(:disabled) {
+                background: #e5e7eb !important;
+            }
+            .chat-toolbar-popover .popover-item.is-selected {
+                background: #dbeafe !important;
+                color: #1d4ed8;
+                font-weight: 500;
+            }
+            /* 回答模式：整体宽度约为原先的 2/3 */
+            .chat-input-panel .model-select-wrap.chat-toolbar-selector--answer {
+                padding: 4px 7px;
+                gap: 2px;
+                font-size: 12px;
+            }
+            .chat-input-panel .model-select-wrap.chat-toolbar-selector--answer button.model-select-native {
+                min-width: 72px;
+                padding: 0 14px 0 0;
+                font-size: 12px;
+            }
+            .chat-input-panel .model-select-wrap.chat-toolbar-selector--answer .model-chevron {
+                right: 6px;
+                font-size: 10px;
+            }
+            .chat-input-panel .model-select-wrap.chat-toolbar-selector--answer > .popover-menu.chat-toolbar-popover {
+                min-width: 100%;
             }
             /* Header 纯图标按钮（中栏/右栏统一样式） */
             .icon-btn {
@@ -3677,8 +3989,18 @@
                 transition: all 0.2s ease;
                 margin-left: 4px;
             }
+            .send-btn:disabled {
+                pointer-events: none;
+                cursor: not-allowed;
+                opacity: 0.72;
+            }
             .send-btn.active { background: #374151; color: #fff; cursor: pointer; }
             .send-btn.active:hover { background: #1f2329; }
+            .send-btn.active:disabled {
+                background: #e5e7eb;
+                color: #6b7280;
+                cursor: not-allowed;
+            }
             .send-btn i { font-size: 16px; }
             
             /* ⏹️ 停止按钮（无边框幽灵风格） */
@@ -4199,6 +4521,22 @@
     word-break: break-all;
     overflow-wrap: anywhere;
     white-space: normal;
+}
+#feedback-modal .feedback-modal-dialog {
+    max-width: 720px;
+    width: min(720px, calc(100% - 2rem));
+}
+#feedback-modal .modal-content.feedback-modal-content {
+    min-height: 0;
+}
+#feedback-modal .modal-body {
+    display: flex;
+    flex-direction: column;
+}
+#feedback-modal .feedback-textarea,
+#feedback-modal .form-control.feedback-textarea {
+    min-height: 17.8125rem;
+    resize: vertical;
 }
 
 /* ================= 版本更新弹框（桌面端：用户菜单 → 更新应用） ================= */

@@ -748,6 +748,47 @@
     border: none;
     padding: 0;
 }
+/* 技能右栏 JSON：与聊天区 code-block-wrapper 同宽、深色主题（marked renderer.code） */
+.skill-mm-markdown .smart-content-wrapper:has(.code-block-wrapper),
+.skill-mm-json-block .smart-content-wrapper:has(.code-block-wrapper) {
+    width: 100%;
+    max-width: 100%;
+    display: block;
+    align-self: stretch;
+    background: transparent;
+    border: none;
+    margin: 8px 0 12px;
+}
+.skill-mm-markdown .code-block-wrapper,
+.skill-mm-json-block .code-block-wrapper {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+.skill-mm-markdown .code-block-wrapper pre,
+.skill-mm-json-block .code-block-wrapper pre {
+    background: transparent !important;
+    border: none !important;
+    padding: 12px !important;
+    margin: 0 !important;
+    overflow-x: auto;
+    max-width: 100%;
+}
+.skill-mm-markdown .code-block-wrapper pre code,
+.skill-mm-json-block .code-block-wrapper pre code {
+    background: none !important;
+    border: none !important;
+    padding: 0 !important;
+}
+.skill-mm-data-grid-wrap {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+.skill-mm-data-grid-wrap .skill-mm-data-grid {
+    width: 100%;
+    max-width: 100%;
+}
 
 /* 底部分割线与操作区 */
 .skill-mm-footer {
