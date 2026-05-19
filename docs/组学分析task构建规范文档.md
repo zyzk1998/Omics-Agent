@@ -17,6 +17,16 @@
 
 **扩展说明**：`STED_EC` / `SPATIOTEMPORAL_DYNAMICS` 为单细胞轨迹专项通道，定义于 `gibh_agent/core/workflows/sted_ec_workflow.py`，路由仍走 `rna_agent`；本文以 **四模态 tabular/spatial/imaging 标准管线** 为主模板。
 
+**三大组学扩展（基因组已贯通，可作新模态模板）**
+
+| 域名 `domain_name` | 实现文件 | Runner / 工具 |
+| --- | --- | --- |
+| `genomics` | `gibh_agent/core/workflows/genomics_workflow.py`（12 步） | `omics_genomics_pipeline_tools.py` + `omics_genomics_runner.py` |
+| `epigenomics` | `epigenomics_workflow.py` | `omics_epigenomics_runner.py` |
+| `proteomics` | `proteomics_workflow.py` | `omics_proteomics_runner.py`（及 pipeline_tools） |
+
+用户侧标准测试文件（`test_data/`，可用 `scripts/download_omics_test_data.py` 拉取）：`genomics/sample1_R1.fastq.gz`、`proteomics/BSA1_F1.mzML`、`epigenomics/SRR1822153_1.fastq.gz`。
+
 ---
 
 ## 摘要 · 一步到位融合路线图（步骤清单 + 工具名 → 可跑 Task）
@@ -149,6 +159,17 @@ PYTHONPATH=. python -c "from gibh_agent.core.workflows.registry import registry 
 - **新增占位符类型** 若无法匹配现有分支，可能需在 `executor.py` 的数据流处理中扩展（搜索 `_process_data_flow` 与 `placeholder`）。
 
 **实践建议**：优先使用 `**step_id` 作为占位符名**（与 `SpatialWorkflow` 中 `h5ad_path: "<qc_norm>"` 一类对齐），降低 Executor 特例分支数量。
+
+### 2.4 三大组学链式产物（基因组贯通要点）
+
+文件：`gibh_agent/core/executor.py` · `WorkflowExecutor` 对 `tool_category in ("Genomics", "Epigenomics", "Proteomics")` 的分支。
+
+| 要点 | 说明 |
+| --- | --- |
+| **产物类型传递** | 每步成功后按 `vcf_path` → `filtered_vcf_path` → `annotated_vcf_path` → `bam_path` → `trimmed_fastq` 优先级更新 `current_file_path`，避免 CNV/SV 写入的 `bam_path` 盖住胚系 VCF 导致 VQSR 收到 `.cnn` 等非 VCF。 |
+| **CNV/SV 需 BAM** | `genomics_cnv_calling` / `genomics_sv_calling`：若 `params.bam_path` 为空，从 `step_results` 倒序注入 `bam_path` / `dedup_bam_path`。 |
+| **临床报告聚合** | `genomics_clinical_reporting` 通过 `_serialize_prior_qc_metrics()` 注入 `pipeline_metrics_json`（含 `qc_metrics`、`variant_summary`、`sv_count`、`acmg_proxy_counts`、各步 VCF 路径）。 |
+| **工具层参数** | CNV/SV 工具签名除 `file_path` 外增加 `bam_path`（宪法词汇表内）；Planner 填参仍以 `file_path` 为主。 |
 
 ---
 
@@ -364,7 +385,8 @@ PYTHONPATH=. python -c "from gibh_agent.core.workflows.registry import registry 
   - 使用真实测试文件（仓库 `test_data/` 或约定目录）跑通：  
    `SOPPlanner.generate_plan`（传入 `domain_name` + 全量 `target_steps` + `file_metadata`，与快车道一致）→ `WorkflowExecutor.execute_workflow`。  
   - 回归脚本示例：`tests/test_omics_three_modalities_e2e.py`（仓库根目录 `PYTHONPATH=. python3 tests/test_omics_three_modalities_e2e.py`）。  
-  - 断言：`workflow_status == success`，且报告步骤中至少一步的 `**step_result.data.markdown`** 非空（与 Mock 诊断输出约定一致）。
+  - **基因组真实 CLI 专项**：`tests/test_genomics_real_pipeline_e2e.py`（`GIBH_E2E_EXECUTOR_LOCAL=1`；要求 `data/references/genomics/hg38.fa` + bwa 索引，见 `scripts/init_omics_mock_references.py`）。断言：无 `skipped` / `infra_pass`；下半场四步须含 `cli_command` 或 `cli_stderr_excerpt`。  
+  - 断言：`workflow_status == success`，且报告步骤中至少一步的 `**step_result.data.markdown`** 非空（真实管线步骤应含 CLI 日志字段，而非纯占位 Mock）。
 4. **交付边界**
   - **禁止**「只改 Agent / 只改种子」即宣称交付；至少完成上述 **广场可见性 + 体检白名单 + Executor 全 DAG** 三项。
 
@@ -372,21 +394,25 @@ PYTHONPATH=. python -c "from gibh_agent.core.workflows.registry import registry 
 
 ## 11. 三大组学工具链（基因组 / 表观遗传 / 蛋白质组）参数与业界软件映射
 
-下列 `**tool_id`** 对应 `gibh_agent/tools/omics_*_pipeline_tools.py` 中 `@registry.register(name=...)`；**可调参数键**与 `get_step_metadata(...).default_params`、ToolRegistry 生成的 **Pydantic args_schema** 一致（路径类键仍遵守宪法词汇表）。重型 CLI 在宿主侧优先 **探测工具 → 组装命令 → 失败则降级仿真**，完整吞吐建议在 Worker/TaaS 执行。
+下列 `**tool_id`** 对应 `gibh_agent/tools/omics_*_pipeline_tools.py` 中 `@registry.register(name=...)`；**可调参数键**与 `get_step_metadata(...).default_params`、ToolRegistry 生成的 **Pydantic args_schema** 一致（路径类键仍遵守宪法词汇表）。基因组 **已落地真实 subprocess**（`omics_genomics_runner.py` + `run_omics_without_synthetic_fallback`）；表观/蛋白部分步骤仍可能为轻量统计或 Worker 占位，扩展时优先复用基因组模式。
 
 ### 11.1 基因组学（`domain_name`: `genomics`）
 
 
 | tool_id                     | 业界参考软件                     | 代表性参数（默认值）                                                                                    | 说明                                                                                                       |
 | --------------------------- | -------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `genomics_read_trimming`    | fastp                      | `quality_cutoff`（20）                                                                          | `-q` 质量阈值                                                                                                |
-| `genomics_alignment`        | **BWA-MEM**                | `threads`（8）、`mismatch_penalty`（4）、`gap_open_penalty`（6）                                      | 映射 `-t`、`-B`、`-O`（open/extension 同值占位）                                                                   |
-| `genomics_mark_duplicates`  | Picard / samtools markdup  | `optical_duplicate_distance`（2500）                                                            | 光学重复距离（仿真管线）                                                                                             |
-| `genomics_bqsr`             | GATK BaseRecalibrator      | `bqsr_max_cycles`（2）                                                                          | 宿主缺资源位点集时常降级                                                                                             |
-| `genomics_germline_calling` | **GATK 4 HaplotypeCaller** | `stand_call_conf`（30.0）、`min_mapping_quality`（20）、`min_base_quality`（20）、`reference_id`（hg38） | CLI 组装 `--standard-min-confidence-threshold-for-calling`、`--minimum-mapping-quality`；BQ 阈值保留给上游过滤/Worker |
-| `genomics_cnv_calling`      | GATK CNV                   | `cnv_bin_width`（1000）                                                                         | 深度分箱                                                                                                     |
-| `genomics_sv_calling`       | Manta 等                    | `min_sv_len`（50）                                                                              | SV 最小长度                                                                                                  |
-| `genomics_vqsr_filtering`   | GATK VQSR / bcftools       | `tranche_sensitivity`（99.0）                                                                   | VQSLOD / tranche                                                                                         |
+| `genomics_raw_qc`           | 流式 FASTQ 统计              | `file_path`                                                                                   | 首步真实 reads/GC/Q30，写入 `qc_metrics`                                                                    |
+| `genomics_read_trimming`    | fastp                      | `quality_cutoff`（20）                                                                          | 子进程 + `fastp_summary`                                                                                   |
+| `genomics_alignment`        | **BWA-MEM** + samtools     | `reference_id`（hg38）、`threads`（8）                                                          | 参考序列 `resolve_genomics_reference_fasta` / `GIBH_REF_HG38`                                              |
+| `genomics_mark_duplicates`  | samtools sort/markdup      | `file_path`（BAM）                                                                              | 产出 `dedup_bam_path`                                                                                      |
+| `genomics_bqsr`             | 轻量 BQSR 占位 / 可扩展 GATK | `bqsr_max_cycles`（2）                                                                          | 小样本可保留简化实现                                                                                             |
+| `genomics_germline_calling` | **GATK HaplotypeCaller** → bcftools 回退 | `stand_call_conf`（30.0）、`min_mapping_quality`（20）、`reference_id`（hg38） | 成功后须 `bcftools index -t` 建 `.tbi`                                                                       |
+| `genomics_cnv_calling`      | **cnvkit** / samtools depth 回退 | `file_path`、`bam_path`                                                                       | 微缩 BAM 可 depth 回退，仍 `success` + CLI 日志                                                              |
+| `genomics_sv_calling`       | **delly** + bcftools       | `file_path`、`bam_path`、`min_sv_len`（50）                                                       | 低深度「not enough data」→ 空 VCF 仍 success                                                                  |
+| `genomics_vqsr_filtering`   | GATK VariantFiltration / **bcftools QUAL** | `reference_id`、`tranche_sensitivity`（99.0）                                                | 无 QD/FS（bcftools VCF）或 GATK 失败时自动 `bcftools view -i QUAL>=30`；输入须已 tabix 索引                      |
+| `genomics_variant_annotation` | **snpEff** → bcftools annotate 回退 | `file_path`                                                                               |                                                                                                          |
+| `genomics_acmg_classification` | bcftools query + 规则代理 | `file_path`                                                                                   | 产出 `acmg_proxy_counts`、`acmg_summary_path`                                                                |
+| `genomics_clinical_reporting` | 报告聚合（无重型 CLI）        | `pipeline_metrics_json`、`report_style`                                                         | 禁止捏造 Reads/变异数；依赖上游 `qc_metrics` / `variant_summary`                                              |
 
 
 ### 11.2 表观遗传组学（`domain_name`: `epigenomics`）
@@ -408,4 +434,60 @@ PYTHONPATH=. python -c "from gibh_agent.core.workflows.registry import registry 
 
 ---
 
-*文档版本：与 `gibh_agent/core/workflows/base.py`、`registry.py`、`executor.py`、`planner.py`（`_classify_intent`）、`orchestrator.py`（domain 路由）、`diagnosis_param_whitelist.py`、四模态 workflow 实现及 `index.html` 中 `STEP_NAME_MAP` 对齐；若实现变更，请同步更新 **§8 速查表**、**§11 三大组学映射** 与 **§3.1 Planner 同步** 条款。*
+## 12. 基因组学真实管线贯通经验（首例，供表观/蛋白扩展对照）
+
+> **状态**：`domain_name=genomics` 12 步 DAG 已在宿主机与 API 容器内跑通（`sample1_R1.fastq.gz` + `hg38` 参考）；下列为可复用的工程经验，**非**重复 §2–§10 通用条款。
+
+### 12.1 分层落位（推荐照抄）
+
+| 层 | 文件 | 职责 |
+| --- | --- | --- |
+| 注册门面 | `omics_genomics_pipeline_tools.py` | `@registry.register` + `@safe_tool_execution`，薄包装调用 `*_impl` |
+| 真实算子 | `omics_genomics_runner.py` | `subprocess`、CLI 组装、`run_omics_without_synthetic_fallback`（禁止静默 Mock/skip） |
+| I/O 与参考 | `omics_genomics_real_io.py` | `discover_genomics_reference`、`ensure_bam_indexed` / `ensure_vcf_indexed`、`summarize_vcf` |
+| 环境与 CLI 解析 | `omics_pipeline_env.py` | `resolve_cli_exe`、Conda/apt 路径、`omics_subprocess_failed` 统一错误 Markdown |
+| DAG | `genomics_workflow.py` | 12 `step_id` 与 `get_step_metadata.default_params` |
+| 执行器补丁 | `executor.py` | 链式 `file_path`、CNV/SV `bam_path` 注入、临床报告 `pipeline_metrics_json` |
+
+新模态扩展时：**先写 runner + real_io，再写 pipeline_tools 注册，最后补 executor 链式规则**，避免只改 Agent 文案。
+
+### 12.2 参考基因组与 Docker（必配）
+
+- 宿主机：`data/references/genomics/hg38.fa` + `bwa index`；环境变量 `OMICS_REF_DIR`、`GIBH_REF_HG38`（容器内常为 `/app/references/...`）。
+- 初始化：`python3 scripts/init_omics_mock_references.py`；`docker-compose.yml` 挂载 `./data/references:/app/references`。
+- API 镜像 Conda env `omics-real`：`gatk4`、`cnvkit`、`delly`、`snpeff`（`services/api/Dockerfile`）；构建用 `scripts/build_api_server.sh`（**禁止** `docker build \| tail -N`，见 `.cursorrules`）。
+- 环境自检：`python3 scripts/doctor_omics_env.py`（可选）。
+
+### 12.3 工具返回契约（前端黑框日志）
+
+失败或成功均应通过 `omics_subprocess_failed` / `attach_visual_contract` 写入：
+
+- `cli_command`、`cli_returncode`、`cli_stdout_excerpt`、`cli_stderr_excerpt`（各约 500 字）
+- `markdown` 含可读的「CLI 非零退出」块
+
+**禁止**下半场步骤 `status: skipped` 且无 CLI 字段；低深度 SV 等边界应 `success` + 明确 `note`。
+
+### 12.4 常见踩坑（已修复，扩展时勿回退）
+
+| 现象 | 根因 | 对策 |
+| --- | --- | --- |
+| VQSR `VariantFiltration exit 2` | `.vcf.gz` 无 `.tbi`；bcftools VCF 无 QD/FS | `ensure_vcf_indexed`；无 QD/FS 时走 bcftools QUAL 过滤 |
+| VQSR 收到 `.cnn` | 链式 `file_path` 被 CNV 产物覆盖 | Executor 优先 `vcf_path` |
+| 容器无 cnvkit/delly | 旧镜像未含 Conda 层 | 重建 `api-server` 后 `docker compose up -d` |
+| BepiPred 与组学构建冲突 | Conda PATH 污染 `python3` venv | Dockerfile 用 `/usr/local/bin/python3` 建 venv；开发可用挂载 `third_party/BepiPred-3.0/.venv` |
+
+### 12.5 验证命令
+
+```bash
+cd /home/ubuntu/GIBH-AGENT-V2
+# 参考库
+python3 scripts/init_omics_mock_references.py
+# 宿主全链路（约 3 分钟）
+GIBH_E2E_EXECUTOR_LOCAL=1 PYTHONPATH=. python3 tests/test_genomics_real_pipeline_e2e.py
+# 三模态冒烟
+PYTHONPATH=. python3 tests/test_omics_three_modalities_e2e.py
+```
+
+---
+
+*文档版本：与 `gibh_agent/core/workflows/base.py`、`registry.py`、`executor.py`、`planner.py`（`_classify_intent`）、`orchestrator.py`（domain 路由）、`diagnosis_param_whitelist.py`、四模态 workflow、**genomics_workflow / omics_genomics_runner** 及 `index.html` 中 `STEP_NAME_MAP` 对齐；若实现变更，请同步更新 **§8 速查表**、**§11–§12 组学映射** 与 **§3.1 Planner 同步** 条款。*

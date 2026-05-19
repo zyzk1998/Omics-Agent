@@ -15,6 +15,11 @@
                 --input-border: #d1d5db;
                 --card-bg: #ffffff;
                 --card-border: #e5e7eb;
+                /* 侧栏选中：与输入区模型切换器 .chat-toolbar-popover .popover-item.is-selected 一致 */
+                --sidebar-active-l1-bg: #dbeafe;
+                --sidebar-active-l1-color: #1d4ed8;
+                --sidebar-active-l2-bg: rgba(29, 78, 216, 0.08);
+                --sidebar-active-l2-color: #1d4ed8;
             }
 
             html {
@@ -387,8 +392,67 @@
                 flex-shrink: 0;
                 pointer-events: none;
             }
-            #btn-skills-square.sidebar-skills-plaza-active {
-                background-color: #f3f4f6;
+            /* --- 一级目录选中样式 --- */
+            /* 1. 直达类（技能广场）：靠 .active / 技能广场视图同步类 */
+            #sidebar-pane #btn-skills-square.active,
+            #sidebar-pane #btn-skills-square.sidebar-skills-plaza-active,
+            #sidebar-pane .nav-item > a:not([data-bs-toggle="collapse"]).active,
+            /* 2. 折叠类（收藏夹、历史、数据资产）：展开 aria-expanded="true" 即选中 */
+            #sidebar-pane #btn-sidebar-favorites[aria-expanded="true"],
+            #sidebar-pane #sidebar-nav-history[aria-expanded="true"],
+            #sidebar-pane #sidebar-nav-assets[aria-expanded="true"],
+            #sidebar-pane .nav-item > a[data-bs-toggle="collapse"][aria-expanded="true"] {
+                background-color: var(--sidebar-active-l1-bg, rgba(13, 110, 253, 0.12)) !important;
+                color: var(--sidebar-active-l1-color, #0d6efd) !important;
+                font-weight: 600;
+                border-radius: 6px;
+                padding: 8px 16px;
+                box-sizing: border-box;
+            }
+            #sidebar-pane #sidebar-section-history > summary[aria-expanded="true"],
+            #sidebar-pane #sidebar-section-assets > summary[aria-expanded="true"] {
+                display: flex;
+                align-items: center;
+            }
+            /* 强制排除新建会话按钮被意外高亮 */
+            #sidebar-pane #btnNewSession,
+            #sidebar-pane #btn-new-chat,
+            #sidebar-pane .btn-new-session,
+            #sidebar-pane #btnNewSession.active,
+            #sidebar-pane #btnNewSession.active-session {
+                background-color: transparent !important;
+                color: inherit !important;
+                font-weight: normal !important;
+            }
+            /* --- 二级目录选中样式：仅 .active 类 --- */
+            #sidebar-pane .history-item.active,
+            #sidebar-pane .sidebar-session-item.active,
+            #sidebar-pane .sidebar-session-item.active-session,
+            #sidebar-pane .sidebar-asset-item.active,
+            #sidebar-pane .sub-nav-item.active:not(.asset-category),
+            #sidebar-pane .favorite-item.active,
+            #sidebar-pane .sidebar-favorite-item.active {
+                background-color: var(--sidebar-active-l2-bg, rgba(13, 110, 253, 0.06)) !important;
+                color: var(--sidebar-active-l2-color, #0a58ca) !important;
+                border-radius: 6px;
+                font-weight: 500;
+            }
+            /* 数据资产二级分类（转录组学等）：展开 aria-expanded="true" 即选中，收起恢复默认 */
+            #sidebar-pane .asset-modality-group > summary.asset-category[aria-expanded="true"] {
+                background-color: var(--sidebar-active-l2-bg, rgba(13, 110, 253, 0.06)) !important;
+                color: var(--sidebar-active-l2-color, #0a58ca) !important;
+                border-radius: 6px;
+                font-weight: 500;
+                display: flex;
+                align-items: center;
+                padding: 8px 12px 8px 16px;
+                box-sizing: border-box;
+            }
+            #sidebar-pane .asset-modality-group > summary.asset-category[aria-expanded="false"],
+            #sidebar-pane .asset-modality-group > summary.asset-category.active {
+                background-color: transparent !important;
+                color: #4b5563 !important;
+                font-weight: 500;
             }
             #sidebar-pane.sidebar-collapsed #sidebar-active-skill-container { display: none !important; }
             #sidebar-pane.sidebar-collapsed #btn-skills-square.sidebar-skill-in-use .sidebar-icon-wrap {
@@ -451,8 +515,6 @@
             .asset-modality-group summary { padding-left: 12px; }
             .sidebar-session-item .item-text, .sidebar-asset-item .item-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .sidebar-session-item:hover, .sidebar-asset-item:hover { background: #f3f4f6; }
-            .sidebar-session-item.active-session { background: #f3f4f6; }
-            #btnNewSession.active-session { background: #f3f4f6; border-radius: 8px; }
             .item-more-btn { opacity: 0; background: transparent; border: none; color: #9ca3af; cursor: pointer; padding: 4px; border-radius: 4px; transition: all 0.2s; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
             .sidebar-session-item:hover .item-more-btn, .sidebar-asset-item:hover .item-more-btn, .sidebar-favorite-item:hover .item-more-btn { opacity: 1; }
             /* 工作流收藏夹：去折叠化，使用按钮 Hover 显示、稍深边框 */
@@ -888,6 +950,14 @@
                 overflow: hidden;
             }
             #sidebar-pane .sidebar-user:hover { background-color: #f3f4f6; }
+            /* 用户头像：展开仅背景框，文本/图标颜色不变 */
+            #sidebar-pane #sidebar-user-area[aria-expanded="true"] {
+                background-color: var(--sidebar-active-l1-bg, rgba(13, 110, 253, 0.12)) !important;
+                border-radius: 8px;
+            }
+            #sidebar-pane #sidebar-user-area[aria-expanded="true"]:hover {
+                background-color: var(--sidebar-active-l1-bg, rgba(13, 110, 253, 0.12)) !important;
+            }
             #sidebar-pane .sidebar-user .user-name { font-size: 13px; color: #111827; }
             #sidebar-pane .sidebar-user .btn-upgrade { font-size: 12px; color: #6b7280; }
             /* 中栏 + 右侧本地资源管理器：同行 flex。
@@ -2077,7 +2147,7 @@
             #workspace-pane.workspace-active {
                 width: 28vw;
                 flex-basis: 28vw;
-                max-width: none;
+                max-width: 40vw;
                 min-width: 350px;
                 flex-shrink: 0;
                 opacity: 1;
@@ -2088,7 +2158,7 @@
             #workspace-pane.workspace-active.panel-report-width {
                 width: 28vw;
                 flex-basis: 28vw;
-                max-width: none;
+                max-width: 40vw;
                 min-width: 350px;
             }
             #workspace-pane .workspace-scroll {
@@ -4533,6 +4603,12 @@
     display: flex;
     flex-direction: column;
 }
+#feedback-modal .feedback-field-label {
+    font-size: calc(0.875rem + 4px);
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 0.35rem;
+}
 #feedback-modal .feedback-textarea,
 #feedback-modal .form-control.feedback-textarea {
     min-height: 17.8125rem;
@@ -4601,4 +4677,88 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+}
+
+/* 开发者与帮助中心（全屏文档 Modal） */
+#docCenterModal .modal-content {
+    border: none;
+    border-radius: 0;
+    height: 100vh;
+}
+#docCenterModal .doc-center-nav {
+    width: 280px;
+    flex-shrink: 0;
+    overflow-y: auto;
+    background: #f8fafc;
+}
+#docCenterModal .doc-center-nav .list-group-item {
+    border: none;
+    border-left: 3px solid transparent;
+    padding: 12px 16px;
+    font-size: 14px;
+    color: #334155;
+    cursor: pointer;
+}
+#docCenterModal .doc-center-nav .list-group-item:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+#docCenterModal .doc-center-nav .list-group-item.active {
+    background: var(--sidebar-active-l1-bg, #dbeafe) !important;
+    color: var(--sidebar-active-l1-color, #1d4ed8) !important;
+    font-weight: 600;
+    border-left-color: var(--sidebar-active-l1-color, #1d4ed8);
+}
+#docCenterModal .doc-center-body {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 28px 40px 48px;
+    background: #fff;
+}
+#docCenterModal .doc-center-body h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    color: #0f172a;
+}
+#docCenterModal .doc-center-body h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin: 1.25rem 0 0.5rem;
+    color: #1e293b;
+}
+#docCenterModal .doc-center-body p,
+#docCenterModal .doc-center-body li {
+    font-size: 14px;
+    line-height: 1.65;
+    color: #475569;
+}
+#docCenterModal .doc-center-body pre {
+    background: #1e293b;
+    color: #e2e8f0;
+    padding: 14px 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 13px;
+}
+#docCenterModal .doc-center-body code {
+    background: #f1f5f9;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+}
+#docCenterModal .doc-center-body pre code {
+    background: transparent;
+    padding: 0;
+}
+#docCenterModal .doc-center-iframe {
+    width: 100%;
+    height: calc(100vh - 120px);
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+}
+#docCenterModal .doc-center-loading {
+    color: #64748b;
+    font-size: 14px;
 }

@@ -98,17 +98,18 @@ def _pick_bepipred_python(bp_root: Path) -> Tuple[Optional[str], str]:
         if w:
             candidates.append(w)
 
-    _opt_py = Path("/opt/bepipred3-venv/bin/python")
-    if _opt_py.is_file():
-        s = str(_opt_py.resolve())
-        if s not in candidates:
-            candidates.append(s)
-
+    # 挂载的 third_party/.venv 优先于镜像内 /opt（避免 INSTALL_BEPIPRED3=0 时的空壳 /opt）
     for rel in (bp_root / ".venv" / "bin" / "python", bp_root / "venv" / "bin" / "python"):
         if rel.is_file():
             s = str(rel.resolve())
             if s not in candidates:
                 candidates.append(s)
+
+    _opt_py = Path("/opt/bepipred3-venv/bin/python")
+    if _opt_py.is_file() and not (_opt_py.parent.parent / "SKIPPED.txt").is_file():
+        s = str(_opt_py.resolve())
+        if s not in candidates:
+            candidates.append(s)
 
     main_py = (sys.executable or "").strip()
     if main_py and main_py not in candidates:

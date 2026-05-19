@@ -239,8 +239,11 @@ def genomics_germline_calling(
     output_type="file_path",
 )
 @safe_tool_execution
-def genomics_cnv_calling(file_path: str = "", cnv_bin_width: int = 1000) -> Dict[str, Any]:
-    return genomics_cnv_calling_impl(file_path)
+def genomics_cnv_calling(
+    file_path: str = "", bam_path: str = "", cnv_bin_width: int = 1000
+) -> Dict[str, Any]:
+    del cnv_bin_width
+    return genomics_cnv_calling_impl(file_path, bam_path=bam_path)
 
 
 @registry.register(
@@ -250,8 +253,11 @@ def genomics_cnv_calling(file_path: str = "", cnv_bin_width: int = 1000) -> Dict
     output_type="file_path",
 )
 @safe_tool_execution
-def genomics_sv_calling(file_path: str = "", min_sv_len: int = 50) -> Dict[str, Any]:
-    return genomics_sv_calling_impl(file_path)
+def genomics_sv_calling(
+    file_path: str = "", bam_path: str = "", min_sv_len: int = 50
+) -> Dict[str, Any]:
+    del min_sv_len
+    return genomics_sv_calling_impl(file_path, bam_path=bam_path)
 
 
 @registry.register(
@@ -321,8 +327,21 @@ def genomics_clinical_reporting(
             logger.warning("genomics_clinical_reporting: pipeline_metrics_json 解析失败")
 
     primary_qc: Optional[Dict[str, Any]] = None
+    variant_summary: Optional[Dict[str, Any]] = None
+    report_vcf = (file_path or "").strip()
     if qc_bundle:
-        primary_qc = next(iter(qc_bundle.values()), None)
+        for entry in qc_bundle.values():
+            if not isinstance(entry, dict):
+                continue
+            qm = entry.get("qc_metrics")
+            if isinstance(qm, dict) and qm and primary_qc is None:
+                primary_qc = qm
+            vs = entry.get("variant_summary")
+            if isinstance(vs, dict) and vs:
+                variant_summary = vs
+            vp = entry.get("vcf_path")
+            if vp and str(vp).lower().endswith((".vcf", ".vcf.gz")):
+                report_vcf = str(vp)
 
     reads_txt = "N/A"
     gc_txt = "N/A"
@@ -350,7 +369,9 @@ def genomics_clinical_reporting(
         )
     md_lines.append(f"- **报告模板**: `{report_style}`")
 
-    sec2, sec3, sec4 = clinical_genomics_sections(primary_qc, file_path or "")
+    sec2, sec3, sec4 = clinical_genomics_sections(
+        primary_qc, report_vcf or file_path or "", pipeline_bundle=qc_bundle
+    )
     md_lines.extend(
         [
             "",
@@ -368,22 +389,31 @@ def genomics_clinical_reporting(
     )
     md_body = "\n".join(md_lines)
 
-    out = _mock("g_report", "Clinical reporting stage (structured draft)")
-    out["report_path"] = out["output_path"]
-    out["pdf_url"] = None
-    out["html_url"] = None
-    out["markdown"] = md_body
-    out["qc_metrics"] = primary_qc or {}
-    out["pipeline_qc_bundle"] = qc_bundle
+    artifact_path = report_vcf or (primary_qc or {}).get("input_path") or file_path or ""
+    out: Dict[str, Any] = {
+        "status": "success",
+        "message": "Genomics clinical summary (real pipeline metrics)",
+        "output_path": artifact_path,
+        "file_path": artifact_path,
+        "report_path": artifact_path,
+        "pdf_url": None,
+        "html_url": None,
+        "markdown": md_body,
+        "qc_metrics": primary_qc or {},
+        "variant_summary": variant_summary or {},
+        "pipeline_qc_bundle": qc_bundle,
+    }
+    var_n = (variant_summary or {}).get("variant_count")
     out["summary"] = (
-        f"Reads={reads_txt}, GC%={gc_txt}" if primary_qc else "缺少上游 qc_metrics"
+        f"Reads={reads_txt}, GC%={gc_txt}, variants={var_n}"
+        if primary_qc or variant_summary
+        else "缺少上游 qc_metrics / variant_summary"
     )
-    if not primary_qc and not qc_bundle:
-        # 禁止「成功」外壳下输出空的结构化幻觉结题
+    if not primary_qc and not variant_summary:
         out["status"] = "error"
         out["message"] = (
-            "缺少上游 genomics_raw_qc 的 qc_metrics（pipeline_metrics_json 为空），"
-            "无法生成可信临床摘要。请确认质控步骤已成功执行。"
+            "缺少上游 genomics_raw_qc 的 qc_metrics 与 germline 的 variant_summary，"
+            "无法生成可信临床摘要。请确认质控与变异检测步骤已成功执行。"
         )
     out["image_urls"] = [IMG_DNA_HELIX]
     out["json_url"] = None

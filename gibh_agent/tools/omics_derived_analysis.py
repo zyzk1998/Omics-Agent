@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .omics_mock_ui import (
     IMG_MANHATTAN,
@@ -319,36 +319,147 @@ def genomics_proxy_acmg(b: Dict[str, Any]) -> Tuple[str, Dict[str, Any], str]:
     return md, tbl, "ACMG proxy (rules not executed)"
 
 
-def clinical_genomics_sections(primary_qc: Optional[Dict[str, Any]], ingress: str) -> Tuple[str, str, str]:
-    """返回 (变异统计段落, 临床段落, 结论段落) HTML/markdown 片段。"""
+def _pick_latest_variant_summary(
+    pipeline_bundle: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(pipeline_bundle, dict):
+        return None
+    best: Optional[Dict[str, Any]] = None
+    best_n = -1
+    for entry in pipeline_bundle.values():
+        if not isinstance(entry, dict):
+            continue
+        vs = entry.get("variant_summary")
+        if not isinstance(vs, dict):
+            continue
+        n = int(vs.get("variant_count") or 0)
+        if n >= best_n:
+            best_n = n
+            best = vs
+    return best
+
+
+def _pick_fastp_summary(pipeline_bundle: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(pipeline_bundle, dict):
+        return None
+    for entry in pipeline_bundle.values():
+        if isinstance(entry, dict) and isinstance(entry.get("fastp_summary"), dict):
+            return entry["fastp_summary"]
+    return None
+
+
+def _pick_latest_sv_count(pipeline_bundle: Optional[Dict[str, Any]]) -> Optional[int]:
+    if not isinstance(pipeline_bundle, dict):
+        return None
+    best: Optional[int] = None
+    for entry in pipeline_bundle.values():
+        if not isinstance(entry, dict):
+            continue
+        raw = entry.get("sv_count")
+        if raw is None:
+            continue
+        try:
+            n = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if best is None or n >= best:
+            best = n
+    return best
+
+
+def _pick_acmg_proxy_counts(
+    pipeline_bundle: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    if not isinstance(pipeline_bundle, dict):
+        return None
+    for entry in reversed(list(pipeline_bundle.values())):
+        if not isinstance(entry, dict):
+            continue
+        ac = entry.get("acmg_proxy_counts")
+        if isinstance(ac, dict) and ac:
+            return ac
+    return None
+
+
+def _pick_cnv_artifact(pipeline_bundle: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(pipeline_bundle, dict):
+        return ""
+    for entry in pipeline_bundle.values():
+        if not isinstance(entry, dict):
+            continue
+        p = entry.get("cnv_cnn_path") or entry.get("cnv_bed_path")
+        if p and str(p).strip():
+            return str(p).strip()
+    return ""
+
+
+def clinical_genomics_sections(
+    primary_qc: Optional[Dict[str, Any]],
+    ingress: str,
+    pipeline_bundle: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, str, str]:
+    """返回 (变异统计段落, 临床段落, 结论段落) markdown 片段。"""
+    from .omics_genomics_real_io import format_variant_summary_md
+
+    var_sum = _pick_latest_variant_summary(pipeline_bundle)
+    fastp_sum = _pick_fastp_summary(pipeline_bundle)
+    sv_n = _pick_latest_sv_count(pipeline_bundle)
+    acmg_counts = _pick_acmg_proxy_counts(pipeline_bundle)
+    cnv_art = _pick_cnv_artifact(pipeline_bundle)
+
+    if var_sum and var_sum.get("variant_count") is not None:
+        sec2_parts: List[str] = []
+        if fastp_sum:
+            sec2_parts.append(
+                "#### fastp 质控（真实 JSON）\n"
+                f"- **过滤前 reads**: {fastp_sum.get('before_filtering_total_reads', 'N/A')}\n"
+                f"- **过滤后 reads**: {fastp_sum.get('after_filtering_total_reads', 'N/A')}\n"
+                f"- **Q30 比例**: {fastp_sum.get('q30_rate', 'N/A')}\n"
+            )
+        sec2_parts.append(format_variant_summary_md(var_sum).rstrip())
+        if cnv_art:
+            sec2_parts.append(f"- **CNV 产物**: `{cnv_art}`（cnvkit / samtools depth 真实 CLI）")
+        if sv_n is not None:
+            sec2_parts.append(f"- **结构变异 (Delly)**: **{sv_n}** 条记录（低深度测试集可为 0）")
+        sec2 = "\n".join(sec2_parts) + "\n"
+        sec3_parts = [
+            "- 胚系 SNV/Indel 统计来自 **bcftools / GATK** 对真实 VCF 的汇总。",
+        ]
+        if acmg_counts:
+            sec3_parts.append(
+                "- **ACMG 代理分级计数（bcftools query + 规则）**: "
+                + ", ".join(f"{k}={v}" for k, v in sorted(acmg_counts.items()))
+            )
+        else:
+            sec3_parts.append(
+                "- ACMG 步骤未返回 `acmg_proxy_counts` 时，致病性解读须结合 ClinVar 与实验验证。"
+            )
+        sec3 = "\n".join(sec3_parts) + "\n"
+        sec4 = (
+            "- 全流程：fastp → bwa → samtools → bcftools/GATK → CNV(cnvkit/depth) → SV(Delly) → "
+            "注释(snpEff/bcftools) → ACMG 代理 → 本摘要。\n"
+        )
+        return sec2, sec3, sec4
+
     if not isinstance(primary_qc, dict) or not primary_qc:
         return (
-            "- 缺少上游质控指标，无法生成代理变异统计。\n",
-            "- 等待完整 VEP/ACMG 管线时使用临床解读。\n",
-            "- 请优先确认首步 FASTQ 质控已成功。\n",
+            "- 缺少上游质控与变异检测摘要（需 `genomics_raw_qc` 与 germline 步骤的 `variant_summary`）。\n",
+            "- 请确认 germline / VQSR 步骤已成功产出非空 VCF。\n",
+            "- 请优先确认首步 FASTQ 质控与比对步骤已成功。\n",
         )
     path_try = (ingress or primary_qc.get("input_path") or "").strip()
-    b = fastq_bundle_from_path(path_try) if path_try else None
-    if not b:
-        try:
-            b = compute_fastq_stream_bundle(str(primary_qc.get("input_path") or ingress))
-        except OSError:
-            b = dict(primary_qc)
-    seed = _fq_seed(b if isinstance(b, dict) else {})
-    tb = int(b.get("total_bases") or primary_qc.get("total_bases") or 0)
-    snv = int(max(1000, tb) * (6e-4 + _u01(seed, "crep") * 4e-4))
+    q30_txt = "N/A"
+    if path_try:
+        b = fastq_bundle_from_path(path_try)
+        if b:
+            q30_txt = f"{float(b.get('q30_fraction', 0)) * 100:.2f}%"
     sec2 = (
-        f"- **代理 SNV 规模（由总碱基数推导）**: 约 **{snv:,}** 个量级（非 Variant Caller 真值）。\n"
-        f"- **流式 Q30**: **{float(b.get('q30_fraction', 0)) * 100:.2f}%**（来自同一 FASTQ 子样本统计）。\n"
+        "- **变异检测**: 上游未返回 `variant_summary`，无法展示真实 VCF 计数。\n"
+        f"- **流式 Q30（首步 FASTQ）**: **{q30_txt}**\n"
+        f"- **总 Reads**: **{primary_qc.get('n_reads', 'N/A')}**\n"
     )
-    sec3 = (
-        "- 基于代理分级表的示例位点见上游 `genomics_acmg_classification` 步骤输出；"
-        "临床解读须以验证实验与权威数据库为准。\n"
-    )
-    sec4 = (
-        "- 本摘要中的「代理」指标仅用于打通分析与可视化；"
-        "生产环境请在 Worker 上运行标准比对与变异检测管线。\n"
-    )
+    sec3 = "- 待 germline calling 成功后，本段将自动填充 Ti/Tv 与变异总数。\n"
+    sec4 = "- 请勿将本段当作最终临床结论；请重跑比对与变异检测步骤。\n"
     return sec2, sec3, sec4
 
 

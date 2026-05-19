@@ -72,7 +72,7 @@
                         </button>
                     </div>
                     <div class="sidebar-middle">
-                        <div class="sidebar-item sidebar-item-unified" id="btn-skills-square" title="技能广场"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span><span class="sidebar-item-text">技能广场</span></div>
+                        <div class="sidebar-item sidebar-item-unified sidebar-nav-l1" id="btn-skills-square" title="技能广场"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span><span class="sidebar-item-text">技能广场</span></div>
                         <ul class="nav flex-column" id="sidebar-active-skill-container" style="display: none; padding-left: 0;">
                             <li class="nav-item position-relative">
                                 <div class="sidebar-active-skill-wrapper" role="status" aria-live="polite">
@@ -87,20 +87,20 @@
                             </li>
                         </ul>
                         <div class="sidebar-favorites-block collapsed">
-                            <div class="sidebar-item sidebar-item-unified" id="btn-sidebar-favorites" title="工作流收藏夹"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></span><span class="sidebar-item-text">工作流收藏夹</span></div>
+                            <div class="sidebar-item sidebar-item-unified sidebar-nav-l1" id="btn-sidebar-favorites" title="工作流收藏夹" role="button" aria-expanded="false" aria-controls="sidebar-favorite-list"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></span><span class="sidebar-item-text">工作流收藏夹</span></div>
                             <div id="sidebar-favorite-list" class="sidebar-favorite-list"></div>
                         </div>
                     </div>
                 </div>
                 <div class="sidebar-scroll-area">
                     <details class="sidebar-favorites-section" id="sidebar-section-history">
-                        <summary class="sidebar-item sidebar-item-unified sidebar-favorites-title sidebar-category-title" title="历史会话"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span><span class="sidebar-item-text">历史会话</span></summary>
+                        <summary class="sidebar-item sidebar-item-unified sidebar-nav-l1 history-header sidebar-favorites-title sidebar-category-title" id="sidebar-nav-history" title="历史会话" aria-expanded="false"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span><span class="sidebar-item-text">历史会话</span></summary>
                         <div class="details-content-wrapper">
                             <div id="sidebar-sessions-list" class="sidebar-sub-list"></div>
                         </div>
                     </details>
                     <details class="sidebar-favorites-section" id="sidebar-section-assets">
-                        <summary class="sidebar-item sidebar-item-unified sidebar-favorites-title sidebar-category-title" title="数据资产">
+                        <summary class="sidebar-item sidebar-item-unified sidebar-nav-l1 asset-header sidebar-favorites-title sidebar-category-title" id="sidebar-nav-assets" title="数据资产" aria-expanded="false">
                             <span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h3l2 3h9a2 2 0 012 2z"/></svg></span>
                             <span class="sidebar-item-text">数据资产</span>
                             <button type="button" id="sidebar-asset-refresh-btn" class="sidebar-asset-refresh-btn" title="刷新并重新分类：同步上传数据，将未分类文件归入对应类别" aria-label="刷新数据资产"><i class="bi bi-arrow-clockwise"></i></button>
@@ -115,7 +115,7 @@
                         <span class="sidebar-workspace-indicator__icon" aria-hidden="true">📂</span>
                         <span class="sidebar-workspace-indicator__text" id="sidebar-workspace-indicator-text">未挂载</span>
                     </button>
-                    <div class="sidebar-user" id="sidebar-user-area" title="点击登录/注册" style="cursor:pointer;">
+                    <div class="sidebar-user" id="sidebar-user-area" title="点击登录/注册" role="button" aria-expanded="false" aria-haspopup="true" aria-controls="user-profile-menu" style="cursor:pointer;">
                         <i class="bi bi-person-circle sidebar-user-icon" style="font-size:1.5rem;color:#6b7280;"></i>
                         <div class="d-flex flex-column sidebar-user-text">
                             <span class="user-name">游客 (Guest)</span>
@@ -129,10 +129,9 @@
             <!-- 用户头像悬浮菜单（Kimi 风格，position:fixed 防侧栏 overflow 裁剪） -->
             <div id="user-profile-menu" class="popover-menu" aria-hidden="true">
                 <div class="popover-item" id="menu-item-download-client" data-action="client-download" role="menuitem" tabindex="0"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg></span>下载客户端</div>
-                <div class="popover-item" data-action="help-whotowork"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></span>帮助文档</div>
+                <div class="popover-item" data-action="doc-center" role="menuitem" tabindex="0"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></span>帮助与 API 文档</div>
                 <div class="popover-item" data-action="feedback-help"><span class="sidebar-icon-wrap" aria-hidden="true">💡</span>问题反馈</div>
                 <div class="popover-item" id="menu-item-update-app" data-action="app-update" style="display:none;" role="menuitem" tabindex="0"><span class="sidebar-icon-wrap"><i class="bi bi-cloud-arrow-down"></i></span>更新应用</div>
-                <div class="popover-item" data-action="help-api"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></span>API 文档</div>
                 <div class="popover-item" id="user-menu-admin-console" data-action="admin-console" style="display: none;" title="管理员审核技能"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg></span>管理员控制台</div>
                 <div class="popover-item" data-action="settings"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span>设置</div>
                 <div class="popover-divider"></div>
@@ -3022,9 +3021,64 @@
                 window.__workspaceSelection = selection || null;
                 try {
                     if (selection) localStorage.setItem('workspaceSelection', JSON.stringify(selection));
+                    else localStorage.removeItem('workspaceSelection');
                 } catch (_e) {}
                 if (typeof syncWorkspaceIndicators === 'function') syncWorkspaceIndicators(selection || null);
             }
+            function clearWorkspaceSelectionCache() {
+                window.__workspaceSelection = null;
+                window.__workspaceTreeData = [];
+                try { localStorage.removeItem('workspaceSelection'); } catch (_e) {}
+                if (typeof syncWorkspaceIndicators === 'function') syncWorkspaceIndicators(null);
+                var container = document.getElementById('file-tree-container');
+                if (container && (window.__rightSidebarMode || 'local') === 'local') {
+                    container.innerHTML = '';
+                }
+            }
+            async function validateLocalMountOnStartup() {
+                var sel = typeof getCachedWorkspaceSelection === 'function' ? getCachedWorkspaceSelection() : null;
+                var path = sel && sel.workspace_path ? String(sel.workspace_path).trim() : '';
+                if (!sel || !path) {
+                    if (sel && !path) clearWorkspaceSelectionCache();
+                    return;
+                }
+                var sidecarOk = false;
+                try {
+                    var healthRes = await fetch(localSidecarUrl('/health'), { method: 'GET' });
+                    sidecarOk = healthRes.ok;
+                } catch (_healthErr) {
+                    sidecarOk = false;
+                }
+                if (!sidecarOk) {
+                    console.warn('[workspace] 本地 Sidecar 不可用，清除幽灵挂载缓存');
+                    clearWorkspaceSelectionCache();
+                    return;
+                }
+                try {
+                    var checkUrl = localSidecarUrl('/api/tools/check_file') + '?path=' + encodeURIComponent(path);
+                    var checkRes = await fetch(checkUrl, { headers: typeof getAuthHeaders === 'function' ? getAuthHeaders() : {} });
+                    var checkData = await checkRes.json().catch(function () { return {}; });
+                    if (!checkRes.ok || !checkData || !checkData.exists || !checkData.is_dir) {
+                        console.warn('[workspace] 本地挂载路径已失效，清除幽灵缓存:', path);
+                        clearWorkspaceSelectionCache();
+                        return;
+                    }
+                    var workspace = await postWorkspaceInit(path);
+                    if (workspace) {
+                        applyWorkspaceInitSuccess(workspace, sel);
+                        if (typeof window.fetchAndRenderWorkspaceTree === 'function') {
+                            await window.fetchAndRenderWorkspaceTree();
+                        }
+                    } else {
+                        clearWorkspaceSelectionCache();
+                    }
+                } catch (e) {
+                    console.warn('[workspace] 挂载状态自检失败，清除缓存', e);
+                    clearWorkspaceSelectionCache();
+                }
+            }
+            window.validateLocalMountOnStartup = validateLocalMountOnStartup;
+            window.clearWorkspaceSelectionCache = clearWorkspaceSelectionCache;
             function getCachedWorkspaceSelection() {
                 if (window.__workspaceSelection) return window.__workspaceSelection;
                 try {
@@ -4070,6 +4124,55 @@
                 var modal = document.getElementById('client-download-modal');
                 if (modal) modal.style.display = 'none';
             };
+
+            function loadDocCenterApiMarkdown() {
+                var host = document.getElementById('doc-api-guide-body');
+                if (!host || host.getAttribute('data-loaded') === '1') return;
+                host.innerHTML = '<p class="doc-center-loading">正在加载 API 文档…</p>';
+                fetch('/API.md', { cache: 'no-store' })
+                    .then(function (r) {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.text();
+                    })
+                    .then(function (md) {
+                        host.innerHTML = (typeof safeMarkedParse === 'function')
+                            ? safeMarkedParse(md || '')
+                            : ((typeof marked !== 'undefined' && marked.parse) ? marked.parse(md || '') : '<pre>' + (md || '') + '</pre>');
+                        host.setAttribute('data-loaded', '1');
+                    })
+                    .catch(function (err) {
+                        host.innerHTML = '<p class="text-danger">加载失败：' + (err && err.message ? err.message : String(err)) + '。请确认服务已暴露 <code>/API.md</code>。</p>';
+                    });
+            }
+            window.openDocCenterModal = function (tabId) {
+                if (typeof closeAllPopovers === 'function') closeAllPopovers();
+                var userProfileMenu = document.getElementById('user-profile-menu');
+                if (userProfileMenu) {
+                    userProfileMenu.classList.remove('show');
+                    userProfileMenu.setAttribute('aria-hidden', 'true');
+                }
+                var modalEl = document.getElementById('docCenterModal');
+                if (!modalEl || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+                    window.open('/api-doc.html', '_blank');
+                    return;
+                }
+                var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+                modal.show();
+                tabId = tabId || 'doc-quickstart';
+                var trigger = modalEl.querySelector('[data-bs-target="#' + tabId + '"]');
+                if (trigger && bootstrap.Tab) {
+                    bootstrap.Tab.getOrCreateInstance(trigger).show();
+                }
+                if (modalEl.getAttribute('data-doc-nav-bound') !== '1') {
+                    modalEl.setAttribute('data-doc-nav-bound', '1');
+                    modalEl.querySelectorAll('#doc-nav-list [data-bs-toggle="list"]').forEach(function (btn) {
+                        btn.addEventListener('shown.bs.tab', function () {
+                            if (btn.getAttribute('data-bs-target') === '#doc-api-guide') loadDocCenterApiMarkdown();
+                        });
+                    });
+                }
+                if (tabId === 'doc-api-guide') loadDocCenterApiMarkdown();
+            };
             window.refreshClientDownloadModal = function () {
                 var base = '/downloads/';
                 var verEl = document.getElementById('client-dl-ver-line');
@@ -4520,6 +4623,7 @@
                 if (historyPane) historyPane.style.display = 'flex';
                 if (wsPane) wsPane.style.display = 'none';
                 if (rzR) rzR.style.display = 'none';
+                if (typeof syncSidebarPrimaryNavActive === 'function') syncSidebarPrimaryNavActive();
             }
             function switchToFileManagementView() {
                 persistLastChatSessionBeforeLeaving();
@@ -4553,6 +4657,7 @@
                 if (wsPane) wsPane.style.display = 'none';
                 if (rzR) rzR.style.display = 'none';
                 if (typeof renderFileManagementTable === 'function') renderFileManagementTable();
+                if (typeof syncSidebarPrimaryNavActive === 'function') syncSidebarPrimaryNavActive();
             }
             window.switchToDataAssetsView = switchToDataAssetsView;
             var currentAssetSort = { key: 'created_at', asc: false };
@@ -4683,9 +4788,11 @@
                  */
                 function workspaceDragBounds() {
                     var WORKSPACE_MIN_PX = 350;
+                    var WORKSPACE_MAX_VIEWPORT_RATIO = 0.4;
                     var CHAT_PANE_MIN_PX = 320;
                     var innerW = window.innerWidth;
                     if (!isFinite(innerW) || innerW <= 0) innerW = window.screen.availWidth || 1024;
+                    var maxByViewportRatio = Math.floor(innerW * WORKSPACE_MAX_VIEWPORT_RATIO);
                     var sidebar = document.getElementById('sidebar-pane');
                     var leftSidebarW = sidebar ? sidebar.offsetWidth : 0;
                     if (!isFinite(leftSidebarW) || leftSidebarW < 0) leftSidebarW = 0;
@@ -4700,6 +4807,7 @@
                     var maxAvailableW = innerW - leftSidebarW - CHAT_PANE_MIN_PX - rzLW - rzRW - rexW;
                     if (!isFinite(maxAvailableW)) maxAvailableW = 0;
                     var rawMax = Math.floor(Math.max(0, maxAvailableW));
+                    rawMax = Math.min(rawMax, maxByViewportRatio);
                     if (rawMax < WORKSPACE_MIN_PX) {
                         return { min: rawMax, max: rawMax };
                     }
@@ -5349,43 +5457,103 @@
                 if (typeof highlightActiveSession === 'function') highlightActiveSession(null);
                 if (typeof highlightActiveSkillInSidebar === 'function') highlightActiveSkillInSidebar(null);
             }
-            function setActiveSessionInSidebar(sessionId) {
-                var btnNew = document.getElementById('btnNewSession');
-                document.querySelectorAll('.sidebar-session-item').forEach(function(el) { el.classList.remove('active-session'); });
-                if (document.getElementById('full-history-list')) {
-                    document.querySelectorAll('#full-history-list .sidebar-session-item').forEach(function(el) { el.classList.remove('active-session'); });
+            var SIDEBAR_L2_ACTIVE_SELECTORS = '#sidebar-sessions-list .history-item, #sidebar-sessions-list .sidebar-session-item, #full-history-list .history-item, #full-history-list .sidebar-session-item, #sidebar-assets-list .sidebar-asset-item, #sidebar-favorite-list .favorite-item, #sidebar-favorite-list .sidebar-favorite-item';
+            var SIDEBAR_L2_ITEM_SELECTOR = '.history-item, .sub-nav-item:not(.asset-category), .favorite-item, .sidebar-favorite-item, .sidebar-session-item, .sidebar-asset-item';
+            function syncAssetModalityGroupAriaExpanded(root) {
+                var scope = root || document.getElementById('sidebar-assets-list');
+                if (!scope) return;
+                scope.querySelectorAll('.asset-modality-group').forEach(function(det) {
+                    var sum = det.querySelector('summary.asset-category');
+                    if (!sum) return;
+                    sum.setAttribute('aria-expanded', det.open ? 'true' : 'false');
+                    if (!det.open) sum.classList.remove('active');
+                });
+            }
+            function syncSidebarUserAreaAriaExpanded() {
+                var area = document.getElementById('sidebar-user-area');
+                var menu = document.getElementById('user-profile-menu');
+                if (!area) return;
+                var open = !!(menu && menu.classList.contains('show'));
+                area.setAttribute('aria-expanded', open ? 'true' : 'false');
+            }
+            function syncSidebarCollapsibleL1AriaExpanded() {
+                var favBtn = document.getElementById('btn-sidebar-favorites');
+                var favBlock = favBtn && favBtn.closest('.sidebar-favorites-block');
+                if (favBtn && favBlock) {
+                    favBtn.setAttribute('aria-expanded', favBlock.classList.contains('collapsed') ? 'false' : 'true');
                 }
-                if (sessionId == null || sessionId === '') {
-                    if (btnNew) btnNew.classList.add('active-session');
-                } else {
-                    if (btnNew) btnNew.classList.remove('active-session');
-                    var sel = document.querySelector('.sidebar-session-item[data-session-id="' + sessionId + '"]');
-                    if (sel) sel.classList.add('active-session');
-                    var fullList = document.getElementById('full-history-list');
-                    if (fullList) {
-                        var fullSel = fullList.querySelector('.sidebar-session-item[data-session-id="' + sessionId + '"]');
-                        if (fullSel) fullSel.classList.add('active-session');
-                    }
+                [['sidebar-section-history', 'sidebar-nav-history'], ['sidebar-section-assets', 'sidebar-nav-assets']].forEach(function(pair) {
+                    var det = document.getElementById(pair[0]);
+                    var sum = document.getElementById(pair[1]);
+                    if (det && sum) sum.setAttribute('aria-expanded', det.open ? 'true' : 'false');
+                });
+            }
+            /** 一级侧栏手风琴：收藏夹 / 历史会话 / 数据资产 开一关一（高亮绑定 aria-expanded） */
+            function collapseSidebarL1Except(keepKey) {
+                var favBlock = document.querySelector('#sidebar-pane .sidebar-favorites-block');
+                if (keepKey !== 'favorites' && favBlock) favBlock.classList.add('collapsed');
+                if (keepKey !== 'history') {
+                    var hist = document.getElementById('sidebar-section-history');
+                    if (hist) hist.open = false;
+                }
+                if (keepKey !== 'assets') {
+                    var assets = document.getElementById('sidebar-section-assets');
+                    if (assets) assets.open = false;
+                }
+                if (typeof syncSidebarCollapsibleL1AriaExpanded === 'function') syncSidebarCollapsibleL1AriaExpanded();
+            }
+            function ensureSidebarDetailsExpanded(detailsId, summaryId) {
+                var key = detailsId === 'sidebar-section-history' ? 'history' : (detailsId === 'sidebar-section-assets' ? 'assets' : null);
+                if (key && typeof collapseSidebarL1Except === 'function') collapseSidebarL1Except(key);
+                var det = document.getElementById(detailsId);
+                if (det) det.open = true;
+                var sum = document.getElementById(summaryId);
+                if (sum) sum.setAttribute('aria-expanded', 'true');
+            }
+            function clearSidebarNavActiveLevel(level) {
+                if (level === 1 || level == null) {
+                    var btnSkills = document.getElementById('btn-skills-square');
+                    if (btnSkills) btnSkills.classList.remove('active', 'sidebar-skills-plaza-active');
+                }
+                if (level === 2 || level == null) {
+                    document.querySelectorAll(SIDEBAR_L2_ACTIVE_SELECTORS).forEach(function(el) {
+                        el.classList.remove('active', 'active-session');
+                    });
+                }
+                var btnNew = document.getElementById('btnNewSession');
+                if (btnNew) btnNew.classList.remove('active', 'active-session');
+            }
+            function setSidebarSecondaryNavActive(el) {
+                if (!el || el.id === 'btnNewSession') return;
+                clearSidebarNavActiveLevel(2);
+                el.classList.add('active');
+                if (el.classList.contains('sidebar-session-item') || el.classList.contains('history-item')) {
+                    el.classList.add('active-session');
                 }
             }
+            function updateSidebarActiveState(clickedElement, isLevel2) {
+                if (!clickedElement || clickedElement.id === 'btnNewSession') return;
+                if (isLevel2) {
+                    setSidebarSecondaryNavActive(clickedElement);
+                    return;
+                }
+                clearSidebarNavActiveLevel(1);
+                clickedElement.classList.add('active');
+                if (clickedElement.id === 'btn-skills-square') {
+                    clickedElement.classList.add('sidebar-skills-plaza-active');
+                }
+            }
+            function setActiveSessionInSidebar(sessionId) {
+                clearSidebarNavActiveLevel(2);
+                if (sessionId == null || sessionId === '') return;
+                document.querySelectorAll(
+                    '.sidebar-session-item[data-session-id="' + sessionId + '"], .history-item[data-session-id="' + sessionId + '"]'
+                ).forEach(function(el) {
+                    el.classList.add('active', 'active-session');
+                });
+            }
             function highlightActiveSession(sessionId) {
-                document.querySelectorAll('.sidebar-session-item').forEach(function(el) { el.classList.remove('active-session'); });
-                var btnNew = document.getElementById('btnNewSession');
-                if (btnNew) btnNew.classList.remove('active-session');
-                if (document.getElementById('full-history-list')) {
-                    document.querySelectorAll('#full-history-list .sidebar-session-item').forEach(function(el) { el.classList.remove('active-session'); });
-                }
-                if (sessionId != null && sessionId !== '') {
-                    var sel = document.querySelector('.sidebar-session-item[data-session-id="' + sessionId + '"]');
-                    if (sel) sel.classList.add('active-session');
-                    var fullList = document.getElementById('full-history-list');
-                    if (fullList) {
-                        var fullSel = fullList.querySelector('.sidebar-session-item[data-session-id="' + sessionId + '"]');
-                        if (fullSel) fullSel.classList.add('active-session');
-                    }
-                } else {
-                    if (btnNew) btnNew.classList.add('active-session');
-                }
+                setActiveSessionInSidebar(sessionId);
             }
             /** 清除侧栏「使用中技能」并清空聊天输入框 Prompt */
             function clearActiveSkillFromSidebar() {
@@ -5442,13 +5610,76 @@
                 }
             }
             window.highlightActiveSkillInSidebar = highlightActiveSkillInSidebar;
-            function syncSidebarSkillsPlazaNavActive() {
-                var btn = document.getElementById('btn-skills-square');
-                var skillsPane = document.getElementById('skills-square-pane');
-                if (!btn || !skillsPane) return;
-                var onPlaza = skillsPane.style.display === 'flex';
-                btn.classList.toggle('sidebar-skills-plaza-active', onPlaza);
+            function setSidebarPrimaryNavActive(key) {
+                var btnSkills = document.getElementById('btn-skills-square');
+                if (btnSkills) btnSkills.classList.remove('active', 'sidebar-skills-plaza-active');
+                if (key === 'skills') {
+                    if (btnSkills) btnSkills.classList.add('active', 'sidebar-skills-plaza-active');
+                    return;
+                }
+                if (key === 'favorites') {
+                    if (typeof collapseSidebarL1Except === 'function') collapseSidebarL1Except('favorites');
+                    var favBlock = document.querySelector('.sidebar-favorites-block');
+                    if (favBlock) favBlock.classList.remove('collapsed');
+                    syncSidebarCollapsibleL1AriaExpanded();
+                    return;
+                }
+                if (key === 'history') {
+                    ensureSidebarDetailsExpanded('sidebar-section-history', 'sidebar-nav-history');
+                    return;
+                }
+                if (key === 'assets') {
+                    ensureSidebarDetailsExpanded('sidebar-section-assets', 'sidebar-nav-assets');
+                }
             }
+            function syncSidebarPrimaryNavActive() {
+                var skillsPane = document.getElementById('skills-square-pane');
+                var historyPane = document.getElementById('history-pane');
+                var daPane = document.getElementById('data-assets-pane');
+                var btnSkills = document.getElementById('btn-skills-square');
+                if (btnSkills) btnSkills.classList.remove('active', 'sidebar-skills-plaza-active');
+                if (skillsPane && skillsPane.style.display === 'flex') {
+                    if (btnSkills) btnSkills.classList.add('active', 'sidebar-skills-plaza-active');
+                    return;
+                }
+                if (historyPane && historyPane.style.display === 'flex') {
+                    ensureSidebarDetailsExpanded('sidebar-section-history', 'sidebar-nav-history');
+                    return;
+                }
+                if (daPane && daPane.style.display === 'flex') {
+                    ensureSidebarDetailsExpanded('sidebar-section-assets', 'sidebar-nav-assets');
+                }
+            }
+            function syncSidebarSkillsPlazaNavActive() {
+                syncSidebarPrimaryNavActive();
+            }
+            window.setSidebarPrimaryNavActive = setSidebarPrimaryNavActive;
+            window.syncSidebarPrimaryNavActive = syncSidebarPrimaryNavActive;
+            window.syncSidebarCollapsibleL1AriaExpanded = syncSidebarCollapsibleL1AriaExpanded;
+            window.syncSidebarUserAreaAriaExpanded = syncSidebarUserAreaAriaExpanded;
+            window.syncAssetModalityGroupAriaExpanded = syncAssetModalityGroupAriaExpanded;
+            window.clearSidebarNavActiveLevel = clearSidebarNavActiveLevel;
+            window.setSidebarSecondaryNavActive = setSidebarSecondaryNavActive;
+            window.updateSidebarActiveState = updateSidebarActiveState;
+            function bindSidebarL2ActiveClickDelegation() {
+                document.addEventListener('click', function(e) {
+                    var l2Item = e.target.closest(SIDEBAR_L2_ITEM_SELECTOR);
+                    if (!l2Item || l2Item.classList.contains('asset-category') || !l2Item.closest('#sidebar-pane')) return;
+                    if (l2Item.id === 'btnNewSession' || l2Item.closest('#btnNewSession')) return;
+                    if (e.target.closest && (e.target.closest('.item-more-btn') || e.target.closest('.popover-menu') || e.target.closest('.sidebar-asset-refresh-btn') || e.target.closest('.btn-use-favorite'))) return;
+                    var parentContainer = l2Item.closest('.collapse, ul, .list-group, .sidebar-sub-list, .sidebar-favorite-list, .details-content-wrapper');
+                    if (parentContainer) {
+                        parentContainer.querySelectorAll(SIDEBAR_L2_ITEM_SELECTOR).forEach(function(el) {
+                            el.classList.remove('active', 'active-session');
+                        });
+                    }
+                    l2Item.classList.add('active');
+                    if (l2Item.classList.contains('sidebar-session-item') || l2Item.classList.contains('history-item')) {
+                        l2Item.classList.add('active-session');
+                    }
+                });
+            }
+            bindSidebarL2ActiveClickDelegation();
             function enableChatTitleEdit() {
                 var displayMode = document.getElementById('chat-title-display-mode');
                 var editMode = document.getElementById('chat-title-edit-mode');
@@ -6227,7 +6458,9 @@
                         m._popoverOwner = null;
                     }
                     m.classList.remove('show');
+                    if (m.id === 'user-profile-menu') m.setAttribute('aria-hidden', 'true');
                 });
+                if (typeof syncSidebarUserAreaAriaExpanded === 'function') syncSidebarUserAreaAriaExpanded();
             }
             function openPopoverAt(btnEl, popoverEl) {
                 if (!btnEl || !popoverEl) return;
@@ -6271,7 +6504,7 @@
                         var displayList = list.slice(0, 5);
                         displayList.forEach(function(s) {
                             var item = document.createElement('div');
-                            item.className = 'sidebar-session-item';
+                            item.className = 'sidebar-session-item history-item sub-nav-item';
                             var rawTitle = (s.title || s.id || '').trim();
                             var displayTitle = typeof sanitizeSystemInjections === 'function' ? (sanitizeSystemInjections(rawTitle) || '').trim() : rawTitle;
                             if (!displayTitle) displayTitle = '复用工作流';
@@ -6312,7 +6545,13 @@
                             item.appendChild(textSpan);
                             item.appendChild(moreBtn);
                             item.appendChild(popover);
-                            item.onclick = function(ev) { if (ev.target.closest && !ev.target.closest('.item-more-btn') && !ev.target.closest('.popover-menu')) { ev.preventDefault(); ev.stopPropagation(); loadSessionAndRestore(s.id, s.title); } };
+                            item.onclick = function(ev) {
+                                if (ev.target.closest && (ev.target.closest('.item-more-btn') || ev.target.closest('.popover-menu'))) return;
+                                ev.preventDefault();
+                                ev.stopPropagation();
+                                if (typeof setSidebarSecondaryNavActive === 'function') setSidebarSecondaryNavActive(item);
+                                loadSessionAndRestore(s.id, s.title);
+                            };
                             el.appendChild(item);
                         });
                         if (typeof setActiveSessionInSidebar === 'function') setActiveSessionInSidebar(currentSessionId);
@@ -6377,7 +6616,7 @@
                     var searchTitle = (displayTitle + ' ' + (rawTitle || s.id || '')).toLowerCase();
                     var dateStr = formatHistoryDate(s);
                     var item = document.createElement('div');
-                    item.className = 'full-history-item sidebar-session-item';
+                    item.className = 'full-history-item sidebar-session-item history-item sub-nav-item';
                     item.title = displayTitle;
                     item.dataset.sessionId = s.id;
                     item.dataset.title = searchTitle;
@@ -6421,7 +6660,9 @@
                     item.appendChild(actionsDiv);
                     item.onclick = function(ev) {
                         if (ev.target.closest && (ev.target.closest('.item-actions') || ev.target.closest('.item-action-btn'))) return;
-                        ev.preventDefault(); ev.stopPropagation();
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        if (typeof setSidebarSecondaryNavActive === 'function') setSidebarSecondaryNavActive(item);
                         loadSessionAndRestore(s.id, s.title);
                     };
                     container.appendChild(item);
@@ -6720,18 +6961,23 @@
                             var details = document.createElement('details');
                             details.className = 'asset-modality-group';
                             var summary = document.createElement('summary');
+                            summary.className = 'asset-category sub-nav-item';
+                            summary.setAttribute('aria-expanded', 'false');
                             var iconWrap = document.createElement('span');
                             iconWrap.className = 'asset-modality-icon-wrap';
                             iconWrap.innerHTML = FIXED_MODALITY_SVG[groupKey] || FIXED_MODALITY_SVG.uncategorized;
                             summary.appendChild(iconWrap);
                             summary.appendChild(document.createTextNode(label + ' (' + items.length + ')'));
+                            details.addEventListener('toggle', function() {
+                                if (typeof syncAssetModalityGroupAriaExpanded === 'function') syncAssetModalityGroupAriaExpanded(el);
+                            });
                             details.appendChild(summary);
                             var fileList = document.createElement('div');
                             fileList.className = 'asset-modality-files';
                             var showItems = items.slice(0, 5);
                             showItems.forEach(function(a) {
                                 var item = document.createElement('div');
-                                item.className = 'sidebar-asset-item';
+                                item.className = 'sidebar-asset-item sub-nav-item';
                                 item.title = (a.file_name || '') + (a.modality ? ' (' + a.modality + ')' : '');
                                 item.dataset.filePath = a.file_path;
                                 item.dataset.fileName = a.file_name;
@@ -6773,7 +7019,13 @@
                                 item.appendChild(textSpan);
                                 item.appendChild(moreBtn);
                                 item.appendChild(popover);
-                                item.onclick = function(ev) { if (ev.target.closest && !ev.target.closest('.item-more-btn') && !ev.target.closest('.popover-menu')) { ev.preventDefault(); ev.stopPropagation(); addAssetAsAttachment(a.file_path, a.file_name || a.file_path || '文件'); } };
+                                item.onclick = function(ev) {
+                                    if (ev.target.closest && (ev.target.closest('.item-more-btn') || ev.target.closest('.popover-menu'))) return;
+                                    ev.preventDefault();
+                                    ev.stopPropagation();
+                                    if (typeof setSidebarSecondaryNavActive === 'function') setSidebarSecondaryNavActive(item);
+                                    addAssetAsAttachment(a.file_path, a.file_name || a.file_path || '文件');
+                                };
                                 fileList.appendChild(item);
                             });
                             if (items.length > 5) {
@@ -6786,6 +7038,7 @@
                             details.appendChild(fileList);
                             el.appendChild(details);
                         });
+                        if (typeof syncAssetModalityGroupAriaExpanded === 'function') syncAssetModalityGroupAriaExpanded(el);
                         renderHpcAssetsPlaceholder(el);
                         var fileMgmtEntry = document.createElement('div');
                         fileMgmtEntry.className = 'sidebar-item';
@@ -7810,13 +8063,19 @@
                     window.checkPostUpdateGreeting().catch(function () {});
                 }
                 (function restoreWorkspaceFileExplorer() {
-                    try {
-                        var sel = typeof getCachedWorkspaceSelection === 'function' ? getCachedWorkspaceSelection() : null;
-                        if (typeof syncWorkspaceIndicators === 'function') syncWorkspaceIndicators(sel);
-                        if (sel && sel.workspace_path) {
-                            if (typeof window.fetchAndRenderWorkspaceTree === 'function') window.fetchAndRenderWorkspaceTree();
-                        }
-                    } catch (_r) {}
+                    if (typeof validateLocalMountOnStartup === 'function') {
+                        validateLocalMountOnStartup().catch(function (e) {
+                            console.warn('[workspace] validateLocalMountOnStartup failed', e);
+                        });
+                    } else {
+                        try {
+                            var sel = typeof getCachedWorkspaceSelection === 'function' ? getCachedWorkspaceSelection() : null;
+                            if (typeof syncWorkspaceIndicators === 'function') syncWorkspaceIndicators(sel);
+                            if (sel && sel.workspace_path && typeof window.fetchAndRenderWorkspaceTree === 'function') {
+                                window.fetchAndRenderWorkspaceTree();
+                            }
+                        } catch (_r) {}
+                    }
                 })();
                 if (typeof updateSidebarUser === 'function') updateSidebarUser();
                 if (typeof window.syncImmersiveDemoEntryVisibility === 'function') window.syncImmersiveDemoEntryVisibility();
@@ -8212,8 +8471,19 @@
                         showToast('请登录后解锁工作流收藏夹', 'warning');
                         return;
                     }
+                    var willExpand = favBlock.classList.contains('collapsed');
+                    if (willExpand && typeof collapseSidebarL1Except === 'function') collapseSidebarL1Except('favorites');
                     favBlock.classList.toggle('collapsed');
+                    if (typeof syncSidebarCollapsibleL1AriaExpanded === 'function') syncSidebarCollapsibleL1AriaExpanded();
                 };
+                [['sidebar-section-history', 'history'], ['sidebar-section-assets', 'assets']].forEach(function(pair) {
+                    var det = document.getElementById(pair[0]);
+                    if (det) det.addEventListener('toggle', function() {
+                        if (det.open && typeof collapseSidebarL1Except === 'function') collapseSidebarL1Except(pair[1]);
+                        if (typeof syncSidebarCollapsibleL1AriaExpanded === 'function') syncSidebarCollapsibleL1AriaExpanded();
+                    });
+                });
+                if (typeof syncSidebarCollapsibleL1AriaExpanded === 'function') syncSidebarCollapsibleL1AriaExpanded();
                 var navMain = document.getElementById('skillsNavMain');
                 if (navMain) navMain.querySelectorAll('.skills-nav-tab').forEach(function(btn) {
                     btn.onclick = function() {
@@ -8305,7 +8575,6 @@
                             e.stopPropagation();
                             if (userProfileMenu && userProfileMenu.classList.contains('show')) {
                                 closeAllPopovers();
-                                if (userProfileMenu) userProfileMenu.setAttribute('aria-hidden', 'true');
                                 return;
                             }
                             closeAllPopovers();
@@ -8318,11 +8587,11 @@
                                 userProfileMenu.classList.add('show');
                                 userProfileMenu.setAttribute('aria-hidden', 'false');
                             }
+                            if (typeof syncSidebarUserAreaAriaExpanded === 'function') syncSidebarUserAreaAriaExpanded();
                             setTimeout(function() {
                                 function _closeUserMenu(ev) {
                                     if (ev.target.closest && ev.target.closest('#user-profile-menu')) return;
                                     closeAllPopovers();
-                                    if (userProfileMenu) userProfileMenu.setAttribute('aria-hidden', 'true');
                                     document.removeEventListener('click', _closeUserMenu);
                                 }
                                 document.addEventListener('click', _closeUserMenu);
@@ -8338,8 +8607,9 @@
                         item.onclick = function(ev) {
                             ev.stopPropagation();
                             closeAllPopovers();
-                            if (action === 'help-whotowork') window.open('/whotowork.html', '_blank');
-                            if (action === 'help-api') window.open('/api-doc.html', '_blank');
+                            if (action === 'doc-center') {
+                                if (typeof window.openDocCenterModal === 'function') window.openDocCenterModal('doc-quickstart');
+                            }
                             if (action === 'feedback-help') {
                                 if (typeof window.openFeedbackModal === 'function') window.openFeedbackModal();
                                 else if (typeof window.showToast === 'function') showToast('反馈模块未加载', 'warning');
@@ -8787,6 +9057,7 @@
                     }
                     det.addEventListener('toggle', function() {
                         if (!isLoggedIn() && det.open) { det.open = false; }
+                        if (typeof syncSidebarCollapsibleL1AriaExpanded === 'function') syncSidebarCollapsibleL1AriaExpanded();
                     });
                 }
                 _guestGuardSidebarDetails('sidebar-section-history', '请登录后查看历史会话');
@@ -14679,7 +14950,7 @@
                 for (var fi = 0; fi < favorites.length; fi++) {
                     var fav = favorites[fi];
                     var item = document.createElement('div');
-                    item.className = 'sidebar-favorite-item sidebar-item';
+                    item.className = 'sidebar-favorite-item favorite-item sub-nav-item sidebar-item';
                     item.dataset.id = fav.id;
                     item.dataset.fid = fav.id;
                     item.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;position:relative;width:100%;">' +
@@ -16130,6 +16401,63 @@
                 </div>
                 <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
                     <button type="button" class="btn btn-dark omics-update-check-btn" onclick="closePostUpdateWelcomeModal();">开始使用</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal fade" id="docCenterModal" tabindex="-1" aria-hidden="true" aria-labelledby="docCenterModalTitle">
+            <div class="modal-dialog modal-fullscreen">
+                <div class="modal-content">
+                    <div class="modal-header bg-light border-bottom py-3">
+                        <h5 class="modal-title fw-bold" id="docCenterModalTitle"><i class="bi bi-book me-2"></i>开发者与帮助中心</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+                    </div>
+                    <div class="modal-body p-0 d-flex" style="height: calc(100vh - 56px);">
+                        <div class="doc-center-nav border-end">
+                            <div class="list-group list-group-flush" id="doc-nav-list" role="tablist">
+                                <button type="button" class="list-group-item list-group-item-action active" data-bs-toggle="list" data-bs-target="#doc-quickstart" role="tab">快速开始</button>
+                                <button type="button" class="list-group-item list-group-item-action" data-bs-toggle="list" data-bs-target="#doc-api-guide" role="tab">首次调用 API</button>
+                                <button type="button" class="list-group-item list-group-item-action" data-bs-toggle="list" data-bs-target="#doc-omics-agent" role="tab">智能体接入指南</button>
+                                <button type="button" class="list-group-item list-group-item-action" data-bs-toggle="list" data-bs-target="#doc-architecture" role="tab">架构与数据流</button>
+                            </div>
+                        </div>
+                        <div class="doc-center-body tab-content flex-grow-1" id="doc-content-panes">
+                            <div class="tab-pane fade show active" id="doc-quickstart" role="tabpanel">
+                                <h2>快速开始</h2>
+                                <p>欢迎使用 <strong>Omics Agent</strong> 多模态组学智能分析平台。以下步骤可帮助您在数分钟内完成首次分析。</p>
+                                <h3>1. 登录与新建会话</h3>
+                                <p>点击左下角用户区完成登录；使用侧栏 <strong>新建会话</strong> 或快捷键 <code>Ctrl+K</code> 开始对话。</p>
+                                <h3>2. 上传数据</h3>
+                                <p>将文件拖拽至输入区，或通过右侧工作台挂载本地目录；小文件将自动上传至云端，大文件可走本地 Sidecar 轨道（桌面客户端）。</p>
+                                <h3>3. 选择技能或工作流</h3>
+                                <p>在 <strong>技能广场</strong> 选择领域技能一键注入 Prompt；或在对话中由智能体生成可执行工作流并分步运行。</p>
+                                <h3>4. 查看报告</h3>
+                                <p>分析结果在右侧 <strong>分析报告</strong> 工作台展示；历史会话与数据资产可在左侧栏随时回溯。</p>
+                            </div>
+                            <div class="tab-pane fade" id="doc-api-guide" role="tabpanel">
+                                <h2>首次调用 API</h2>
+                                <div id="doc-api-guide-body"><p class="doc-center-loading">切换到本页时将自动加载完整 API 文档…</p></div>
+                            </div>
+                            <div class="tab-pane fade" id="doc-omics-agent" role="tabpanel">
+                                <h2>智能体接入指南</h2>
+                                <p>Omics Agent 提供与 OpenAI Chat Completions 兼容的流式接口，便于将现有 LLM 客户端接入组学分析编排能力。</p>
+                                <h3>鉴权</h3>
+                                <p>在请求头携带 <code>Authorization: Bearer &lt;token&gt;</code>，或使用访客 UUID（<code>X-Guest-UUID</code>）进行匿名试用（能力受限）。</p>
+                                <h3>典型端点</h3>
+                                <ul>
+                                    <li><code>POST /api/chat</code> — 主对话与 SSE 流式事件</li>
+                                    <li><code>GET /api/sessions</code> — 会话列表</li>
+                                    <li><code>POST /api/upload</code> — 上传分析数据</li>
+                                    <li><code>GET /api/skills</code> — 技能广场目录</li>
+                                </ul>
+                                <p>完整参数、错误码与示例请阅左侧 <strong>首次调用 API</strong> 加载的 Markdown 全文，或仓库根目录 <code>API.md</code>。</p>
+                            </div>
+                            <div class="tab-pane fade" id="doc-architecture" role="tabpanel">
+                                <h2>架构与数据流</h2>
+                                <p>下图展示用户请求、编排器、工具 Worker 与多模态资产总线之间的典型数据流向（交互式大图可在新标签页打开）。</p>
+                                <iframe class="doc-center-iframe" src="/whotowork.html" title="Omics Agent 架构与数据流"></iframe>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

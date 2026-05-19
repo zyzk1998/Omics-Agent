@@ -32,6 +32,10 @@
     function patchExistingFeedbackModal() {
         const modal = document.getElementById('feedback-modal');
         if (!modal) return;
+        modal.querySelectorAll('label[for="feedback-type-select"], label[for="feedback-content-text"]').forEach(function (lab) {
+            lab.classList.remove('small', 'text-muted');
+            lab.classList.add('feedback-field-label');
+        });
         const dialog = modal.querySelector('.feedback-modal-dialog, .modal-dialog');
         if (dialog) dialog.classList.remove('modal-lg');
         const sel = document.getElementById('feedback-type-select');
@@ -60,7 +64,7 @@
             '        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>' +
             '      </div>' +
             '      <div class="modal-body">' +
-            '        <label class="form-label small text-muted" for="feedback-type-select">分类</label>' +
+            '        <label class="form-label feedback-field-label" for="feedback-type-select">分类</label>' +
             '        <select id="feedback-type-select" class="form-select form-select-sm mb-3">' +
             '          <option value="issue">遇到问题</option>' +
             '          <option value="suggestion">功能建议</option>' +
@@ -68,7 +72,7 @@
             '          <option value="error">报错 / 异常</option>' +
             '          <option value="other">其他</option>' +
             '        </select>' +
-            '        <label class="form-label small text-muted" for="feedback-content-text">详细描述</label>' +
+            '        <label class="form-label feedback-field-label" for="feedback-content-text">详细描述</label>' +
             '        <textarea id="feedback-content-text" class="form-control feedback-textarea" rows="9" placeholder="请描述现象、复现步骤或建议…"></textarea>' +
             '        <input type="hidden" id="feedback-error-context" value="" />' +
             '      </div>' +

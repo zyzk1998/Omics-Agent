@@ -20,17 +20,27 @@ RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian-security ${DEB_VERSION}-security main" >> /etc/apt/sources.list; \
     fi
 
-# 安装系统级依赖（编译生信库需要）
+# 安装系统级依赖（编译生信库 + 组学下游 CLI）
 # bedtools 为 pybedtools (Epigenomics) 所需
-RUN apt-get update && apt-get install -y \
+# bwa/samtools/bcftools/bowtie2/fastp 为 Genomics 真实管线所需（见 scripts/install_omics_real_env.sh apt 段）
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
     g++ \
+    wget \
+    ca-certificates \
+    bzip2 \
     libhdf5-dev \
     libcurl4-openssl-dev \
     libssl-dev \
     gosu \
     bedtools \
+    bwa \
+    samtools \
+    bcftools \
+    bowtie2 \
+    fastp \
+    default-jdk-headless \
     libxrender1 \
     libxext6 \
     libfontconfig1 \
@@ -38,27 +48,37 @@ RUN apt-get update && apt-get install -y \
     libcairo2 \
     openbabel \
     hmmer \
+    picard-tools \
+    trimmomatic \
     && rm -rf /var/lib/apt/lists/*
 
+# 组学 Conda 栈：GATK4 / MACS2（独立 env，避免 base 与 Python 3.13 求解冲突）
+RUN wget -qO /tmp/miniforge.sh https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
+    && bash /tmp/miniforge.sh -b -p /opt/omics-conda \
+    && /opt/omics-conda/bin/conda create -y -n omics-real -c conda-forge -c bioconda \
+        python=3.11 gatk4 macs2 cnvkit delly snpeff \
+    && rm -f /tmp/miniforge.sh
+# 注意：组学 Conda 的 PATH 须在 BepiPred/chem venv 创建之后再 prepend，否则 `python3` 会变成 3.11 导致 pandas 编译失败
+
 # 配置 pip 使用国内镜像源（清华大学镜像，速度更快）
-RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn && \
-    pip config set global.timeout 60
+RUN /usr/local/bin/python3 -m pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    /usr/local/bin/python3 -m pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn && \
+    /usr/local/bin/python3 -m pip config set global.timeout 60
 
 # 先复制依赖文件（利用 Docker 层缓存）
 COPY requirements.txt .
 
 # 安装 Python 依赖（层缓存失效时用 BuildKit 缓存挂载加速 pip 下载；需 DOCKER_BUILDKIT=1）
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade pip && \
-    pip install -r requirements.txt && \
-    pip install --no-cache-dir 'biopython>=1.83' 'promb>=0.1.0' && \
-    python3 -c "from Bio import SeqIO; import promb; print('biopython+promb ok')" && \
-    pip install --no-cache-dir 'anarci' || true
+    /usr/local/bin/python3 -m pip install --upgrade pip && \
+    /usr/local/bin/python3 -m pip install -r requirements.txt && \
+    /usr/local/bin/python3 -m pip install --no-cache-dir 'biopython>=1.83' 'promb>=0.1.0' && \
+    /usr/local/bin/python3 -c "from Bio import SeqIO; import promb; print('biopython+promb ok')" && \
+    /usr/local/bin/python3 -m pip install --no-cache-dir 'anarci' || true
 
 # RDKit 化学原子工具（chem_*）：独立 venv；须固定 numpy<2（与仓库 requirements 一致，避免 rdInfoTheory _ARRAY_API / NumPy 2 ABI 崩溃）
 # 系统库 libxrender 等：MolToImage / Draw 依赖 libXrender.so.1（无头容器亦需安装）
-RUN python3 -m venv /opt/chem-rdkit-venv && \
+RUN /usr/local/bin/python3 -m venv /opt/chem-rdkit-venv && \
     /opt/chem-rdkit-venv/bin/pip install -U pip && \
     /opt/chem-rdkit-venv/bin/pip install 'numpy>=1.24.0,<2' && \
     /opt/chem-rdkit-venv/bin/pip install --no-cache-dir 'rdkit-pypi>=2022.3.1' && \
@@ -67,23 +87,37 @@ RUN python3 -m venv /opt/chem-rdkit-venv && \
 
 ENV CHEM_RDKIT_PYTHON=/opt/chem-rdkit-venv/bin/python
 
-# BepiPred-3.0 独立 venv（必须放在 /opt，避免 compose 挂载 .:/app 覆盖 /app 下 .venv）
-# 默认 CPU 版 torch；GPU 构建示例：--build-arg BEPIPRED_TORCH_INDEX=https://download.pytorch.org/whl/cu121
+# BepiPred-3.0 独立 venv（须用 /usr/local/bin/python3 创建，避免 Conda PATH 污染导致 pandas 编译失败）
+# 默认 CPU 版 torch；GPU：--build-arg BEPIPRED_TORCH_INDEX=https://download.pytorch.org/whl/cu121
+# INSTALL_BEPIPRED3=0 仅用于极快重建（生产/技能请保持 1；开发可挂载 third_party/BepiPred-3.0/.venv）
+ARG INSTALL_BEPIPRED3=1
 ARG BEPIPRED_TORCH_INDEX=https://download.pytorch.org/whl/cpu
 COPY third_party/BepiPred-3.0/requirements.txt /opt/bepipred3/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m venv /opt/bepipred3-venv && \
-    /opt/bepipred3-venv/bin/pip install --upgrade pip && \
-    /opt/bepipred3-venv/bin/pip install torch torchvision --index-url "${BEPIPRED_TORCH_INDEX}" && \
-    /opt/bepipred3-venv/bin/pip install -r /opt/bepipred3/requirements.txt
+    if [ "${INSTALL_BEPIPRED3}" = "1" ]; then \
+        /usr/local/bin/python3 -m venv /opt/bepipred3-venv && \
+        /opt/bepipred3-venv/bin/pip install --upgrade pip 'setuptools>=65,<81' wheel && \
+        /opt/bepipred3-venv/bin/pip install torch torchvision --index-url "${BEPIPRED_TORCH_INDEX}" && \
+        /opt/bepipred3-venv/bin/pip install --only-binary=:all: 'numpy==1.22.4' 'pandas==1.4.3' && \
+        /opt/bepipred3-venv/bin/pip install --no-build-isolation -r /opt/bepipred3/requirements.txt && \
+        /opt/bepipred3-venv/bin/python -c "import torch; import esm; print('bepipred3-venv ok')"; \
+    else \
+        mkdir -p /opt/bepipred3-venv/bin && \
+        printf '%s\n' 'INSTALL_BEPIPRED3=0: use mounted /app/third_party/BepiPred-3.0/.venv or entrypoint bootstrap.' \
+            > /opt/bepipred3-venv/SKIPPED.txt; \
+    fi
 
 ENV BEPIPRED3_PYTHON=/opt/bepipred3-venv/bin/python
+
+# 运行时：组学 CLI（cnvkit/delly/snpEff/gatk）优先；API 主进程仍为 /usr/local/bin/python3
+ENV PATH="/opt/omics-conda/envs/omics-real/bin:/opt/omics-conda/bin:${PATH}"
 
 # 最后复制项目代码（代码变化时只需要重新构建这一层）
 # 使用 .dockerignore 排除大文件，只复制必要的代码
 COPY gibh_agent/ /app/gibh_agent/
 COPY server.py /app/
 COPY scripts/docker_api_entrypoint.sh /entrypoint.sh
+COPY scripts/init_omics_mock_references.py /app/scripts/init_omics_mock_references.py
 
 # 🔒 安全：创建非 root 用户（带 home 目录）
 # 注意：UID 1000 应该与主机用户匹配，以便挂载目录有正确的权限
@@ -92,7 +126,7 @@ RUN groupadd -r appuser && \
 
 # 创建必要的目录并设置权限
 RUN mkdir -p /app/uploads /app/results /app/data /home/appuser/.cache /home/appuser/.config && \
-    chown -R appuser:appuser /app /home/appuser /opt/bepipred3-venv /opt/chem-rdkit-venv
+    chown -R appuser:appuser /app /home/appuser /opt/bepipred3-venv /opt/chem-rdkit-venv /opt/omics-conda
 
 # 入口脚本：权限修复 +（可选）运行时补齐 BepiPred venv
 RUN chmod +x /entrypoint.sh
@@ -113,5 +147,5 @@ ENV HOME=/home/appuser
 EXPOSE 8028
 
 # 默认命令（会被 docker-compose 覆盖）
-CMD ["python", "server.py"]
+CMD ["/usr/local/bin/python3", "server.py"]
 

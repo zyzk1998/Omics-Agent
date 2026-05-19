@@ -85,11 +85,42 @@ class WorkflowExecutor:
         self._workflow_circuit_breaker: Optional[Dict[str, Any]] = None
 
     def _serialize_prior_qc_metrics(self) -> str:
-        """聚合前几步工具返回的 qc_metrics（如 genomics_raw_qc），供报告步骤透传。"""
+        """聚合前几步工具返回的 qc_metrics / variant_summary / fastp 等，供临床报告透传。"""
         bundle: Dict[str, Any] = {}
         for sid, raw in self.step_results.items():
-            if isinstance(raw, dict) and isinstance(raw.get("qc_metrics"), dict) and raw["qc_metrics"]:
-                bundle[str(sid)] = raw["qc_metrics"]
+            if not isinstance(raw, dict):
+                continue
+            entry: Dict[str, Any] = {}
+            if isinstance(raw.get("qc_metrics"), dict) and raw["qc_metrics"]:
+                entry["qc_metrics"] = raw["qc_metrics"]
+            if isinstance(raw.get("variant_summary"), dict) and raw["variant_summary"]:
+                entry["variant_summary"] = raw["variant_summary"]
+            if isinstance(raw.get("fastp_summary"), dict) and raw["fastp_summary"]:
+                entry["fastp_summary"] = raw["fastp_summary"]
+            for key in (
+                "vcf_path",
+                "bam_path",
+                "trimmed_fastq",
+                "fastp_json",
+                "filtered_vcf_path",
+                "annotated_vcf_path",
+                "sv_vcf_path",
+                "cnv_cnn_path",
+                "acmg_summary_path",
+            ):
+                val = raw.get(key)
+                if val and str(val).strip():
+                    entry[key] = str(val).strip()
+            for key in ("sv_count", "caller"):
+                val = raw.get(key)
+                if val is not None and str(val).strip() != "":
+                    entry[key] = val
+            acmg_counts = raw.get("acmg_proxy_counts")
+            if isinstance(acmg_counts, dict) and acmg_counts:
+                entry["acmg_proxy_counts"] = acmg_counts
+            if entry:
+                entry["tool_id"] = raw.get("tool_id") or ""
+                bundle[str(sid)] = entry
         if not bundle:
             return ""
         return json.dumps(bundle, ensure_ascii=False)
@@ -2352,7 +2383,46 @@ class WorkflowExecutor:
                 pm = self._serialize_prior_qc_metrics()
                 if pm:
                     params["pipeline_metrics_json"] = pm
+
+            # CNV/SV 需 BAM：链上 current_file_path 可能已是 VCF，从 step_results 回溯 bam_path
+            if tool_id in ("genomics_cnv_calling", "genomics_sv_calling"):
+                if not str(params.get("bam_path") or "").strip():
+                    for _sid in reversed(list(self.step_results.keys())):
+                        _raw = self.step_results.get(_sid)
+                        if not isinstance(_raw, dict):
+                            continue
+                        _bp = _raw.get("bam_path") or _raw.get("dedup_bam_path")
+                        if _bp and os.path.isfile(str(_bp)):
+                            params["bam_path"] = str(_bp)
+                            logger.info(
+                                "🔄 [Executor] %s 注入 bam_path=%s",
+                                tool_id,
+                                _bp,
+                            )
+                            break
             
+            # 三大组学：若链上已有 BAM/VCF，勿让 Planner 注入的原始 FASTQ 覆盖下游步骤
+            if tool_category in ("Genomics", "Epigenomics", "Proteomics") and current_file_path:
+                fp_slot = params.get("file_path", "")
+                cur = str(current_file_path)
+                cur_low = cur.lower()
+                slot_low = str(fp_slot).lower() if fp_slot else ""
+                downstream_artifact = cur_low.endswith(
+                    (".bam", ".vcf", ".vcf.gz", ".bed", ".narrowpeak", ".bedgraph")
+                )
+                upstream_fastq = slot_low.endswith(
+                    (".fastq.gz", ".fq.gz", ".fastq", ".fq")
+                )
+                if downstream_artifact and (
+                    self._param_slot_empty(params, "file_path") or upstream_fastq
+                ):
+                    params["file_path"] = cur
+                    logger.info(
+                        "🔄 [Executor] 组学下游步骤改用链式产物: %s -> %s",
+                        tool_id,
+                        cur,
+                    )
+
             # 更新步骤的 params
             step["params"] = params
             
@@ -2369,6 +2439,46 @@ class WorkflowExecutor:
                 tool_metadata = registry.get_metadata(tool_id)
                 tool_category = tool_metadata.category if tool_metadata else None
                 
+                # 三大组学：BAM / VCF / FASTQ 链式传递（避免 markdup 仍收到原始 FASTQ）
+                if tool_category in ("Genomics", "Epigenomics", "Proteomics"):
+                    # 基因组：VQSR/注释/报告须优先衔接 VCF，避免 CNV/SV 步骤的 bam_path 覆盖 germline VCF
+                    if tool_category == "Genomics":
+                        next_file_path = (
+                            result_data.get("vcf_path")
+                            or result_data.get("filtered_vcf_path")
+                            or result_data.get("annotated_vcf_path")
+                            or result_data.get("sv_vcf_path")
+                            or result_data.get("bam_path")
+                            or result_data.get("dedup_bam_path")
+                            or result_data.get("trimmed_fastq")
+                            or result_data.get("bed_path")
+                            or result_data.get("cnv_cnn_path")
+                            or result_data.get("output_path")
+                            or result_data.get("file_path")
+                        )
+                    else:
+                        next_file_path = (
+                            result_data.get("bam_path")
+                            or result_data.get("dedup_bam_path")
+                            or result_data.get("vcf_path")
+                            or result_data.get("filtered_vcf_path")
+                            or result_data.get("trimmed_fastq")
+                            or result_data.get("bed_path")
+                            or result_data.get("output_path")
+                            or result_data.get("file_path")
+                        )
+                    if next_file_path:
+                        try:
+                            resolved_path = self._resolve_file_path(str(next_file_path))
+                        except Exception:
+                            resolved_path = str(next_file_path)
+                        current_file_path = resolved_path
+                        logger.info(
+                            "✅ [Executor] 组学链式路径更新（%s）: %s",
+                            tool_category,
+                            current_file_path,
+                        )
+
                 # scRNA-seq / Spatial：任一步产出 AnnData 磁盘路径则更新链式 current_file_path
                 if tool_category in ("scRNA-seq", "Spatial"):
                     next_file_path = self._extract_ann_data_path_from_tool_result(result_data)
