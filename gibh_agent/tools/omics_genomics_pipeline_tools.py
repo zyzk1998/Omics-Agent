@@ -37,7 +37,11 @@ from .omics_mock_ui import (
     simple_rows_table,
 )
 from .omics_derived_analysis import clinical_genomics_sections
-from .omics_real_io import compute_fastq_stats, format_fastq_qc_markdown
+from .omics_genomics_report_ui import (
+    assemble_genomics_step_markdown,
+    plot_streaming_quality_curve_md,
+)
+from .omics_real_io import compute_fastq_stats, compute_fastq_stream_bundle, format_fastq_qc_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +111,28 @@ def genomics_raw_qc(
         }
 
     stats = compute_fastq_stats(path)
-    md = format_fastq_qc_markdown(stats)
+    stream = compute_fastq_stream_bundle(path, max_reads=8000)
+    stats = {**stats, **{k: stream.get(k) for k in ("q30_fraction", "qual_mean", "truncated")}}
+    q30_pct = float(stats.get("q30_fraction") or 0) * 100.0
+    metrics = [
+        ("总 Reads", f"**{stats['n_reads']:,}**"),
+        ("GC 含量", f"**{stats['gc_percent']}%**"),
+        ("平均读长", str(stats.get("mean_read_length", "N/A"))),
+        ("Q30 碱基比例", f"**{q30_pct:.2f}%**"),
+        ("平均 Phred", str(stream.get("qual_mean", "N/A"))),
+    ]
+    chart = plot_streaming_quality_curve_md(path)
+    md = assemble_genomics_step_markdown(
+        title="原始测序数据质控",
+        metrics=metrics,
+        chart_md=chart,
+        body_md=format_fastq_qc_markdown(stats).replace("## 原始测序数据质控", "").strip(),
+        footer_note=(
+            "_指标由服务进程直接读取 FASTQ 流式统计；质量曲线为抽样估计。"
+            + ("（已截断抽样以控制耗时）" if stream.get("truncated") else "")
+            + "_"
+        ),
+    )
 
     safe_base = re.sub(r"[^\w.\-]+", "_", os.path.basename(path))[:120]
     qdir = os.path.abspath(os.getenv("RESULTS_DIR", os.path.join(os.getcwd(), "results")))

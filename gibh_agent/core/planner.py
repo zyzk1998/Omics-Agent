@@ -2065,26 +2065,36 @@ Classify the intent and return JSON only. Remember:
         # 优先级关键词列表
         priority_keywords = ['Diet', 'diet', 'Group', 'group', 'Condition', 'condition', 
                             'Treatment', 'treatment', 'Class', 'class', 'Category', 'category',
-                            'Type', 'type', 'Label', 'label', 'Status', 'status']
+                            'Type', 'type', 'Label', 'label', 'Status', 'status',
+                            'Muscle', 'muscle', 'Loss', 'loss', 'Cohort', 'cohort',
+                            'Diagnosis', 'diagnosis']
+
+        # 方法0: FileInspector semantic_map（已过滤高基数 ID 列）
+        semantic_map = file_metadata.get("semantic_map") or {}
+        group_cols_sm = semantic_map.get("group_cols") or []
+        if group_cols_sm:
+            picked = group_cols_sm[0]
+            logger.info(f"✅ [Heuristic] 检测到分组列（semantic_map）: {picked}")
+            return picked
         
-        # 方法1: 检查 metadata_columns（FileInspector 可能已经检测到）
-        metadata_cols = file_metadata.get("metadata_columns", [])
-        if metadata_cols:
-            # 优先检查关键词匹配
-            for col in metadata_cols:
-                if any(keyword in col for keyword in priority_keywords):
-                    logger.info(f"✅ [Heuristic] 检测到分组列（关键词匹配）: {col}")
-                    return col
-            # 如果没有关键词匹配，返回第一个元数据列
-            logger.info(f"✅ [Heuristic] 检测到分组列（metadata_columns）: {metadata_cols[0]}")
-            return metadata_cols[0]
-        
-        # 方法2: 检查 potential_groups
+        # 方法1: 检查 potential_groups（唯一值 2–20 的候选列）
         potential_groups = file_metadata.get("potential_groups", {})
         if isinstance(potential_groups, dict) and len(potential_groups) > 0:
+            for col in potential_groups.keys():
+                if any(keyword in col for keyword in priority_keywords):
+                    logger.info(f"✅ [Heuristic] 检测到分组列（potential_groups 关键词）: {col}")
+                    return col
             first_group_col = list(potential_groups.keys())[0]
             logger.info(f"✅ [Heuristic] 检测到分组列（potential_groups）: {first_group_col}")
             return first_group_col
+
+        # 方法2: 检查 metadata_columns（须满足合理分组基数，避免 Patient ID）
+        metadata_cols = file_metadata.get("metadata_columns", [])
+        if metadata_cols:
+            for col in metadata_cols:
+                if any(keyword in col for keyword in priority_keywords):
+                    logger.info(f"✅ [Heuristic] 检测到分组列（metadata 关键词匹配）: {col}")
+                    return col
         
         # 方法3: 🔥 CRITICAL FIX - 检查数值列，如果唯一值 <= 5，当作分类变量
         columns = file_metadata.get("columns", [])

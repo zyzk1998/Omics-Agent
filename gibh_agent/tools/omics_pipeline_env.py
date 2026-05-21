@@ -188,17 +188,22 @@ def omics_subprocess_failed(
         if isinstance(stderr, bytes)
         else (stderr or "")
     )
+    from .omics_genomics_report_ui import assemble_genomics_step_markdown
+
     cmd_s = " ".join(str(c) for c in cmd[:48])
     if len(cmd) > 48:
         cmd_s += " …"
-    md = (
-        f"### CLI 非零退出（{ctx}）\n\n"
-        f"- **returncode**: `{proc.returncode}`\n"
-        f"- **命令**: `{cmd_s}`\n\n"
-        "#### stderr\n\n```\n"
-        f"{clip_omics_log(serr)}\n```\n\n"
-        "#### stdout\n\n```\n"
-        f"{clip_omics_log(sout)}\n```\n"
+    fake_cp = subprocess.CompletedProcess(cmd, proc.returncode, sout, serr)
+    md = assemble_genomics_step_markdown(
+        title=f"CLI 非零退出（{ctx}）",
+        metrics=[
+            ("returncode", str(proc.returncode)),
+            ("stderr 长度", f"{len(serr)} 字符"),
+            ("stdout 长度", f"{len(sout)} 字符"),
+        ],
+        body_md=f"- **命令**: `{cmd_s}`",
+        cmd=cmd,
+        cp=fake_cp,
     )
     out: Dict[str, Any] = {
         "status": "error",

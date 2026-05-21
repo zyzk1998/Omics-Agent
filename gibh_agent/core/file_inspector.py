@@ -1598,6 +1598,46 @@ class TabularHandler(BaseFileHandler):
                 head_markdown = df.head(preview_rows).to_csv(index=False)
             
             head_json = df.head(preview_rows).to_dict(orient='records')
+
+            # semantic_map：供 Planner / Executor 注入 group_column（避免误用 Patient ID 等高基数列）
+            group_cols: List[str] = []
+            potential_groups: Dict[str, List[Any]] = {}
+            id_like_tokens = ("patient", "sample", "subject", "specimen", "individual")
+            priority_keywords = (
+                "group", "condition", "treatment", "class", "category", "type",
+                "label", "status", "diet", "cohort", "diagnosis", "muscle", "loss",
+            )
+            for col in df.columns:
+                try:
+                    nuc = int(df[col].nunique(dropna=True))
+                except Exception:
+                    continue
+                if nuc < 2 or nuc > 20:
+                    continue
+                col_norm = str(col).lower().replace(" ", "").replace("_", "").replace("-", "")
+                if any(tok in col_norm for tok in id_like_tokens) and nuc > max(10, n_samples // 3):
+                    continue
+                is_meta = col in metadata_cols
+                is_low_card_numeric = col in numeric_cols and nuc <= 5
+                if not is_meta and not is_low_card_numeric:
+                    continue
+                group_cols.append(col)
+                try:
+                    potential_groups[col] = sorted(df[col].dropna().unique().tolist())[:20]
+                except Exception:
+                    potential_groups[col] = []
+            if group_cols:
+                def _group_rank(c: str) -> tuple:
+                    cn = str(c).lower().replace(" ", "").replace("_", "")
+                    kw = 0 if any(k in cn for k in priority_keywords) else 1
+                    return (kw, len(potential_groups.get(c, [])))
+                group_cols = sorted(group_cols, key=_group_rank)
+
+            semantic_map = {
+                "group_cols": group_cols,
+                "id_col": metadata_cols[0] if metadata_cols else None,
+                "feature_count": n_features,
+            }
             
             return {
                 "status": "success",
@@ -1622,6 +1662,8 @@ class TabularHandler(BaseFileHandler):
                 "total_feature_columns": len(numeric_cols),
                 "missing_rate": round(missing_rate, 2),
                 "data_range": data_range,
+                "semantic_map": semantic_map,
+                "potential_groups": potential_groups,
                 "data": {
                     "summary": {
                         "n_samples": n_samples,

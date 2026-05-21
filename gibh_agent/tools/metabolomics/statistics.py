@@ -444,9 +444,12 @@ def run_differential_analysis(
             results_df.to_csv(output_path, index=False)
             logger.info(f"💾 差异分析结果已保存: {output_path}")
         
-        # 🔥 追加：VIP 棒棒糖图 + 聚类热图（不替换原有火山图，火山图在 visualize_volcano 步骤）
+        # 🔥 可视化：优先显著代谢物；若无显著结果则用 Top p 值展示（避免步骤「无图无表」）
         lollipop_path = None
         clustermap_path = None
+        volcano_preview_path = None
+        images: list = []
+        tables: list = []
         if output_dir and results:
             out_dir = Path(output_dir)
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -457,6 +460,9 @@ def run_differential_analysis(
                 sig_list = [r for r in results if r.get("significant", False)]
                 sig_list.sort(key=lambda x: x.get("p_value", 1))
                 top_list = (top_list + sig_list)[:20]
+            if len(top_list) < 5:
+                exploratory = sorted(results, key=lambda x: x.get("p_value", 1.0))[:20]
+                top_list = exploratory
             if top_list:
                 try:
                     # VIP 棒棒糖图：横轴 VIP，纵轴代谢物名，颜色/大小映射 Log2FC
@@ -493,6 +499,45 @@ def run_differential_analysis(
                         plt.close()
                 except Exception as e:
                     logger.warning("聚类热图生成失败: %s", e)
+                try:
+                    fig, ax = plt.subplots(figsize=(8, 5))
+                    xs = [r.get("log2fc", 0) for r in top_list]
+                    ys = [-np.log10(max(r.get("p_value", 1), 1e-300)) for r in top_list]
+                    colors = ["#e74c3c" if r.get("significant") else "#95a5a6" for r in top_list]
+                    ax.scatter(xs, ys, c=colors, alpha=0.75, s=40)
+                    ax.axhline(-np.log10(p_value_threshold), color="gray", linestyle="--", alpha=0.6)
+                    ax.axvline(np.log2(fold_change_threshold), color="gray", linestyle="--", alpha=0.5)
+                    ax.axvline(-np.log2(fold_change_threshold), color="gray", linestyle="--", alpha=0.5)
+                    ax.set_xlabel("Log2 Fold Change")
+                    ax.set_ylabel("-log10(p-value)")
+                    ax.set_title("Top metabolites (preview)")
+                    plt.tight_layout()
+                    volcano_preview_path = str(out_dir / "differential_top_metabolites.png")
+                    plt.savefig(volcano_preview_path, bbox_inches="tight", dpi=150)
+                    plt.close()
+                except Exception as e:
+                    logger.warning("差异代谢物预览散点图失败: %s", e)
+
+            preview_rows = []
+            for r in top_list[:15]:
+                preview_rows.append({
+                    "metabolite": r.get("metabolite"),
+                    "log2fc": round(float(r.get("log2fc", 0)), 4),
+                    "p_value": round(float(r.get("p_value", 1)), 6),
+                    "fdr": round(float(r.get("fdr", r.get("p_value", 1))), 6),
+                    "vip": round(float(r.get("vip", 0)), 3),
+                    "significant": bool(r.get("significant", False)),
+                })
+            if preview_rows:
+                tables = [preview_rows]
+
+            for pth, title in (
+                (lollipop_path, "VIP 棒棒糖图"),
+                (clustermap_path, "差异代谢物聚类热图"),
+                (volcano_preview_path, "Top 代谢物预览"),
+            ):
+                if pth:
+                    images.append({"title": title, "path": pth})
         
         # 统计摘要
         significant_count = sum(1 for r in results if r.get("significant", False))
@@ -504,30 +549,63 @@ def run_differential_analysis(
         
         top_up_names = [r["metabolite"] for r in top_up]
         top_down_names = [r["metabolite"] for r in top_down]
+
+        summary_stats = {
+            "total_metabolites": len(results),
+            "significant_count": significant_count,
+            "sig_count": significant_count,
+            "method": method,
+            "case_group": case_group,
+            "control_group": control_group,
+            "p_value_threshold": p_value_threshold,
+            "fold_change_threshold": fold_change_threshold,
+            "top_up": top_up_names,
+            "top_down": top_down_names,
+        }
+        if significant_count == 0:
+            summary_text = (
+                f"共分析 {len(results)} 个代谢物（{case_group} vs {control_group}），"
+                f"在 FDR<{p_value_threshold} 且 |Log2FC|≥{np.log2(fold_change_threshold):.2f} "
+                f"(约 FC>{fold_change_threshold:.1f}) 标准下**无显著差异代谢物**。"
+                f"下图与表格为按 p 值排序的 Top 候选（探索性展示，供人工复核）。"
+            )
+        else:
+            summary_text = (
+                f"共 {len(results)} 个代谢物，显著差异 {significant_count} 个（FDR<{p_value_threshold}，"
+                f"|Log2FC|≥{np.log2(fold_change_threshold):.2f}）。上调示例: {', '.join(top_up_names[:3]) or '无'}；"
+                f"下调示例: {', '.join(top_down_names[:3]) or '无'}。"
+            )
         
         out = {
             "status": "success",
             "results": results,
             "output_path": output_path,
-            "output_file": output_path,  # 别名，用于数据流传递
-            "file_path": output_path,    # 另一个别名，确保兼容性
-            "summary": {
-                "total_metabolites": len(results),
-                "significant_count": significant_count,
-                "sig_count": significant_count,  # 别名，用于AI报告
-                "method": method,
+            "output_file": output_path,
+            "file_path": output_path,
+            "summary": summary_text,
+            "summary_stats": summary_stats,
+            "metrics": {
+                "total": len(results),
+                "significant": significant_count,
                 "case_group": case_group,
                 "control_group": control_group,
-                "p_value_threshold": p_value_threshold,
-                "fold_change_threshold": fold_change_threshold,
-                "top_up": top_up_names,
-                "top_down": top_down_names
-            }
+            },
         }
+        if tables:
+            out["tables"] = tables
+        if images:
+            out["images"] = images
         if lollipop_path:
             out["lollipop_path"] = lollipop_path
+            out["plot_path"] = lollipop_path
+        elif volcano_preview_path:
+            out["plot_path"] = volcano_preview_path
         if clustermap_path:
             out["clustermap_path"] = clustermap_path
+        if output_path:
+            out["download_links"] = [
+                {"title": "下载差异分析结果 CSV", "path": output_path, "kind": "data"},
+            ]
         return out
     
     except Exception as e:

@@ -458,14 +458,24 @@ PYTHONPATH=. python -c "from gibh_agent.core.workflows.registry import registry 
 - API 镜像 Conda env `omics-real`：`gatk4`、`cnvkit`、`delly`、`snpeff`（`services/api/Dockerfile`）；构建用 `scripts/build_api_server.sh`（**禁止** `docker build \| tail -N`，见 `.cursorrules`）。
 - 环境自检：`python3 scripts/doctor_omics_env.py`（可选）。
 
-### 12.3 工具返回契约（前端黑框日志）
+### 12.3 全模态节点输出标准契约（Output Specification）
 
-失败或成功均应通过 `omics_subprocess_failed` / `attach_visual_contract` 写入：
+> **实现入口**：`gibh_agent/tools/omics_genomics_report_ui.py`（`assemble_genomics_step_markdown`、`wrap_cli_logs_markdown`、Matplotlib Base64 图）；基因组各步在 `omics_genomics_runner.py` / `omics_genomics_pipeline_tools.py` 调用。
 
-- `cli_command`、`cli_returncode`、`cli_stdout_excerpt`、`cli_stderr_excerpt`（各约 500 字）
-- `markdown` 含可读的「CLI 非零退出」块
+每个分析节点返回的 **`markdown`（及 `attach_visual_contract`）** 须按下列顺序组织，**禁止**将整屏 `stdout`/`stderr` 黑框置于顶部：
+
+| 顺序 | 区块 | 要求 |
+| --- | --- | --- |
+| 1 | **核心指标摘要** | Markdown 顶部 `### 核心指标摘要` + 表格，**3–5 行**关键生信指标（如 Q30、Reads、Ti/Tv、变异数、CNV 产物路径）。 |
+| 2 | **可视化** | 质控/变异等核心步骤须嵌入 **Base64 PNG**：`![](data:image/png;base64,...)`（由 `plot_fastp_quality_curve_md` / `plot_variant_composition_pie_md` 等生成）。 |
+| 3 | **业务说明** | 简短 bullet：输出路径、模式、降级说明（如有）。 |
+| 4 | **技术日志（默认折叠）** | 所有 CLI 原文须包在 HTML `<details><summary>🔍 点击查看该步骤底层真实运行日志 (CLI Logs)</summary>…</details>` 内；代码块语言用 `plaintext`。 |
+
+**机器可读字段（保留）**：`cli_command`、`cli_returncode`、`cli_stdout_excerpt`、`cli_stderr_excerpt` 仍写入 `step_result` 供排障，但 UI 以折叠区为准。
 
 **禁止**下半场步骤 `status: skipped` 且无 CLI 字段；低深度 SV 等边界应 `success` + 明确 `note`。
+
+**表观/蛋白扩展**：新模态 Runner 应复用 `assemble_genomics_step_markdown` 或抽离等价模块，勿再写 `#### stderr\n\n\`\`\`` 直出。
 
 ### 12.4 常见踩坑（已修复，扩展时勿回退）
 
@@ -476,7 +486,18 @@ PYTHONPATH=. python -c "from gibh_agent.core.workflows.registry import registry 
 | 容器无 cnvkit/delly | 旧镜像未含 Conda 层 | 重建 `api-server` 后 `docker compose up -d` |
 | BepiPred 与组学构建冲突 | Conda PATH 污染 `python3` venv | Dockerfile 用 `/usr/local/bin/python3` 建 venv；开发可用挂载 `third_party/BepiPred-3.0/.venv` |
 
-### 12.5 验证命令
+### 12.5 已实现可视化探针（基因组）
+
+| 步骤 | 图表 | 数据来源 |
+| --- | --- | --- |
+| `genomics_raw_qc` | 逐碱基质量曲线（抽样） | `plot_streaming_quality_curve_md` + FASTQ 流式 |
+| `genomics_read_trimming` | fastp 质量曲线 | `plot_fastp_quality_curve_md` + `fastp.json` |
+| `genomics_germline_calling` | 变异组成饼图（SNP/Indel） | `plot_variant_composition_pie_md` + `summarize_vcf` |
+| `genomics_variant_annotation` / VQSR | 同上饼图（过滤后） | `variant_summary` |
+
+前端：`safeMarkedParse`（`index.html`）须能渲染原生 HTML `<details>` 与 data-URI 图片；样式见 `css/main.css` 中 `.markdown-body details.omics-cli-logs`。
+
+### 12.6 验证命令
 
 ```bash
 cd /home/ubuntu/GIBH-AGENT-V2

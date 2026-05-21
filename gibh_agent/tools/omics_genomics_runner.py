@@ -29,6 +29,13 @@ from .omics_genomics_real_io import (
     summarize_vcf,
     vcf_header_has_info_ids,
 )
+from .omics_genomics_report_ui import (
+    assemble_genomics_step_markdown,
+    cli_logs_from_process,
+    metrics_table_md,
+    plot_fastp_quality_curve_md,
+    plot_variant_composition_pie_md,
+)
 from .omics_pipeline_env import (
     bwa_index_ready,
     clip_omics_log,
@@ -157,10 +164,18 @@ def _bcftools_qual_filter_vcf(
     if bad_out:
         return bad_out
     var_sum = summarize_vcf(out_vcf)
-    md = (
-        "### 变异过滤（bcftools view -i QUAL>=30）\n\n"
-        f"- **输入**: `{invcf}`\n- **输出**: `{out_vcf}`\n"
-        f"{format_variant_summary_md(var_sum)}\n"
+    md = assemble_genomics_step_markdown(
+        title="变异过滤（bcftools QUAL≥30）",
+        metrics=[
+            ("模式", "bcftools_qual_filter"),
+            ("输入 VCF", f"`{invcf}`"),
+            ("输出 VCF", f"`{out_vcf}`"),
+            ("变异记录数", str(var_sum.get("variant_count", 0))),
+            ("SNP", str(var_sum.get("snp_count", "N/A"))),
+            ("Indel", str(var_sum.get("indel_count", "N/A"))),
+        ],
+        cmd=cmd,
+        cp=cp,
     )
     out = {
         "status": "success",
@@ -291,19 +306,11 @@ def _format_cli_markdown(
     note: str = "",
     extra_lines: str = "",
 ) -> str:
-    cmd_s = " ".join(str(c) for c in cmd)
-    note_line = f"- **Result note**: {note}\n" if note else ""
-    extra = extra_lines.rstrip() + "\n" if extra_lines else ""
+    """子步骤 CLI 块：标题 + 折叠日志（供 CNV/SV 等多段拼接）。"""
     return (
         f"### {title}\n\n"
-        f"- **Command executed**: `{cmd_s}`\n"
-        f"- **Exit code**: `{cp.returncode}`\n"
-        f"{note_line}"
-        f"{extra}"
-        "#### stderr（前 500 字符）\n\n```\n"
-        f"{clip_omics_log(cp.stderr or '', 500)}\n```\n"
-        "#### stdout（前 500 字符）\n\n```\n"
-        f"{clip_omics_log(cp.stdout or '', 500)}\n```\n"
+        + cli_logs_from_process(cp, cmd, note=note, extra_lines=extra_lines).strip()
+        + "\n"
     )
 
 
@@ -462,32 +469,30 @@ def _try_fastp_trim(
     if bad:
         bad["message"] = (bad.get("message") or "") + f"\nfastp stderr:\n{cp.stderr or ''}"
         return bad
-    stderr_excerpt = clip_omics_log(cp.stderr or "", 6000)
     fastp_summary = load_fastp_summary(json_rep)
-    json_hint = ""
-    try:
-        import json
-
-        with open(json_rep, encoding="utf-8") as jf:
-            fj = json.load(jf)
-            summ = fj.get("summary") or {}
-            af = summ.get("after_filtering") or {}
-            if af:
-                json_hint = (
-                    "\n#### fastp.json 摘要（节选）\n\n```json\n"
-                    + clip_omics_log(json.dumps(af, ensure_ascii=False, indent=2), 4000)
-                    + "\n```\n"
-                )
-    except Exception:  # noqa: BLE001
-        json_hint = ""
-    md = (
-        "### 接头修剪（fastp）\n\n"
+    af = fastp_summary.get("after_filtering") or {}
+    bf = fastp_summary.get("before_filtering") or {}
+    metrics = [
+        ("质量阈值 (-q)", str(int(quality_cutoff))),
+        ("过滤前 Reads", str(bf.get("total_reads", "N/A"))),
+        ("过滤后 Reads", str(af.get("total_reads", fastp_summary.get("total_reads_after", "N/A")))),
+        ("过滤后 Q30 比例", str(af.get("q30_rate", fastp_summary.get("q30_rate_after", "N/A")))),
+        ("过滤后 GC%", str(af.get("gc_content", fastp_summary.get("gc_content_after", "N/A")))),
+    ]
+    chart = plot_fastp_quality_curve_md(json_rep)
+    stderr_excerpt = clip_omics_log(cp.stderr or "", 6000)
+    body = (
         f"- **输出 FASTQ**: `{out_fq}`\n"
         f"- **JSON 报告**: `{json_rep}`\n"
         f"- **HTML 报告**: `{html_rep}`\n"
-        "#### fastp stderr（节选）\n\n```\n"
-        f"{stderr_excerpt}\n```\n"
-        f"{json_hint}"
+    )
+    md = assemble_genomics_step_markdown(
+        title="接头修剪（fastp）",
+        metrics=metrics,
+        chart_md=chart,
+        body_md=body,
+        cmd=cmd,
+        cp=cp,
     )
     return _contract(
         "g_trim",
@@ -938,12 +943,22 @@ def _try_bcftools_germline(
     if idx_err:
         return idx_err
     var_sum = summarize_vcf(out_vcf)
-    md = (
-        "### 胚系变异检测（bcftools mpileup + call）\n\n"
-        f"- **VCF**: `{out_vcf}`\n"
-        f"{format_variant_summary_md(var_sum)}"
-        "#### bcftools call stderr（节选）\n\n```\n"
-        f"{clip_omics_log((cp.stderr or '') + mp_stderr, 8000)}\n```\n"
+    metrics = [
+        ("Caller", "bcftools"),
+        ("变异记录数", str(var_sum.get("variant_count", 0))),
+        ("SNP", str(var_sum.get("snp_count", "N/A"))),
+        ("Indel", str(var_sum.get("indel_count", "N/A"))),
+        ("Ti/Tv", str(var_sum.get("tstv_ratio", "N/A"))),
+    ]
+    chart = plot_variant_composition_pie_md(var_sum)
+    md = assemble_genomics_step_markdown(
+        title="胚系变异检测（bcftools）",
+        metrics=metrics,
+        chart_md=chart,
+        body_md=f"- **VCF**: `{out_vcf}`",
+        cmd=call_cmd,
+        cp=cp,
+        cli_extra=f"mpileup stderr 节选已折叠；合并 stderr 长度 {len((cp.stderr or '') + mp_stderr)} 字符。\n",
     )
     out = {
         "status": "success",
@@ -1032,15 +1047,23 @@ def _try_germline(
                 vc_lines = f"\n- **approx_variant_records（bcftools view -H 行数）**: {nl}\n"
         except (OSError, subprocess.TimeoutExpired):
             vc_lines = "\n- （bcftools 计数跳过）\n"
-    md = (
-        "### 胚系变异检测（GATK HaplotypeCaller）\n\n"
-        f"- **VCF**: `{out_vcf}`\n"
-        f"{format_variant_summary_md(var_sum)}"
-        f"- **stand_call_conf**: {stand_call_conf}\n"
-        f"- **min_mapping_quality**: {min_mapping_quality}\n"
-        f"{vc_lines}"
-        "#### GATK stderr（节选）\n\n```\n"
-        f"{clip_omics_log(cp.stderr or '', 12000)}\n```\n"
+    metrics = [
+        ("Caller", "GATK HaplotypeCaller"),
+        ("变异记录数", str(var_sum.get("variant_count", 0))),
+        ("SNP", str(var_sum.get("snp_count", "N/A"))),
+        ("Indel", str(var_sum.get("indel_count", "N/A"))),
+        ("Ti/Tv", str(var_sum.get("tstv_ratio", "N/A"))),
+        ("stand_call_conf", str(stand_call_conf)),
+    ]
+    chart = plot_variant_composition_pie_md(var_sum)
+    body = f"- **VCF**: `{out_vcf}`\n- **min_mapping_quality**: {min_mapping_quality}\n{vc_lines}"
+    md = assemble_genomics_step_markdown(
+        title="胚系变异检测（GATK HaplotypeCaller）",
+        metrics=metrics,
+        chart_md=chart,
+        body_md=body,
+        cmd=cmd,
+        cp=cp,
     )
     out = {
         "status": "success",
@@ -1195,7 +1218,20 @@ def _try_cnv(file_path: str, bam_path: str = "") -> Optional[Dict[str, Any]]:
 
     vcf_in = (file_path or "").strip()
     vcf_pass = vcf_in if vcf_in.lower().endswith((".vcf", ".vcf.gz")) else ""
-    md = _format_cli_markdown("拷贝数变异（cnvkit coverage + export）", cmd, cp, note=note)
+    cnn_size = os.path.getsize(cnn_out) if os.path.isfile(cnn_out) else 0
+    md = assemble_genomics_step_markdown(
+        title="拷贝数变异（CNV）",
+        metrics=[
+            ("输入 BAM", f"`{bam}`"),
+            ("CNN 产物", f"`{cnn_out}`"),
+            ("CNN 大小 (bytes)", str(cnn_size)),
+            ("BED 分段", f"`{seg_bed}`"),
+            ("模式", "cnvkit" if cp_depth is None else "cnvkit + samtools depth 回退"),
+        ],
+        body_md=f"- **说明**: {note}",
+        cmd=cmd,
+        cp=cp,
+    )
     if cp_depth is not None and cmd_depth:
         md += "\n" + _format_cli_markdown(
             "samtools depth（CNV 回退）",
@@ -1347,7 +1383,18 @@ def _try_sv(file_path: str, bam_path: str = "") -> Optional[Dict[str, Any]]:
     vcf_upstream = (file_path or "").strip()
     vcf_pass = vcf_upstream if vcf_upstream.lower().endswith((".vcf", ".vcf.gz")) else sv_vcf
 
-    md = _format_cli_markdown("结构变异（delly call）", cmd, cp, note=note)
+    md = assemble_genomics_step_markdown(
+        title="结构变异（SV / Delly）",
+        metrics=[
+            ("SV 记录数", str(sv_count)),
+            ("SV VCF", f"`{sv_vcf}`"),
+            ("输入 BAM", f"`{bam}`"),
+            ("低深度数据集", "是" if delly_low_data else "否"),
+        ],
+        body_md=f"- **说明**: {note}",
+        cmd=cmd,
+        cp=cp,
+    )
     md += "\n" + _format_cli_markdown(
         "bcftools view（BCF→VCF.gz）",
         cmd_view,
@@ -1518,15 +1565,22 @@ def _try_vqsr_filtering(
             "VQSR 数值不稳定）。已使用 **GATK VariantFiltration 硬过滤** 产出可衔接下游的 VCF。\n\n"
         )
 
-    md = (
-        "### 变异过滤（GATK VariantFiltration）\n\n"
-        f"{policy_md}"
-        f"- **输入 VCF**: `{invcf}`\n"
-        f"- **输出 VCF**: `{out_vcf}`\n"
-        f"- **参考序列**: `{ref}`\n"
-        "- **过滤**: QD < 2.0 || FS > 60.0 || MQ < 40.0 → `HardFiltered`\n\n"
-        "#### GATK stderr（节选）\n\n```\n"
-        f"{clip_omics_log(cp.stderr or '', 12000)}\n```\n"
+    var_sum = summarize_vcf(out_vcf)
+    md = assemble_genomics_step_markdown(
+        title="变异过滤（GATK VariantFiltration）",
+        metrics=[
+            ("模式", "hard_filter_variant_filtration"),
+            ("输入 VCF", f"`{invcf}`"),
+            ("输出 VCF", f"`{out_vcf}`"),
+            ("过滤后变异数", str(var_sum.get("variant_count", 0))),
+            ("参考序列", f"`{ref}`"),
+        ],
+        body_md=(
+            f"{policy_md}"
+            "- **过滤规则**: QD < 2.0 || FS > 60.0 || MQ < 40.0 → `HardFiltered`"
+        ),
+        cmd=cmd,
+        cp=cp,
     )
     out = {
         "status": "success",
@@ -1680,13 +1734,21 @@ def _try_annotation(file_path: str) -> Optional[Dict[str, Any]]:
         f"Annotation mode={mode}. Variants in output: {var_sum.get('variant_count', 0)}. "
         "Command logs attached (snpEff and/or bcftools)."
     )
-    md = (
-        "### 变异注释（snpEff + bcftools 回退）\n\n"
-        f"- **模式**: `{mode}`\n"
-        f"- **输出 VCF**: `{annotated}`\n"
-        f"{format_variant_summary_md(var_sum)}\n\n"
-        + "\n".join(md_parts)
+    chart = plot_variant_composition_pie_md(var_sum)
+    md = assemble_genomics_step_markdown(
+        title="变异注释",
+        metrics=[
+            ("注释模式", mode),
+            ("输出 VCF", f"`{annotated}`"),
+            ("变异记录数", str(var_sum.get("variant_count", 0))),
+            ("SNP", str(var_sum.get("snp_count", "N/A"))),
+            ("Indel", str(var_sum.get("indel_count", "N/A"))),
+        ],
+        chart_md=chart,
+        body_md=f"{format_variant_summary_md(var_sum)}",
     )
+    if md_parts:
+        md += "\n" + "\n".join(md_parts)
     out = {
         "status": "success",
         "message": note,

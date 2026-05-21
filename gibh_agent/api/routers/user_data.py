@@ -16,14 +16,18 @@ import os
 import logging
 import traceback
 from pathlib import Path
-from typing import List, Optional
+from typing import AsyncIterator, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from gibh_agent.core.deps import get_current_owner_id
+from gibh_agent.core.execution_snapshot import build_session_composer_draft_payload
+from gibh_agent.core.session_runtime import SESSION_RUNNING, normalize_session_status
+from gibh_agent.core.session_stream_hub import get_session_stream_hub
 from gibh_agent.core.utils import sanitize_for_json
 from gibh_agent.db.connection import get_db_session
 from gibh_agent.db.models import (
@@ -43,6 +47,12 @@ class WorkflowTemplateCreate(BaseModel):
 class SessionRenameBody(BaseModel):
     """PUT /api/sessions/{session_id} 请求体"""
     title: str
+
+
+class ComposerDraftBody(BaseModel):
+    """PATCH /api/sessions/{session_id}/composer_draft 请求体"""
+    input_draft_text: str = ""
+    input_draft_attachments: List[dict] = []
 
 
 class AssetRenameBody(BaseModel):
@@ -91,10 +101,106 @@ def list_sessions(
             "id": r.id,
             "owner_id": r.owner_id,
             "title": r.title,
+            "status": normalize_session_status(getattr(r, "status", None)),
             "created_at": r.created_at.isoformat() if r.created_at else None,
         }
         for r in rows
     ]
+
+
+@router.get("/api/sessions/{session_id}")
+def get_session(
+    session_id: str,
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    """返回会话元数据及主页面 Composer 草稿（时光机输入框现场复原）。"""
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session.owner_id != owner_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该会话")
+    draft = session.composer_draft if isinstance(session.composer_draft, dict) else {}
+    if not draft:
+        draft = build_session_composer_draft_payload()
+    return sanitize_for_json({
+        "id": session.id,
+        "title": session.title,
+        "status": normalize_session_status(getattr(session, "status", None)),
+        "created_at": session.created_at.isoformat() if session.created_at else None,
+        "composer_draft": draft,
+        "input_draft_text": draft.get("input_draft_text") or "",
+        "input_draft_attachments": draft.get("input_draft_attachments") or [],
+    })
+
+
+@router.get("/api/sessions/{session_id}/stream")
+async def stream_session_sse(
+    session_id: str,
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+) -> StreamingResponse:
+    """
+    running 会话断点重连：先重放内存 ring buffer，再订阅后续 SSE 块（与主 /api/chat 流格式一致）。
+    """
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session.owner_id != owner_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该会话")
+
+    st = normalize_session_status(getattr(session, "status", None))
+    hub = get_session_stream_hub()
+
+    async def _event_generator() -> AsyncIterator[str]:
+        meta = json.dumps(
+            {"session_id": session_id, "status": st, "replay": True},
+            ensure_ascii=False,
+        )
+        yield f"event: reconnect\ndata: {meta}\n\n"
+        if st != SESSION_RUNNING:
+            yield f"event: done\ndata: {json.dumps({'reason': 'not_running', 'status': st}, ensure_ascii=False)}\n\n"
+            return
+        async for chunk in hub.subscribe(session_id):
+            yield chunk
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.patch("/api/sessions/{session_id}/composer_draft")
+def update_session_composer_draft(
+    session_id: str,
+    body: ComposerDraftBody,
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    """防抖自动保存：更新会话级主页面输入框草稿（文本 + 附件药丸元数据）。"""
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session.owner_id != owner_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权修改该会话")
+    try:
+        payload = build_session_composer_draft_payload(
+            input_draft_text=body.input_draft_text,
+            input_draft_attachments=body.input_draft_attachments,
+        )
+        session.composer_draft = payload
+        flag_modified(session, "composer_draft")
+        db.commit()
+        return {"status": "success", "composer_draft": sanitize_for_json(payload)}
+    except Exception as e:
+        db.rollback()
+        logger.exception("更新 Composer 草稿失败 session_id=%s: %s", session_id, e)
+        raise HTTPException(status_code=500, detail="更新失败")
 
 
 @router.get("/api/sessions/{session_id}/messages")

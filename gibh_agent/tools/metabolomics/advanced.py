@@ -518,6 +518,74 @@ def run_pathway_enrichment(
         
         # 创建排序的代谢物列表（按 fold change 降序）
         metabolite_rank = fold_change.sort_values(ascending=False)
+
+        def _fallback_metabolite_rank_output(reason: str) -> Dict[str, Any]:
+            """KEGG/GSEApy 无匹配时：用组间 FC 排序代谢物，保证步骤仍有图/表/说明。"""
+            top_n = metabolite_rank.replace([np.inf, -np.inf], np.nan).dropna().head(15)
+            if top_n.empty:
+                return {
+                    "status": "warning",
+                    "message": reason,
+                    "enriched_pathways": [],
+                    "summary": reason + " 且无法从丰度矩阵生成代谢物排序图。",
+                }
+            plot_path = None
+            images: List[Dict[str, str]] = []
+            tables: list = []
+            output_csv = None
+            table_rows = [
+                {
+                    "metabolite": str(idx)[:80],
+                    "fold_change": round(float(val), 4) if np.isfinite(val) else None,
+                }
+                for idx, val in top_n.items()
+            ]
+            tables = [table_rows]
+            if output_dir:
+                out_p = Path(output_dir)
+                out_p.mkdir(parents=True, exist_ok=True)
+                output_csv = str(out_p / "pathway_metabolite_rank_fallback.csv")
+                pd.DataFrame(table_rows).to_csv(output_csv, index=False)
+                try:
+                    fig, ax = plt.subplots(figsize=(9, max(4, len(top_n) * 0.35)))
+                    labels = [str(x)[:45] for x in top_n.index]
+                    vals = top_n.values.astype(float)
+                    colors = ["#e74c3c" if v >= 1 else "#3498db" for v in vals]
+                    ax.barh(range(len(labels)), vals, color=colors, alpha=0.85)
+                    ax.set_yticks(range(len(labels)))
+                    ax.set_yticklabels(labels, fontsize=8)
+                    ax.axvline(1.0, color="gray", linestyle="--", alpha=0.6)
+                    ax.set_xlabel("Fold change (case/control)")
+                    ax.set_title("Top metabolites by |FC| (KEGG fallback)")
+                    plt.tight_layout()
+                    plot_path = str(out_p / "pathway_metabolite_rank_fallback.png")
+                    fig.savefig(plot_path, bbox_inches="tight", dpi=150)
+                    plt.close()
+                    images.append({"title": "代谢物 FC 排序（KEGG 未匹配回退）", "path": plot_path})
+                except Exception as fe:
+                    logger.warning("通路步骤回退图失败: %s", fe)
+            summary_text = (
+                f"{reason} 已改为展示组间倍数变化 Top {len(top_n)} 代谢物（非 KEGG 通路富集，供探索参考）。"
+            )
+            out_fb = {
+                "status": "warning",
+                "message": reason,
+                "enriched_pathways": [],
+                "summary": summary_text,
+                "metrics": {"fallback_metabolites": len(top_n)},
+                "skipped_reason": "kegg_mapping_empty",
+            }
+            if plot_path:
+                out_fb["plot_path"] = plot_path
+            if images:
+                out_fb["images"] = images
+            if tables:
+                out_fb["tables"] = tables
+            if output_csv:
+                out_fb["download_links"] = [
+                    {"title": "下载代谢物 FC 排序表", "path": output_csv, "kind": "data"},
+                ]
+            return out_fb
         
         # 准备 GSEApy 输入（需要代谢物名称到 KEGG ID 的映射）
         # 注意：这里使用代谢物名称作为 ID（实际应用中需要映射到 KEGG ID）
@@ -547,51 +615,118 @@ def run_pathway_enrichment(
             # 提取结果
             if enr is not None and hasattr(enr, 'results'):
                 results_df = enr.results
-                
-                # 过滤显著通路
-                significant_pathways = results_df[
-                    results_df['Adjusted P-value'] < p_value_threshold
-                ].copy()
-                
-                # 🔥 Phase 2: Extract top pathways for AI report
+                if results_df is None or len(results_df) == 0:
+                    return _fallback_metabolite_rank_output(
+                        "代谢物名称未能匹配 KEGG/Enrichr 基因集（常见于代谢物名非 HGNC 符号）。"
+                    )
+                term_col = "Term" if "Term" in results_df.columns else (
+                    "Gene_set" if "Gene_set" in results_df.columns else (
+                        "Pathway" if "Pathway" in results_df.columns else results_df.columns[0]
+                    )
+                )
+                p_col = "Adjusted P-value" if "Adjusted P-value" in results_df.columns else (
+                    "P-value" if "P-value" in results_df.columns else None
+                )
+
+                significant_pathways = results_df.copy()
+                if p_col:
+                    significant_pathways = results_df[results_df[p_col] < p_value_threshold].copy()
+
                 top_pathways = []
-                if len(significant_pathways) > 0:
-                    # Sort by Adjusted P-value (ascending) and take top 5
-                    top_pathways_df = significant_pathways.nsmallest(5, 'Adjusted P-value')
-                    top_pathways = top_pathways_df['Term'].tolist() if 'Term' in top_pathways_df.columns else []
-                    # Fallback: use 'Gene_set' or 'Pathway' column if 'Term' doesn't exist
-                    if not top_pathways and 'Gene_set' in top_pathways_df.columns:
-                        top_pathways = top_pathways_df['Gene_set'].tolist()[:5]
-                    elif not top_pathways and 'Pathway' in top_pathways_df.columns:
-                        top_pathways = top_pathways_df['Pathway'].tolist()[:5]
-                
-                # 保存结果（如果指定了输出目录）
+                if len(significant_pathways) > 0 and p_col:
+                    top_pathways_df = significant_pathways.nsmallest(5, p_col)
+                    top_pathways = top_pathways_df[term_col].astype(str).tolist() if term_col in top_pathways_df.columns else []
+
+                plot_df = results_df.copy()
+                if p_col:
+                    plot_df = plot_df.sort_values(p_col, ascending=True)
+                plot_df = plot_df.head(15)
+
                 output_csv = None
+                plot_path = None
+                images: List[Dict[str, str]] = []
+                tables: list = []
                 if output_dir:
                     output_path = Path(output_dir)
                     output_path.mkdir(parents=True, exist_ok=True)
                     output_csv = str(output_path / "pathway_enrichment.csv")
-                    significant_pathways.to_csv(output_csv, index=False)
-                
-                return {
-                    "status": "success",
+                    results_df.to_csv(output_csv, index=False)
+                    if len(plot_df) > 0 and term_col in plot_df.columns:
+                        try:
+                            fig, ax = plt.subplots(figsize=(9, max(4, len(plot_df) * 0.35)))
+                            labels = plot_df[term_col].astype(str).str.slice(0, 50).tolist()
+                            if p_col:
+                                scores = -np.log10(plot_df[p_col].clip(lower=1e-300).astype(float))
+                            else:
+                                scores = np.arange(len(plot_df), 0, -1)
+                            y_pos = np.arange(len(labels))
+                            colors = ["#2ecc71" if (p_col and row[p_col] < p_value_threshold) else "#bdc3c7"
+                                      for _, row in plot_df.iterrows()]
+                            ax.barh(y_pos, scores, color=colors, alpha=0.85)
+                            ax.set_yticks(y_pos)
+                            ax.set_yticklabels(labels, fontsize=8)
+                            ax.set_xlabel("-log10(adjusted P-value)" if p_col else "rank score")
+                            ax.set_title("KEGG 通路富集 (Top 15)")
+                            plt.tight_layout()
+                            plot_path = str(output_path / "pathway_enrichment_bar.png")
+                            fig.savefig(plot_path, bbox_inches="tight", dpi=150)
+                            plt.close()
+                            images.append({"title": "通路富集条形图", "path": plot_path})
+                        except Exception as pe:
+                            logger.warning("通路富集图生成失败: %s", pe)
+
+                table_rows = []
+                for _, row in plot_df.iterrows():
+                    table_rows.append({
+                        "pathway": str(row.get(term_col, ""))[:80],
+                        "adjusted_p": round(float(row[p_col]), 6) if p_col else None,
+                        "significant": bool(p_col and row[p_col] < p_value_threshold),
+                    })
+                if table_rows:
+                    tables = [table_rows]
+
+                n_sig = len(significant_pathways)
+                if n_sig == 0:
+                    summary_text = (
+                        f"共检索 {len(results_df)} 条通路，在校正 P<{p_value_threshold} 下无显著富集。"
+                        f"下图与表格为按 P 值排序的 Top 通路（探索性展示）。"
+                    )
+                    status = "warning"
+                else:
+                    summary_text = (
+                        f"显著富集通路 {n_sig} 条（共 {len(results_df)} 条，P<{p_value_threshold}）。"
+                        f"代表通路: {', '.join(top_pathways[:3]) or '见下表'}。"
+                    )
+                    status = "success"
+
+                out_pe = {
+                    "status": status,
                     "enriched_pathways": significant_pathways.to_dict(orient='records'),
-                    "n_significant": len(significant_pathways),
+                    "n_significant": n_sig,
                     "n_total": len(results_df),
                     "output_csv": output_csv,
-                    "summary": {
-                        "n_significant": len(significant_pathways),
+                    "summary": summary_text,
+                    "summary_stats": {
+                        "n_significant": n_sig,
                         "n_total": len(results_df),
                         "top_pathways": top_pathways,
-                        "p_value_threshold": p_value_threshold
-                    }
+                        "p_value_threshold": p_value_threshold,
+                    },
+                    "metrics": {"significant_pathways": n_sig, "total_pathways": len(results_df)},
                 }
+                if plot_path:
+                    out_pe["plot_path"] = plot_path
+                if images:
+                    out_pe["images"] = images
+                if tables:
+                    out_pe["tables"] = tables
+                if output_csv:
+                    out_pe["download_links"] = [
+                        {"title": "下载通路富集结果 CSV", "path": output_csv, "kind": "data"},
+                    ]
+                return out_pe
             else:
-                return {
-                    "status": "warning",
-                    "message": "通路富集分析完成，但未找到显著富集通路",
-                    "enriched_pathways": []
-                }
+                return _fallback_metabolite_rank_output("GSEApy 未返回可解析的富集结果表。")
         
         except Exception as e:
             # 🔥 CRITICAL FIX: If gseapy fails, return warning (not error) so pipeline continues

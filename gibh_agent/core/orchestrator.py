@@ -1483,7 +1483,14 @@ class AgentOrchestrator:
                 
                 logger.info(f"✅ [Orchestrator] 准备执行 {len(steps)} 个步骤")
                 # 🔥 持久化用户勾选状态：将当前执行的 workflow（含 step.enabled/selected）写入快照，历史恢复时复选框正确
-                state_snapshot["workflow"] = {"workflow_data": workflow_config, "workflow_config": {"workflow_data": workflow_config}}
+                _exec_id = workflow_data.get("execution_id") or workflow_data.get("executionId")
+                if _exec_id and str(_exec_id).strip():
+                    state_snapshot["_current_execution_id"] = str(_exec_id).strip()
+                state_snapshot["workflow"] = {
+                    "workflow_data": workflow_config,
+                    "workflow_config": {"workflow_data": workflow_config},
+                    "execution_id": state_snapshot.get("_current_execution_id"),
+                }
                 
                 # 1. Initialize Execution Engine
                 yield self._emit_sse(state_snapshot,"status", {
@@ -2157,6 +2164,14 @@ class AgentOrchestrator:
                 })
                 await asyncio.sleep(0.01)
                 yield self._emit_sse(state_snapshot,"done", {"status": "success"})
+                if steps_details:
+                    from gibh_agent.core.execution_snapshot import apply_execution_snapshot_to_state
+
+                    apply_execution_snapshot_to_state(
+                        state_snapshot,
+                        steps_details,
+                        workflow_name=workflow_config.get("workflow_name"),
+                    )
                 state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
                 yield self._format_sse("state_snapshot", state_snapshot)
                 return  # STOP HERE - Do not continue to planning
@@ -4734,7 +4749,9 @@ class AgentOrchestrator:
         elif event_type == "workspace_update" and isinstance(data, dict):
             md = data.get("markdown")
             if isinstance(md, str) and md.strip():
-                state_snapshot["expert_report_markdown"] = md.strip()
+                from gibh_agent.core.execution_snapshot import update_expert_report_in_state
+
+                update_expert_report_in_state(state_snapshot, md.strip())
         elif event_type == "status" and data:
             # 🔥 约束二：process_log 与前端 state 一致（running/completed/error/start 等），保证图标/动画一致
             # 技能快车道 [AgenticLog] 细粒度事件不入库：否则快照每条 token 一行，历史还原会出现数千条 JSON
@@ -4748,6 +4765,9 @@ class AgentOrchestrator:
                 })
         elif event_type in ("workflow", "plan") and data:
             state_snapshot["workflow"] = data
+            _eid = data.get("execution_id") or data.get("executionId")
+            if _eid and str(_eid).strip():
+                state_snapshot["_current_execution_id"] = str(_eid).strip()
         elif event_type == "step" and data:
             step_obj = data.get("step", data)
             step_id = step_obj.get("id") or step_obj.get("step_id")
@@ -4765,14 +4785,13 @@ class AgentOrchestrator:
         elif event_type == "step_result" and data:
             rd = data.get("report_data") or {}
             if rd.get("steps_details"):
-                # 全量替换为 steps_details，并确保每步的 data（图表/表格）无损写入快照
-                steps_list = []
-                for s in rd["steps_details"]:
-                    step_copy = dict(s) if isinstance(s, dict) else {"step": s}
-                    if isinstance(s, dict) and "data" in s:
-                        step_copy["data"] = s["data"]
-                    steps_list.append(step_copy)
-                state_snapshot["steps"] = steps_list
+                from gibh_agent.core.execution_snapshot import apply_execution_snapshot_to_state
+
+                apply_execution_snapshot_to_state(
+                    state_snapshot,
+                    rd["steps_details"],
+                    workflow_name=rd.get("workflow_name"),
+                )
             # 单步更新：若 payload 带 step_id + data，合并到对应 step
             step_id = data.get("step_id") or data.get("id")
             if step_id and state_snapshot.get("steps"):
@@ -4796,12 +4815,23 @@ class AgentOrchestrator:
             report_data.update(data.get("report_data") or {})
             report["report_data"] = report_data
             diagnosis_val = data.get("diagnosis") or report_data.get("diagnosis")
+            diag_report = data.get("diagnosis_report") or data.get("message")
+            if diagnosis_val is None and isinstance(diag_report, str) and diag_report.strip():
+                diagnosis_val = diag_report
+                report_data["diagnosis"] = diag_report
+                report["report_data"] = report_data
             if diagnosis_val is not None:
                 report["diagnosis"] = diagnosis_val
+                if isinstance(diag_report, str) and diag_report.strip():
+                    report["diagnosis_report"] = diag_report
             for k, v in data.items():
                 if k not in ("report_data", "diagnosis"):
                     report[k] = v
             state_snapshot["report"] = report
+            if diagnosis_val is not None:
+                from gibh_agent.core.execution_snapshot import update_diagnosis_in_state
+
+                update_diagnosis_in_state(state_snapshot, diagnosis_val)
         elif event_type in ("result", "done") and data:
             if data.get("diagnosis") is not None or data.get("report_data") is not None:
                 report = state_snapshot.get("report") or {}
@@ -4812,6 +4842,20 @@ class AgentOrchestrator:
                     if k != "report_data":
                         report[k] = v
                 state_snapshot["report"] = report
+                _expert = report_data.get("report") or report.get("report")
+                if isinstance(_expert, str) and _expert.strip():
+                    from gibh_agent.core.execution_snapshot import update_expert_report_in_state
+
+                    update_expert_report_in_state(state_snapshot, _expert)
+                _rd_steps = report_data.get("steps_details")
+                if _rd_steps:
+                    from gibh_agent.core.execution_snapshot import apply_execution_snapshot_to_state
+
+                    apply_execution_snapshot_to_state(
+                        state_snapshot,
+                        _rd_steps,
+                        workflow_name=report_data.get("workflow_name"),
+                    )
             if data.get("tool_result") is not None:
                 state_snapshot["skill_last_tool"] = {
                     "tool_name": data.get("tool_name"),
@@ -4836,6 +4880,18 @@ class AgentOrchestrator:
                     "running", "loading", "start", "active", "analyzing", "thinking",
                 ):
                     entry["state"] = "completed"
+            from gibh_agent.core.execution_snapshot import ensure_report_timestamp_frozen
+
+            ensure_report_timestamp_frozen(state_snapshot)
+            ex_done = state_snapshot.get("execution_snapshot")
             data = {**(data or {}), "duration": duration, "total_duration": duration}
+            if isinstance(ex_done, dict):
+                data["execution_snapshot"] = ex_done
+            _snap_col = state_snapshot.get("execution_snapshots")
+            if isinstance(_snap_col, dict) and _snap_col.get("snapshots"):
+                data["execution_snapshots"] = _snap_col
+                _active = _snap_col.get("active_snapshot_id")
+                if _active:
+                    data["active_snapshot_id"] = _active
         return self._format_sse(event_type, data)
 

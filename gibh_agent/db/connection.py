@@ -37,6 +37,10 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 _users_approval_schema_lock = threading.Lock()
 _users_approval_schema_done = False
+_sessions_composer_schema_lock = threading.Lock()
+_sessions_composer_schema_done = False
+_sessions_status_schema_lock = threading.Lock()
+_sessions_status_schema_done = False
 
 
 def is_available() -> bool:
@@ -45,7 +49,7 @@ def is_available() -> bool:
 
 
 def get_db_session() -> Generator:
-    global _users_approval_schema_done
+    global _users_approval_schema_done, _sessions_composer_schema_done, _sessions_status_schema_done
     db = SessionLocal()
     try:
         if not _users_approval_schema_done:
@@ -57,6 +61,24 @@ def get_db_session() -> Generator:
 
                     ensure_users_approval_columns(engine)
                     _users_approval_schema_done = True
+        if not _sessions_composer_schema_done:
+            with _sessions_composer_schema_lock:
+                if not _sessions_composer_schema_done:
+                    from gibh_agent.db.session_composer_schema import (
+                        ensure_sessions_composer_draft_column,
+                    )
+
+                    ensure_sessions_composer_draft_column(engine)
+                    _sessions_composer_schema_done = True
+        if not _sessions_status_schema_done:
+            with _sessions_status_schema_lock:
+                if not _sessions_status_schema_done:
+                    from gibh_agent.db.session_status_schema import (
+                        ensure_sessions_status_column,
+                    )
+
+                    ensure_sessions_status_column(engine)
+                    _sessions_status_schema_done = True
         yield db
     finally:
         db.close()

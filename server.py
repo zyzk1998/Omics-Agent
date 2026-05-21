@@ -247,9 +247,15 @@ def _migrate_users_approval_columns():
 
         ensure_users_approval_columns(engine)
         logger.info("✅ [DB] users 审核字段迁移已执行")
+        from gibh_agent.db.session_composer_schema import ensure_sessions_composer_draft_column
+        from gibh_agent.db.session_status_schema import ensure_sessions_status_column
+
+        ensure_sessions_composer_draft_column(engine)
+        ensure_sessions_status_column(engine)
+        logger.info("✅ [DB] sessions.composer_draft / status 字段迁移已执行")
     except Exception as e:
         logger.warning(
-            "[DB] users 审核字段迁移在启动阶段失败，将在首次数据库会话时重试: %s",
+            "[DB] users/sessions 字段迁移在启动阶段失败，将在首次数据库会话时重试: %s",
             e,
         )
 
@@ -1031,6 +1037,8 @@ class ChatRequest(BaseModel):
     client_track: Optional[str] = "web"  # dual-track: web | local_sidecar
     local_workspace_mounted: Optional[bool] = False
     local_tool_response: Optional[dict] = None  # 前端 relay 回传的本地工具结果
+    intent_override_id: Optional[str] = None  # LUI 澄清闭环：用户点击 Action Pill 后直路由，跳过 LLM 意图探针
+    clarification_context_message: Optional[str] = None  # 澄清前原始自然语言（闭环时与 override 一并透传）
 
 
 class WorkspaceInitRequest(BaseModel):
@@ -2424,16 +2432,26 @@ async def upload_file(
             logger.warning("⚠️ 目录结构规范化失败（不影响上传）: %s", e)
         
         # 🔥 统一返回格式：强制使用绝对路径，避免底层工具收到相对路径导致 [Errno 2] No such file or directory
+        from gibh_agent.core.file_asset_meta import SOURCE_DATA, enrich_file_record
+
         file_paths = []
         file_info = []
         for result in uploaded_results:
             raw = result.get("file_path") or result.get("file_id") or ""
             abs_path = _ensure_absolute_upload_path(raw) if raw else ""
             file_paths.append(abs_path)
+            meta_row = enrich_file_record(
+                path=abs_path,
+                name=result.get("file_name", ""),
+                source=result.get("source") or SOURCE_DATA,
+                size=result.get("file_size"),
+            )
+            result.update(meta_row)
             file_info.append({
-                "name": result.get("file_name", ""),
+                "name": meta_row.get("file_name") or meta_row.get("name", ""),
                 "size": result.get("file_size", 0),
-                "path": abs_path
+                "path": abs_path,
+                "source": meta_row.get("source", SOURCE_DATA),
             })
         
         # Phase 4: 非 10x 文件入库（Asset 表与返回前端均使用绝对路径）
@@ -2526,7 +2544,11 @@ def _build_agent_message_content(state_snapshot_for_db: Optional[Dict[str, Any]]
             return ""
         return v if isinstance(v, str) else str(v)
 
-    return {
+    execution_snapshot = snap.get("execution_snapshot")
+    if not isinstance(execution_snapshot, dict):
+        execution_snapshot = None
+
+    payload: Dict[str, Any] = {
         "text": _as_text(snap.get("text")),
         "reasoning": _as_text(snap.get("reasoning")),
         "process_log": list(snap.get("process_log") or []),
@@ -2534,6 +2556,12 @@ def _build_agent_message_content(state_snapshot_for_db: Optional[Dict[str, Any]]
         "tool_output_memory": _as_text(snap.get("tool_output_memory")),
         "state_snapshot": snap,
     }
+    if execution_snapshot:
+        payload["execution_snapshot"] = execution_snapshot
+    execution_snapshots = snap.get("execution_snapshots")
+    if isinstance(execution_snapshots, dict) and execution_snapshots.get("snapshots"):
+        payload["execution_snapshots"] = execution_snapshots
+    return payload
 
 
 def _extract_tool_output_memory_from_agent_content(content: Any) -> Optional[str]:
@@ -2763,12 +2791,27 @@ async def chat_endpoint(
             
             # 返回 SSE 流式响应（Phase 4: 首包下发 session_id，流结束后写 agent 消息，不阻塞 SSE）
             async def generate_sse():
+                from gibh_agent.core.session_runtime import (
+                    SESSION_COMPLETED,
+                    SESSION_FAILED,
+                    SESSION_RUNNING,
+                    set_session_status,
+                )
+                from gibh_agent.core.session_stream_hub import get_session_stream_hub
+
                 original_llm_clients = {}
                 override_llm = None
                 state_snapshot_for_db = None  # 🔥 有状态应用切片：从流中解析 event: state_snapshot 作为入库 content
                 _api_mode_token = None
+                _stream_hub = get_session_stream_hub()
+                _sid = (req.session_id or "").strip()
+                _run_failed = False
                 # Phase 4: 第一个事件下发 session_id，供前端持久化
-                yield f"event: session\ndata: {json.dumps({'session_id': req.session_id}, ensure_ascii=False)}\n\n"
+                _session_ev = f"event: session\ndata: {json.dumps({'session_id': req.session_id}, ensure_ascii=False)}\n\n"
+                if _sid:
+                    set_session_status(db, _sid, SESSION_RUNNING, owner_id=owner_id)
+                    await _stream_hub.publish(_sid, _session_ev)
+                yield _session_ev
                 try:
                     from gibh_agent.core.llm_client import (
                         LLMClientFactory,
@@ -2803,7 +2846,6 @@ async def chat_endpoint(
                         logger.info(
                             "🔧 [ChatEndpoint] compute_scheduler 已启用：统一走 AgentOrchestrator + DeepReAct（不再使用 HPC 直连短路）"
                         )
-                    orchestrator = AgentOrchestrator(agent, upload_dir=str(UPLOAD_DIR))
                     _hist_merged = _augment_history_with_db_tool_memory(
                         req.session_id, req.history or [], db
                     )
@@ -2815,51 +2857,181 @@ async def chat_endpoint(
                         _track = "web"
                     _workspace_ctx["execution_track"] = _track
                     _workspace_ctx["local_workspace_mounted"] = bool(req.local_workspace_mounted)
+
+                    # —— Master LLM Intent Router（LUI 自然语言入口；澄清则物理硬阻断，绝不进入 Orchestrator）——
+                    _route_message = (req.message or "").strip()
+                    _route_target_domain = req.target_domain
+                    _clarify_hard_stop = False
+                    _intent_override_id = (req.intent_override_id or "").strip()
+                    try:
+                        from gibh_agent.core.intent_router import (
+                            apply_intent_dispatch,
+                            master_intent_router_enabled,
+                            should_bypass_master_intent_router,
+                        )
+
+                        def _apply_dispatch_patch(target_id: str) -> None:
+                            nonlocal _route_message, _route_target_domain
+                            _ctx_msg = (req.clarification_context_message or req.message or "").strip()
+                            _patch = apply_intent_dispatch(
+                                message=_ctx_msg or _route_message,
+                                target_id=target_id,
+                            )
+                            if _patch.get("target_domain"):
+                                _route_target_domain = _patch["target_domain"]
+                            if _patch.get("message"):
+                                _route_message = _patch["message"]
+
+                        # 澄清闭环：有 intent_override_id 时绝不调用 MasterIntentRouter.classify
+                        if _intent_override_id:
+                            _apply_dispatch_patch(_intent_override_id)
+                            logger.info(
+                                "🧭 [ChatEndpoint] intent_override_id=%s → 100%% 绕过 MasterIntentRouter，"
+                                "直达 Orchestrator（patch 后 target_domain=%s）",
+                                _intent_override_id,
+                                _route_target_domain,
+                            )
+                        elif master_intent_router_enabled() and not should_bypass_master_intent_router(req):
+                            from gibh_agent.core.intent_router import (
+                                MasterIntentRouter,
+                                format_clarification_sse_payload,
+                            )
+
+                            _router_llm = override_llm
+                            if _router_llm is None and agent and hasattr(agent, "agents"):
+                                for _a in agent.agents.values():
+                                    if hasattr(_a, "llm_client") and _a.llm_client is not None:
+                                        _router_llm = _a.llm_client
+                                        break
+                            if _router_llm:
+                                _mir = MasterIntentRouter(_router_llm)
+                                _intent_res = await _mir.classify(
+                                    _route_message,
+                                    has_files=bool(uploaded_files),
+                                )
+                                if _intent_res.status == "clarify":
+                                    _q_text = (
+                                        _intent_res.question or "请选择您需要的分析类型："
+                                    ).strip()
+                                    from gibh_agent.core.intent_router import (
+                                        enrich_clarification_candidates,
+                                    )
+
+                                    _clarify_payload = {
+                                        "question": _q_text,
+                                        "candidates": enrich_clarification_candidates(
+                                            _intent_res.candidates or []
+                                        ),
+                                    }
+                                    state_snapshot_for_db = {
+                                        "text": _q_text,
+                                        "reasoning": "",
+                                        "workflow": None,
+                                        "steps": [],
+                                        "process_log": [],
+                                        "report": None,
+                                        "clarification": {
+                                            "type": "clarification",
+                                            "question": _q_text,
+                                            "candidates": _clarify_payload["candidates"],
+                                            "rationale_short": _intent_res.rationale_short,
+                                        },
+                                    }
+                                    logger.info(
+                                        "🛑 [ChatEndpoint] CLARIFY_HARD_STOP — 不创建 Orchestrator，"
+                                        "仅下发 clarification + done"
+                                    )
+                                    _clarify_hard_stop = True
+                                    yield (
+                                        "event: clarification\n"
+                                        f"data: {json.dumps(_clarify_payload, ensure_ascii=False)}\n\n"
+                                    )
+                                    yield (
+                                        "event: done\n"
+                                        f"data: {json.dumps({'status': 'success', 'mode': 'intent_clarification'}, ensure_ascii=False)}\n\n"
+                                    )
+                                    return
+                                elif _intent_res.status == "exact" and _intent_res.target_id:
+                                    logger.info(
+                                        "🧭 [ChatEndpoint] MasterIntentRouter EXACT → %s",
+                                        _intent_res.target_id,
+                                    )
+                                    _apply_dispatch_patch(_intent_res.target_id)
+                                else:
+                                    logger.info(
+                                        "🧭 [ChatEndpoint] MasterIntentRouter → chitchat，进入常规范式"
+                                    )
+                            else:
+                                logger.warning("⚠️ [ChatEndpoint] MasterIntentRouter 无可用 LLM，跳过")
+                    except Exception as _mir_err:
+                        logger.warning(
+                            "⚠️ [ChatEndpoint] MasterIntentRouter 异常，回退常规范式: %s",
+                            _mir_err,
+                            exc_info=True,
+                        )
+
+                    if _clarify_hard_stop:
+                        return
+
+                    orchestrator = AgentOrchestrator(agent, upload_dir=str(UPLOAD_DIR))
                     async for event in orchestrator.stream_process(
-                        query=req.message,
-                        files=uploaded_files,
-                        history=_hist_merged,
-                        session_id=req.session_id or "default",
-                        test_dataset_id=req.test_dataset_id,
-                        workflow_data=req.workflow_data,
-                        user_id=req.user_id or "guest",
-                        owner_id=owner_id,
-                        db=db,
-                        model_name=model_name,
-                        target_domain=req.target_domain,
-                        enabled_mcps=req.enabled_mcps or [],
-                        thinking_mode=_effective_thinking,
-                        workspace_context=_workspace_ctx,
-                        local_tool_response=req.local_tool_response,
-                    ):
-                        if isinstance(event, str) and "event: state_snapshot" in event:
-                            for line in event.split("\n"):
-                                if line.startswith("data:"):
-                                    raw_line = line[5:].strip()
-                                    try:
-                                        state_snapshot_for_db = json.loads(raw_line)
-                                    except Exception as parse_err:
-                                        logger.error(
-                                            "❌ [Chat] state_snapshot JSON 解析失败，将原始数据备份入库: %s",
-                                            parse_err,
-                                            exc_info=True,
-                                        )
-                                        raw_preview = raw_line[:1000] if len(raw_line) > 1000 else raw_line
-                                        logger.error("❌ [Chat] 原始 data 前 1000 字符: %s", raw_preview)
-                                        raw_backup = raw_line[:50000] if len(raw_line) > 50000 else raw_line
-                                        state_snapshot_for_db = {
-                                            "text": "⚠️ [系统警告] 工作流数据解析失败，原始数据备份:\n" + raw_backup,
-                                            "workflow": None,
-                                            "steps": [],
-                                            "report": None,
-                                        }
-                                    break
-                        yield event
+                            query=_route_message,
+                            files=uploaded_files,
+                            history=_hist_merged,
+                            session_id=req.session_id or "default",
+                            test_dataset_id=req.test_dataset_id,
+                            workflow_data=req.workflow_data,
+                            user_id=req.user_id or "guest",
+                            owner_id=owner_id,
+                            db=db,
+                            model_name=model_name,
+                            target_domain=_route_target_domain,
+                            enabled_mcps=req.enabled_mcps or [],
+                            thinking_mode=_effective_thinking,
+                            workspace_context=_workspace_ctx,
+                            local_tool_response=req.local_tool_response,
+                        ):
+                            if isinstance(event, str) and "event: state_snapshot" in event:
+                                for line in event.split("\n"):
+                                    if line.startswith("data:"):
+                                        raw_line = line[5:].strip()
+                                        try:
+                                            state_snapshot_for_db = json.loads(raw_line)
+                                        except Exception as parse_err:
+                                            logger.error(
+                                                "❌ [Chat] state_snapshot JSON 解析失败，将原始数据备份入库: %s",
+                                                parse_err,
+                                                exc_info=True,
+                                            )
+                                            raw_preview = raw_line[:1000] if len(raw_line) > 1000 else raw_line
+                                            logger.error("❌ [Chat] 原始 data 前 1000 字符: %s", raw_preview)
+                                            raw_backup = raw_line[:50000] if len(raw_line) > 50000 else raw_line
+                                            state_snapshot_for_db = {
+                                                "text": "⚠️ [系统警告] 工作流数据解析失败，原始数据备份:\n" + raw_backup,
+                                                "workflow": None,
+                                                "steps": [],
+                                                "report": None,
+                                            }
+                                        break
+                            if _sid and isinstance(event, str):
+                                await _stream_hub.publish(_sid, event)
+                            yield event
                 except Exception as e:
+                    _run_failed = True
                     logger.error(f"❌ SSE 流式传输错误: {e}", exc_info=True)
                     error_event = f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+                    if _sid:
+                        await _stream_hub.publish(_sid, error_event)
                     yield error_event
                 finally:
+                    if _sid:
+                        await _stream_hub.close_session(_sid)
+                        set_session_status(
+                            db,
+                            _sid,
+                            SESSION_FAILED if _run_failed else SESSION_COMPLETED,
+                            owner_id=owner_id,
+                        )
                     # Phase 4: 流结束后写 agent 消息（有状态切片入库，废弃 content.events）
                     # 🔥 强制快照同步：前端传来的 workflow_data 含真实 enabled/selected，必须原样写入快照
                     if req.workflow_data:
@@ -2881,7 +3053,10 @@ async def chat_endpoint(
                         db.commit()
                         # 下发 message_saved 事件，前端可绑定到当前 AI 气泡的 dataset.messageId（commit 后 msg.id 已填充）
                         if getattr(msg, "id", None) is not None:
-                            yield f"event: message_saved\ndata: {json.dumps({'message_id': msg.id}, ensure_ascii=False)}\n\n"
+                            _ms_ev = f"event: message_saved\ndata: {json.dumps({'message_id': msg.id}, ensure_ascii=False)}\n\n"
+                            if _sid:
+                                await _stream_hub.publish(_sid, _ms_ev)
+                            yield _ms_ev
                     except (DataError, OperationalError) as db_err:
                         logger.error(
                             "❌ [Chat] Agent 消息入库失败（数据库错误，可能超出 max_allowed_packet 或字段限制）: %s",

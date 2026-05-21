@@ -2063,6 +2063,27 @@
                 outline: none; font-size: 15px; margin-bottom: 32px; transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
             }
             .history-search-input:focus { border-color: #3b82f6; background: #ffffff; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1); }
+            /* ================= 时间线：审计栏 / 历史分组 / 聊天分割 ================= */
+            .omics-audit-trail-bar {
+                font-size: 12px;
+                line-height: 1.5;
+                letter-spacing: 0.01em;
+                border-color: #e2e8f0 !important;
+                background: #f8fafc !important;
+            }
+            .omics-audit-trail-bar span { white-space: nowrap; }
+            .history-time-group { margin-bottom: 4px; }
+            .history-time-group-header {
+                padding: 6px 12px 4px;
+                font-size: 11px;
+                font-weight: 600;
+                color: #94a3b8;
+                text-transform: none;
+                letter-spacing: 0.02em;
+            }
+            #sidebar-sessions-list .history-time-group-header { padding-left: 8px; }
+            .chat-time-divider { pointer-events: none; user-select: none; }
+            .chat-time-divider-badge { font-size: 11px !important; font-weight: 400 !important; padding: 4px 10px; border: 1px solid #e5e7eb; }
             .full-history-list { display: flex; flex-direction: column; }
             .full-history-item {
                 display: flex; justify-content: space-between; align-items: center;
@@ -2745,6 +2766,74 @@
                 transform: translateY(-1px);
             }
 
+            /* LUI 意图澄清：问句 + 可点击建议气泡（与 suggestion-chip 同风格） */
+            .intent-clarification-panel {
+                margin-top: 4px;
+                padding: 12px 14px;
+                background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+                border: 1px solid #c7d2fe;
+                border-radius: 12px;
+                box-sizing: border-box;
+                width: 100%;
+            }
+            .intent-clarification-question {
+                margin: 0 0 10px 0;
+                font-size: 14px;
+                line-height: 1.55;
+                color: #1e293b;
+                font-weight: 500;
+            }
+            .intent-clarification-chips {
+                border-top: none;
+                padding-top: 0;
+                margin-top: 0;
+            }
+            button.intent-clarification-pill.suggestion-chip {
+                margin: 4px 6px 4px 0;
+            }
+            .clarification-btn-group {
+                display: flex !important;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin-top: 10px;
+                width: 100%;
+            }
+            .clarification-btn-group .intent-clarification-pill,
+            .clarification-btn-group .btn.intent-clarification-pill {
+                display: inline-flex !important;
+                align-items: center;
+                visibility: visible !important;
+                opacity: 1 !important;
+            }
+            .bubble .text-zone .intent-clarification-question {
+                margin: 0 0 8px 0;
+                font-size: 14px;
+                line-height: 1.55;
+                color: #1e293b;
+            }
+            /* LUI 澄清防护区：独立于 text-zone，避免 SSE updateChatBubble innerHTML 抹除按钮 */
+            .bubble .clarification-shield-zone {
+                display: block !important;
+                width: 100%;
+                margin-top: 8px;
+                box-sizing: border-box;
+                flex-shrink: 0;
+            }
+            .clarification-btn-group-shield {
+                display: flex !important;
+                flex-wrap: wrap;
+                gap: 8px;
+                background: #f8fafc;
+                border: 1px solid #c7d2fe;
+                border-radius: 12px;
+            }
+            .clarification-btn-group-shield .btn.intent-clarification-pill {
+                display: inline-flex !important;
+                align-items: center;
+                visibility: visible !important;
+                opacity: 1 !important;
+            }
+
             /* 推荐追问区（<<>> 解析）：极简科技风，药丸按钮 */
             .suggestions-zone {
                 display: flex;
@@ -3354,24 +3443,24 @@
                 display: block;
             }
 
-            /* Print: 仅打印报告区域，三部分可见，手风琴全部展开 */
+            /* Print: 文档流排版（禁止 absolute 叠层；完整规则见 style.css @media print） */
             @media print {
-                @page { margin: 1cm; size: auto; }
-                body * { visibility: hidden; }
+                @page { margin: 12mm 14mm; size: auto; }
                 .unified-report-container,
-                .unified-report-container * {
-                    visibility: visible !important;
+                .omics-report-three-slots-shell,
+                .execution-instance,
+                .execution-instance .accordion-item,
+                .execution-instance .accordion-body {
+                    position: static !important;
+                    left: auto !important;
+                    top: auto !important;
+                    float: none !important;
+                    width: 100% !important;
+                    max-width: 100% !important;
+                    margin-left: 0 !important;
+                    margin-right: 0 !important;
+                    transform: none !important;
                 }
-                .unified-report-container {
-                    position: absolute;
-                    left: 0;
-                    top: 0;
-                    width: 100%;
-                    margin: 0;
-                    padding: 0;
-                    visibility: visible !important;
-                }
-                /* 强制展开所有 accordion，保证工作流执行结果完整打印 */
                 .accordion-collapse {
                     display: block !important;
                     height: auto !important;
@@ -3380,9 +3469,20 @@
                 }
                 .btn, .no-print { display: none !important; }
                 .accordion-button::after { display: none !important; }
-                .accordion-button { pointer-events: none; padding-left: 0; font-weight: bold; color: #000 !important; background: none !important; }
-                .accordion-item { border: none; border-bottom: 1px solid #eee; page-break-inside: avoid; }
-                img { max-width: 80% !important; page-break-inside: avoid; display: block; margin: 10px 0; }
+                .accordion-button {
+                    pointer-events: none;
+                    position: static !important;
+                    display: block !important;
+                    width: 100% !important;
+                    padding: 8pt 0 !important;
+                    font-weight: 700 !important;
+                    color: #111 !important;
+                    background: none !important;
+                    box-shadow: none !important;
+                    line-height: 1.45 !important;
+                }
+                .accordion-item { border: none; border-bottom: 1px solid #e5e7eb; page-break-inside: avoid; }
+                img { max-width: 100% !important; page-break-inside: avoid; display: block; margin: 10pt 0; }
                 * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
             }
 
@@ -3504,6 +3604,14 @@
                 margin-left: 0 !important;
                 padding-left: 0 !important;
             }
+
+            /* 分析锚点卡片（聊天流执行记录下方，Artifacts 式跳转工作台） */
+            .analysis-artifact-card {
+                border-left: 3px solid #4d6bfe !important;
+                background: linear-gradient(135deg, #f8fbff 0%, #ffffff 100%);
+            }
+            .analysis-artifact-card .card-body h6 { font-weight: 600; }
+            .analysis-artifact-card .analysis-artifact-toggle-btn { white-space: nowrap; flex-shrink: 0; }
 
             /* 任务3：数据资产附件标签（输入框上方） */
             .asset-tags-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; min-height: 0; }
@@ -4117,7 +4225,94 @@
             .file-card .file-card-meta { font-size: 12px; color: #8f959e; }
             .file-card .file-card-remove { margin-left: auto; cursor: pointer; color: #8f959e; padding: 2px; }
             .file-card .file-card-remove:hover { color: #e53935; }
-            #dropOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.95); z-index: 999; display: none; flex-direction: column; justify-content: center; align-items: center; color: var(--primary-color); }
+            /* 输入区局部拖拽引导：外部文件 + 右侧边栏内部拖入（锚定 #chatInputPanel） */
+            #chatInputPanel #dropOverlay.input-drop-overlay,
+            #dropOverlay.universal-drag-overlay,
+            .universal-drag-overlay.input-drop-overlay {
+                position: absolute;
+                inset: 0;
+                width: auto;
+                height: auto;
+                background-color: rgba(13, 110, 253, 0.06) !important;
+                border: 2px dashed #0d6efd !important;
+                box-sizing: border-box;
+                z-index: 30;
+                display: none;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                color: #0d6efd;
+                pointer-events: none;
+                text-align: center;
+                padding: 12px 16px;
+                border-radius: 12px;
+                transition: opacity 0.2s ease, border-color 0.2s ease;
+            }
+            #dropOverlay .drop-overlay__icon {
+                font-size: 28px;
+                margin-bottom: 6px;
+                line-height: 1;
+            }
+            #dropOverlay .drop-overlay__title {
+                font-size: 15px;
+                font-weight: 600;
+                margin: 0;
+                line-height: 1.35;
+            }
+            #dropOverlay .drop-overlay__subtitle {
+                font-size: 12px;
+                max-width: 420px;
+            }
+            #dropOverlay.input-drop-overlay.active-show,
+            #dropOverlay.universal-drag-overlay.active-show {
+                display: flex;
+            }
+            /* 内部/外部拖拽：全视口蓝色虚线引导（与桌面拖入一致） */
+            #dropOverlay.universal-drag-overlay.universal-drag-overlay--viewport {
+                position: fixed !important;
+                inset: 0 !important;
+                width: 100vw !important;
+                height: 100vh !important;
+                z-index: 10050 !important;
+                border-radius: 0 !important;
+                background-color: rgba(13, 110, 253, 0.08) !important;
+                border: 3px dashed #0d6efd !important;
+                pointer-events: none;
+            }
+            #dropOverlay.universal-drag-overlay--viewport .drop-overlay__icon {
+                font-size: 42px;
+                margin-bottom: 12px;
+            }
+            #dropOverlay.universal-drag-overlay--viewport .drop-overlay__title {
+                font-size: 18px;
+            }
+            .drop-overlay-home-anchor {
+                display: none !important;
+            }
+            /* 右栏三槽位：历史/直播统一，禁止 display:none 与手风琴灰框污染专家区 */
+            .omics-report-three-slots-shell .omics-report-slot {
+                display: block !important;
+            }
+            #omics-expert-report-slot .omics-expert-report-card {
+                overflow: hidden;
+            }
+            #omics-expert-report-slot .omics-expert-report-card > .card-header.bg-primary {
+                background-color: var(--bs-primary, #0d6efd) !important;
+                color: #fff !important;
+                border-bottom: none;
+            }
+            #omics-expert-report-slot .omics-expert-report-card > .card-header.bg-primary h5 {
+                color: #fff !important;
+            }
+            #omics-expert-report-slot .omics-expert-report-card > .card-body {
+                background: #fff;
+            }
+            #omics-expert-report-slot:not(:empty) .accordion-item,
+            #omics-expert-report-slot:not(:empty) .checklist-container {
+                border: none;
+                box-shadow: none;
+                background: transparent;
+            }
             
             /* 灯箱 */
             .lightbox { display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.9); justify-content: center; align-items: center; }
@@ -4478,23 +4673,26 @@
                 .workspace-print-header {
                     display: block !important;
                     visibility: visible !important;
+                    position: static !important;
                     page-break-after: avoid;
                     break-after: avoid-page;
-                    margin: 0 0 14pt 0 !important;
-                    padding: 0 0 12pt 0 !important;
+                    margin: 0 0 12pt 0 !important;
+                    padding: 0 0 10pt 0 !important;
                     border-bottom: 2px solid #1f2937 !important;
+                    line-height: 1.5 !important;
                 }
                 .workspace-print-header__title {
+                    display: block !important;
                     font-size: 20pt !important;
                     font-weight: 700 !important;
                     color: #111 !important;
-                    margin: 0 0 8pt 0 !important;
+                    margin: 0 0 0 !important;
+                    padding: 0 !important;
+                    line-height: 1.35 !important;
                 }
+                /* 法定时间在 omics-audit-trail-bar，避免与封面重复叠字 */
                 .workspace-print-header__meta {
-                    display: flex !important;
-                    justify-content: space-between !important;
-                    font-size: 9pt !important;
-                    color: #4b5563 !important;
+                    display: none !important;
                 }
                 img,
                 table,
@@ -4553,29 +4751,54 @@
     max-width: 100%;
 }
 
-/* ================= 拖拽引导：底部输入区（桌面 / 侧栏文件拖拽全局可见） ================= */
-#input-wrapper-bottom.drag-active {
-    position: relative;
-    z-index: 10060 !important;
-    isolation: isolate;
-    border-radius: 12px;
+/* 组学步骤 Markdown：CLI 日志折叠 + 居中图表 */
+.markdown-body details.omics-cli-logs,
+.markdown-body details {
+    margin: 0.75rem 0 1rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
 }
-#input-wrapper-bottom.drag-active::after {
-    content: '➕ 拖拽文件至此处添加';
-    position: absolute;
-    inset: 0;
-    z-index: 9999 !important;
-    border-radius: inherit;
-    background: rgba(59, 130, 246, 0.15) !important;
-    border: 3px dashed #3b82f6 !important;
-    box-sizing: border-box;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px;
-    font-weight: 700;
-    color: #1d4ed8;
-    pointer-events: none;
+.markdown-body details > summary {
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: #475569;
+    list-style: none;
+}
+.markdown-body details > summary::-webkit-details-marker {
+    display: none;
+}
+.markdown-body details[open] > summary {
+    margin-bottom: 0.5rem;
+    color: #1e40af;
+}
+.markdown-body details pre {
+    font-size: 11px;
+    max-height: 280px;
+    overflow: auto;
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: 6px;
+    padding: 0.65rem;
+}
+.markdown-body div[align="center"] img.report-image,
+.markdown-body img[src^="data:image/png;base64"] {
+    max-width: 100%;
+    height: auto;
+    margin: 0.5rem auto;
+    border-radius: 6px;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+
+/* 拖拽引导：默认锚定 #chatInputPanel；激活 .universal-drag-overlay--viewport 时为全屏遮罩 */
+.file-list-item.sidebar-draggable-file {
+    cursor: grab;
+}
+.file-list-item.sidebar-draggable-file.is-dragging {
+    opacity: 0.55;
+    cursor: grabbing;
 }
 
 /* ================= Toast / 弹窗 / 告警：长路径强制换行 ================= */
@@ -4761,4 +4984,23 @@
 #docCenterModal .doc-center-loading {
     color: #64748b;
     font-size: 14px;
+}
+
+/* 历史侧栏：后台 running 会话动态指示 */
+.session-running-indicator {
+    flex-shrink: 0;
+    vertical-align: middle;
+}
+.sidebar-session-item .item-text,
+.full-history-item .item-title {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 2px;
+    min-width: 0;
+}
+.file-source-badge {
+    flex-shrink: 0;
+    font-weight: 600;
+    letter-spacing: 0.02em;
 }

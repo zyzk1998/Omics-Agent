@@ -97,9 +97,15 @@ def _preset_for_tool(tool_id: str) -> Dict[str, Any]:
     return {"urls": [IMG_DNA_HELIX, IMG_VOLCANO], "synthetic": "generic"}
 
 
-def enrich_omics_visual_urls(tool_id: Optional[str], existing: Optional[Sequence[str]] = None) -> List[str]:
+def enrich_omics_visual_urls(
+    tool_id: Optional[str],
+    existing: Optional[Sequence[str]] = None,
+    *,
+    markdown: str = "",
+) -> List[str]:
     """
     合并：调用方已有 URL + 工具预设公开图 + matplotlib 合成图（兜底绝不返回空列表）。
+    若 Markdown 已内嵌 Base64 业务图，则不再追加 synthetic 占位图，避免与步骤语义冲突。
     """
     from .omics_visual_synthetic import synthetic_png_data_uri
 
@@ -108,15 +114,18 @@ def enrich_omics_visual_urls(tool_id: Optional[str], existing: Optional[Sequence
     preset = _preset_for_tool(tid)
     urls = list(preset.get("urls") or [])
     syn_kind = str(preset.get("synthetic") or "generic")
+    md_blob = (markdown or "").strip()
+    has_embedded_chart = "data:image/png;base64," in md_blob
 
     out: List[str] = []
     for u in raw + urls:
         if u not in out:
             out.append(u)
-    seed = abs(hash(tid)) % (2**31) if tid else 42
-    syn = synthetic_png_data_uri(syn_kind, seed=seed)
-    if syn and syn not in out:
-        out.append(syn)
+    if not has_embedded_chart:
+        seed = abs(hash(tid)) % (2**31) if tid else 42
+        syn = synthetic_png_data_uri(syn_kind, seed=seed)
+        if syn and syn not in out:
+            out.append(syn)
     if len(out) < 2:
         out.extend([IMG_DNA_HELIX, IMG_VOLCANO])
     # 去重保序，限制长度避免 SSE 过大
@@ -199,7 +208,7 @@ def attach_visual_contract(
     """将可视化字段写入工具返回 dict；若传入 tool_id 或 result['tool_id']，自动 enrich image_urls。"""
     result["markdown"] = markdown
     tid = tool_id or (result.get("tool_id") if isinstance(result.get("tool_id"), str) else None)
-    result["image_urls"] = enrich_omics_visual_urls(tid, image_urls)
+    result["image_urls"] = enrich_omics_visual_urls(tid, image_urls, markdown=markdown)
     if tid and "tool_id" not in result:
         result["tool_id"] = tid
     if table_data is not None:

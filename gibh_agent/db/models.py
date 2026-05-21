@@ -36,11 +36,19 @@ class Session(Base):
     id = Column(String(64), primary_key=True)  # 前端生成的会话 UUID
     owner_id = Column(String(255), nullable=False, index=True)  # username 或 guest_xxx
     title = Column(String(512), nullable=True)
+    # 主页面 Composer 草稿：{ input_draft_text, input_draft_attachments }，与 execution_snapshot 同键名
+    composer_draft = Column(JSON, nullable=True)
+    # 会话执行状态：idle | running | completed | failed（后台任务与 SSE 重连）
+    status = Column(String(32), nullable=False, default="idle")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 class Message(Base):
-    """消息记录表：content 为 JSON，兼容前端 steps_details 等复杂嵌套结构。"""
+    """消息记录表：content 为 JSON，兼容前端 steps_details 等复杂嵌套结构。
+
+    时光机全量执行快照写入 content.execution_snapshot（steps_details 含 step_result.markdown/data），
+    与 content.state_snapshot 双写；无需单独 ALTER 表（JSON 列容量由库配置决定）。
+    """
 
     __tablename__ = "messages"
 

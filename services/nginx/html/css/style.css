@@ -819,11 +819,28 @@
         size: auto;
     }
 
-    /* 1) 覆盖 main.css 中 body * { visibility:hidden }，避免整页空白 */
+    /* 1) 全页可见；禁止旧版「仅报告区 absolute 叠层」 */
     body *,
     .unified-report-container,
     .unified-report-container * {
         visibility: visible !important;
+    }
+
+    .unified-report-container,
+    .omics-report-three-slots-shell,
+    .execution-instance,
+    .execution-instance .accordion-collapse,
+    .execution-instance .accordion-body,
+    .omics-report-slot,
+    #omics-audit-trail-slot,
+    #omics-data-diagnosis-slot,
+    #omics-execution-details-slot,
+    #omics-expert-report-slot {
+        position: static !important;
+        left: auto !important;
+        top: auto !important;
+        float: none !important;
+        transform: none !important;
     }
 
     /* 2) 解除 #app / body 的视口锁与 flex 窒息 */
@@ -905,16 +922,151 @@
         display: none !important;
     }
 
-    /* 打印封面：与 main.css .workspace-print-header 一致，保证首屏即有正式标题 */
+    /* 打印封面：正式标题 + 审计栏（时间/ID 仅保留审计栏一份） */
     .workspace-print-header {
         display: block !important;
         visibility: visible !important;
+        position: static !important;
+        margin: 0 0 12pt 0 !important;
+        padding: 0 0 10pt 0 !important;
+        border-bottom: 2px solid #1f2937 !important;
+        page-break-after: avoid;
+        break-after: avoid-page;
+        line-height: 1.5 !important;
+    }
+
+    .workspace-print-header__title {
+        display: block !important;
+        font-size: 20pt !important;
+        font-weight: 700 !important;
+        color: #111 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        line-height: 1.35 !important;
+    }
+
+    .workspace-print-header__meta {
+        display: none !important;
     }
 
     #active-workspace-content {
         margin-top: 0 !important;
         padding-top: 0 !important;
         page-break-before: auto;
+    }
+
+    /* 首屏：审计追踪 + 诊断/执行区块 — 块级文档流、统一行距 */
+    .omics-audit-trail-bar {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 6pt !important;
+        width: 100% !important;
+        margin: 0 0 12pt 0 !important;
+        padding: 10pt 12pt !important;
+        font-size: 9.5pt !important;
+        line-height: 1.55 !important;
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
+
+    .omics-audit-trail-bar span {
+        display: block !important;
+        white-space: normal !important;
+        width: 100% !important;
+        line-height: 1.55 !important;
+    }
+
+    .omics-report-three-slots-shell {
+        margin-top: 0 !important;
+        padding: 0 !important;
+    }
+
+    .omics-report-three-slots-shell .omics-report-slot {
+        display: block !important;
+        margin: 0 0 14pt 0 !important;
+        padding: 0 !important;
+        line-height: 1.55 !important;
+        page-break-inside: auto;
+    }
+
+    #omics-data-diagnosis-slot h6,
+    .report-content-box + h6,
+    .omics-diagnosis-body h6 {
+        display: block !important;
+        position: static !important;
+        margin: 0 0 8pt 0 !important;
+        padding: 0 !important;
+        font-size: 12pt !important;
+        font-weight: 600 !important;
+        line-height: 1.45 !important;
+        color: #374151 !important;
+    }
+
+    #omics-data-diagnosis-slot .text-success,
+    #omics-data-diagnosis-slot p.small {
+        display: block !important;
+        margin: 0 0 10pt 0 !important;
+        line-height: 1.55 !important;
+        font-size: 10pt !important;
+    }
+
+    .report-content-box.omics-diagnosis-body {
+        line-height: 1.65 !important;
+        padding: 12pt 14pt !important;
+        page-break-inside: auto;
+    }
+
+    .report-content-box.omics-diagnosis-body p,
+    .report-content-box.omics-diagnosis-body li {
+        margin-bottom: 6pt !important;
+        line-height: 1.65 !important;
+    }
+
+    .execution-instance {
+        display: block !important;
+        margin: 0 0 16pt 0 !important;
+        padding: 0 !important;
+        page-break-inside: auto;
+    }
+
+    .execution-instance .accordion-header {
+        position: static !important;
+        margin: 0 0 8pt 0 !important;
+    }
+
+    .execution-instance .accordion-button {
+        position: static !important;
+        display: block !important;
+        width: 100% !important;
+        padding: 6pt 0 !important;
+        margin: 0 !important;
+        font-size: 12pt !important;
+        font-weight: 700 !important;
+        line-height: 1.45 !important;
+        box-shadow: none !important;
+        background: transparent !important;
+        border: none !important;
+    }
+
+    .execution-instance .accordion-body {
+        padding: 0 0 8pt 0 !important;
+        line-height: 1.55 !important;
+    }
+
+    /* 三槽位壳层已承载正文时，隐藏手风琴内遗留的空 legacy 容器，避免首屏多余留白 */
+    .execution-instance:has(.omics-report-three-slots-shell) .accordion-body > .unified-report-container:not(.omics-report-three-slots-shell) {
+        display: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        min-height: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
+    }
+
+    .execution-instance:has(.omics-report-three-slots-shell) .accordion-body {
+        padding: 0 !important;
+        min-height: 0 !important;
     }
 
     #active-workspace-content,

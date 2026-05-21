@@ -49,13 +49,21 @@ def preprocess_metabolite_data(
         # 读取数据
         df = pd.read_csv(file_path, index_col=0)
         
-        # 🔥 CRITICAL FIX: 保留分组列（非数值列，但排除索引列）
-        # 检测可能的分组列（非数值列，唯一值数量在2-100之间）
+        # 🔥 CRITICAL FIX: 保留分组列（非数值列或低基数数值列）
         non_numeric_cols = df.select_dtypes(exclude=[np.number]).columns.tolist()
+        numeric_cols_all = df.select_dtypes(include=[np.number]).columns.tolist()
         group_cols = []
+        id_like = ("patient", "sample", "subject", "specimen", "id")
         for col in non_numeric_cols:
             unique_count = df[col].nunique()
-            if 2 <= unique_count <= 100:  # 合理的分组列应该有2-100个唯一值
+            cn = str(col).lower().replace(" ", "").replace("_", "")
+            if any(tok in cn for tok in id_like) and unique_count > max(10, len(df) // 3):
+                continue
+            if 2 <= unique_count <= 100:
+                group_cols.append(col)
+        for col in numeric_cols_all:
+            unique_count = df[col].nunique()
+            if 2 <= unique_count <= 5:
                 group_cols.append(col)
         
         # 提取数值列（代谢物列）

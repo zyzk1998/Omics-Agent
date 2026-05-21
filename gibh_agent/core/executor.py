@@ -286,6 +286,48 @@ class WorkflowExecutor:
             return p
         return f"/results/{p}"
 
+    def _enrich_step_media_payload(self, result_data: Dict[str, Any]) -> Dict[str, Any]:
+        """合并工具返回的图片/表格字段，供前端手风琴渲染（避免仅有 CSV 无图）。"""
+        if not isinstance(result_data, dict):
+            return result_data
+        imgs: List[Dict[str, str]] = []
+        seen_paths: set = set()
+        existing = result_data.get("images") or []
+        if isinstance(existing, list):
+            for item in existing:
+                if isinstance(item, dict) and item.get("path"):
+                    url = self._to_results_url(str(item["path"]))
+                    if url not in seen_paths:
+                        imgs.append({"title": str(item.get("title") or "结果图"), "path": url})
+                        seen_paths.add(url)
+                elif isinstance(item, str) and item.strip():
+                    url = self._to_results_url(item)
+                    if url not in seen_paths:
+                        imgs.append({"title": "结果图", "path": url})
+                        seen_paths.add(url)
+        for key, title in (
+            ("plot_path", "结果图"),
+            ("lollipop_path", "VIP 棒棒糖图"),
+            ("clustermap_path", "差异代谢物聚类热图"),
+        ):
+            raw = result_data.get(key)
+            if raw and self._is_image_file(str(raw)):
+                url = self._to_results_url(str(raw))
+                if url not in seen_paths:
+                    imgs.append({"title": title, "path": url})
+                    seen_paths.add(url)
+        if imgs:
+            result_data["images"] = imgs
+        summ = result_data.get("summary")
+        if isinstance(summ, dict):
+            result_data.setdefault("summary_stats", summ)
+            n_sig = summ.get("significant_count", summ.get("sig_count", summ.get("n_significant")))
+            total = summ.get("total_metabolites", summ.get("n_total", "?"))
+            result_data["summary"] = (
+                f"统计完成：共 {total} 项，显著 {n_sig} 项（详见下图/表）。"
+            )
+        return result_data
+
     def _normalize_result_paths(self, payload: Any) -> Any:
         """递归规范化结果中的图片/下载链接/常见路径字段。"""
         if isinstance(payload, dict):
@@ -620,7 +662,7 @@ class WorkflowExecutor:
                 for step_id, step_result in self.step_results.items():
                     if step_id == "differential_analysis" or "differential" in step_id.lower():
                         # step_results 存储的是工具返回的原始结果
-                        if isinstance(step_result, dict):
+                        if isinstance(step_result, dict) and step_result.get("status") == "success":
                             diff_result = step_result
                             break
                 
@@ -629,6 +671,25 @@ class WorkflowExecutor:
                     logger.info(f"✅ [Executor] 自动注入 diff_results 到 visualize_volcano")
                 else:
                     logger.error(f"❌ [Executor] 无法找到 differential_analysis 结果，visualize_volcano 将失败")
+                    return {
+                        "status": "error",
+                        "step_id": step_id,
+                        "step_name": step_name,
+                        "error": "差异代谢物分析未成功完成，无法绘制火山图。请检查分组列 group_column 是否正确。",
+                        "message": f"步骤 {step_name} 执行失败：缺少差异分析结果 diff_results",
+                        "error_category": "data_issue",
+                        "user_message": "火山图依赖差异分析结果：请先确保「差异代谢物分析」步骤成功（需有效分组列，如 Muscle loss）。",
+                    }
+            dr = processed_params.get("diff_results")
+            if isinstance(dr, str) and dr.strip().startswith("<"):
+                return {
+                    "status": "error",
+                    "step_id": step_id,
+                    "step_name": step_name,
+                    "error": f"diff_results 占位符未解析: {dr}",
+                    "message": f"步骤 {step_name} 执行失败：上游差异分析无输出",
+                    "error_category": "data_issue",
+                }
             
             # 过滤掉工具不接受的参数（保留 diff_results）
             allowed_params = {"diff_results", "output_path", "fdr_threshold", "log2fc_threshold"}
@@ -809,7 +870,13 @@ class WorkflowExecutor:
                 processed_params["group_column"] = group_column_value
                 logger.warning(f"⚠️ [Executor] {tool_id} 从原始步骤数据恢复 group_column: {group_column_value}")
             
-            # 检查3: step_context 中的 file_metadata
+            # 检查3: step_context 中的 file_metadata / workflow_group_column
+            elif step_context and step_context.get("workflow_group_column"):
+                group_column_value = step_context["workflow_group_column"]
+                processed_params["group_column"] = group_column_value
+                logger.warning(
+                    f"⚠️ [Executor] {tool_id} 从 workflow_group_column 注入: {group_column_value}"
+                )
             elif step_context and step_context.get("file_metadata"):
                 semantic_map = step_context["file_metadata"].get("semantic_map", {})
                 group_cols = semantic_map.get("group_cols", [])
@@ -817,6 +884,22 @@ class WorkflowExecutor:
                     group_column_value = group_cols[0]
                     processed_params["group_column"] = group_column_value
                     logger.warning(f"⚠️ [Executor] {tool_id} 从 file_metadata 自动注入 group_column: {group_column_value}")
+
+            # 检查4: 从当前/预处理数据文件启发式检测（Planner 漏填时的最后防线）
+            if not group_column_value:
+                detect_path = processed_params.get("file_path") or (
+                    step_context.get("current_file_path") if step_context else None
+                )
+                if detect_path and isinstance(detect_path, str) and os.path.exists(detect_path):
+                    detected_group_column = self._detect_group_column_from_file(detect_path)
+                    if detected_group_column:
+                        group_column_value = detected_group_column
+                        processed_params["group_column"] = group_column_value
+                        if step_context is not None:
+                            step_context["workflow_group_column"] = detected_group_column
+                        logger.warning(
+                            f"⚠️ [Executor] {tool_id} 从数据文件自动检测 group_column: {detected_group_column}"
+                        )
             
             # 如果所有检查都失败，返回明确错误
             if not group_column_value:
@@ -2172,6 +2255,29 @@ class WorkflowExecutor:
         current_file_path = self._seed_workflow_current_path(
             assets, omics_resolved, resolved_file_paths
         )
+
+        # 代谢组：预检输入表，构建 file_metadata / workflow_group_column 供执行期注入
+        workflow_file_metadata: Optional[Dict[str, Any]] = None
+        workflow_group_column: Optional[str] = None
+        if resolved_file_paths:
+            try:
+                from .file_inspector import FileInspector
+                _inspector = FileInspector(self.upload_dir)
+                for _fp in resolved_file_paths:
+                    if not str(_fp).lower().endswith(".csv"):
+                        continue
+                    _fm = _inspector.inspect_file(_fp)
+                    if _fm.get("status") != "success":
+                        continue
+                    workflow_file_metadata = _fm
+                    _gc = ( _fm.get("semantic_map") or {}).get("group_cols") or []
+                    if _gc:
+                        workflow_group_column = _gc[0]
+                    elif not workflow_group_column:
+                        workflow_group_column = self._detect_group_column_from_file(_fp)
+                    break
+            except Exception as _pre_e:
+                logger.warning("⚠️ [Executor] 工作流预检 file_metadata 失败: %s", _pre_e)
         
         # 🔥 TASK 1 FIX: 检测输入文件类型，如果是10x格式，标记需要跳过cellranger步骤
         is_10x_input = bool(
@@ -2186,9 +2292,11 @@ class WorkflowExecutor:
         
         # 执行每个步骤
         for i, step in enumerate(steps, 1):
-            step_id = step.get("step_id", f"step{i}")
+            step_id = step.get("step_id") or step.get("id") or f"step{i}"
+            tool_id = step.get("tool_id") or step.get("id") or step_id
+            step["step_id"] = step_id
+            step["tool_id"] = tool_id
             step_name = step.get("name", step.get("step_name", step_id))
-            tool_id = step.get("tool_id", step_id)
             params = step.get("params", {})
             
             # 🔥 前端勾选状态：用户取消勾选的步骤不执行，仅持久化到快照
@@ -2336,7 +2444,16 @@ class WorkflowExecutor:
                 "steps_order": steps_order,
                 "enabled_mcps": getattr(self, "_enabled_mcps", None) or [],
                 "tool_log_sink": getattr(self, "_tool_log_sink", None),
+                "file_metadata": workflow_file_metadata,
+                "workflow_group_column": workflow_group_column,
             }
+            # 代谢组监督步骤：Planner 漏填 group_column / label_col 时预注入
+            if workflow_group_column:
+                if tool_id in ("metabolomics_plsda", "differential_analysis", "metabolomics_pathway_enrichment"):
+                    if not params.get("group_column"):
+                        params["group_column"] = workflow_group_column
+                if tool_id == "metabo_model_comparison" and not params.get("label_col"):
+                    params["label_col"] = workflow_group_column
             
             # 🔥 参数映射：签名需要 adata_path 且槽位空时，将 file_path 迁入（常见于单细胞工具）
             if tool_func_exec:
@@ -2430,6 +2547,9 @@ class WorkflowExecutor:
             tool_start = time.time()
             step_result = self.execute_step(step, step_context)
             logger.info("[Profiler] 工具[%s] 执行耗时: %.2fs", step_name, time.time() - tool_start)
+
+            if step_result.get("status") == "success" and step_context.get("workflow_group_column"):
+                workflow_group_column = step_context["workflow_group_column"]
             
             # 🔥 TASK 3 FIX: 更新 current_file_path 供下一个步骤使用
             # 对于 scRNA-seq 工具，所有产生 output_h5ad 的步骤都应该更新 current_file_path
@@ -2545,6 +2665,7 @@ class WorkflowExecutor:
                     result_data["images"] = [
                         p.get("path") if isinstance(p, dict) else p for p in rp_images
                     ]
+                result_data = self._enrich_step_media_payload(result_data)
             _tb = step_result.get("traceback", "") or step_result.get("debug_info", "")
             _display_summary = ""
             if isinstance(result_data, dict):
