@@ -51,6 +51,36 @@ ASK_HUMAN_APPENDIX = r"""
 """
 
 
+def _load_supplement_sections() -> str:
+    """嵌入 Registry 统计 + 磐石生物信息对照表（由独立脚本生成）。"""
+    try:
+        from scripts.generate_bioinformatics_tools_matrix_md import (  # noqa: WPS433
+            build_matrix_rows,
+            render_bio_matrix_markdown,
+            render_registry_category_table,
+        )
+    except ImportError:
+        gen = Path(__file__).resolve().parent / "generate_bioinformatics_tools_matrix_md.py"
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("bio_matrix_gen", gen)
+        if spec is None or spec.loader is None:
+            return ""
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        build_matrix_rows = mod.build_matrix_rows
+        render_bio_matrix_markdown = mod.render_bio_matrix_markdown
+        render_registry_category_table = mod.render_registry_category_table
+
+    rows = build_matrix_rows(exclude_implemented=True)
+    return (
+        "---\n\n"
+        + render_registry_category_table()
+        + "\n"
+        + render_bio_matrix_markdown(rows, exclude_implemented=True)
+    )
+
+
 def main() -> None:
     tools_json = registry.get_all_tools_json()
     n_reg = len(tools_json)
@@ -82,6 +112,10 @@ def main() -> None:
         f"**Registry 工具总数：** {n_reg}",
         f"**附录 MCP 清单条数（HPC+工作站）：** {n_mcp}",
         "",
+        "5. **生物信息分析工具对照表（待对接）**：见下文 [生物信息分析工具（磐石 ToolChain 对照表 · 待对接）](#生物信息分析工具磐石-toolchain-对照表--待对接)；"
+        "元数据刷新见 `scripts/refresh_scienceone_toolchain_names.py`，与技能广场种子 `gibh_agent/db/seed_skills.py` 对齐。",
+        "",
+        _load_supplement_sections(),
         "---",
         "",
         "## 完整 JSON 数组（Registry）",

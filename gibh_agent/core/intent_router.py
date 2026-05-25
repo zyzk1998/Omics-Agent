@@ -36,17 +36,62 @@ class IntentRegistryEntry(BaseModel):
     description: str = ""
     route_kind: IntentRouteKind = IntentRouteKind.workflow
     target_domain: Optional[str] = None
+    required_parameters: List[str] = Field(default_factory=list)
 
 
 class IntentRouterResult(BaseModel):
-    """LLM 意图探针输出（与产品约定的三种状态对齐）。"""
+    """LLM 意图探针输出（exact | missing_param | clarify | chitchat）。"""
 
-    status: str  # exact | clarify | chitchat
+    status: str  # exact | missing_param | clarify | chitchat
     target_id: Optional[str] = None
     question: Optional[str] = None
     candidates: List[Dict[str, str]] = Field(default_factory=list)
     rationale_short: str = ""
 
+
+# 技能必填参数（注入 LLM 注册表，供 MISSING_PARAM 槽位校验）
+_SKILL_REQUIRED_PARAMETERS: Dict[str, List[str]] = {
+    "lipinski_druglikeness": [
+        "目标化合物：SMILES 结构式、可唯一映射的常用药物/小分子名称，或已挂载的 SMILES 文本文件",
+    ],
+    "drug_similarity_search": [
+        "目标化合物：SMILES 结构式、可唯一映射的化合物俗名/药物名，或已挂载的分子/SMILES 文件",
+    ],
+    "bepipred3_epitope_prediction": [
+        "蛋白/抗原氨基酸序列（FASTA 文本或 sequence_or_path 文件）",
+    ],
+}
+
+# 工作流必填参数（按注册表 id）
+_WORKFLOW_REQUIRED_PARAMETERS: Dict[str, List[str]] = {
+    "genomics_pipeline": [
+        "测序原始数据或比对结果（如 FASTQ、BAM、VCF 等）的文件路径或已上传挂载",
+    ],
+    "rna_scrna": [
+        "表达矩阵或单细胞 count 矩阵目录（matrix_dir）或已上传表达数据文件",
+    ],
+    "metabolomics": [
+        "代谢组原始数据或特征表文件/目录（input_dir 或 file_path）",
+    ],
+    "spatial_transcriptomics": [
+        "空间转录组表达矩阵与坐标信息（matrix_dir 或配套挂载文件）",
+    ],
+    "radiomics": [
+        "医学影像文件对（image_path 与 mask_path，或 DICOM/NIfTI 挂载）",
+    ],
+    "proteomics": [
+        "蛋白组质谱原始数据或鉴定结果表（file_path / input_dir）",
+    ],
+    "epigenomics": [
+        "表观组测序数据（如 BAM、bed、bigWig 等）文件或目录",
+    ],
+    "sted_ec_trajectory": [
+        "单细胞表达矩阵与细胞注释（matrix_dir 或等效挂载）",
+    ],
+    "spatiotemporal_dynamics": [
+        "时空动力学输入矩阵或 h5ad 等挂载文件",
+    ],
+}
 
 # 精选生物医药单点技能（Registry tool_id → 展示名）
 _CURATED_SKILL_ENTRIES: List[IntentRegistryEntry] = [
@@ -56,13 +101,15 @@ _CURATED_SKILL_ENTRIES: List[IntentRegistryEntry] = [
         aliases=["五规则", "类药性", "口服小分子", "lipinski", "成药潜势"],
         description="基于 Lipinski 五规则对 SMILES 做口服小分子成药潜势快筛（本地计算）。",
         route_kind=IntentRouteKind.skill,
+        required_parameters=_SKILL_REQUIRED_PARAMETERS["lipinski_druglikeness"],
     ),
     IntentRegistryEntry(
         id="drug_similarity_search",
         name="药物结构相似性搜索",
-        aliases=["分子相似", "pubchem", "chembl", "结构类似物", "tanimoto"],
+        aliases=["分子相似", "pubchem", "chembl", "结构类似物", "tanimoto", "药物相似性评估"],
         description="在 PubChem/ChEMBL 等库检索结构相似化合物并生成 HTML 报告（需联网）。",
         route_kind=IntentRouteKind.skill,
+        required_parameters=_SKILL_REQUIRED_PARAMETERS["drug_similarity_search"],
     ),
     IntentRegistryEntry(
         id="bepipred3_epitope_prediction",
@@ -70,6 +117,7 @@ _CURATED_SKILL_ENTRIES: List[IntentRegistryEntry] = [
         aliases=["表位", "抗体表位", "bepipred", "免疫表位"],
         description="基于 BepiPred-3 对蛋白序列进行线性 B 细胞表位预测。",
         route_kind=IntentRouteKind.skill,
+        required_parameters=_SKILL_REQUIRED_PARAMETERS["bepipred3_epitope_prediction"],
     ),
 ]
 
@@ -120,6 +168,9 @@ def _workflow_registry_entries() -> List[IntentRegistryEntry]:
                 reg_id, aliases = lid, [dk.lower()]
 
             td = _WORKFLOW_TARGET_DOMAIN.get(reg_id) or dk.lower()
+            req_params = _WORKFLOW_REQUIRED_PARAMETERS.get(reg_id) or [
+                "与本流程匹配的组学/影像原始数据文件或目录（须已上传挂载或给出可解析路径）",
+            ]
             entries.append(
                 IntentRegistryEntry(
                     id=reg_id,
@@ -130,6 +181,7 @@ def _workflow_registry_entries() -> List[IntentRegistryEntry]:
                     description=(desc or "").strip()[:400],
                     route_kind=IntentRouteKind.workflow,
                     target_domain=td,
+                    required_parameters=req_params,
                 )
             )
     except Exception as e:
@@ -160,7 +212,7 @@ def registry_entry_by_id(entry_id: str) -> Optional[IntentRegistryEntry]:
 
 
 def build_master_intent_router_system_prompt(registry: List[IntentRegistryEntry]) -> str:
-    """向 LLM 注入工具注册表并规定 JSON 输出契约。"""
+    """领域无关的全局 ReAct 意图 Prompt：注册表注入 + 四态 JSON + 动态缺参示例。"""
     compact = [
         {
             "id": e.id,
@@ -168,54 +220,126 @@ def build_master_intent_router_system_prompt(registry: List[IntentRegistryEntry]
             "aliases": e.aliases[:8],
             "description": (e.description or "")[:200],
             "route_kind": e.route_kind.value,
+            "required_parameters": e.required_parameters[:6],
         }
         for e in registry
     ]
     registry_json = json.dumps(compact, ensure_ascii=False, indent=2)
-    return f"""你是 Omics Agent 的「全局意图路由网关」。用户将用自然语言描述分析需求（含专业名词、模糊表述或白话）。
-你只能根据下方【工具/技能注册表】做意图分类，并输出**一个** JSON 对象（禁止 Markdown 围栏、禁止解释文字）。
+    return f"""你是 Omics Agent 的「全局意图泛化路由引擎」（Universal ReAct Router）。你的唯一依据是下方【工具/技能注册表】及用户上下文（message、has_uploaded_files、conversation_history）。
 
-【工具/技能注册表】
+ReAct 流程（内部完成，禁止输出思考过程）：(1) 解析用户要做什么；(2) 在注册表中**指哪打哪**匹配至多一个执行目标；(3) 按 required_parameters 判断槽位是否齐备；(4) 输出**一个** JSON（禁止 Markdown 围栏与多余字段）。
+
+【工具/技能注册表 — 每项含 required_parameters】
 {registry_json}
 
-【输出契约 — 三选一，键名必须严格一致】
+【输出契约 — 纯 JSON，四态之一】
 
-1) 极大概率唯一匹配（EXACT_MATCH）：
-{{"status":"exact","target_id":"<注册表 id>","rationale_short":"<一句中文理由>"}}
+1) EXACT — 已唯一命中注册表 id，且 required_parameters 在**当前句、上传标记、或对话历史**中可执行（含经知识映射后的等效参数）：
+{{"status":"exact","target_id":"<注册表 id>","rationale_short":"<≤40字>"}}
 
-2) 匹配多个或意图模糊（AMBIGUOUS）：
-{{"status":"clarify","question":"<面向用户的中文澄清问句>","candidates":[{{"id":"<id>","name":"<展示名>"}},...],"rationale_short":"<理由>"}}
-- candidates 必须从注册表中选取 2～5 个最相关项，id/name 与注册表一致。
+2) MISSING_PARAM — 已唯一命中 id，但**完全**不足以启动该工具（无文件、无路径、无可映射实体、无格式正确的输入）：
+{{"status":"missing_param","target_id":"<注册表 id>","question":"<专业且友好的中文追问>","candidates":[{{"id":"<必须=target_id>","name":"<动态示例1>","type":"<skill|workflow>"}},{{"id":"<target_id>","name":"<动态示例2>","type":"..."}},...],"rationale_short":"<≤40字>"}}
+- **必须**输出 question + **2～3 个** candidates；candidates **只能**由你根据**当前 target_id 的 required_parameters 与 description 动态撰写**，禁止照搬无关领域示例。
+- 每个 candidate.id **必须等于** target_id；name 为可点击短句（如化合物工具可用「以 <小分子俗名> 为例」；基因工具可用「以 <基因符号> 序列为例」；组学流程可用「使用内置演示数据集」「查看输入格式要求」等——须与**该工具**一致）。
+- 若用户已给出可唯一映射的常识实体 → **禁止** missing_param，应 exact。
 
-3) 与平台工具无关的闲聊、百科、天气、写代码示例、打招呼（CHITCHAT）：
-{{"status":"chitchat","rationale_short":"<理由>"}}
+3) CLARIFY — 合理命中 ≥2 个注册表 id，用户未明确择一：
+{{"status":"clarify","question":"<澄清问句>","candidates":[{{"id":"<注册表 id>","name":"<展示名>"}},...],"rationale_short":"<≤40字>"}}
+- candidates 2～5 个，id 均来自注册表。
 
-【判定规则 — 总原则】
-- **宁可 clarify，不可误 exact**：只要合理对应注册表中 **≥2 个** id，且用户未明确点名某一流程/工具，必须判 clarify，禁止 exact。
-- 仅当用户**明确且唯一**指向某一注册表 id（或无可争议的单一域，如「跑 Lipinski 五规则筛查」）才判 exact。
-- 仅概念问答（如「什么是 WGS」「科普一下转录组」）无「帮我跑/分析我的数据」执行诉求：chitchat。
-- 禁止编造注册表外的 id；candidates 的 id 必须来自注册表。
-- rationale_short 控制在约 40 字以内。
+4) CHITCHAT / 通用文件处理（GENERAL_QA）— 下列情形**必须** chitchat，**禁止** exact 到任何组学 workflow 或生信 skill：
+- (a) 纯闲聊、百科、写作润色、翻译、找代码 Bug、总结普通文档等**无**注册表工具执行诉求；
+- (b) 用户挂载的是**通用**文本/代码/表格（.txt/.md/.py/.csv 等）且需求为「总结」「翻译」「解释」「改错」「写文章」等**非**专业生信分析 —— 一律 chitchat，**不得**因 has_uploaded_files=true 就拉起 genomics/RNA/代谢等工作流；
+- (c) 需求**超出**注册表能力（如分子对接、AlphaFold、未列出的专有软件），须委婉说明当前平台不支持，**禁止**编造 target_id。
+{{"status":"chitchat","rationale_short":"<说明不支持、通用问答或转为科普>"}}
 
-【必须判 clarify 的典型模糊模式（非 exhaustive）】
-- **药物/化合物**：「评估/分析一下这个化合物/小分子/药物」但未区分类药性(Lipinski) vs 结构相似检索 → candidates 含 lipinski_druglikeness 与 drug_similarity_search。
-- **组学泛称**：「跑个组学/做组学分析/上机组学」未指明基因组/转录/蛋白/代谢/表观/空间 → candidates 至少含 genomics_pipeline、rna_scrna、metabolomics、proteomics 中多项。
-- **变异/测序文件**：「BAM/VCF/FASTQ + 找突变/变异」未指明胚系 WGS、RNA、表观或蛋白层面 → candidates 含 genomics_pipeline，并搭配 rna_scrna 或 epigenomics 等合理备选项。
-- **转录/表达**：「测序下机了想分析一下」未说明 bulk RNA、单细胞还是空间 → candidates 含 rna_scrna 与 spatial_transcriptomics（及/或 metabolomics）。
-- **影像/图像**：「医学图像/CT/MRI/病理切片」未说明影像组学特征 vs 空间组学 → candidates 含 radiomics 与 spatial_transcriptomics。
-- **蛋白/免疫**：「蛋白序列分析一下」可能为表位预测或蛋白组流程 → candidates 含 bepipred3_epitope_prediction 与 proteomics。
-- **细胞/轨迹**：「细胞运动/轨迹」可能 STED_EC 或时空动力学 → candidates 含 sted_ec_trajectory 与 spatiotemporal_dynamics。
-- **代谢**：「质谱数据想看一下」未指明靶向/非靶向代谢组 → 若仅对应 metabolomics 一项可 exact；若同时像蛋白组则 clarify（metabolomics + proteomics）。
+【全局知识映射与参数转换原则 (Universal Knowledge Mapping)】
+注册表覆盖组学流程、小分子/蛋白序列技能等；各工具 required_parameters 可能要求 FASTA、SMILES、表达矩阵路径、影像文件对等严格格式。
+1. **智能推断**：用户提供常识性自然语言实体（化合物俗名、基因符号如 TP53、蛋白名、细胞类型、疾病语境下的标准分析对象等）时，用生物医学常识判断能否**唯一**映射到该工具所需输入。能映射 → 视为参数已齐备 → exact；**不得**在已可映射时仍索要底层格式。
+2. **拒绝幻觉**：target_id、candidates[].id **必须**来自注册表；禁止为用户未提及的数据编造具体 SMILES/突变/文件路径并 exact；禁止将无关工具强行关联（节外生枝）。
+3. **指哪打哪**：命中工具后不得改判无关 id；仅用户明确更换分析类型或 clarify 选型后可切换。
 
-【禁止误判】
-- 上述模糊模式**禁止**判 chitchat（用户有执行/analysis 诉求）。
-- 上述模糊模式**禁止**只返回 1 个 candidate（必须 2～5 个）。
+【MISSING_PARAM 动态泛化要求】
+question 须说明该工具**缺什么**（对照 required_parameters）。candidates 的 name 须是**该工具领域**的一键示例（由你生成，非固定模板）：
+- 小分子/化合物类工具 → 可选不同俗名或「上传 SMILES 文件」类短句；
+- 序列/表位类 → 不同基因/蛋白示例或「粘贴 FASTA」；
+- 组学/影像 workflow → 演示数据集、路径占位、格式说明类短句。
+type 字段与注册表 route_kind 一致（skill / workflow）。
+
+【多轮上下文 — 任务延续】
+结合 conversation_history：上一轮 missing_param/clarify 后，用户补充实体、换对象、或点击式短句 → 延续同一分析意图与 target_id（除非用户明确改换）；补充后若可映射 → exact。
+
+【槽位齐备（领域无关）】
+- 结构化字符串（SMILES、FASTA、路径、矩阵目录名）已出现 → 齐备。
+- 可唯一映射的常识实体 → 齐备。
+- has_uploaded_files=true 且与当前工具数据类型相符 → 齐备。
+- 仅「分析一下」「帮我跑」无任何对象 → missing_param（动态 candidates）或 clarify（多工具）。
+
+【AMBIGUOUS 典型模式（仍须 clarify，非 exhaustive）】
+- 化合物「评估/看看」未区分类药性 vs 相似检索 → 对应注册表多项。
+- 「组学/测序/图像/蛋白/轨迹」泛称未指明流程 → 从注册表选 2～5 个最相关 workflow/skill。
+
+【总原则】
+- 超出注册表 → chitchat，不 hallucinate 工具。
+- 通用文件 + 非生信诉求 → chitchat（FILE_PROCESSING 语义），绝不误触组学流水线。
+- 多工具 → clarify；单工具缺参 → missing_param（**LLM 自生成** 2～3 candidates）；单工具够参 → exact。
+- rationale_short ≤40 字。
 """
 
 
-def _serialize_user_context(message: str, has_files: bool) -> str:
+def _extract_history_text(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, dict):
+        for key in ("text", "message", "content"):
+            val = content.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        clar = content.get("clarification")
+        if isinstance(clar, dict) and clar.get("question"):
+            return str(clar["question"]).strip()
+        try:
+            return json.dumps(content, ensure_ascii=False)[:600]
+        except Exception:
+            return str(content)[:600]
+    return str(content).strip()
+
+
+def trim_history_for_intent_router(
+    history: Optional[List[Dict[str, Any]]],
+    *,
+    max_messages: int = 10,
+) -> List[Dict[str, str]]:
+    """保留最近若干条 user/assistant 轮次，供 MasterIntentRouter 多轮推理。"""
+    trimmed: List[Dict[str, str]] = []
+    for h in history or []:
+        if not isinstance(h, dict):
+            continue
+        role = (h.get("role") or "").strip().lower()
+        if role == "agent":
+            role = "assistant"
+        if role not in ("user", "assistant"):
+            continue
+        text = _extract_history_text(h.get("content") or h.get("message"))
+        if not text:
+            continue
+        trimmed.append({"role": role, "content": text[:800]})
+    return trimmed[-max_messages:]
+
+
+def _serialize_user_context(
+    message: str,
+    has_files: bool,
+    history: Optional[List[Dict[str, Any]]] = None,
+) -> str:
     return json.dumps(
-        {"message": (message or "").strip(), "has_uploaded_files": bool(has_files)},
+        {
+            "message": (message or "").strip(),
+            "has_uploaded_files": bool(has_files),
+            "conversation_history": trim_history_for_intent_router(history),
+        },
         ensure_ascii=False,
         indent=2,
     )
@@ -278,7 +402,7 @@ def apply_intent_dispatch(
 
 
 class MasterIntentRouter:
-    """轻量 LLM 全局路由：注册表注入 + 三态 JSON 分类。"""
+    """领域无关 LLM 全局路由：注册表注入 + 历史感知 + 四态 JSON（缺参示例由 LLM 动态生成）。"""
 
     CONFIDENCE_FALLBACK_CLARIFY = "无法可靠解析意图，请选择最接近的分析类型。"
 
@@ -291,21 +415,25 @@ class MasterIntentRouter:
         message: str,
         *,
         has_files: bool = False,
+        history: Optional[List[Dict[str, Any]]] = None,
     ) -> IntentRouterResult:
         system_prompt = build_master_intent_router_system_prompt(self._registry)
-        user_blob = _serialize_user_context(message, has_files)
+        user_blob = _serialize_user_context(message, has_files, history)
         messages = [
             {"role": "system", "content": system_prompt},
             {
                 "role": "user",
-                "content": "请对以下用户输入做意图分类，仅输出 JSON：\n\n" + user_blob,
+                "content": (
+                    "请结合 conversation_history 做 ReAct 意图分类，仅输出 JSON：\n\n"
+                    + user_blob
+                ),
             },
         ]
         try:
             raw = await self._llm.achat(
                 messages,
                 temperature=0.1,
-                max_tokens=512,
+                max_tokens=768,
             )
             text = ""
             if hasattr(raw, "choices") and raw.choices:
@@ -335,30 +463,65 @@ class MasterIntentRouter:
             )
 
         status = (parsed.get("status") or "").strip().lower()
-        if status not in ("exact", "clarify", "chitchat"):
+        if status not in ("exact", "missing_param", "clarify", "chitchat"):
             status = "clarify"
+
+        parsed_candidates: List[Dict[str, str]] = []
+        for c in (parsed.get("candidates") or []):
+            if not isinstance(c, dict):
+                continue
+            cid = str(c.get("id", "")).strip()
+            cname = str(c.get("name", "")).strip()
+            if not cid or not cname:
+                continue
+            item: Dict[str, str] = {"id": cid, "name": cname}
+            ctype = str(c.get("type", "")).strip()
+            if ctype:
+                item["type"] = ctype
+            parsed_candidates.append(item)
 
         result = IntentRouterResult(
             status=status,
             target_id=(parsed.get("target_id") or "").strip() or None,
             question=(parsed.get("question") or "").strip() or None,
-            candidates=[
-                {"id": str(c.get("id", "")), "name": str(c.get("name", ""))}
-                for c in (parsed.get("candidates") or [])
-                if isinstance(c, dict) and c.get("id")
-            ],
+            candidates=parsed_candidates,
             rationale_short=(parsed.get("rationale_short") or "")[:200],
         )
 
-        if result.status == "exact" and result.target_id:
+        if result.status in ("exact", "missing_param") and result.target_id:
             if not registry_entry_by_id(result.target_id):
-                logger.warning("MasterIntentRouter 未知 target_id=%s，改 clarify", result.target_id)
+                logger.warning(
+                    "MasterIntentRouter 未知 target_id=%s，改 clarify", result.target_id
+                )
                 result.status = "clarify"
                 result.target_id = None
                 result.question = result.question or "未能唯一匹配，请选择您需要的分析类型："
                 result.candidates = result.candidates or [
                     {"id": c.id, "name": c.name} for c in self._registry[:4]
                 ]
+
+        if result.status == "missing_param" and not result.question:
+            entry = registry_entry_by_id(result.target_id or "")
+            if entry and entry.required_parameters:
+                req_hint = "、".join(entry.required_parameters[:2])
+                result.question = (
+                    f"请提供执行「{entry.name}」所需的参数：{req_hint}。"
+                )
+            else:
+                result.question = "请补充执行任务所需的参数或数据文件。"
+
+        if result.status == "missing_param" and result.target_id:
+            result.candidates = sanitize_missing_param_candidates(
+                result.target_id,
+                result.candidates,
+            )
+            if len(result.candidates) < 2:
+                logger.warning(
+                    "MasterIntentRouter missing_param 候选不足（%s 条），"
+                    "须由 LLM 动态生成 2～3 个；target_id=%s",
+                    len(result.candidates),
+                    result.target_id,
+                )
 
         if result.status == "clarify" and not result.candidates:
             result.candidates = [{"id": c.id, "name": c.name} for c in self._registry[:4]]
@@ -371,6 +534,33 @@ class MasterIntentRouter:
             result.rationale_short,
         )
         return result
+
+
+def sanitize_missing_param_candidates(
+    target_id: str,
+    candidates: List[Dict[str, str]],
+) -> List[Dict[str, str]]:
+    """
+    missing_param 候选的结构化清洗：id 对齐 target_id、去重、补全 type。
+    不注入任何领域硬编码示例——示例文案 100% 由 LLM 生成。
+    """
+    tid = (target_id or "").strip()
+    if not tid:
+        return []
+    entry = registry_entry_by_id(tid)
+    route_type = entry.route_kind.value if entry else "skill"
+    out: List[Dict[str, str]] = []
+    seen_names: set = set()
+    for raw in candidates or []:
+        if not isinstance(raw, dict):
+            continue
+        name = (raw.get("name") or "").strip()
+        if not name or name in seen_names:
+            continue
+        seen_names.add(name)
+        ctype = (raw.get("type") or route_type).strip() or route_type
+        out.append({"id": tid, "name": name, "type": ctype})
+    return out[:5]
 
 
 def enrich_clarification_candidates(
@@ -391,9 +581,16 @@ def enrich_clarification_candidates(
                 "name": (raw.get("name") or "").strip()
                 or (entry.name if entry else cid),
                 "type": (
-                    entry.route_kind.value
-                    if entry
-                    else ("skill" if cid in {e.id for e in _CURATED_SKILL_ENTRIES} else "workflow")
+                    (raw.get("type") or "").strip()
+                    or (
+                        entry.route_kind.value
+                        if entry
+                        else (
+                            "skill"
+                            if cid in {e.id for e in _CURATED_SKILL_ENTRIES}
+                            else "workflow"
+                        )
+                    )
                 ),
             }
         )

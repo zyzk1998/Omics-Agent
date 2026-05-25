@@ -4565,7 +4565,8 @@
                 var menu = document.getElementById('custom-context-menu');
                 if (!menu) return;
                 __fileTreeContextState.targetPath = String(absPath || '').trim();
-                __fileTreeContextState.source = source === 'hpc' ? 'hpc' : 'local';
+                var src = String(source || '').trim().toLowerCase();
+                __fileTreeContextState.source = (src === 'hpc' || src === 'files' || src === 'local') ? src : 'local';
                 menu.style.display = 'block';
                 menu.setAttribute('aria-hidden', 'false');
                 menu.style.left = '0px';
@@ -4577,53 +4578,283 @@
                 menu.style.left = Math.max(8, left) + 'px';
                 menu.style.top = Math.max(8, top) + 'px';
             }
-            function isUnsupportedPreviewPath(filePath) {
-                var ext = String(filePath || '').split('.').pop().toLowerCase();
-                var blocked = ['exe', 'dll', 'so', 'dylib', 'zip', 'rar', '7z', 'gz', 'bz2', 'xz', 'tar', 'jar', 'class', 'pyc', 'pyd', 'pyo', 'bin', 'iso', 'img', 'sqlite', 'db', 'mp3', 'wav', 'mp4', 'avi', 'mov', 'mkv', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'];
-                return blocked.indexOf(ext) >= 0;
+            var __FILE_PREVIEW_IMAGE_EXT = { png: 1, jpg: 1, jpeg: 1, gif: 1, webp: 1, svg: 1, bmp: 1 };
+            var __FILE_PREVIEW_PDF_EXT = { pdf: 1 };
+            var __FILE_PREVIEW_TEXT_EXT = {
+                txt: 1, md: 1, markdown: 1, py: 1, csv: 1, tsv: 1, json: 1, yaml: 1, yml: 1,
+                html: 1, htm: 1, xml: 1, log: 1, ini: 1, cfg: 1, conf: 1, sh: 1, bash: 1,
+                js: 1, ts: 1, jsx: 1, tsx: 1, sql: 1, toml: 1, env: 1, r: 1, fasta: 1, fa: 1, fna: 1
+            };
+            var __FILE_PREVIEW_BLOCKED_EXT = {
+                exe: 1, dll: 1, so: 1, dylib: 1, zip: 1, rar: 1, '7z': 1, gz: 1, bz2: 1, xz: 1,
+                tar: 1, jar: 1, class: 1, pyc: 1, bin: 1, iso: 1, sqlite: 1, db: 1,
+                mp3: 1, wav: 1, mp4: 1, avi: 1, mov: 1, mkv: 1,
+                doc: 1, docx: 1, xls: 1, xlsx: 1, ppt: 1, pptx: 1
+            };
+            function filePreviewExt(filePath) {
+                var base = String(filePath || '').split(/[\\/]/).pop() || '';
+                var lower = base.toLowerCase();
+                var compound = ['nii.gz', 'fastq.gz', 'fq.gz', 'tar.gz', 'vcf.gz'];
+                var ci;
+                for (ci = 0; ci < compound.length; ci++) {
+                    if (lower.endsWith('.' + compound[ci])) {
+                        return compound[ci].split('.').pop();
+                    }
+                }
+                var dot = base.lastIndexOf('.');
+                return dot >= 0 ? base.slice(dot + 1).toLowerCase() : '';
+            }
+            function normalizeFilePreviewSource(source) {
+                var s = String(source || '').trim().toLowerCase();
+                if (s === 'hpc') return 'hpc';
+                if (s === 'local') return 'local';
+                return 'cloud';
+            }
+            function filePreviewDownloadUrl(filePath, source) {
+                var p = String(filePath || '').trim();
+                var q = 'path=' + encodeURIComponent(p);
+                var mode = normalizeFilePreviewSource(source);
+                if (mode === 'hpc') return '';
+                if (mode === 'local' && typeof localSidecarUrl === 'function') {
+                    try {
+                        return localSidecarUrl('/api/files/download?' + q);
+                    } catch (_e) { /* fall through */ }
+                }
+                var origin = (typeof getCloudUploadBaseUrl === 'function') ? getCloudUploadBaseUrl() : '';
+                return (origin || '') + '/api/files/download?' + q;
+            }
+            function filePreviewReadTextUrl(filePath, source) {
+                var p = String(filePath || '').trim();
+                var q = 'path=' + encodeURIComponent(p);
+                var mode = normalizeFilePreviewSource(source);
+                if (mode === 'hpc') return '';
+                if (mode === 'local' && typeof localSidecarUrl === 'function') {
+                    try {
+                        return localSidecarUrl('/api/files/read_text?' + q);
+                    } catch (_e) { /* fall through */ }
+                }
+                var origin = (typeof getCloudUploadBaseUrl === 'function') ? getCloudUploadBaseUrl() : '';
+                return (origin || '') + '/api/files/read_text?' + q;
+            }
+            function revokeFilePreviewBlobUrl() {
+                if (window.__filePreviewBlobUrl) {
+                    try { URL.revokeObjectURL(window.__filePreviewBlobUrl); } catch (_e) {}
+                    window.__filePreviewBlobUrl = null;
+                }
+            }
+            async function fetchFilePreviewBlobUrl(url) {
+                var res = await fetch(url, {
+                    method: 'GET',
+                    headers: (typeof getAuthHeaders === 'function') ? getAuthHeaders() : {}
+                });
+                if (!res.ok) throw new Error('blob_failed');
+                revokeFilePreviewBlobUrl();
+                window.__filePreviewBlobUrl = URL.createObjectURL(await res.blob());
+                return window.__filePreviewBlobUrl;
+            }
+            function buildTabularPreviewHtml(text, ext, maxRows) {
+                maxRows = maxRows || 200;
+                if (typeof Papa === 'undefined') {
+                    return '<pre><code>' + fileTreeEscapeHtml(text) + '</code></pre>';
+                }
+                if (ext === 'csv' && typeof window.buildSimpleCsvTableHtml === 'function') {
+                    return window.buildSimpleCsvTableHtml(text, maxRows, {
+                        wrapStyle: 'overflow:auto;max-height:calc(86vh - 160px);border:1px solid #e5e7eb;border-radius:8px;'
+                    });
+                }
+                var delimiter = ext === 'tsv' ? '\t' : ',';
+                var parsed = Papa.parse(String(text || '').trim(), {
+                    header: true,
+                    skipEmptyLines: true,
+                    delimiter: delimiter
+                });
+                var data = parsed.data || [];
+                var fields = parsed.meta && parsed.meta.fields;
+                if (parsed.errors && parsed.errors.length && (!data.length || !fields || !fields.length)) {
+                    return '<pre><code>' + fileTreeEscapeHtml(text) + '</code></pre>';
+                }
+                if (!fields || !fields.length) {
+                    if (data.length && typeof data[0] === 'object' && data[0] !== null) {
+                        fields = Object.keys(data[0]);
+                    } else {
+                        return '<pre><code>' + fileTreeEscapeHtml(text) + '</code></pre>';
+                    }
+                }
+                if (!data.length) {
+                    return '<div class="file-preview-modal__unsupported">表格为空</div>';
+                }
+                var rows = data.slice(0, maxRows);
+                var esc = (typeof escapeHtml === 'function') ? escapeHtml : fileTreeEscapeHtml;
+                var html = '<div style="overflow:auto;max-height:calc(86vh - 160px);border:1px solid #e5e7eb;border-radius:8px;">';
+                html += '<table class="table table-sm table-striped mb-0" style="font-size:12px;margin:0;"><thead><tr>';
+                fields.forEach(function(h) {
+                    html += '<th style="white-space:nowrap;padding:6px 8px;">' + esc(String(h)) + '</th>';
+                });
+                html += '</tr></thead><tbody>';
+                rows.forEach(function(row) {
+                    html += '<tr>';
+                    fields.forEach(function(f) {
+                        var v = row && row[f] != null ? row[f] : '';
+                        html += '<td style="padding:4px 8px;word-break:break-word;">' + esc(String(v)) + '</td>';
+                    });
+                    html += '</tr>';
+                });
+                html += '</tbody></table></div>';
+                if (data.length > maxRows) {
+                    html += '<p class="file-preview-modal__hint" style="margin-top:8px;">仅显示前 ' + maxRows + ' 行（只读预览）</p>';
+                }
+                return html;
+            }
+            async function readPreviewTextContent(filePath, source) {
+                var mode = normalizeFilePreviewSource(source);
+                if (mode === 'local') {
+                    var res = await fetch(localSidecarUrl('/api/tools/read_file'), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ file_path: filePath, max_lines: 2000 }),
+                    });
+                    var sideData = await res.json().catch(function() { return {}; });
+                    if (!res.ok || !sideData || sideData.status !== 'success') {
+                        throw new Error('read_failed');
+                    }
+                    return {
+                        content: String(sideData.content || ''),
+                        truncated: !!sideData.truncated,
+                        hint: sideData.truncated
+                            ? '内容较长，仅展示前 ' + Number(sideData.returned_lines || 0) + ' 行'
+                            : ''
+                    };
+                }
+                var readUrl = filePreviewReadTextUrl(filePath, source);
+                var res2 = await fetch(readUrl, {
+                    method: 'GET',
+                    headers: (typeof getAuthHeaders === 'function') ? getAuthHeaders() : {}
+                });
+                var data = await res2.json().catch(function() { return {}; });
+                if (!res2.ok || !data || data.status !== 'success') {
+                    throw new Error('read_failed');
+                }
+                return {
+                    content: String(data.content || ''),
+                    truncated: !!data.truncated,
+                    hint: data.truncated ? '内容较长，已截断展示' : ''
+                };
+            }
+            async function renderPreviewImage(bodyEl, filePath, source, displayName) {
+                var mode = normalizeFilePreviewSource(source);
+                var webUrl = '';
+                if (mode !== 'local' && typeof window.normalizeToolAssetWebUrl === 'function') {
+                    webUrl = window.normalizeToolAssetWebUrl(filePath);
+                }
+                bodyEl.innerHTML = '<div class="file-preview-modal__media"><img alt="' + fileTreeEscapeHtml(displayName) + '"></div>';
+                var img = bodyEl.querySelector('img');
+                if (!img) return;
+                async function loadBlob() {
+                    var blobUrl = await fetchFilePreviewBlobUrl(filePreviewDownloadUrl(filePath, source));
+                    img.src = blobUrl;
+                }
+                if (webUrl) {
+                    img.onerror = function() {
+                        img.onerror = null;
+                        loadBlob().catch(function() { throw new Error('img_failed'); });
+                    };
+                    img.src = webUrl;
+                    return;
+                }
+                await loadBlob();
+            }
+            async function renderPreviewPdf(bodyEl, filePath, source, displayName) {
+                var blobUrl = await fetchFilePreviewBlobUrl(filePreviewDownloadUrl(filePath, source));
+                bodyEl.innerHTML = '<iframe class="file-preview-modal__iframe" src="' + fileTreeEscapeHtml(blobUrl) + '" title="' + fileTreeEscapeHtml(displayName) + '"></iframe>';
             }
             function closeFilePreviewModal() {
+                revokeFilePreviewBlobUrl();
                 var modal = document.getElementById('file-preview-modal');
                 if (!modal) return;
                 modal.style.display = 'none';
                 modal.setAttribute('aria-hidden', 'true');
+                var bodyEl = document.getElementById('file-preview-body');
+                if (bodyEl) bodyEl.innerHTML = '';
             }
-            async function openFilePreviewModal(absPath) {
-                var p = String(absPath || '').trim();
+            async function previewAssetFile(filePath, fileName, sourceOverride) {
+                var p = String(filePath || '').trim();
                 if (!p) return;
+                var displayName = String(fileName || '').trim() || p.split(/[\\/]/).pop() || '文件预览';
+                var source = sourceOverride
+                    || ((__fileTreeContextState && __fileTreeContextState.targetPath === p && __fileTreeContextState.source)
+                        ? __fileTreeContextState.source
+                        : 'cloud');
                 var modal = document.getElementById('file-preview-modal');
+                var titleEl = document.getElementById('file-preview-title');
                 var pathEl = document.getElementById('file-preview-path');
                 var bodyEl = document.getElementById('file-preview-body');
                 if (!modal || !pathEl || !bodyEl) return;
+                revokeFilePreviewBlobUrl();
+                if (titleEl) titleEl.textContent = displayName;
                 modal.style.display = 'flex';
                 modal.setAttribute('aria-hidden', 'false');
                 pathEl.textContent = p;
-                bodyEl.textContent = '正在读取文件内容...';
-                if (isUnsupportedPreviewPath(p)) {
-                    bodyEl.innerHTML = '<div class="file-preview-modal__unsupported">该文件格式暂不支持预览</div>';
+                bodyEl.innerHTML = '<div class="file-preview-modal__loading">正在加载预览…</div>';
+                if (normalizeFilePreviewSource(source) === 'hpc') {
+                    if (typeof showToast === 'function') {
+                        showToast('暂不支持该格式在线预览，请下载后查看。', 'warning');
+                    }
+                    closeFilePreviewModal();
+                    return;
+                }
+                var ext = filePreviewExt(p);
+                if (!ext && (p.indexOf('.') < 0 || p.split(/[\\/]/).pop().indexOf('.') < 0)) {
+                    ext = 'txt';
+                }
+                if (__FILE_PREVIEW_BLOCKED_EXT[ext]) {
+                    if (typeof showToast === 'function') {
+                        showToast('暂不支持该格式在线预览，请下载后查看。', 'warning');
+                    }
+                    closeFilePreviewModal();
                     return;
                 }
                 try {
-                    var res = await fetch(localSidecarUrl('/api/tools/read_file'), {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ file_path: p, max_lines: 1200 }),
-                    });
-                    var data = await res.json().catch(function() { return {}; });
-                    if (!res.ok || !data || data.status !== 'success') {
-                        bodyEl.innerHTML = '<div class="file-preview-modal__unsupported">该文件格式暂不支持预览</div>';
+                    if (__FILE_PREVIEW_IMAGE_EXT[ext]) {
+                        await renderPreviewImage(bodyEl, p, source, displayName);
                         return;
                     }
-                    var content = String(data.content || '');
-                    if (!content) {
-                        bodyEl.innerHTML = '<div class="file-preview-modal__unsupported">文件为空或暂无可展示内容</div>';
+                    if (__FILE_PREVIEW_PDF_EXT[ext]) {
+                        await renderPreviewPdf(bodyEl, p, source, displayName);
                         return;
                     }
-                    var hint = data.truncated ? '<div class="file-preview-modal__hint">内容较长，仅展示前 ' + Number(data.returned_lines || 0) + ' 行</div>' : '';
-                    bodyEl.innerHTML = hint + '<pre><code>' + fileTreeEscapeHtml(content) + '</code></pre>';
+                    if (__FILE_PREVIEW_TEXT_EXT[ext]) {
+                        var textPayload = await readPreviewTextContent(p, source);
+                        var content = textPayload.content;
+                        if (!content) {
+                            bodyEl.innerHTML = '<div class="file-preview-modal__unsupported">文件为空或暂无可展示内容</div>';
+                            return;
+                        }
+                        var hintHtml = textPayload.hint
+                            ? '<div class="file-preview-modal__hint">' + fileTreeEscapeHtml(textPayload.hint) + '</div>'
+                            : '';
+                        if (ext === 'csv' || ext === 'tsv') {
+                            bodyEl.innerHTML = hintHtml + buildTabularPreviewHtml(content, ext, 200);
+                            return;
+                        }
+                        bodyEl.innerHTML = hintHtml + '<pre><code>' + fileTreeEscapeHtml(content) + '</code></pre>';
+                        return;
+                    }
                 } catch (_e) {
-                    bodyEl.innerHTML = '<div class="file-preview-modal__unsupported">该文件格式暂不支持预览</div>';
+                    if (typeof showToast === 'function') {
+                        showToast('暂不支持该格式在线预览，请下载后查看。', 'warning');
+                    }
+                    closeFilePreviewModal();
+                    return;
                 }
+                if (typeof showToast === 'function') {
+                    showToast('暂不支持该格式在线预览，请下载后查看。', 'warning');
+                }
+                closeFilePreviewModal();
+            }
+            window.previewAssetFile = previewAssetFile;
+            function openFilePreviewModal(absPath, source) {
+                var name = String(absPath || '').split(/[\\/]/).pop() || '';
+                previewAssetFile(absPath, name, source);
             }
             function renderWorkspaceTreeNodes(nodes, parentEl) {
                 (nodes || []).forEach(function(node) {
@@ -5593,29 +5824,37 @@
                 });
             }
 
+            /** 将 LLM 动态生成的 Pill 文案转为可发送的正文（领域无关） */
+            function resolvePillComposerBody(pillLabel) {
+                var s = String(pillLabel || '').trim();
+                if (!s) return '';
+                var m = s.match(/^以\s*(.+?)\s*为例$/);
+                if (m) return m[1].trim();
+                return s;
+            }
+
             function buildFastTrackDraftPrompt(toolId, toolName, toolType) {
                 var ctx = window._lastChatSendContext || {};
                 var orig = (ctx.originalMessage || '').trim();
                 var label = toolName || toolId;
                 var tid = (toolId || '').trim();
+                var pillBody = resolvePillComposerBody(label);
                 if (toolType === 'skill') {
-                    var lines = ['[Skill_Route: ' + tid + ']', '请执行「' + label + '」相关分析。', ''];
-                    if (tid === 'lipinski_druglikeness' || tid === 'drug_similarity_search') {
-                        lines.push(LUI_SKILL_PARAM_PLACEHOLDER);
-                    } else if (tid === 'bepipred3_epitope_prediction') {
-                        lines.push('【请在此处粘贴蛋白氨基酸序列（FASTA 或一行序列），或上传序列文件】');
+                    var lines = ['[Skill_Route: ' + tid + ']', ''];
+                    if (pillBody) {
+                        lines.push(pillBody);
                     } else {
-                        lines.push(LUI_SKILL_PARAM_PLACEHOLDER);
+                        lines.push('请执行「' + label + '」相关分析。', '', LUI_SKILL_PARAM_PLACEHOLDER);
                     }
                     if (orig) lines.push('', '【原始需求】' + orig);
                     return lines.join('\n');
                 }
-                var wfLines = [
-                    '[Workflow: ' + tid + ']',
-                    '请执行「' + label + '」分析流程。',
-                    '',
-                    LUI_WF_PARAM_PLACEHOLDER
-                ];
+                var wfLines = ['[Workflow: ' + tid + ']', ''];
+                if (pillBody) {
+                    wfLines.push(pillBody);
+                } else {
+                    wfLines.push('请执行「' + label + '」分析流程。', '', LUI_WF_PARAM_PLACEHOLDER);
+                }
                 if (orig) wfLines.push('', '【原始需求】' + orig);
                 return wfLines.join('\n');
             }
@@ -5623,7 +5862,10 @@
             function fillComposerWithFastTrack(toolId, toolName, toolType) {
                 toolType = inferClarificationToolType(toolId, toolType);
                 var label = toolName || toolId || '所选分析';
-                var localHint = '已为您生成「' + label + '」的快捷指令。⚠️ 请在下方输入框补充必要的数据（如粘贴 SMILES 或确认已上传文件）后，再点击发送。';
+                var pillBody = resolvePillComposerBody(label);
+                var localHint = pillBody
+                    ? '已填入建议：「' + pillBody + '」。确认后点击发送。'
+                    : '已为您生成「' + label + '」的快捷指令。请在下方补充必要参数或确认已上传数据后再发送。';
                 if (typeof appendMessage === 'function') {
                     appendMessage('ai', localHint, null, null, false);
                 }
@@ -5647,7 +5889,10 @@
                     }
                 }
                 if (typeof showToast === 'function') {
-                    showToast('已填入快车道指令，请补充 SMILES/数据后发送', 'success');
+                    showToast(
+                        pillBody ? '已填入路由建议，可直接发送' : '已填入快车道指令，请补充参数后发送',
+                        'success'
+                    );
                 }
             }
             window.fillComposerWithFastTrack = fillComposerWithFastTrack;
@@ -7712,7 +7957,7 @@
                         hintEl.className = 'guest-login-prompt btn-upgrade';
                         hintEl.setAttribute('onclick', 'event.stopPropagation(); if(typeof openAuthModal===\'function\')openAuthModal();');
                         hintEl.style.cssText = 'cursor:pointer;padding:10px 4px;color:var(--primary-color,#4d6bfe);font-weight:bold;line-height:1.25;';
-                        hintEl.textContent = '👉 登录 / 注册解锁全功能';
+                        hintEl.textContent = '👉 登录以解锁全功能';
                     }
                 }
                 if (chev) chev.style.display = isLoggedIn() ? '' : 'none';
@@ -7731,13 +7976,27 @@
                 if (typeof showAdminConsoleIfNeeded === 'function') showAdminConsoleIfNeeded();
                 if (typeof window.syncImmersiveDemoEntryVisibility === 'function') window.syncImmersiveDemoEntryVisibility();
             }
-            function authShellSetStep(step) {
+            function authShellFocusInput(elOrId) {
+                var el = typeof elOrId === 'string' ? document.getElementById(elOrId) : elOrId;
+                if (!el || typeof el.focus !== 'function') return;
+                window.requestAnimationFrame(function() {
+                    window.requestAnimationFrame(function() {
+                        try {
+                            el.focus({ preventScroll: true });
+                        } catch (_e) {
+                            el.focus();
+                        }
+                    });
+                });
+            }
+            function authShellSetStep(step, focusInputId) {
                 var root = document.getElementById('auth-modal');
                 if (!root) return;
                 root.querySelectorAll('.auth-shell-step').forEach(function(p) {
                     if (p.getAttribute('data-auth-step') === step) p.removeAttribute('hidden');
                     else p.setAttribute('hidden', '');
                 });
+                if (focusInputId) authShellFocusInput(focusInputId);
             }
             function authShellMaskEmail(email) {
                 var e = (email || '').trim();
@@ -7811,7 +8070,7 @@
                 if (hid) hid.value = id;
                 if (lab) lab.textContent = id || '—';
                 if (pw) pw.value = '';
-                authShellSetStep('login');
+                authShellSetStep('login', 'auth-shell-login-password');
             }
             function resetAuthShellToGate() {
                 var gateId = document.getElementById('auth-gate-identifier');
@@ -9696,6 +9955,18 @@
                         e.stopPropagation();
                         openCustomContextMenu(e.clientX, e.clientY, (row.dataset && row.dataset.path) ? row.dataset.path : '', (row.dataset && row.dataset.source) ? row.dataset.source : 'local');
                     });
+                    fileTreeContainer.addEventListener('dblclick', function(e) {
+                        var row = e.target && e.target.closest ? e.target.closest('.file-tree-file') : null;
+                        if (!row || !fileTreeContainer.contains(row)) return;
+                        if (row.dataset && row.dataset.type === 'directory') return;
+                        var path = (row.dataset && row.dataset.path) ? String(row.dataset.path).trim() : '';
+                        if (!path) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        var src = (row.dataset && row.dataset.source) ? row.dataset.source : 'cloud';
+                        var fn = path.split(/[\\/]/).pop() || path;
+                        previewAssetFile(path, fn, src);
+                    });
                 }
                 if (customContextMenu) {
                     customContextMenu.addEventListener('click', function(e) {
@@ -9717,7 +9988,8 @@
                                 showToast('复制失败，请检查剪贴板权限', 'warning');
                             });
                         } else if (action === 'preview') {
-                            openFilePreviewModal(absPath);
+                            var fn = (absPath.split(/[\\/]/).pop()) || absPath;
+                            previewAssetFile(absPath, fn, source);
                         }
                         hideCustomContextMenu();
                     });
@@ -10128,14 +10400,14 @@
                         var password = (document.getElementById('auth-shell-login-password') && document.getElementById('auth-shell-login-password').value) || '';
                         if (!password) { if (errEl) { errEl.textContent = '请输入密码'; errEl.style.display = 'block'; } return; }
                         if (errEl) errEl.style.display = 'none';
-                        authShellSetStep('mfa');
+                        authShellSetStep('mfa', 'auth-shell-mfa-code');
                         if (typeof authShellRefreshMfaLead === 'function') authShellRefreshMfaLead();
                         var mfa = document.getElementById('auth-shell-mfa-code');
                         if (mfa) mfa.value = '';
                     };
                 }
                 var mfaBack = document.getElementById('auth-mfa-back');
-                if (mfaBack) mfaBack.onclick = function() { authShellSetStep('login'); };
+                if (mfaBack) mfaBack.onclick = function() { authShellSetStep('login', 'auth-shell-login-password'); };
 
                 var btnMfa = document.getElementById('auth-btn-mfa-confirm');
                 if (btnMfa) {

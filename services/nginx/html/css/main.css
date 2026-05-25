@@ -1269,6 +1269,40 @@
                 color: #9a3412;
                 margin-bottom: 8px;
             }
+            .file-preview-modal__loading {
+                color: #6b7280;
+                font-size: 13px;
+                padding: 18px 8px;
+            }
+            .file-preview-modal__media {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 240px;
+                max-height: calc(86vh - 120px);
+            }
+            .file-preview-modal__media img {
+                max-width: 100%;
+                max-height: calc(86vh - 120px);
+                object-fit: contain;
+                border-radius: 8px;
+                background: #fff;
+            }
+            .file-preview-modal__iframe {
+                width: 100%;
+                height: min(72vh, 640px);
+                border: none;
+                border-radius: 8px;
+                background: #fff;
+            }
+            .file-preview-modal__body .table {
+                margin-bottom: 0;
+                background: #fff;
+            }
+            .file-preview-modal__body .table th,
+            .file-preview-modal__body .table td {
+                font-size: 12px;
+            }
 
             /* 大文件本地沙盒提示（黑色遮罩） */
             .sandbox-modal {

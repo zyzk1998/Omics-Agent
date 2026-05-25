@@ -824,6 +824,174 @@ def validate_file_path(file_path: Path, base_dir: Path) -> Path:
             detail=f"无效的文件路径: {str(e)}"
         )
 
+
+# —— 通用文件预览 / 闲聊上下文注入（Phase 1）——
+_TEXT_PREVIEW_EXTENSIONS = frozenset({
+    "txt", "md", "markdown", "py", "csv", "tsv", "json", "yaml", "yml",
+    "html", "htm", "xml", "log", "ini", "cfg", "conf", "sh", "bash", "r",
+    "js", "ts", "jsx", "tsx", "sql", "toml", "env", "fasta", "fa", "fna",
+})
+_IMAGE_PREVIEW_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"})
+_PDF_PREVIEW_EXTENSIONS = frozenset({"pdf"})
+_GENERAL_CHAT_TEXT_MAX_BYTES = 100_000
+_FILE_READ_TEXT_PREVIEW_MAX_BYTES = 512_000
+
+_FILE_DOWNLOAD_MEDIA_TYPES = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+    "svg": "image/svg+xml",
+    "bmp": "image/bmp",
+    "pdf": "application/pdf",
+}
+
+
+def _file_preview_allowed_roots() -> List[Path]:
+    roots: List[Path] = []
+    for base in (UPLOAD_DIR, RESULTS_DIR):
+        try:
+            roots.append(base.resolve())
+        except OSError:
+            pass
+    ws = get_workspace_context() or {}
+    wp = (ws.get("workspace_path") or "").strip()
+    if wp:
+        try:
+            roots.append(Path(wp).expanduser().resolve())
+        except OSError:
+            pass
+    extra = (os.environ.get("GIBH_FILE_READ_EXTRA_ROOTS") or "").strip()
+    for part in extra.split(os.pathsep):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            roots.append(Path(part).expanduser().resolve())
+        except OSError:
+            continue
+    seen: Set[str] = set()
+    out: List[Path] = []
+    for r in roots:
+        key = str(r)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    return out
+
+
+def _path_under_allowed_root(resolved: Path) -> bool:
+    for root in _file_preview_allowed_roots():
+        try:
+            resolved.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def resolve_user_file_for_read(path: str) -> Path:
+    """解析用户可读文件路径（uploads / results / 工作区），防路径遍历。"""
+    raw = (path or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="path 不能为空")
+
+    raw_norm = raw.replace("\\", "/")
+    candidates: List[Path] = []
+    if raw_norm.startswith("/app/uploads/"):
+        try:
+            candidates.append(Path(raw_norm).resolve())
+        except OSError:
+            pass
+    if raw_norm.startswith("/app/results/"):
+        try:
+            candidates.append(Path(raw_norm).resolve())
+        except OSError:
+            pass
+    if raw_norm.startswith("/uploads/"):
+        try:
+            candidates.append((UPLOAD_DIR / raw_norm[len("/uploads/"):]).resolve())
+        except OSError:
+            pass
+    if raw_norm.startswith("/results/"):
+        try:
+            candidates.append((RESULTS_DIR / raw_norm[len("/results/"):]).resolve())
+        except OSError:
+            pass
+
+    p0 = Path(raw).expanduser()
+    if p0.is_absolute():
+        candidates.append(p0)
+    else:
+        for base in _file_preview_allowed_roots():
+            candidates.append((base / raw).resolve())
+
+    for cand in candidates:
+        try:
+            resolved = cand.resolve()
+        except OSError:
+            continue
+        if not resolved.is_file():
+            continue
+        if _path_under_allowed_root(resolved):
+            return resolved
+
+    raise HTTPException(
+        status_code=404,
+        detail="文件不存在或不在允许访问的目录内",
+    )
+
+
+def _read_small_text_file(path: Path, *, max_bytes: int) -> Optional[str]:
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+    if size > max_bytes:
+        return None
+    ext = path.suffix.lower().lstrip(".")
+    if ext not in _TEXT_PREVIEW_EXTENSIONS:
+        return None
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def build_chitchat_message_with_uploaded_text_files(
+    message: str,
+    uploaded_files: List[Dict[str, Any]],
+    *,
+    max_bytes: int = _GENERAL_CHAT_TEXT_MAX_BYTES,
+) -> str:
+    """CHITCHAT 时将小型文本挂载内容注入用户 prompt 前缀。"""
+    user_msg = (message or "").strip()
+    blocks: List[str] = []
+    for fi in uploaded_files or []:
+        if not isinstance(fi, dict):
+            continue
+        fp = (fi.get("path") or fi.get("file_path") or "").strip()
+        if not fp:
+            continue
+        try:
+            target = resolve_user_file_for_read(fp)
+        except HTTPException:
+            continue
+        content = _read_small_text_file(target, max_bytes=max_bytes)
+        if content is None:
+            continue
+        name = (fi.get("name") or fi.get("file_name") or target.name).strip() or target.name
+        blocks.append(f"【系统提示：用户上传了文件 {name}，内容如下：\n{content}\n】")
+    if not blocks:
+        return user_msg
+    prefix = "\n".join(blocks)
+    if user_msg:
+        return f"{prefix}\n用户的实际问题是：{user_msg}"
+    return prefix
+
+
 # 初始化文件检测器
 file_inspector = FileInspector(str(UPLOAD_DIR))
 
@@ -2045,6 +2213,46 @@ async def index():
     return HTMLResponse(content=html_content)
 
 
+@app.get("/api/files/download")
+async def download_user_file(path: str = Query(..., description="已挂载文件的绝对或相对路径")):
+    """安全下载/内联预览 uploads、results、工作区内的用户文件。"""
+    target = resolve_user_file_for_read(path)
+    ext = target.suffix.lower().lstrip(".")
+    media_type = _FILE_DOWNLOAD_MEDIA_TYPES.get(ext, "application/octet-stream")
+    return FileResponse(
+        path=str(target),
+        media_type=media_type,
+        filename=target.name,
+    )
+
+
+@app.get("/api/files/read_text")
+async def read_user_file_as_text(
+    path: str = Query(..., description="文本类文件路径"),
+    max_bytes: int = Query(_FILE_READ_TEXT_PREVIEW_MAX_BYTES, ge=1024, le=2_000_000),
+):
+    """轻量级文本读取，供前端通用文件预览 Modal 使用。"""
+    target = resolve_user_file_for_read(path)
+    ext = target.suffix.lower().lstrip(".")
+    if ext not in _TEXT_PREVIEW_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="该扩展名不支持文本预览")
+    try:
+        size = target.stat().st_size
+    except OSError as e:
+        raise HTTPException(status_code=400, detail=f"无法读取文件: {e}") from e
+    truncated = size > max_bytes
+    raw = target.read_bytes()[:max_bytes]
+    content = raw.decode("utf-8", errors="replace")
+    return {
+        "status": "success",
+        "file_path": str(target),
+        "file_name": target.name,
+        "content": content,
+        "truncated": truncated,
+        "size_bytes": size,
+    }
+
+
 @app.post("/api/upload")
 async def upload_file(
     files: List[UploadFile] = File(...),  # 🔥 必须 List：单数 file 只会接收第一个，多文件会被静默丢弃
@@ -2862,6 +3070,7 @@ async def chat_endpoint(
                     _route_message = (req.message or "").strip()
                     _route_target_domain = req.target_domain
                     _clarify_hard_stop = False
+                    _intent_is_chitchat = False
                     _intent_override_id = (req.intent_override_id or "").strip()
                     try:
                         from gibh_agent.core.intent_router import (
@@ -2908,7 +3117,57 @@ async def chat_endpoint(
                                 _intent_res = await _mir.classify(
                                     _route_message,
                                     has_files=bool(uploaded_files),
+                                    history=_hist_merged,
                                 )
+                                if _intent_res.status == "missing_param":
+                                    from gibh_agent.core.intent_router import (
+                                        enrich_clarification_candidates,
+                                    )
+
+                                    _q_text = (
+                                        _intent_res.question
+                                        or "请补充必要的参数或上传数据："
+                                    ).strip()
+                                    _clarify_payload = {
+                                        "question": _q_text,
+                                        "candidates": enrich_clarification_candidates(
+                                            _intent_res.candidates or []
+                                        ),
+                                        "subtype": "missing_param",
+                                        "target_id": _intent_res.target_id,
+                                    }
+                                    state_snapshot_for_db = {
+                                        "text": _q_text,
+                                        "reasoning": "",
+                                        "workflow": None,
+                                        "steps": [],
+                                        "process_log": [],
+                                        "report": None,
+                                        "clarification": {
+                                            "type": "clarification",
+                                            "subtype": "missing_param",
+                                            "target_id": _intent_res.target_id,
+                                            "question": _q_text,
+                                            "candidates": _clarify_payload["candidates"],
+                                            "rationale_short": _intent_res.rationale_short,
+                                        },
+                                    }
+                                    logger.info(
+                                        "🛑 [ChatEndpoint] MISSING_PARAM_HARD_STOP — "
+                                        "target_id=%s，clarification 示例气泡 %s 个，不进入 Orchestrator",
+                                        _intent_res.target_id,
+                                        len(_clarify_payload["candidates"]),
+                                    )
+                                    _clarify_hard_stop = True
+                                    yield (
+                                        "event: clarification\n"
+                                        f"data: {json.dumps(_clarify_payload, ensure_ascii=False)}\n\n"
+                                    )
+                                    yield (
+                                        "event: done\n"
+                                        f"data: {json.dumps({'status': 'success', 'mode': 'intent_missing_param'}, ensure_ascii=False)}\n\n"
+                                    )
+                                    return
                                 if _intent_res.status == "clarify":
                                     _q_text = (
                                         _intent_res.question or "请选择您需要的分析类型："
@@ -2958,6 +3217,9 @@ async def chat_endpoint(
                                     )
                                     _apply_dispatch_patch(_intent_res.target_id)
                                 else:
+                                    _intent_is_chitchat = (
+                                        (_intent_res.status or "").strip().lower() == "chitchat"
+                                    )
                                     logger.info(
                                         "🧭 [ChatEndpoint] MasterIntentRouter → chitchat，进入常规范式"
                                     )
@@ -2972,6 +3234,18 @@ async def chat_endpoint(
 
                     if _clarify_hard_stop:
                         return
+
+                    if _intent_is_chitchat and uploaded_files:
+                        _injected = build_chitchat_message_with_uploaded_text_files(
+                            _route_message,
+                            uploaded_files,
+                        )
+                        if _injected != _route_message:
+                            logger.info(
+                                "📎 [ChatEndpoint] CHITCHAT 通用文本上下文注入（%s 个挂载，prompt 已扩展）",
+                                len(uploaded_files),
+                            )
+                            _route_message = _injected
 
                     orchestrator = AgentOrchestrator(agent, upload_dir=str(UPLOAD_DIR))
                     async for event in orchestrator.stream_process(

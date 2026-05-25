@@ -12,6 +12,7 @@ import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 
@@ -313,6 +314,67 @@ async def install_sandbox() -> Dict[str, Any]:
     """本地沙盒安装存根。"""
     await asyncio.sleep(1.2)
     return {"status": "success", "message": "轻量级计算沙盒已配置完成（模拟）"}
+
+
+def _resolve_workspace_file(path: str) -> Path:
+    raw = str(path or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="path 不能为空")
+    target = Path(raw).expanduser().resolve()
+    if not target.is_file():
+        raise HTTPException(status_code=400, detail=f"文件不存在或不可读: {target}")
+    root_raw = (_workspace_context.get("workspace_path") or "").strip()
+    if root_raw:
+        root = Path(root_raw).expanduser().resolve()
+        try:
+            target.relative_to(root)
+            return target
+        except ValueError:
+            pass
+    return target
+
+
+@app.get("/api/files/download")
+async def download_workspace_file(path: str = Query(...)):
+    """本地工作区文件内联下载/预览（图片、PDF 等）。"""
+    target = _resolve_workspace_file(path)
+    ext = target.suffix.lower().lstrip(".")
+    media = {
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "gif": "image/gif",
+        "webp": "image/webp",
+        "svg": "image/svg+xml",
+        "pdf": "application/pdf",
+    }.get(ext, "application/octet-stream")
+    return FileResponse(path=str(target), media_type=media, filename=target.name)
+
+
+@app.get("/api/files/read_text")
+async def read_workspace_file_text(
+    path: str = Query(...),
+    max_bytes: int = Query(512_000, ge=1024, le=2_000_000),
+):
+    target = _resolve_workspace_file(path)
+    ext = target.suffix.lower().lstrip(".")
+    allowed = {
+        "txt", "md", "markdown", "py", "csv", "tsv", "json", "yaml", "yml",
+        "html", "htm", "xml", "log", "ini", "sh", "js", "ts", "sql", "toml", "env",
+    }
+    if ext not in allowed:
+        raise HTTPException(status_code=400, detail="该扩展名不支持文本预览")
+    size = target.stat().st_size
+    truncated = size > max_bytes
+    content = target.read_bytes()[:max_bytes].decode("utf-8", errors="replace")
+    return {
+        "status": "success",
+        "file_path": str(target),
+        "file_name": target.name,
+        "content": content,
+        "truncated": truncated,
+        "size_bytes": size,
+    }
 
 
 @app.post("/api/tools/read_file")

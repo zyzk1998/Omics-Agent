@@ -1,0 +1,66 @@
+﻿学科,技能名称,子分类,skills类型,简介,tool_chain_key
+化学与分子信息学,3D分子结构渲染工具,数据可视化,脚本,用于渲染通用小分子的三维结构，支持MOL、SDF格式。,molPreview
+化学与分子信息学,Brenk filter分子毒性检查工具,药物筛选,脚本,Brenk 不良片段筛查（RDKit BRENK 目录或 SMARTS 兜底）。,molecularBrenkFilterToxicityCheckTool
+化学与分子信息学,Gen Mol,数据分析,模型,磐石 ToolChain 工具「Gen Mol」（genmol）。,genmol
+化学与分子信息学,LAMMPS,预测与建模,脚本,开源的分子动力学模拟软件，常被用于模拟液体、固体或气态的粒子集合。,lammps
+化学与分子信息学,Open Babel,数据处理,脚本,支持分子文件格式转换、分子对接和虚拟筛选。,openBabel
+化学与分子信息学,残基互作分析器,数据分析,脚本,基于PyMOL分析PDB文件中的残基互作关系，支持复合物结构解析。,pymol
+化学与分子信息学,Tanimoto 距离矩阵计算工具,分子计算,脚本,规划中的多分子矩阵能力；当前请使用「分子相似性评估工具」做双分子 Tanimoto。,molecularTanimotoDistanceMatrixCalculationTool
+化学与分子信息学,分子BBB评估工具,药物筛选,脚本,血脑屏障渗透启发式评估（理化描述符组合，非临床 PBPK）。,molecularBBBAssessmentTool
+化学与分子信息学,分子Kekulization 转换工具,数据处理,脚本,对分子进行 Kekulization 转换，将芳香键转为交替单/双键。,molecularKekulizationConversionTool
+化学与分子信息学,分子Morgan Fingerprint生成工具,分子计算,脚本,Morgan（ECFP 类）指纹摘要：开位数与哈希预览；附 2D 结构图。,molecularMorganFingerprintGenerationTool
+化学与分子信息学,分子Pattern Fingerprint生成工具,数据处理,脚本,生成分子的 Pattern Fingerprint。,molecularPatternFingerprintGenerationTool
+化学与分子信息学,分子假阳性片段检测工具,药物筛选,脚本,PAINS 泛测定干扰片段检测（RDKit FilterCatalog）。,molecularFalsePositiveFragmentDetectionTool
+化学与分子信息学,分子分析工具,数据分析,脚本,基于RDKit，实现分子性质计算、子结构匹配与相似性分析等功能。,rdkitAnalysis
+化学与分子信息学,分子可视化工具,数据可视化,脚本,基于RDKit.js，支持从多种格式读取分子结构并生成2D图像。,rdkitMolecularViewer
+化学与分子信息学,分子图像生成工具,数据可视化,脚本,根据 SMILES 生成分子结构图像 (PNG)，上传到 MinIO 并返回文件 URL。,molecularImageGenerationTool
+化学与分子信息学,分子官能团识别工具,数据分析,脚本,识别分子中的常见官能团 (functional groups)。,molecularFunctionalGroupIdentificationTool
+化学与分子信息学,分子格式转换工具,数据处理,脚本,基于RDKit，实现SMILES、SDF、Mol、InChI等化学结构格式的相互转换与标准化。,rdkitTransform
+化学与分子信息学,分子相似性评估工具,分子计算,脚本,双分子 Morgan 指纹 Tanimoto 相似度（2048-bit）；支持 SMILES 文本或文件。,molecularSimilarityAssessmentTool
+化学与分子信息学,分子胃肠道吸收能力评估工具,预测与建模,脚本,估算分子在胃肠道的吸收能力。,molecularGastrointestinalAbsorptionCapacityAssessmentTool
+化学与分子信息学,分子芳香性感知操作工具,数据处理,脚本,对分子进行芳香性感知操作。,molecularAromaticityPerceptionOperationTool
+化学与分子信息学,分子量计算,数据分析,脚本,根据化学式计算分子质量和元素组成，可用于辅助化学、制药与生物分析研究。,molWeight
+化学与分子信息学,分子量计算工具,分子计算,脚本,平均分子量与精确分子量（RDKit Descriptors）。,molecularMolWeightCalculationTool
+化学与分子信息学,化学元素查询,信息检索,数据库调用,查询指定化学元素的详细信息。,chemicalElementQueryTool
+化学与分子信息学,合成可行性分析工具,数据分析,脚本,对输入的候选分子 SDF 文件（URL）逐一分子计算合成可行性分数（SA Score），基于 RDKit SA_Score 算法，直接以 JSON 列表形式返回每个分子的评分，,syntheticFeasibilityAnalysis
+化学与分子信息学,药物相似性评估工具,预测与建模,脚本,双模式入口：① Lipinski 五规则成药潜势（MW/logP/HBD/HBA，本地快速）；② 基于 PubChem/ChEMBL 等的结构相似性检索与 HTML 报告（需联网、耗时更长）。在技能广场点击「使用」后，请在弹窗中选择「Lipinski 类药性快筛」或「高通量结构相似性搜索」。,drugSimilarityAssessmentTool
+多模态组学,CRISPR-Cas9 基因编辑工具,预测与建模,脚本,模拟 CRISPR-Cas9 基因组编辑流程，包含向导RNA验证、目标位点识别、递送效率与编辑结果模拟。,CRISPRCas9GeneEditing
+多模态组学,Evo2,预测与建模,模型,生物学基础模型，能够整合长基因组序列的信息，同时保持对单核苷酸变化的敏感性。,evo2
+多模态组学,MatterGen,流程编排,模型,专用于跨元素周期表的晶体材料设计，能探索材料空间并根据应用需求生成新材料。,matterGen
+多模态组学,晶体对称性分析工具,流程编排,脚本,分析给定晶体结构的对称性，返回空间群符号。,crystalSymmetryAnalysis
+生物信息学基础,ABACUS,数据分析,脚本,基于平面波与数值原子轨道的高效电子结构计算软件，支持材料能带、态密度及分子动力学研究。,abacus
+生物信息学基础,BepiPred3,预测与建模,模型,基于蛋白语言模型的 B 细胞表位预测工具，可高效识别蛋白序列中的潜在线性与构象表位。,BepiPred3
+生物信息学基础,CP2K,预测与建模,纯prompt,量子化学与固体物理模拟软件包，主要用于原子级别的分子动力学模拟。,CP2K
+生物信息学基础,DRTtools,电化学,脚本,EIS 电化学阻抗谱 → DRT 弛豫时间分布分析；子进程执行，输出 JSON 与图像（需上传 frequency/Z_real/Z_imag 等列 CSV）。,DRTtools
+生物信息学基础,Db SNPDatabase,数据分析,数据库调用,磐石 ToolChain 工具「Db SNPDatabase」（dbSNPDatabase）。,dbSNPDatabase
+生物信息学基础,ESMVariants,预测与建模,模型,磐石 ToolChain 工具「ESMVariants」（esmVariants）。,esmVariants
+生物信息学基础,GEODatabase,数据分析,数据库调用,磐石 ToolChain 工具「GEODatabase」（geoDatabase）。,geoDatabase
+生物信息学基础,GSEASupported Database Query,数据分析,数据库调用,磐石 ToolChain 工具「GSEASupported Database Query」（GSEASupportedDatabaseQuery）。,GSEASupportedDatabaseQuery
+生物信息学基础,GWASCatalog DB,数据分析,数据库调用,磐石 ToolChain 工具「GWASCatalog DB」（GWASCatalogDB）。,GWASCatalogDB
+生物信息学基础,Gene Search,数据分析,数据库调用,磐石 ToolChain 工具「Gene Search」（geneSearch）。,geneSearch
+生物信息学基础,ITC结合热力学分析工具,数据分析,脚本,可以分析等温滴定量热 (ITC) 数据，采用一位点结合模型拟合，返回 Kd、ΔH、ΔS、ΔG 等热力学参数。,ITCAnalysisTool
+生物信息学基础,Inter Pro DB,数据分析,数据库调用,磐石 ToolChain 工具「Inter Pro DB」（interProDatabase）。,interProDatabase
+生物信息学基础,OligoFormer,预测与建模,模型,可以自动设计并推荐高效靶向特定 mRNA 的 siRNA 分子。,OligoFormer
+生物信息学基础,ProtGPT2,预测与建模,模型,能够理解蛋白质语言，可用于从头设计和构建蛋白质。,protGPT2
+生物信息学基础,Protein Extraction Tool,数据分析,纯prompt,磐石 ToolChain 工具「Protein Extraction Tool」（ProteinExtractionTool）。,ProteinExtractionTool
+生物信息学基础,Pub Med Database,数据分析,数据库调用,磐石 ToolChain 工具「Pub Med Database」（pubMedDatabase）。,pubMedDatabase
+生物信息学基础,UCSCGenome Browser,数据分析,数据库调用,磐石 ToolChain 工具「UCSCGenome Browser」（UCSCGenomeBrowser）。,UCSCGenomeBrowser
+生物信息学基础,数据库条目获取与保存工具,数据分析,数据库调用,从 Materials Project 拉取 ComputedEntry 列表（可指定化学体系或单个材料 ID），并生成 .pkl 文件，上传后返回文件的下载 URL。,computedEntryList
+生物信息学基础,组分性质获取工具,数据分析,脚本,计算指定化学式中某元素的总分子量、摩尔数、原子分数和质量分数等信息。,constitutiveProperty
+生物医药,AlphaFold2,预测与建模,模型,根据蛋白质的氨基酸序列预测其三维结构。,AlphaFold2
+生物医药,Alpha Fold2Multimer,预测与建模,模型,磐石 ToolChain 工具「Alpha Fold2Multimer」（AlphaFold2Multimer）。,AlphaFold2Multimer
+生物医药,DiffDock,预测与建模,模型,预测分子与蛋白质相互作用的 3D 结构。,diffDoc
+生物医药,ESM3,预测与建模,模型,模拟蛋白质进化，多模态生成新型蛋白。,esm3
+生物医药,ESMFold,预测与建模,模型,根据蛋白质的氨基酸序列预测其三维结构，预测速度快，适合快速分析蛋白质。,ESMFold
+生物医药,MRNASequence Retrieval,数据分析,纯prompt,磐石 ToolChain 工具「MRNASequence Retrieval」（MRNASequenceRetrieval）。,MRNASequenceRetrieval
+生物医药,RFdiffusion,预测与建模,模型,用于蛋白质结合剂设计的蛋白质骨架生成模型。,rFdiffusion
+生物医药,RNAFold,预测与建模,脚本,基于最小自由能原理，预测 RNA 分子的二级结构。,rnaFold
+生物医药,RNAPreview,数据分析,纯prompt,磐石 ToolChain 工具「RNAPreview」（RNAPreview）。,RNAPreview
+生物医药,RNA二级结构分析工具,数据分析,脚本,可以分析 RNA 的二级结构特征，包括碱基配对、茎区、环区数量与大小。,RNASecondaryStructureAnalysis
+生物医药,人源性评估,数据分析,脚本,使用天然抗体库（OASis）中的肽搜索和种系序列同一性来评估抗体的人性。,humanness
+生物医药,估计细胞周期各阶段持续时间,数据分析,脚本,基于双核苷（EdU/BrdU）脉冲标记的流式细胞术数据，估算细胞周期各阶段（G1、S、G2/M）的时长，以及细胞死亡率。,cellCyclePhaseDurationEstimation
+生物医药,免疫细胞分离与纯化,临床应用,脚本,模拟免疫细胞的分离与纯化流程。,immuneCellIsolationAndPurification
+生物医药,蛋白同源结构评估器,数据分析,脚本,集成 BLAST 序列比对与结构相似性分析，用于精准判定蛋白质同源关系与三维结构差异，支持功能预测和修饰位点评估。,proteinAssess
+生物医药,蛋白质序列保守性分析工具,数据分析,脚本,可以进行蛋白质多序列比对、系统发育树构建与保守性分析。,proteinSequenceConservationAnalysis
+生物医药,蛋白酶动力学分析工具,数据分析,脚本,可以基于荧光读数拟合 Michaelis-Menten 模型分析蛋白酶动力学数据。,proteaseKineticsAnalysis
+生物医药,酶动力学分析工具,数据分析,脚本,可以执行酶动力学实验分析，模拟并拟合酶在不同底物浓度下的反应速率。,enzymeKineticsAnalysis

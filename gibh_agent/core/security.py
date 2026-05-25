@@ -31,8 +31,8 @@ def _load_secret_key() -> str:
 
 SECRET_KEY = _load_secret_key()
 ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
-# 默认 7 天（10080 分钟）；可通过环境变量 ACCESS_TOKEN_EXPIRE_MINUTES 覆盖
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))
+# 默认 30 天（43200 分钟）；可通过环境变量 ACCESS_TOKEN_EXPIRE_MINUTES 覆盖
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "43200"))
 
 # 仅使用 bcrypt，不依赖 argon2（避免 HasherNotAvailable）
 pwd_context = PasswordHash((BcryptHasher(),))
