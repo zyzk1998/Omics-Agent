@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# 从「设计与模块.md」提取 Mermaid，用官方 CLI 容器渲染为矢量 SVG 与高倍率 PNG（无需本机安装 Chrome）。
+# 从「docs/设计与模块.md」提取 Mermaid，用官方 CLI 容器渲染为矢量 SVG 与高倍率 PNG（无需本机安装 Chrome）。
 # 依赖：Docker。首次会拉取镜像 MERMAID_IMG（默认 minlag/mermaid-cli:11.4.0）。
 # 吉卜力动画风：草木绿/天蓝描边与连线（theme）；画布与节点底色默认纯白。
 # 主题 JSON：MERMAID_THEME_CONFIG（默认 scripts/mermaid-design-module-ghibli.json）。
 # 画布背景：MERMAID_BG（默认 #ffffff）。
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-MD="${1:-$ROOT/设计与模块.md}"
+MD="${1:-$ROOT/docs/设计与模块.md}"
 OUT="${2:-$ROOT/docs/exports}"
 MERMAID_IMG="${MERMAID_IMG:-minlag/mermaid-cli:11.4.0}"
 MERMAID_THEME_CONFIG="${MERMAID_THEME_CONFIG:-$ROOT/scripts/mermaid-design-module-ghibli.json}"

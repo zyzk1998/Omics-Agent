@@ -4936,7 +4936,7 @@
     gap: 6px;
 }
 
-/* 开发者与帮助中心（全屏文档 Modal） */
+/* 帮助与 API 文档（全屏文档 Modal） */
 #docCenterModal .modal-content {
     border: none;
     border-radius: 0;
@@ -5015,9 +5015,104 @@
     border: 1px solid #e2e8f0;
     border-radius: 8px;
 }
+#docCenterModal .doc-architecture-text {
+    max-width: 920px;
+}
+#docCenterModal .doc-architecture-text ol {
+    margin: 0.75rem 0 0 1.25rem;
+    padding: 0;
+}
+#docCenterModal .doc-architecture-text li {
+    margin-bottom: 0.65rem;
+    line-height: 1.65;
+}
 #docCenterModal .doc-center-loading {
     color: #64748b;
     font-size: 14px;
+}
+
+/* 沉浸式引导：全局退出按钮 */
+.immersive-tour-exit-btn {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+/* API 文档 Markdown 排版（GitHub README 风格） */
+#docCenterModal .markdown-body.doc-api-markdown,
+#docCenterModal .doc-api-guide-host .markdown-body {
+    max-width: 920px;
+    line-height: 1.7;
+    font-size: 15px;
+    color: #334155;
+}
+#docCenterModal .markdown-body h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin: 0 0 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #e2e8f0;
+    color: #0f172a;
+}
+#docCenterModal .markdown-body h2 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    margin: 1.75rem 0 0.75rem;
+    color: #0f172a;
+}
+#docCenterModal .markdown-body h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 1.25rem 0 0.5rem;
+    color: #1e293b;
+}
+#docCenterModal .markdown-body p {
+    margin-bottom: 0.85rem;
+}
+#docCenterModal .markdown-body ul,
+#docCenterModal .markdown-body ol {
+    margin: 0.5rem 0 1rem 1.25rem;
+}
+#docCenterModal .markdown-body table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 14px;
+}
+#docCenterModal .markdown-body th,
+#docCenterModal .markdown-body td {
+    border: 1px solid #e2e8f0;
+    padding: 8px 12px;
+    text-align: left;
+}
+#docCenterModal .markdown-body th {
+    background: #f8fafc;
+    font-weight: 600;
+}
+#docCenterModal .markdown-body blockquote {
+    border-left: 4px solid #3b82f6;
+    padding: 0.25rem 0 0.25rem 1rem;
+    margin: 1rem 0;
+    color: #475569;
+    background: #f8fafc;
+}
+#docCenterModal .markdown-body :not(pre) > code {
+    background: #f1f5f9;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+}
+#docCenterModal .markdown-body pre {
+    margin: 1rem 0;
+}
+#docCenterModal .markdown-body .code-block-wrapper {
+    margin: 1rem 0;
+    border-radius: 8px;
+    overflow: hidden;
+}
+#docCenterModal .markdown-body hr {
+    border: none;
+    border-top: 1px solid #e2e8f0;
+    margin: 1.5rem 0;
 }
 
 /* 历史侧栏：后台 running 会话动态指示 */

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-将 `gibh_agent/db/seed_skills.py` 中合并后的系统技能清单导出为仓库根目录 `技能库.md`。
+将 `gibh_agent/db/seed_skills.py` 中合并后的系统技能清单导出为 `docs/技能库.md`。
 
 不含用户上传的动态插件（`dynamic_skill_plugins`）与仅 DB 存在的非种子技能；
 线上完整列表以 `GET /api/skills` 为准。
@@ -22,7 +22,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from gibh_agent.db.seed_skills import get_all_system_skills_list  # noqa: E402
 
-OUT_MD = REPO_ROOT / "技能库.md"
+OUT_MD = REPO_ROOT / "docs" / "技能库.md"
 ROUTE_RE = re.compile(r"\[Skill_Route:\s*(\w+)\s*\]")
 
 
@@ -65,7 +65,7 @@ def main() -> None:
         "1. **不含**用户 ZIP 上传的 **动态插件技能**（`dynamic_skill_plugins`，广场 `id` 形如 `dyn_*`）；也不含仅存在于数据库、未在种子文件维护的条目。",
         "2. **线上完整列表**（含收藏态、动态插件合并）以 **`GET /api/skills`** 为准（见 `gibh_agent/api/routers/skills.py` / `server.py`）。",
         "3. **`skill_route_tool`**：从 `prompt_template` 中解析的 **`[Skill_Route: …]`** 工具名；与 `@registry.register(name=...)` 对齐时可走语义路由快车道；`null` 表示未声明直连原子工具（多为占位或通用编排）。",
-        "4. **扩容规范**见 `docs/技能扩展规范文档.md`；**工具 JSON 全量**见根目录 `工具库.md`（`scripts/export_tool_library_md.py`）。",
+        "4. **扩容规范**见 `docs/技能扩展规范文档.md`；**工具 JSON 全量**见 `docs/工具库.md`（`scripts/export_tool_library_md.py`）。",
         "",
         f"**系统种子技能条数：** {n}",
         f"**其中已声明 [Skill_Route] 的条数：** {n_route}",

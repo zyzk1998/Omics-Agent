@@ -10,6 +10,7 @@ python-multipart>=0.0.6
 pydantic>=2.0.0
 openai>=1.0.0
 # --- scRNA / STED-EC：Scanpy 与 AnnData（轨迹、驱动基因等工具链）---
+# 自动细胞类型兜底聚类依赖 scanpy 自带的 leidenalg（Leiden）；Leiden 不可用时代码回退 Louvain
 scanpy>=1.9.0
 anndata>=0.9.0
 squidpy>=1.2.0

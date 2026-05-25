@@ -595,7 +595,7 @@ def render_bio_matrix_markdown(
             "PYTHONPATH=. python3 scripts/refresh_scienceone_toolchain_names.py",
             "# 3) 重生成本节对照表",
             "PYTHONPATH=. python3 scripts/generate_bioinformatics_tools_matrix_md.py",
-            "# 4) 写回根目录 工具库.md（含 Registry JSON + 本表）",
+            "# 4) 写回 docs/工具库.md（含 Registry JSON + 本表）",
             "PYTHONPATH=. python3 scripts/export_tool_library_md.py",
             "# 5) 可选：含已实现条目（全量对照）",
             "PYTHONPATH=. python3 scripts/generate_bioinformatics_tools_matrix_md.py --include-implemented --csv docs/磐石技能广场_生物医药化学_全量.csv",

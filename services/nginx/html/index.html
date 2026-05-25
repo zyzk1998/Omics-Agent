@@ -1413,6 +1413,9 @@
             let isProcessing = false; 
             window.DEMO_STATE = window.DEMO_STATE || 'IDLE';
             window._immersiveDemoActive = false;
+            window._isImmersiveOnboardingActive = false;
+            window._hasScrolledForImmersiveLoadBtn = false;
+            window.__immersiveDemoCancelled = false;
             window.demoExecutionCompleted = false;
             window.isVisitorDemoCompleted = false;
             window.isVisitorMode = true;
@@ -1909,6 +1912,91 @@
             window.buildDiagnosisReportBodyHtml = buildDiagnosisReportBodyHtml;
             window.renderRecommendationTable = renderRecommendationTable;
 
+            /** 是否为单细胞时空动力学（STED-EC）流水线步骤 */
+            function isStedEcPipelineStep(step, stepName, tid) {
+                var t = String(tid || (step && (step.step_id || step.tool_id)) || '').toLowerCase();
+                if (t.indexOf('sted_ec') >= 0) return true;
+                var n = String(stepName || (step && (step.step_name || step.name)) || '');
+                if (n.indexOf('数据与元数据校验') >= 0) return true;
+                if (n.indexOf('时间序列标准化') >= 0) return true;
+                if (n.indexOf('最优传输') >= 0) return true;
+                if (n.indexOf('时空动力学') >= 0) return true;
+                if (n.indexOf('轨迹驱动基因') >= 0) return true;
+                if (n.indexOf('通路富集') >= 0 && n.indexOf('STED') >= 0) return true;
+                return false;
+            }
+            window.isStedEcPipelineStep = isStedEcPipelineStep;
+
+            function truncateExecStepSublabel(text, maxLen) {
+                if (!text) return '';
+                var plain = String(text).replace(/```[\s\S]*?```/g, ' ').replace(/[#>*|`]/g, ' ').replace(/\s+/g, ' ').trim();
+                if (!plain) return '';
+                if (plain.length <= maxLen) return plain;
+                return plain.slice(0, maxLen) + '…';
+            }
+            window.truncateExecStepSublabel = truncateExecStepSublabel;
+
+            /**
+             * STED-EC 专用：将 summary 拆为简短 headline + Obs 透视长文本（verbose）。
+             * 仅当检测到 Obs 透视摘要 / 宽 markdown 表时才拆分。
+             */
+            function splitStedEcVerboseSummary(summary) {
+                var raw = (summary == null) ? '' : String(summary);
+                if (!raw.trim()) return { headline: '', verbose: '', hasVerbose: false };
+                var idx = -1;
+                var reList = [
+                    /\n\n\*\*[^*\n]*Obs 数据透视摘要[^*\n]*\*\*/,
+                    /\n\n\*\*标准化后 Obs 数据透视摘要[^*\n]*\*\*/,
+                    /\*\*[^*\n]*Obs 数据透视摘要[^*\n]*\*\*/,
+                    /\*\*标准化后 Obs 数据透视摘要[^*\n]*\*\*/
+                ];
+                for (var ri = 0; ri < reList.length; ri++) {
+                    var m = raw.match(reList[ri]);
+                    if (m && typeof m.index === 'number' && m.index >= 0) {
+                        idx = m.index;
+                        break;
+                    }
+                }
+                if (idx < 0 && raw.length > 350 && /\|\s*batch\s*\|/i.test(raw) && (raw.match(/\|/g) || []).length > 24) {
+                    idx = raw.search(/\*\*[^*\n]*Obs[^*\n]*\*\*/);
+                    if (idx < 0) idx = raw.search(/\|\s*batch\s*\|/i);
+                }
+                if (idx < 0) return { headline: raw, verbose: '', hasVerbose: false };
+                var headline = raw.slice(0, idx).trim();
+                var verbose = raw.slice(idx).trim();
+                if (!verbose) return { headline: raw, verbose: '', hasVerbose: false };
+                return { headline: headline || truncateExecStepSublabel(raw, 120), verbose: verbose, hasVerbose: true };
+            }
+            window.splitStedEcVerboseSummary = splitStedEcVerboseSummary;
+
+            function renderStepSummaryContentHtml(summary, step, stepName, tid) {
+                if (!summary) return '';
+                var esc = (typeof escapeHtml === 'function') ? escapeHtml : function (t) { return String(t == null ? '' : t); };
+                var parseMd = function (txt) {
+                    try {
+                        return (typeof safeMarkedParse === 'function') ? safeMarkedParse(txt) : esc(txt);
+                    } catch (e) {
+                        return esc(txt);
+                    }
+                };
+                var boxStyle = 'font-size:13px;line-height:1.7;padding:0 0 0 10px;border-left:3px solid #94a3b8;overflow:auto;';
+                if (!isStedEcPipelineStep(step, stepName, tid)) {
+                    return '<div class="mt-2 step-summary-content" style="' + boxStyle + '">' + parseMd(summary) + '</div>';
+                }
+                var split = splitStedEcVerboseSummary(summary);
+                if (!split.hasVerbose) {
+                    return '<div class="mt-2 step-summary-content" style="' + boxStyle + '">' + parseMd(summary) + '</div>';
+                }
+                var html = '';
+                if (split.headline) {
+                    html += '<div class="mt-2 step-summary-content step-summary-headline" style="' + boxStyle + '">' + parseMd(split.headline) + '</div>';
+                }
+                html += '<details class="sted-ec-verbose-summary-fold mt-2"><summary class="small text-primary user-select-none" style="cursor:pointer;">展开 Obs 数据透视技术详情</summary>';
+                html += '<div class="step-summary-content mt-2 markdown-body" style="font-size:12px;line-height:1.6;padding:8px 0 0 10px;border-left:3px solid #cbd5e1;overflow:auto;max-height:420px;">' + parseMd(split.verbose) + '</div></details>';
+                return html;
+            }
+            window.renderStepSummaryContentHtml = renderStepSummaryContentHtml;
+
             /**
              * 沉浸式 Demo / 无 SSE 闭包时：将 steps_details 写入右栏「执行结果详情」（summary Markdown + 图片资产）。
              * 对齐正式 renderExecutionSteps 的图片字段：report_data.images / step.images / plot_path 等。
@@ -1992,7 +2080,7 @@
                     var summaryBlock = '';
                     if (summaryRaw) {
                         try {
-                            summaryBlock = '<div class="mt-2 step-summary-content" style="font-size:13px;line-height:1.7;padding:0 0 0 10px;border-left:3px solid #94a3b8;overflow:auto;">' + safeMarkedParse(summaryRaw) + '</div>';
+                            summaryBlock = renderStepSummaryContentHtml(summaryRaw, st, title, st.step_id || st.tool_id || '');
                         } catch (eSum) {
                             summaryBlock = '<pre class="small bg-light p-2 rounded">' + escLite(summaryRaw) + '</pre>';
                         }
@@ -5498,9 +5586,40 @@
                 if (modal) modal.style.display = 'none';
             };
 
+            function docCenterApiLooksLikeSpaIndexHtml(text) {
+                var s = String(text || '').trim();
+                if (!s) return false;
+                if (/^<!DOCTYPE\s+html/i.test(s)) return true;
+                if (/<html[\s>]/i.test(s) && /<head[\s>]/i.test(s) && /index\.html|bootstrap\.min\.css|hljs/i.test(s)) return true;
+                return false;
+            }
+            function docCenterApiIsSingleGiantCodeBlock(html) {
+                if (!html || typeof html !== 'string') return false;
+                var wrappers = (html.match(/code-block-wrapper/g) || []).length;
+                if (wrappers !== 1) return false;
+                var stripped = html.replace(/<[^>]+>/g, '');
+                return stripped.length > 4000 && /<!DOCTYPE|bootstrap\.min\.css|<html/i.test(stripped);
+            }
+            function renderDocCenterApiHtml(md) {
+                var raw = String(md || '');
+                if (docCenterApiLooksLikeSpaIndexHtml(raw)) {
+                    console.warn('[docCenter] /API.md 疑似 SPA 回退页，改用内置摘要');
+                    raw = '# Omics Agent API 文档\n\n无法加载完整 `API.md`（静态服务可能将缺失文件回退为 index.html）。请通过 API 服务访问 `/API.md`，或查看仓库 `api/README.md`。\n\n## 核心端点\n\n- `GET /api/health`\n- `POST /api/upload`\n- `POST /api/chat`（SSE）\n- `POST /api/execute`\n';
+                }
+                var inner = (typeof safeMarkedParse === 'function')
+                    ? safeMarkedParse(raw)
+                    : ((typeof marked !== 'undefined' && marked.parse) ? marked.parse(raw) : '<p>' + raw.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>');
+                if (docCenterApiIsSingleGiantCodeBlock(inner)) {
+                    inner = (typeof safeMarkedParse === 'function')
+                        ? safeMarkedParse('# API 文档\n\n当前返回内容异常（整页 HTML 被当作单一代码块）。请刷新并确认 `services/nginx/html/API.md` 已部署，且 nginx 对 `.md` 不做 SPA 回退。')
+                        : '<p>API 文档加载异常，请检查静态资源配置。</p>';
+                }
+                return '<div class="markdown-body doc-api-markdown">' + inner + '</div>';
+            }
             function loadDocCenterApiMarkdown() {
                 var host = document.getElementById('doc-api-guide-body');
                 if (!host || host.getAttribute('data-loaded') === '1') return;
+                host.className = 'doc-api-guide-host';
                 host.innerHTML = '<p class="doc-center-loading">正在加载 API 文档…</p>';
                 fetch('/API.md', { cache: 'no-store' })
                     .then(function (r) {
@@ -5508,15 +5627,112 @@
                         return r.text();
                     })
                     .then(function (md) {
-                        host.innerHTML = (typeof safeMarkedParse === 'function')
-                            ? safeMarkedParse(md || '')
-                            : ((typeof marked !== 'undefined' && marked.parse) ? marked.parse(md || '') : '<pre>' + (md || '') + '</pre>');
+                        host.innerHTML = renderDocCenterApiHtml(md);
                         host.setAttribute('data-loaded', '1');
                     })
                     .catch(function (err) {
-                        host.innerHTML = '<p class="text-danger">加载失败：' + (err && err.message ? err.message : String(err)) + '。请确认服务已暴露 <code>/API.md</code>。</p>';
+                        host.innerHTML = '<div class="markdown-body doc-api-markdown"><p class="text-danger">加载失败：' +
+                            (err && err.message ? err.message : String(err)) +
+                            '。请确认服务已暴露 <code>/API.md</code>（FastAPI 或 nginx 静态目录）。</p></div>';
                     });
             }
+            window.closeDocCenterModal = function () {
+                var modalEl = document.getElementById('docCenterModal');
+                if (!modalEl || typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
+                var inst = bootstrap.Modal.getInstance(modalEl);
+                if (inst) inst.hide();
+            };
+            window.triggerImmersiveOnboarding = function () {
+                if (typeof showChatView === 'function') showChatView();
+                window._immersiveDemoActive = true;
+                window._isImmersiveOnboardingActive = true;
+                window._hasScrolledForImmersiveLoadBtn = false;
+                window.DEMO_STATE = 'ARMED';
+                window.demoExecutionCompleted = false;
+                window.isVisitorDemoCompleted = false;
+                var tmpl = '';
+                try {
+                    var sk = (window.__FEATURED_RESEARCH_SKILLS || []).filter(function (s) { return s && s.id === 'spatiotemporal_dynamics_sc'; })[0];
+                    tmpl = (sk && sk.prompt_template) ? sk.prompt_template : '';
+                } catch (eTmpl) { tmpl = ''; }
+                if (!tmpl) {
+                    tmpl = '帮我执行单细胞时空动力学分析。我希望基于最优传输理论（Optimal Transport），探索细胞在时间序列上的发育与分化轨迹。';
+                }
+                var ui = document.getElementById('userInput');
+                if (ui) {
+                    ui.value = tmpl;
+                    if (typeof autoResize === 'function') autoResize(ui);
+                    if (typeof checkInput === 'function') checkInput();
+                }
+                window.__immersiveDemoCancelled = false;
+                if (typeof window.mountImmersiveTourExitBtn === 'function') window.mountImmersiveTourExitBtn();
+                if (typeof DemoCoach !== 'undefined' && DemoCoach.show) {
+                    var sb = document.getElementById('sendBtn');
+                    DemoCoach.show({ target: sb, text: '系统支持根据提示词动态规划工作流，请点击发送。', placement: 'top' });
+                }
+            };
+            window.unmountImmersiveTourExitBtn = function () {
+                var ex = document.getElementById('btn-exit-immersive-tour');
+                if (ex && ex.parentNode) ex.parentNode.removeChild(ex);
+            };
+            window.mountImmersiveTourExitBtn = function () {
+                if (typeof window.unmountImmersiveTourExitBtn === 'function') window.unmountImmersiveTourExitBtn();
+                if (!window._immersiveDemoActive && !window._isImmersiveOnboardingActive) return;
+                var btn = document.createElement('button');
+                btn.id = 'btn-exit-immersive-tour';
+                btn.type = 'button';
+                btn.className = 'btn btn-sm btn-danger position-fixed immersive-tour-exit-btn';
+                btn.setAttribute('aria-label', '退出沉浸式引导');
+                btn.style.top = '20px';
+                btn.style.right = '20px';
+                btn.style.zIndex = '10050';
+                btn.style.borderRadius = '20px';
+                btn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                btn.innerHTML = '<i class="bi bi-x-circle me-1"></i> 退出引导';
+                btn.addEventListener('click', function (ev) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    if (typeof window.cancelImmersiveTour === 'function') window.cancelImmersiveTour();
+                });
+                document.body.appendChild(btn);
+            };
+            window.cancelImmersiveTour = function () {
+                window.__immersiveDemoCancelled = true;
+                window._isImmersiveOnboardingActive = false;
+                window._immersiveDemoActive = false;
+                window._hasScrolledForImmersiveLoadBtn = false;
+                window.DEMO_STATE = 'IDLE';
+                window.__immersiveDemoProcessLogActive = false;
+                if (typeof DemoCoach !== 'undefined' && DemoCoach.hide) DemoCoach.hide();
+                if (typeof window.unmountImmersiveTourExitBtn === 'function') window.unmountImmersiveTourExitBtn();
+                document.body.classList.remove('immersive-tour-active');
+                document.body.style.overflow = '';
+                document.documentElement.style.overflow = '';
+                if (typeof toggleLoadingState === 'function') toggleLoadingState(false);
+                if (typeof showToast === 'function') showToast('已退出引导模式', 'info');
+            };
+            window.scrollImmersiveOnboardingTargetIntoView = function (rootEl) {
+                if (!window._immersiveDemoActive && !window._isImmersiveOnboardingActive) return;
+                if (window._hasScrolledForImmersiveLoadBtn) return;
+                var scope = rootEl && rootEl.querySelector ? rootEl : (document.getElementById('chatContent') || document);
+                var nextTargetEl = (scope.querySelector && scope.querySelector('.btn-use-demo')) ||
+                    document.querySelector('#chatContent .btn-use-demo') ||
+                    document.querySelector('[id^="execute-workflow-"]');
+                if (!nextTargetEl) return;
+                window._hasScrolledForImmersiveLoadBtn = true;
+                try {
+                    nextTargetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                } catch (eScroll) {
+                    try { nextTargetEl.scrollIntoView(true); } catch (e2) { /* ignore */ }
+                }
+            };
+            window.scheduleImmersiveOnboardingScroll = function (rootEl, delayMs) {
+                var d = (delayMs == null || delayMs === undefined) ? 300 : Number(delayMs);
+                if (!isFinite(d) || d < 0) d = 300;
+                setTimeout(function () {
+                    window.scrollImmersiveOnboardingTargetIntoView(rootEl);
+                }, d);
+            };
             window.openDocCenterModal = function (tabId) {
                 if (typeof closeAllPopovers === 'function') closeAllPopovers();
                 var userProfileMenu = document.getElementById('user-profile-menu');
@@ -7065,9 +7281,13 @@
                 if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
                 window.DEMO_STATE = 'IDLE';
                 window._immersiveDemoActive = false;
+                window._isImmersiveOnboardingActive = false;
+                window._hasScrolledForImmersiveLoadBtn = false;
+                window.__immersiveDemoCancelled = true;
                 window.demoExecutionCompleted = false;
                 window.isVisitorDemoCompleted = false;
                 if (typeof DemoCoach !== 'undefined' && DemoCoach.hide) DemoCoach.hide();
+                if (typeof window.unmountImmersiveTourExitBtn === 'function') window.unmountImmersiveTourExitBtn();
                 if (typeof window.syncImmersiveDemoEntryVisibility === 'function') window.syncImmersiveDemoEntryVisibility();
                 setActiveSessionInSidebar(null);
                 if (typeof highlightActiveSession === 'function') highlightActiveSession(null);
@@ -7867,6 +8087,10 @@
             var cardEl = cardZoneRef.querySelector('[data-form-id="' + formId + '"]');
             if (cardEl && typeof window.mountUploadExecuteButton === 'function') window.mountUploadExecuteButton(cardEl);
             if (cardEl && typeof window.syncWorkflowExecuteButtonVisibility === 'function') window.syncWorkflowExecuteButtonVisibility(formId, cardEl);
+            if (window._immersiveDemoActive && (window.DEMO_STATE === 'PLAYING_PLAN' || window.DEMO_STATE === 'PLAN_DONE') &&
+                typeof window.scheduleImmersiveOnboardingScroll === 'function') {
+                window.scheduleImmersiveOnboardingScroll(cardEl, 300);
+            }
             if (cardEl) {
                 var _hidPaths = cardEl.querySelector('#hidden-file-paths-' + formId);
                 var _cardPathArr = [];
@@ -9749,29 +9973,7 @@
                 var btnImmersive = document.getElementById('btnImmersiveSpatiotemporalDemo');
                 if (btnImmersive) {
                     btnImmersive.onclick = function () {
-                        if (typeof showChatView === 'function') showChatView();
-                        window._immersiveDemoActive = true;
-                        window.DEMO_STATE = 'ARMED';
-                        window.demoExecutionCompleted = false;
-                        window.isVisitorDemoCompleted = false;
-                        var tmpl = '';
-                        try {
-                            var sk = (window.__FEATURED_RESEARCH_SKILLS || []).filter(function (s) { return s && s.id === 'spatiotemporal_dynamics_sc'; })[0];
-                            tmpl = (sk && sk.prompt_template) ? sk.prompt_template : '';
-                        } catch (e) { tmpl = ''; }
-                        if (!tmpl) {
-                            tmpl = '\u5e2e\u6211\u6267\u884c\u5355\u7ec6\u80de\u65f6\u7a7a\u52a8\u529b\u5b66\u5206\u6790\u3002\u6211\u5e0c\u671b\u57fa\u4e8e\u6700\u4f18\u4f20\u8f93\u7406\u8bba\uff08Optimal Transport\uff09\uff0c\u63a2\u7d22\u7ec6\u80de\u5728\u65f6\u95f4\u5e8f\u5217\u4e0a\u7684\u53d1\u80b2\u4e0e\u5206\u5316\u8f68\u8ff9\u3002';
-                        }
-                        var ui = document.getElementById('userInput');
-                        if (ui) {
-                            ui.value = tmpl;
-                            if (typeof autoResize === 'function') autoResize(ui);
-                            if (typeof checkInput === 'function') checkInput();
-                        }
-                        if (typeof DemoCoach !== 'undefined' && DemoCoach.show) {
-                            var sb = document.getElementById('sendBtn');
-                            DemoCoach.show({ target: sb, text: '\u7cfb\u7edf\u652f\u6301\u6839\u636e\u63d0\u793a\u8bcd\u52a8\u6001\u89c4\u5212\u5de5\u4f5c\u6d41\uff0c\u8bf7\u70b9\u51fb\u53d1\u9001\u3002', placement: 'top' });
-                        }
+                        if (typeof window.triggerImmersiveOnboarding === 'function') window.triggerImmersiveOnboarding();
                     };
                 }
                 if (isLoggedIn() && typeof getAuthHeaders === 'function') {
@@ -10903,6 +11105,7 @@
              * 解析阶段与 blueprint 一致；派发阶段按事件类型注入「计算呼吸」延迟，并在长算力段插入合成 status，驱动 checklist Spinner 逐步停留。
              */
             window.playImmersiveDemoStream = async function (url, opts) {
+                if (window.__immersiveDemoCancelled) return;
                 opts = opts || {};
                 var streamKind = opts.streamKind;
                 if (!streamKind) {
@@ -11064,7 +11267,7 @@
                 if (!useBreathing) {
                     window.__immersiveDemoProcessLogActive = false;
                     var qLegacy = queue.slice();
-                    while (qLegacy.length > 0) {
+                    while (qLegacy.length > 0 && !window.__immersiveDemoCancelled) {
                         await sleep(delayMsLegacy);
                         var it0 = qLegacy.shift();
                         if (typeof window.handleServerEvent !== 'function') continue;
@@ -11102,6 +11305,7 @@
                     }
 
                     async function dispatchOneDemoItem(item) {
+                        if (window.__immersiveDemoCancelled) return;
                         if (typeof window.handleServerEvent !== 'function') return;
                         console.log('[Demo Parser] Dispatching:', item.type);
 
@@ -11199,13 +11403,13 @@
                     }
 
                     var qa = _phasePre.slice();
-                    while (qa.length > 0) {
+                    while (qa.length > 0 && !window.__immersiveDemoCancelled) {
                         await dispatchOneDemoItem(qa.shift());
                     }
                     if (typeof window.__demoProcessLogFinalizeLast === 'function') window.__demoProcessLogFinalizeLast();
 
                     var qb = _phaseFinal.slice();
-                    while (qb.length > 0) {
+                    while (qb.length > 0 && !window.__immersiveDemoCancelled) {
                         await dispatchOneDemoItem(qb.shift());
                     }
                 } finally {
@@ -11270,6 +11474,14 @@
                     layer = document.createElement('div');
                     layer.className = 'demo-coach-dim';
                     layer.setAttribute('aria-hidden', 'true');
+                    if (window._isImmersiveOnboardingActive || window._immersiveDemoActive) {
+                        layer.style.pointerEvents = 'auto';
+                        layer.style.cursor = 'pointer';
+                        layer.setAttribute('title', '点击退出引导');
+                        layer.addEventListener('click', function onDimExit() {
+                            if (typeof window.cancelImmersiveTour === 'function') window.cancelImmersiveTour();
+                        });
+                    }
                     bubbleEl = document.createElement('div');
                     bubbleEl.className = 'demo-coach-bubble';
                     bubbleEl.setAttribute('role', 'tooltip');
@@ -11285,7 +11497,14 @@
                     window.addEventListener('scroll', onResize, true);
                 }
                 document.addEventListener('keydown', function (ev) {
-                    if (ev.key === 'Escape') hide();
+                    if (ev.key !== 'Escape') return;
+                    if (window._isImmersiveOnboardingActive || window._immersiveDemoActive) {
+                        if (typeof window.cancelImmersiveTour === 'function') {
+                            window.cancelImmersiveTour();
+                            return;
+                        }
+                    }
+                    hide();
                 });
                 return { show: show, hide: hide };
             })();
@@ -11339,15 +11558,26 @@
                         };
                     }
                     await window.playImmersiveDemoStream('/assets/demo/spatiotemporal_tutorial/demo_execution_stream.txt', { streamKind: 'execution' });
+                    if (window.__immersiveDemoCancelled || !window._immersiveDemoActive) {
+                        if (typeof toggleLoadingState === 'function') toggleLoadingState(false);
+                        return;
+                    }
                     window.DEMO_STATE = 'COMPLETED';
                     if (!window.isVisitorDemoCompleted) {
                         window.isVisitorDemoCompleted = true;
                         window.demoExecutionCompleted = true;
                     }
                     window._immersiveDemoActive = false;
+                    window._isImmersiveOnboardingActive = false;
+                    window._hasScrolledForImmersiveLoadBtn = false;
+                    if (typeof window.unmountImmersiveTourExitBtn === 'function') window.unmountImmersiveTourExitBtn();
                     if (typeof toggleLoadingState === 'function') toggleLoadingState(false);
                 } catch (demExecErr) {
                     console.error(demExecErr);
+                    if (window.__immersiveDemoCancelled) {
+                        if (typeof toggleLoadingState === 'function') toggleLoadingState(false);
+                        return;
+                    }
                     if (typeof showToast === 'function') showToast('Demo 执行回放失败', 'danger');
                     window.DEMO_STATE = 'PLAN_DONE';
                     if (typeof toggleLoadingState === 'function') toggleLoadingState(false);
@@ -12342,18 +12572,29 @@
                             if (typeof showToast === 'function') showToast('Demo 规划回放失败', 'danger');
                         }
                         clearInterval(timerInterval);
+                        if (window.__immersiveDemoCancelled || !window._immersiveDemoActive) {
+                            toggleLoadingState(false);
+                            return;
+                        }
                         window.DEMO_STATE = 'PLAN_DONE';
                         toggleLoadingState(false);
                         if (typeof DemoCoach !== 'undefined' && DemoCoach.hide) DemoCoach.hide();
                         setTimeout(function () {
-                            if (typeof DemoCoach === 'undefined' || !DemoCoach.show) return;
-                            var loadBtn = document.querySelector('#chatContent .btn-use-demo') || document.querySelector('[id^="execute-workflow-"]');
-                            if (loadBtn) {
-                                DemoCoach.show({ target: loadBtn, text: '请点击载入官方演示数据', placement: 'top' });
-                            } else {
-                                DemoCoach.show({ targetSelector: '.btn-use-demo', text: '请点击载入官方演示数据', placement: 'top' });
+                            if (window.__immersiveDemoCancelled || !window._immersiveDemoActive) return;
+                            if (typeof window.scheduleImmersiveOnboardingScroll === 'function') {
+                                window.scheduleImmersiveOnboardingScroll(null, 0);
                             }
-                        }, 1000);
+                            setTimeout(function () {
+                                if (window.__immersiveDemoCancelled || !window._immersiveDemoActive) return;
+                                if (typeof DemoCoach === 'undefined' || !DemoCoach.show) return;
+                                var loadBtn = document.querySelector('#chatContent .btn-use-demo') || document.querySelector('[id^="execute-workflow-"]');
+                                if (loadBtn) {
+                                    DemoCoach.show({ target: loadBtn, text: '请点击载入官方演示数据', placement: 'top' });
+                                } else {
+                                    DemoCoach.show({ targetSelector: '.btn-use-demo', text: '请点击载入官方演示数据', placement: 'top' });
+                                }
+                            }, 350);
+                        }, 300);
                         return;
                     }
                 }
@@ -14141,17 +14382,32 @@
                                     stepIconClass = 'running';
                                 }
                                 var stepSublabel = '';
+                                var _labelSummary = (typeof step.summary === 'string' && step.summary.trim()) ? step.summary : '';
+                                if (!_labelSummary && step.step_result && typeof step.step_result.summary === 'string') {
+                                    _labelSummary = step.step_result.summary;
+                                }
                                 if (isSkipped) {
                                     stepSublabel = '条件不足，已跳过';
                                 } else if (stepStatus === 'success' || stepStatus === 'warning') {
-                                    if (step.summary) stepSublabel = step.summary;
+                                    if (_labelSummary) {
+                                        if (isStedEcPipelineStep(step, stepName, tid)) {
+                                            var _stedSplit = splitStedEcVerboseSummary(_labelSummary);
+                                            stepSublabel = _stedSplit.hasVerbose
+                                                ? (truncateExecStepSublabel(_stedSplit.headline, 120) || '执行完成，Obs 透视详情已折叠')
+                                                : _labelSummary;
+                                        } else {
+                                            stepSublabel = _labelSummary;
+                                        }
+                                    }
                                 } else if (stepStatus === 'error') {
                                     stepSublabel = stepError || step.message || '执行失败';
                                 } else if (stepStatus === 'running') stepSublabel = '执行中...';
                                 else stepSublabel = '排队中';
 
-                                // 🔥 所有组学报告手风琴默认展开：不依赖 omics 类型，全部 show、按钮无 collapsed、无 data-bs-parent
-                                const shouldExpand = true;
+                                // 各步骤详情默认展开；STED-EC Obs 长表在 summary 渲染内单独 <details> 折叠
+                                const accBtnClass = 'accordion-button py-2 flex-grow-1';
+                                const accCollapseClass = 'accordion-collapse collapse show';
+                                const accExpanded = 'true';
                                 
                                 // 🔥 PHASE 1: Enhanced result data extraction
                                 const stepResult = step.step_result || {};
@@ -14182,19 +14438,9 @@
                                 // 🔥 PHASE 1: Always show content if available (even for warnings)
                                 if (stepStatus === 'success' || stepStatus === 'warning') {
                                     
-                                    // Render summary as markdown/html（唯一展示处，支持表格；无灰框，仅左边线）
+                                    // Render summary：STED-EC Obs 透视长表默认折叠在 <details> 内
                                     if (summary) {
-                                        let summaryHtml = '';
-                                        try {
-                                            summaryHtml = (typeof safeMarkedParse === 'function') ? safeMarkedParse(summary) : escapeHtml(summary);
-                                        } catch (e) {
-                                            summaryHtml = escapeHtml(summary);
-                                        }
-                                        resultContentHtml += `
-                                            <div class="mt-2 step-summary-content" style="font-size:13px;line-height:1.7;padding:0 0 0 10px;border-left:3px solid #94a3b8;overflow:auto;">
-                                                ${summaryHtml}
-                                            </div>
-                                        `;
+                                        resultContentHtml += renderStepSummaryContentHtml(summary, step, stepName, tid);
                                     }
                                     if (diagMarkdown && (stepStatus === 'success' || stepStatus === 'warning')) {
                                         var dTrim = diagMarkdown.trim();
@@ -14390,10 +14636,10 @@
                                                 <div class="accordion" id="${stepId}-acc">
                                                     <div class="accordion-item" style="border:none;">
                                                         <h2 class="accordion-header exec-result-accordion-header d-flex align-items-stretch flex-nowrap py-0 pe-0">
-                                                            <button class="accordion-button py-2 flex-grow-1" type="button" data-bs-toggle="collapse" data-bs-target="#${stepId}" aria-expanded="true" style="font-size:13px;">查看详情</button>
+                                                            <button class="${accBtnClass}" type="button" data-bs-toggle="collapse" data-bs-target="#${stepId}" aria-expanded="${accExpanded}" style="font-size:13px;">查看详情</button>
                                                             <button type="button" class="focus-mode-btn" title="全屏查看此结果" aria-label="全屏查看此结果">⛶</button>
                                                         </h2>
-                                                        <div id="${stepId}" class="accordion-collapse collapse show">
+                                                        <div id="${stepId}" class="${accCollapseClass}">
                                                             <div class="accordion-body">
                                                                 ${stepError && (stepStatus === 'error' || stepStatus === 'skipped') ? `
                                                                     <div class="alert alert-sm mb-2 error-box ${stepStatus === 'skipped' ? 'skipped-box' : 'alert-danger'}" style="font-size: 0.875rem; padding: 0.5rem;">
@@ -18199,7 +18445,7 @@
             <div class="modal-dialog modal-fullscreen">
                 <div class="modal-content">
                     <div class="modal-header bg-light border-bottom py-3">
-                        <h5 class="modal-title fw-bold" id="docCenterModalTitle"><i class="bi bi-book me-2"></i>开发者与帮助中心</h5>
+                        <h5 class="modal-title fw-bold" id="docCenterModalTitle"><i class="bi bi-book me-2"></i>帮助与API文档</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
                     </div>
                     <div class="modal-body p-0 d-flex" style="height: calc(100vh - 56px);">
@@ -18226,7 +18472,8 @@
                             </div>
                             <div class="tab-pane fade" id="doc-api-guide" role="tabpanel">
                                 <h2>首次调用 API</h2>
-                                <div id="doc-api-guide-body"><p class="doc-center-loading">切换到本页时将自动加载完整 API 文档…</p></div>
+                                <p class="text-muted small">以下为 Markdown 渲染的接口说明：正文使用标题与段落排版，仅 JSON / HTTP 示例置于代码块。</p>
+                                <div id="doc-api-guide-body" class="doc-api-guide-host"><p class="doc-center-loading">切换到本页时将自动加载完整 API 文档…</p></div>
                             </div>
                             <div class="tab-pane fade" id="doc-omics-agent" role="tabpanel">
                                 <h2>智能体接入指南</h2>
@@ -18244,8 +18491,23 @@
                             </div>
                             <div class="tab-pane fade" id="doc-architecture" role="tabpanel">
                                 <h2>架构与数据流</h2>
-                                <p>下图展示用户请求、编排器、工具 Worker 与多模态资产总线之间的典型数据流向（交互式大图可在新标签页打开）。</p>
-                                <iframe class="doc-center-iframe" src="/whotowork.html" title="Omics Agent 架构与数据流"></iframe>
+                                <p class="text-muted small">以下为端到端数据流文字说明（已移除报错的 Mermaid 图表，完整背景见仓库文档）。</p>
+                                <div class="markdown-body doc-architecture-text">
+                                    <h3>步骤详解</h3>
+                                    <ol>
+                                        <li><strong>前端 → API</strong>：POST /api/upload 上传文件；POST /api/chat 发送 message、uploaded_files、stream、session_id、user_id、model_name</li>
+                                        <li><strong>文件治理</strong>：StructureNormalizer 解压 → ModalitySniffer 检测模态 → FileInspector 提取 FileMetadata</li>
+                                        <li><strong>API → 编排器</strong>：FastAPI 调用 <code>AgentOrchestrator.stream_process(query, files, history, model_name=..., owner_id=...)</code>，无 Celery 主路径</li>
+                                        <li><strong>编排器</strong>：意图分类（Chat/Task）、工作流模板复用正则拦截；Task 则调 WorkflowPlanner + 领域 Agent</li>
+                                        <li><strong>规划器 ↔ 检索器/LLM</strong>：Tool Retriever.query_tools() 语义检索 → 工具 Schema 注入 LLM → CoT 生成工作流（含 selected/skip_steps）</li>
+                                        <li><strong>领域智能体 → 执行器</strong>：WorkflowExecutor 按步骤执行，ToolRegistry 动态查找工具</li>
+                                        <li><strong>执行器 → 工具</strong>：Pydantic 校验参数、步骤间 h5ad_path 等链式传递、调用 @register 工具</li>
+                                        <li><strong>执行器 → 输出</strong>：step_result 经 SSE 推送；前端按 type 渲染卡片/步骤/图表</li>
+                                        <li><strong>错误自愈</strong>：Executor 错误反馈 Planner → LLM 修正 → 再执行</li>
+                                        <li><strong>编排器 → 前端</strong>：SSE 事件 status / workflow / step_result / diagnosis / message / done / state_snapshot；state_snapshot 可入库供历史恢复</li>
+                                        <li><strong>前端</strong>：fetch + ReadableStream 解析 SSE，渲染工作流卡片、步骤结果、Markdown 报告</li>
+                                    </ol>
+                                </div>
                             </div>
                         </div>
                     </div>

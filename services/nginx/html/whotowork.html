@@ -2628,51 +2628,12 @@
             </div>
         </div>
         
-        <!-- 数据流总结 - Mermaid 流程图 -->
+        <!-- 数据流总结（已移除 Mermaid 图表，仅保留文字说明） -->
         <div class="section">
             <h2>📊 数据流总结</h2>
             <div class="flow-step">
-                <h3>完整数据流向</h3>
-                <div class="mermaid">
-graph TB
-    classDef user fill:#e8f5e9,stroke:#4CAF50,stroke-width:2px,rx:5,ry:5
-    classDef core fill:#f3e5f5,stroke:#9C27B0,stroke-width:2px,rx:5,ry:5
-    classDef exec fill:#fff3e0,stroke:#FF9800,stroke-width:2px,rx:5,ry:5
-    classDef tool fill:#e3f2fd,stroke:#2196F3,stroke-width:2px,rx:5,ry:5
-
-    subgraph UI_Layer["前端交互层"]
-        direction TB
-        FE["前端 UI"]:::user
-    end
-
-    subgraph Backend["后端核心层"]
-        direction TB
-        API["API 网关"]:::core
-        Orch["总控编排器"]:::core
-        Plan["首席科学家"]:::core
-        RAG["图书馆员"]:::core
-    end
-
-    subgraph Engine["执行引擎层"]
-        direction TB
-        Agent["领域智能体"]:::exec
-        Exec["执行器"]:::exec
-        Tools["生信工具库"]:::tool
-    end
-
-    FE -->|"1.上传/指令"| API
-    API -->|"2.异步任务"| Orch
-    Orch -->|"3.意图路由"| Plan
-    Plan <-->|"4.语义检索"| RAG
-    Plan -->|"5.生成工作流"| Agent
-    Agent -->|"6.初始化"| Exec
-    Exec <-->|"7.动态调用"| Tools
-    Exec -.->|"8.结果回滚"| Plan
-    Agent -->|"9.生成报告"| Orch
-    Orch -->|"10.SSE推送"| FE
-                </div>
                 <div class="flow-text-summary">
-                    <h4>📋 步骤详解</h4>
+                    <h3>步骤详解</h3>
                     <ol>
                         <li><strong>前端 → API</strong>：POST /api/upload 上传文件；POST /api/chat 发送 message、uploaded_files、stream、session_id、user_id、model_name</li>
                         <li><strong>文件治理</strong>：StructureNormalizer 解压 → ModalitySniffer 检测模态 → FileInspector 提取 FileMetadata</li>
@@ -2691,24 +2652,5 @@ graph TB
         </div>
     </div>
 
-    <script type="module">
-        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-        mermaid.initialize({
-            startOnLoad: true,
-            theme: 'base',
-            flowchart: {
-                curve: 'basis',
-                padding: 15
-            },
-            themeVariables: {
-                primaryColor: '#f8f9fa',
-                primaryTextColor: '#333',
-                primaryBorderColor: '#667eea',
-                lineColor: '#b197fc',
-                secondaryColor: '#f3e5f5',
-                tertiaryColor: '#fff'
-            }
-        });
-    </script>
 </body>
 </html>

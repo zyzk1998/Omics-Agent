@@ -15,7 +15,7 @@
 | `Radiomics`                            | `gibh_agent/core/workflows/radiomics_workflow.py` | `radiomics_agent`    |
 
 
-**扩展说明**：`STED_EC` / `SPATIOTEMPORAL_DYNAMICS` 为单细胞轨迹专项通道，定义于 `gibh_agent/core/workflows/sted_ec_workflow.py`，路由仍走 `rna_agent`；本文以 **四模态 tabular/spatial/imaging 标准管线** 为主模板。
+**扩展说明**：`STED_EC` / `SPATIOTEMPORAL_DYNAMICS` 为单细胞轨迹专项通道，定义于 `gibh_agent/core/workflows/sted_ec_workflow.py`，路由仍走 `rna_agent`。细胞类型探针、缺失时自动标注与报告 Obs 表折叠规则见 **[`STED_EC_细胞类型探针与报告展示规范.md`](./STED_EC_细胞类型探针与报告展示规范.md)**。本文以 **四模态 tabular/spatial/imaging 标准管线** 为主模板。
 
 **三大组学扩展（基因组已贯通，可作新模态模板）**
 

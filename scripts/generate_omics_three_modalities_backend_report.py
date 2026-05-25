@@ -6,7 +6,7 @@
   PYTHONPATH=. python3 scripts/generate_omics_three_modalities_backend_report.py
 
 输出:
-  OMICS_THREE_MODALITIES_BACKEND_RUN_REPORT.md（仓库根目录）
+  docs/OMICS_THREE_MODALITIES_BACKEND_RUN_REPORT.md
 """
 from __future__ import annotations
 
@@ -307,7 +307,7 @@ async def main_async() -> int:
         reports.append(rec)
 
     md = _render_markdown(reports, sniff, ok_all=ok_all)
-    out_path = _ROOT / "OMICS_THREE_MODALITIES_BACKEND_RUN_REPORT.md"
+    out_path = _ROOT / "docs" / "OMICS_THREE_MODALITIES_BACKEND_RUN_REPORT.md"
     out_path.write_text(md, encoding="utf-8")
     print(f"Wrote {out_path}")
     return 0 if ok_all else 2

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 
 from ..core.tool_registry import registry
+from ..core.tool_stream_log import aemit_tool_log, emit_tool_log
 from ..core.utils import sanitize_for_json
 
 logger = logging.getLogger(__name__)
@@ -41,18 +42,34 @@ STED_EC_VALID_TIME_KEYS: Tuple[str, ...] = (
     "sample_time",
 )
 
-STED_EC_VALID_CELL_TYPE_KEYS: Tuple[str, ...] = (
-    "cell_type",
-    "celltype",
-    "annotation",
+STED_EC_VIZ_ONLY_CLUSTER_KEYS: Tuple[str, ...] = (
     "clusters",
     "louvain",
     "leiden",
+)
+
+# 视为「已完成细胞类型注释」的 obs 列（不含 leiden/louvain 等纯聚类编号）
+STED_EC_PREANNOTATED_CELL_TYPE_KEYS: Tuple[str, ...] = (
+    "cell_type",
+    "celltype",
+    "CellType",
+    "cell_types",
+    "annotation",
     "label",
     "level1_group",
     "level3_celltypes",
     "level2_organORlineages",
     "new_level3_celltypes",
+)
+
+STED_EC_VALID_CELL_TYPE_KEYS: Tuple[str, ...] = STED_EC_PREANNOTATED_CELL_TYPE_KEYS + STED_EC_VIZ_ONLY_CLUSTER_KEYS
+
+# 细胞类型探针：优先精确匹配常用列名，再回退至其它预注释列名
+STED_EC_CELL_TYPE_PROBE_KEYS: Tuple[str, ...] = (
+    "cell_type",
+    "celltype",
+    "CellType",
+    "cell_types",
 )
 
 
@@ -62,6 +79,254 @@ def _sted_ec_time_keys_ordered() -> Tuple[str, ...]:
         return STED_EC_VALID_TIME_KEYS
     more = tuple(x.strip() for x in extra.split(",") if x.strip())
     return STED_EC_VALID_TIME_KEYS + more
+
+
+def _has_meaningful_cell_type_labels(series: Any) -> bool:
+    """列内至少有一个非空、非占位符的有效标签时，视为已完成细胞类型注释。"""
+    import pandas as pd
+
+    s = series.astype(str).str.strip()
+    s = s.replace(["nan", "NaN", "None", "", " ", "Unknown", "unknown"], pd.NA)
+    valid = s.dropna()
+    return not valid.empty and int(valid.nunique()) >= 1
+
+
+def _probe_cell_type_key(adata: Any) -> Optional[str]:
+    """细胞标签探针：在 obs 中查找已存在的、具生物学含义的细胞类型注释列（不含 leiden/louvain 聚类编号）。"""
+    for k in STED_EC_CELL_TYPE_PROBE_KEYS:
+        if k in adata.obs.columns and _has_meaningful_cell_type_labels(adata.obs[k]):
+            return k
+    for k in STED_EC_PREANNOTATED_CELL_TYPE_KEYS:
+        if k not in STED_EC_CELL_TYPE_PROBE_KEYS and k in adata.obs.columns:
+            if _has_meaningful_cell_type_labels(adata.obs[k]):
+                return k
+    return None
+
+
+def _normalize_cell_type_obs(adata: Any, source_key: str) -> None:
+    """将探针命中的列统一规范命名为 cell_type，供下游一致读取。"""
+    if source_key == "cell_type":
+        return
+    adata.obs["cell_type"] = adata.obs[source_key].astype(str)
+
+
+def _assign_cell_types_from_cluster_markers(adata: Any, cluster_key: str) -> Dict[str, Any]:
+    """
+    依据各 Cluster 的 marker 基因表达，将聚类标签映射为常识细胞类型并写入 adata.obs['cell_type']。
+    """
+    from gibh_agent.tools.rna.annotation import _get_fallback_markers
+
+    import numpy as np
+
+    markers = _get_fallback_markers()
+    var_names = set(adata.var_names)
+    gene_to_type = {g: t for g, t in markers.items() if g in var_names}
+    clusters = adata.obs[cluster_key].astype(str).unique()
+    cluster_to_label: Dict[str, str] = {}
+
+    if not gene_to_type:
+        adata.obs["cell_type"] = "Cluster_" + adata.obs[cluster_key].astype(str)
+        label_counts = adata.obs["cell_type"].value_counts()
+        return {
+            "method": "cluster_id_fallback",
+            "n_cell_types": int(label_counts.nunique()),
+            "cell_types": label_counts.to_dict(),
+        }
+
+    type_genes: Dict[str, List[str]] = {}
+    for g, t in gene_to_type.items():
+        type_genes.setdefault(t, []).append(g)
+
+    for cl in clusters:
+        mask = adata.obs[cluster_key].astype(str) == cl
+        scores: Dict[str, float] = {}
+        for cell_type, genes in type_genes.items():
+            try:
+                sub = adata[mask, genes].X
+                if hasattr(sub, "toarray"):
+                    sub = sub.toarray()
+                scores[cell_type] = float(np.mean(sub))
+            except Exception:
+                scores[cell_type] = 0.0
+        best = max(scores, key=scores.get)
+        cluster_to_label[cl] = best if scores[best] > 0 else f"Cluster_{cl}"
+
+    adata.obs["cell_type"] = adata.obs[cluster_key].astype(str).map(cluster_to_label)
+    label_counts = adata.obs["cell_type"].value_counts()
+    return {
+        "method": "marker_cluster_mapping",
+        "n_cell_types": int(label_counts.nunique()),
+        "cell_types": label_counts.to_dict(),
+    }
+
+
+def _run_scanpy_auto_cluster_pipeline(adata: Any, *, time_key: Optional[str] = None) -> str:
+    """
+    Scanpy 标准兜底：预处理 → 高变基因 → PCA → neighbors → Leiden 聚类。
+    返回用于 marker 映射的 cluster 列名。
+    """
+    import scanpy as sc
+
+    cluster_key = "_sted_auto_cluster"
+    if time_key:
+        _robust_sanitize_and_preprocess(adata, time_key, logger_label="sted_ec_auto_annotate")
+    else:
+        _robust_sanitize_and_preprocess(adata, "", logger_label="sted_ec_auto_annotate")
+
+    n_top = min(2000, max(500, adata.n_vars // 2))
+    sc.pp.highly_variable_genes(
+        adata,
+        min_mean=0.0125,
+        max_mean=3,
+        min_disp=0.7,
+        n_top_genes=n_top,
+    )
+    if adata.var.get("highly_variable") is not None:
+        adata_hvg = adata[:, adata.var["highly_variable"]].copy()
+    else:
+        adata_hvg = adata.copy()
+
+    n_comps = min(50, adata_hvg.n_obs - 1, adata_hvg.n_vars - 1)
+    if n_comps < 2:
+        adata.obs[cluster_key] = "0"
+        return cluster_key
+
+    sc.tl.pca(adata_hvg, n_comps=n_comps, svd_solver="arpack")
+    sc.pp.neighbors(adata_hvg, n_neighbors=min(15, adata_hvg.n_obs - 1), n_pcs=min(50, n_comps))
+    try:
+        sc.tl.leiden(adata_hvg, key_added=cluster_key, resolution=0.8)
+    except Exception as leiden_err:
+        logger.warning("Leiden 聚类失败，回退 Louvain: %s", leiden_err)
+        sc.tl.louvain(adata_hvg, key_added=cluster_key, resolution=0.8)
+    adata.obs[cluster_key] = adata_hvg.obs[cluster_key].astype(str).values
+    del adata_hvg
+    gc.collect()
+    return cluster_key
+
+
+def _auto_annotate_cell_types_fallback_sync(
+    adata: Any,
+    *,
+    session_id: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    source_h5ad_path: Optional[str] = None,
+    time_key: Optional[str] = None,
+) -> Tuple[Any, Dict[str, Any]]:
+    """
+    同步版自动细胞类型标注闭环：聚类 + marker 映射 → 固化 adata.obs['cell_type'] 并写回 h5ad。
+    """
+    _ = session_id  # 预留会话级追踪；当前逻辑不依赖
+    emit_tool_log(
+        "⚠️ 原始数据缺失细胞类型，系统正在自动调用 AI 标记引擎进行细胞类型识别...",
+        state="running",
+    )
+    emit_tool_log("正在进行高变基因筛选、降维与 Leiden 聚类...", state="running")
+
+    cluster_key = _run_scanpy_auto_cluster_pipeline(adata, time_key=time_key)
+    emit_tool_log("正在依据 Cluster Top Marker 基因映射常识细胞类型...", state="running")
+    annotate_meta = _assign_cell_types_from_cluster_markers(adata, cluster_key)
+
+    if cluster_key in adata.obs.columns:
+        del adata.obs[cluster_key]
+
+    src = source_h5ad_path or ""
+    out_dir = output_dir or (str(Path(src).parent) if src else ".")
+    os.makedirs(out_dir, exist_ok=True)
+    stem = Path(src).stem if src else "sted_ec_input"
+    annotated_path = str(Path(out_dir) / f"{stem}_auto_celltype.h5ad")
+    adata.write(annotated_path)
+
+    n_types = annotate_meta.get("n_cell_types", 0)
+    emit_tool_log(
+        f"✅ 自动细胞类型标注完成，识别 {n_types} 种类型，已写入 cell_type 列。",
+        state="completed",
+    )
+    annotate_meta["h5ad_path"] = annotated_path
+    annotate_meta["auto_annotated"] = True
+    annotate_meta["cell_type_key"] = "cell_type"
+    return adata, annotate_meta
+
+
+async def auto_annotate_cell_types_fallback(
+    adata: Any,
+    session_id: Optional[str] = None,
+    *,
+    output_dir: Optional[str] = None,
+    source_h5ad_path: Optional[str] = None,
+    time_key: Optional[str] = None,
+) -> Any:
+    """
+    异步入口：向前端 SSE 发射状态更新后，执行 Scanpy 聚类 + marker 映射兜底标注。
+    返回写入 cell_type 且已持久化的 adata。
+    """
+    await aemit_tool_log(
+        "⚠️ 原始数据缺失细胞类型，系统正在自动调用 AI 标记引擎进行细胞类型识别...",
+        state="running",
+    )
+    adata, _meta = _auto_annotate_cell_types_fallback_sync(
+        adata,
+        session_id=session_id,
+        output_dir=output_dir,
+        source_h5ad_path=source_h5ad_path,
+        time_key=time_key,
+    )
+    return adata
+
+
+def _resolve_sted_ec_cell_types(
+    adata: Any,
+    *,
+    session_id: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    source_h5ad_path: Optional[str] = None,
+    time_key: Optional[str] = None,
+    requested_key: str = "cell_type",
+) -> Tuple[str, Optional[str], Optional[Dict[str, Any]], bool]:
+    """
+    探针 + 条件分流：
+    - 已有细胞类型注释 → 不修改 adata、不写盘、不跑自动标注，直接返回原列名供下游使用；
+    - 缺失注释 → 触发 auto_annotate_cell_types_fallback。
+    返回 (cell_type_key, h5ad_path_override, meta, needs_persist)。
+    """
+    probed = _probe_cell_type_key(adata)
+    if probed:
+        logger.info(
+            "检测到预标注细胞类型（列 %s），跳过自动标注，保持原始数据不变并进入下游。",
+            probed,
+        )
+        skip_meta = {
+            "skipped_auto_annotation": True,
+            "source_column": probed,
+            "reason": "preexisting_cell_type_labels",
+        }
+        return probed, None, skip_meta, False
+
+    if (
+        requested_key
+        and requested_key in adata.obs.columns
+        and requested_key not in STED_EC_VIZ_ONLY_CLUSTER_KEYS
+        and _has_meaningful_cell_type_labels(adata.obs[requested_key])
+    ):
+        logger.info(
+            "用户指定细胞类型列 %s 已含有效标签，跳过自动标注，保持原始数据不变。",
+            requested_key,
+        )
+        skip_meta = {
+            "skipped_auto_annotation": True,
+            "source_column": requested_key,
+            "reason": "user_requested_column_with_labels",
+        }
+        return requested_key, None, skip_meta, False
+
+    logger.warning("未检测到细胞类型列，触发自动打标签兜底机制...")
+    adata, auto_meta = _auto_annotate_cell_types_fallback_sync(
+        adata,
+        session_id=session_id,
+        output_dir=output_dir,
+        source_h5ad_path=source_h5ad_path,
+        time_key=time_key,
+    )
+    return "cell_type", auto_meta.get("h5ad_path"), auto_meta, True
 
 
 def _normalize_enabled_mcps_for_tools(raw: Any) -> List[str]:
@@ -416,9 +681,7 @@ def sted_ec_data_validation(
             raise FileNotFoundError(f"文件不存在: {h5ad_path}")
         adata = sc.read_h5ad(final_path)
         actual_time_key = time_key
-        actual_cell_type_key = cell_type_key
         valid_time_keys = _sted_ec_time_keys_ordered()
-        valid_cell_type_keys = STED_EC_VALID_CELL_TYPE_KEYS
         if actual_time_key not in adata.obs.columns:
             found = False
             for k in valid_time_keys:
@@ -432,18 +695,45 @@ def sted_ec_data_validation(
                     "数据校验失败：找不到时间序列列。请确保 obs 含下列任一时间相关列，或在参数中显式指定 time_key："
                     f"{list(STED_EC_VALID_TIME_KEYS)}；也可设置环境变量 STED_EC_EXTRA_TIME_KEYS 追加列名（逗号分隔）。"
                 )
-        if actual_cell_type_key not in adata.obs.columns:
-            for k in valid_cell_type_keys:
-                if k in adata.obs.columns:
-                    actual_cell_type_key = k
-                    logger.info("智能嗅探到细胞类型列: %s", k)
-                    break
-            else:
-                actual_cell_type_key = None
-                logger.warning("未找到细胞类型列，轨迹图将仅按时间着色。")
+
+        out_dir_early = output_dir or str(Path(final_path).parent)
+        session_id = kwargs.get("session_id")
+        actual_cell_type_key, h5ad_override, auto_meta, needs_persist = _resolve_sted_ec_cell_types(
+            adata,
+            session_id=session_id,
+            output_dir=out_dir_early,
+            source_h5ad_path=final_path,
+            time_key=actual_time_key,
+            requested_key=cell_type_key,
+        )
+        if h5ad_override:
+            final_path = h5ad_override
+        elif needs_persist:
+            annotated_path = str(Path(out_dir_early) / f"{Path(final_path).stem}_celltype_normalized.h5ad")
+            os.makedirs(out_dir_early, exist_ok=True)
+            adata.write(annotated_path)
+            final_path = annotated_path
+
         n_obs, n_vars = int(adata.n_obs), int(adata.n_vars)
-        logger.info("数据校验通过。包含 %d 个细胞。时间列: %s, 细胞类型列: %s", n_obs, actual_time_key, actual_cell_type_key or "(无)")
-        summary = f"数据校验通过，共 {n_obs} 细胞、{n_vars} 基因；时间列: {actual_time_key}，细胞类型列: {actual_cell_type_key or '(无)'}。"
+        auto_note = ""
+        if auto_meta and auto_meta.get("skipped_auto_annotation"):
+            auto_note = f"；沿用已有细胞类型列 `{auto_meta.get('source_column')}`（已跳过自动标注）"
+        elif auto_meta:
+            auto_note = (
+                f"；已自动标注 {auto_meta.get('n_cell_types', '?')} 种细胞类型"
+                f"（{auto_meta.get('method', 'auto')}）"
+            )
+        logger.info(
+            "数据校验通过。包含 %d 个细胞。时间列: %s, 细胞类型列: %s%s",
+            n_obs,
+            actual_time_key,
+            actual_cell_type_key,
+            auto_note,
+        )
+        summary = (
+            f"数据校验通过，共 {n_obs} 细胞、{n_vars} 基因；时间列: {actual_time_key}，"
+            f"细胞类型列: {actual_cell_type_key}{auto_note}。"
+        )
         summary += _df_head_markdown(adata.obs, "Obs 数据透视摘要")
         images_list: List[Dict[str, str]] = []
         out_dir = output_dir or str(Path(final_path).parent)
@@ -468,7 +758,7 @@ def sted_ec_data_validation(
                 logger.info("已生成中间态图: %s", fig_path)
             except Exception as e:
                 logger.warning("生成校验阶段中间图失败（已跳过）: %s", e)
-        return {
+        payload: Dict[str, Any] = {
             "status": "success",
             "message": summary,
             "h5ad_path": final_path,
@@ -479,6 +769,9 @@ def sted_ec_data_validation(
             "summary": summary,
             "report_data": {"images": images_list, "download_links": [], "summary": summary} if images_list else None,
         }
+        if auto_meta:
+            payload["cell_type_resolution"] = auto_meta
+        return payload
     except Exception as e:
         tb_str = traceback.format_exc()
         logger.error("sted_ec_data_validation 失败: %s\n%s", e, tb_str)
@@ -512,6 +805,32 @@ def sted_ec_time_series_formatting(
         adata = sc.read_h5ad(path)
         if time_key not in adata.obs.columns:
             return {"status": "error", "error": f"obs 中缺少时间列: {time_key}"}
+
+        # Step2 二次探针：仅当 Step1 未写入细胞类型注释时才触发自动标注
+        session_id = kwargs.get("session_id")
+        out_dir_fmt = output_dir or str(Path(path).parent)
+        existing_ct = _probe_cell_type_key(adata)
+        auto_meta_fmt = None
+        if existing_ct:
+            resolved_ct_key = existing_ct
+            logger.info(
+                "sted_ec_time_series_formatting: 已存在细胞类型列 %s，跳过自动标注。",
+                existing_ct,
+            )
+        else:
+            resolved_ct_key, _h5ad_override, auto_meta_fmt, _needs_persist = _resolve_sted_ec_cell_types(
+                adata,
+                session_id=session_id,
+                output_dir=out_dir_fmt,
+                source_h5ad_path=path,
+                time_key=time_key,
+                requested_key=cell_type_key or "cell_type",
+            )
+            if auto_meta_fmt and not auto_meta_fmt.get("skipped_auto_annotation"):
+                logger.info(
+                    "sted_ec_time_series_formatting: 二次探针触发自动细胞类型标注，method=%s",
+                    auto_meta_fmt.get("method"),
+                )
 
         col = adata.obs[time_key].copy()
         n_total = len(col)
@@ -584,14 +903,18 @@ def sted_ec_time_series_formatting(
             logger.warning("生成时序标准化中间图失败（已跳过）: %s", e)
         del adata
         gc.collect()
-        return {
+        result: Dict[str, Any] = {
             "status": "success",
             "message": summary,
             "h5ad_path": formatted_path,
             "n_obs": n_obs,
             "summary": summary,
+            "cell_type_key": resolved_ct_key,
             "report_data": {"images": images_list, "download_links": [], "summary": summary} if images_list else None,
         }
+        if auto_meta_fmt:
+            result["cell_type_resolution"] = auto_meta_fmt
+        return result
     except Exception as e:
         tb_str = traceback.format_exc()
         logger.error("sted_ec_time_series_formatting 失败: %s\n%s", e, tb_str)
@@ -622,11 +945,9 @@ def sted_ec_preprocess(
 
         # 1. 优先使用用户传入的参数
         actual_time_key = time_key
-        actual_cell_type_key = cell_type_key
 
         # 2. 严格生物学白名单：绝不可将 batch/condition 当作时间序列（sample 亦不在白名单）
         valid_time_keys = _sted_ec_time_keys_ordered()
-        valid_cell_type_keys = STED_EC_VALID_CELL_TYPE_KEYS
 
         if actual_time_key not in adata.obs.columns:
             found = False
@@ -642,23 +963,37 @@ def sted_ec_preprocess(
                     f"{list(STED_EC_VALID_TIME_KEYS)}；可设置 STED_EC_EXTRA_TIME_KEYS 追加。绝不可使用 batch 或 condition 作为时间！"
                 )
 
-        if actual_cell_type_key not in adata.obs.columns:
-            for k in valid_cell_type_keys:
-                if k in adata.obs.columns:
-                    actual_cell_type_key = k
-                    logger.info("智能嗅探到细胞类型列: %s", k)
-                    break
-            else:
-                actual_cell_type_key = None
-                logger.warning("未找到细胞类型列，轨迹图将仅按时间着色。")
+        session_id = kwargs.get("session_id")
+        actual_cell_type_key, h5ad_override, auto_meta, needs_persist = _resolve_sted_ec_cell_types(
+            adata,
+            session_id=session_id,
+            output_dir=str(Path(final_path).parent),
+            source_h5ad_path=final_path,
+            time_key=actual_time_key,
+            requested_key=cell_type_key,
+        )
+        if h5ad_override:
+            final_path = h5ad_override
+        elif needs_persist:
+            norm_path = str(Path(final_path).parent / f"{Path(final_path).stem}_celltype_normalized.h5ad")
+            adata.write(norm_path)
+            final_path = norm_path
 
-        logger.info("数据校验通过。包含 %d 个细胞。时间列: %s, 细胞类型列: %s", adata.n_obs, actual_time_key, actual_cell_type_key or "(无)")
-        return {
+        logger.info(
+            "数据校验通过。包含 %d 个细胞。时间列: %s, 细胞类型列: %s",
+            adata.n_obs,
+            actual_time_key,
+            actual_cell_type_key,
+        )
+        out_payload: Dict[str, Any] = {
             "status": "success",
             "h5ad_path": final_path,
             "time_key": actual_time_key,
             "cell_type_key": actual_cell_type_key,
         }
+        if auto_meta:
+            out_payload["cell_type_resolution"] = auto_meta
+        return out_payload
     except Exception as e:
         tb_str = traceback.format_exc()
         logger.error("🔥[sted_ec_preprocess] 崩溃:\n%s", tb_str)

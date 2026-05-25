@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-将 ToolRegistry 全量导出为仓库根目录 `工具库.md`，并附加超算 MCP 22 工具固定清单
+将 ToolRegistry 全量导出为 `docs/工具库.md`，并附加超算 MCP 22 工具固定清单
 （docs/hpc_mcp_tools_catalog.json，与网关 GET /tools 对齐）。
 
 用法（在仓库根目录）:
@@ -20,7 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 import gibh_agent.tools  # noqa: F401, E402 — 触发 @registry.register
 from gibh_agent.core.tool_registry import registry  # noqa: E402
 
-OUT_MD = REPO_ROOT / "工具库.md"
+OUT_MD = REPO_ROOT / "docs" / "工具库.md"
 CATALOG_JSON = REPO_ROOT / "docs" / "hpc_mcp_tools_catalog.json"
 
 ASK_HUMAN_APPENDIX = r"""

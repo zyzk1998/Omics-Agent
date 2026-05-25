@@ -44,7 +44,7 @@ class STEDECWorkflow(BaseWorkflow):
         metadata_map = {
             "sted_ec_data_validation": {
                 "name": "数据与元数据校验",
-                "description": "加载 h5ad，校验 time_key 与 cell_type_key 是否存在并解析实际列名。",
+                "description": "加载 h5ad，校验 time_key；细胞类型列探针（cell_type/celltype 等），缺失时自动 Scanpy 聚类 + marker 标注并写回 h5ad。",
                 "tool_id": "sted_ec_data_validation",
                 "default_params": {"h5ad_path": "<user_input>"},
             },
@@ -116,7 +116,7 @@ class SpatiotemporalDynamicsWorkflow(BaseWorkflow):
         metadata_map = {
             "sted_ec_data_validation": {
                 "name": "数据与元数据校验",
-                "description": "加载 h5ad，校验 time_key 与 cell_type_key 是否存在并解析实际列名。",
+                "description": "加载 h5ad，校验 time_key；细胞类型列探针（cell_type/celltype 等），缺失时自动 Scanpy 聚类 + marker 标注并写回 h5ad。",
                 "tool_id": "sted_ec_data_validation",
                 "default_params": {"h5ad_path": "<user_input>"},
             },
