@@ -1165,6 +1165,20 @@ async def sync_tools_on_startup():
         logger.error(f"❌ 工具模块加载失败: {e}", exc_info=True)
         logger.warning("   继续启动，但工具可能未完全加载")
 
+    # 🏭 Skill Factory：动态扫描 gibh_agent/skills/ 并注册 BaseSkill
+    try:
+        from gibh_agent.core.skill_registry import discover_and_register_skills
+
+        skill_result = discover_and_register_skills()
+        logger.info(
+            "✅ 动态技能加载: 模块 %s 成功 / %s 失败, 技能 %s 个",
+            skill_result.get("loaded", 0),
+            skill_result.get("failed", 0),
+            skill_result.get("skills", 0),
+        )
+    except Exception as e:
+        logger.warning("⚠️ 动态技能目录加载失败: %s", e, exc_info=True)
+
     # 🔌 MCP 插件（与 tools/ 物理隔离，注册到同一 ToolRegistry）
     try:
         from gibh_agent.mcp import load_mcp_plugins

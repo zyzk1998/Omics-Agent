@@ -60,6 +60,37 @@ _SKILL_REQUIRED_PARAMETERS: Dict[str, List[str]] = {
     "bepipred3_epitope_prediction": [
         "蛋白/抗原氨基酸序列（FASTA 文本或 sequence_or_path 文件）",
     ],
+    # 首发核心技能（gibh_agent/skills/ BaseSkill，与 [Skill_Route] 一致）
+    "chembl_drug_search": [
+        "药物名称关键词或 ChEMBL ID（query）",
+    ],
+    "rdkit_substructure_search": [
+        "子结构 SMILES/SMARTS（substructure_smiles）与待检分子 SMILES 或 SMILES 列表文件",
+    ],
+    "nucleotide_sequence_blast": [
+        "核酸查询序列（sequence_text）或 FASTA 文件（sequence_or_path）",
+    ],
+    "protein_sequence_blast": [
+        "蛋白氨基酸序列（sequence_text）或 FASTA 文件（sequence_or_path）",
+    ],
+    "pubchem_smiles_to_cid": [
+        "化合物 SMILES 字符串（smiles）",
+    ],
+    "mhc_epitope_search": [
+        "MHC 等位基因（mhc_allele）和/或肽段序列（peptide_sequence）",
+    ],
+    "chipatlas_experiment_search": [
+        "实验 accession（expid）或检索关键词（query）",
+    ],
+    "rdkit_3d_mol_render": [
+        "分子 SMILES（smiles）",
+    ],
+    "chembl_similar_molecules": [
+        "查询 SMILES 或 ChEMBL 分子 ID（smiles / chembl_id）",
+    ],
+    "rdkit_mol_format_convert": [
+        "待转换结构文本（input_text）及 input_format / output_format",
+    ],
 }
 
 # 工作流必填参数（按注册表 id）
@@ -189,11 +220,51 @@ def _workflow_registry_entries() -> List[IntentRegistryEntry]:
     return entries
 
 
+def _dynamic_skill_registry_entries() -> List[IntentRegistryEntry]:
+    """从 gibh_agent/skills/ 动态发现的 BaseSkill（Skill Factory）。"""
+    try:
+        from gibh_agent.core.skill_registry import (
+            discover_and_register_skills,
+            get_discovered_skill_metas,
+        )
+
+        if not get_discovered_skill_metas():
+            discover_and_register_skills()
+        entries: List[IntentRegistryEntry] = []
+        for m in get_discovered_skill_metas():
+            aliases = list(m.aliases or [])
+            if m.tool_chain_key and m.tool_chain_key not in aliases:
+                aliases.append(m.tool_chain_key)
+            req = list(m.required_parameters or [])
+            if not req:
+                req = [
+                    "与本技能匹配的数据文件或序列（file_path / sequence_or_path 等，须已上传挂载）",
+                ]
+            entries.append(
+                IntentRegistryEntry(
+                    id=m.skill_id,
+                    name=m.display_name or m.skill_id,
+                    aliases=aliases[:12],
+                    description=(m.description or "")[:400],
+                    route_kind=IntentRouteKind.skill,
+                    required_parameters=req[:8],
+                )
+            )
+        return entries
+    except Exception as e:
+        logger.warning("intent_router: 动态技能注册表加载失败: %s", e)
+        return []
+
+
 def build_global_intent_registry() -> List[IntentRegistryEntry]:
-    """合并工作流 SOP 与精选技能，供 Prompt 注入。"""
+    """合并工作流 SOP、精选技能与动态技能目录，供 Prompt 注入。"""
     seen: set = set()
     out: List[IntentRegistryEntry] = []
-    for e in _workflow_registry_entries() + _CURATED_SKILL_ENTRIES:
+    for e in (
+        _workflow_registry_entries()
+        + _CURATED_SKILL_ENTRIES
+        + _dynamic_skill_registry_entries()
+    ):
         if e.id in seen:
             continue
         seen.add(e.id)

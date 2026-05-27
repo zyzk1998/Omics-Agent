@@ -1,40 +1,40 @@
 #!/usr/bin/env bash
-# 清理 data/results 下历史工作流/测试输出 run_*，释放磁盘（默认保留最近 N 次）。
+# 后台分析结果数据清理（默认：所有用户、7 天前）
+#
+# 包含：
+#   1) MySQL messages 内 execution_snapshot / 重型 state_snapshot 等
+#   2) SQLite job_history 过期行
+#   3) data/uploads、data/results 重型文件（StorageManager，与 API 定时任务同策略）
+#   4) data/results/run_* 目录（修改时间早于 MAX_DAYS）
 #
 # 用法：
-#   ./scripts/清理后台结果数据.sh              # 保留最近 3 次 run
-#   KEEP=5 ./scripts/清理后台结果数据.sh       # 保留最近 5 次
-#   DRY_RUN=1 ./scripts/清理后台结果数据.sh    # 只打印将删除的路径
+#   ./scripts/清理后台结果数据.sh              # 执行清理（需确认）
+#   ./scripts/清理后台结果数据.sh --yes        # 跳过确认
+#   DRY_RUN=1 ./scripts/清理后台结果数据.sh    # 仅统计
+#   MAX_DAYS=14 ./scripts/清理后台结果数据.sh --yes
 #
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-R="${ROOT}/data/results"
-KEEP="${KEEP:-3}"
+cd "$ROOT"
+export MAX_DAYS="${MAX_DAYS:-7}"
+export UPLOAD_DIR="${UPLOAD_DIR:-$ROOT/data/uploads}"
+export RESULTS_DIR="${RESULTS_DIR:-$ROOT/data/results}"
+export MYSQL_HOST="${MYSQL_HOST:-127.0.0.1}"
+export MYSQL_PORT="${MYSQL_PORT:-3306}"
+
 DRY_RUN="${DRY_RUN:-0}"
-
-if [ ! -d "$R" ]; then
-  echo "目录不存在: $R"
-  exit 0
+YES_FLAG=()
+if [[ "${1:-}" == "--yes" ]]; then
+  YES_FLAG=(--yes)
+  shift
 fi
 
-mapfile -t runs < <(ls -1td "$R"/run_* 2>/dev/null || true)
-n="${#runs[@]}"
-if [ "$n" -le "$KEEP" ]; then
-  echo "仅有 ${n} 个 run 目录，不超过 KEEP=${KEEP}，无需清理。"
-  exit 0
+PY_ARGS=(scripts/purge_stale_analysis_results.py --max-days "$MAX_DAYS")
+if [[ "$DRY_RUN" == "1" ]]; then
+  PY_ARGS+=(--dry-run)
+else
+  PY_ARGS+=("${YES_FLAG[@]}")
 fi
 
-echo "==> data/results: 共 ${n} 个 run_*，保留最近 ${KEEP} 个，将删除 $((n - KEEP)) 个"
-for ((i = KEEP; i < n; i++)); do
-  d="${runs[i]}"
-  if [ "$DRY_RUN" = "1" ]; then
-    echo "DRY_RUN 将删除: $d"
-  else
-    echo "删除: $d"
-    rm -rf "$d"
-  fi
-done
-
-echo "==> 剩余:"
-du -sh "$R" 2>/dev/null || true
-ls -1 "$R" 2>/dev/null | wc -l | xargs echo "run 目录数:"
+echo "==> 启动分析结果清理 MAX_DAYS=${MAX_DAYS} DRY_RUN=${DRY_RUN}"
+PYTHONPATH=. python3 "${PY_ARGS[@]}"

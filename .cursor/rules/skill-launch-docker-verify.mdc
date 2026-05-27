@@ -1,0 +1,34 @@
+---
+description: 首发/新增 BaseSkill 接入后必须做 Docker 依赖与容器内验收（防 blastn/rdkit 等仅宿主机可用）
+alwaysApply: true
+---
+
+# 技能接入 · Docker 依赖与交付后验收（长记忆）
+
+凡在 `gibh_agent/skills/` **新增或修改** `skill_*.py`、其 `__dependencies__`、或 `launch_skill_demos.py` / `launch_core_skill_prompt_templates.py` 后，**不得仅以宿主机 pytest 通过即结项**；必须完成 **一轮「修改 → 镜像/容器验收」**：
+
+## 1. 依赖声明与镜像
+
+- 每个技能类的 `__dependencies__` 须与实现一致（`pip:` / `apt:` / `conda:`）。
+- **首发 10 项**：系统 CLI / pip 写入 `services/launch-skills/Dockerfile` + `requirements.txt`，**不要**再塞进 `services/api/Dockerfile` 全量层。
+- **化学 `chem_*`** 仍走 `CHEM_RDKIT_PYTHON` / §4.4。
+- 对照表见 `docs/技能扩展规范文档.md` **§5.11.1**。
+
+## 2. 容器内必跑（交付前）
+
+```bash
+cd /home/ubuntu/GIBH-AGENT-V2
+./scripts/build_launch_skills.sh
+docker compose up -d api-server
+docker exec gibh_v2_launch_skills /app/scripts/verify_launch_skill_deps.sh
+PYTHONPATH=. python3 -m pytest tests/test_launch_core_skills_smoke.py -q
+```
+
+## 3. 广场一键体验
+
+- Prompt JSON 与 `launch_skill_demos.py` 同源；改模板后跑 `scripts/patch_launch_skills_batch.py`。
+- 在 UI 或容器内对 **每个** 新 `tool_id` 至少验证一次「空参 + 演示默认」不因「未找到 CLI / 未安装包」失败（外网 API 超时除外）。
+
+## 4. 文档
+
+- 依赖矩阵变更时同步 **§5.11.1**；勿只改代码不写 Dockerfile。

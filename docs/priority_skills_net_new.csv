@@ -1,0 +1,11 @@
+﻿学科,技能名称,子分类,skills类型,简介,tool_chain_key,Selection_Reason,filter
+化学与分子信息学,ChEMBL药物检索,数据分析,脚本,根据药物名称、审批状态或其他条件检索ChEMBL数据库中的药物信息,chembl,化学·脚本：REST 药物聚合；轻依赖，衔接已上线相似性/Lipinski。,script_only|net_new
+化学与分子信息学,子结构搜索化合物,数据分析,脚本,在PubChem中搜索包含给定子结构(SMILES)的所有CID,,化学·脚本：RDKit SMARTS；与 Tanimoto 互补。,script_only|net_new
+化学与分子信息学,通过SMILES获取CID,数据分析,脚本,通过SMILES字符串检索对应的PubChem CID列表,smilesCid,化学·脚本：PubChem 桥接；秒级 API。,script_only|net_new
+化学与分子信息学,3D分子结构渲染工具,数据可视化,脚本,用于渲染通用小分子的三维结构，支持MOL、SDF格式。,molPreview,化学·脚本：molPreview/RDKit 3D；尚未接快车道。,script_only|net_new
+化学与分子信息学,精确质量搜索代谢物,数据分析,脚本,通过精确分子质量搜索代谢物。适用于从高分辨率质谱数据中鉴定未知代谢物。,,化学·脚本：质谱代谢物鉴定常用；轻量检索/匹配，衔接代谢组解读。,script_only|net_new
+生物医药,ADMET性质预测工具,预测与建模,脚本,预测一组化合物的 ADMET 药代动力学属性，包括溶解性、吸收、代谢、毒性等。（磐石：支持对话调用）,admet,生医·脚本：无 Route 占位；补 Lipinski 外 ADME/T。,script_only|net_new
+生物医药,MHC关联表位检索,数据分析,脚本,基于IEDB查询API搜索MHC相关实验数据行，用于发现涉及MHC限制的表位`structure_id`值。可使用`select`参数仅请求少量字段以优化响应速度。,mhc,生医·脚本：表位库检；补 BepiPred 预测。,script_only|net_new
+生物医药,核酸序列比对,数据分析,脚本,使用NCBI BLAST blastn工具在核酸数据库中搜索核酸序列,,生医·脚本：blast/muscle；FASTA 基石算子。,script_only|net_new
+生物医药,蛋白质序列比对,数据分析,脚本,使用NCBI BLAST的blastp算法在蛋白质数据库中搜索相似序列,,生医·脚本：同源比对；衔接序列保守性分析。,script_only|net_new
+生物医药,ChIPAtlas富集分析,数据分析,脚本,"执行富集分析以识别数据中富集的转录因子和组蛋白修饰。**需提供一种输入类型** - (1) BED基因组区域，(2) DNA序列基序（IUPAC表示法：A/T/G/C/W/S/M/K/R/Y/B/D/H/V/N），或(3) 基因符号列表。将您的输入与433,000+个ChIP-seq/ATAC-seq/亚硫酸氢盐测序实验进行比较，以识别显著富集。返回与您的区域/基序结合或调控您的基因的蛋白质的排名列表。注意：返回提交URL（基于网页表单的分析）。用途：识别基因组区域的调…",chipatlas,生医·脚本：ChIP 峰集富集；衔接表观/转录组。,script_only|net_new

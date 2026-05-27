@@ -100,6 +100,9 @@ services:
       - SECRET_KEY_FILE=${SECRET_KEY_FILE:-}
       # PySkills 微服务（ViennaRNA / RDKit 等）；与 worker-pyskills 同网络
       - PYSKILLS_BASE_URL=${PYSKILLS_BASE_URL:-http://worker-pyskills:8000}
+      # 首发 10 项 BaseSkill 隔离栈（BLAST/ChEMBL/RDKit）；勿与 api-server 全量镜像混装
+      - LAUNCH_SKILLS_BASE_URL=${LAUNCH_SKILLS_BASE_URL:-http://launch-skills:8010}
+      - LAUNCH_SKILLS_HTTP_TIMEOUT=${LAUNCH_SKILLS_HTTP_TIMEOUT:-600}
       # 三大组学统一参考库（见 scripts/init_omics_mock_references.py）
       - OMICS_REF_DIR=/app/references
       - GIBH_REF_HG38=/app/references/genomics/hg38.fa
@@ -117,6 +120,8 @@ services:
       - GIBH_LITE_TASK_MODE=${GIBH_LITE_TASK_MODE:-0}
     volumes:
       - .:/app
+      # Skill Factory：宿主机 codegen 技能热挂载（reload_skills / 重启 API 即生效，无需 rebuild 镜像）
+      - ./gibh_agent/skills:/app/gibh_agent/skills
       - ./data/uploads:/app/uploads
       - ./data/results:/app/results
       - ./data:/app/data
@@ -129,6 +134,8 @@ services:
         condition: service_started
       worker-pyskills:
         condition: service_started
+      launch-skills:
+        condition: service_healthy
       mcp-gateway:
         condition: service_started
     networks:
@@ -162,6 +169,32 @@ services:
       - "host.docker.internal:host-gateway"
     networks:
       - gibh-network
+
+  # =========================================
+  # 2a2. 首发 BaseSkill 轻量栈（BLAST + ChEMBL + RDKit；与 api-server 解耦，单独重建）
+  # =========================================
+  launch-skills:
+    build:
+      context: .
+      dockerfile: services/launch-skills/Dockerfile
+    image: gibh-v2-launch-skills:latest
+    container_name: gibh_v2_launch_skills
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai
+      - LAUNCH_SKILLS_IN_WORKER=1
+      - LOCAL_BLASTDB_PATH=${LOCAL_BLASTDB_PATH:-/app/gibh_agent/blast_db}
+    volumes:
+      - ./gibh_agent/skills:/app/gibh_agent/skills:ro
+      - ./gibh_agent/blast_db:/app/gibh_agent/blast_db:ro
+    networks:
+      - gibh-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   # =========================================
   # 2b. 传统生信算法综合微服务（ViennaRNA / PyMOL / RDKit / gseapy）
@@ -235,6 +268,8 @@ services:
       - MCP_GATEWAY_URL=${MCP_GATEWAY_URL:-http://mcp-gateway:8002}
     volumes:
       - .:/app
+      # Skill Factory：Celery 任务若加载动态技能，与 api-server 共享同一技能目录
+      - ./gibh_agent/skills:/app/gibh_agent/skills
       - ./data/uploads:/app/uploads
       - ./data/results:/app/results
       - ./data:/app/data

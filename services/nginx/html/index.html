@@ -6818,11 +6818,711 @@
                     containerEl.innerHTML = '<p class="skill-ws-empty small mb-0 skill-csv-error">' + _skillWsEscapeHtml(String(err && err.message ? err.message : err)) + '</p>';
                 }
             };
+            /** 已有定制 HTML/图表/iframe 渲染的技能 — 拦截器放行，禁止覆盖 */
+            var SKILL_VIS_PRESERVE_IDS = {
+                drug_similarity_search: true,
+                gseapy_enrichment: true,
+                gseapy_prerank: true,
+                pymol_render: true,
+                rnafold_analysis: true
+            };
+            var SKILL_VIS_META_KEYS = {
+                status: 1, message: 1, Status: 1, Message: 1,
+                markdown: 1, data: 1, result: 1,
+                html_url: 1, csv_url: 1, zip_url: 1, json_url: 1, pdf_url: 1,
+                image_url: 1, image_urls: 1, image_paths: 1, json_paths: 1,
+                script_path: 1, output_dir: 1, artifacts: 1,
+                query_smiles: 1, stdout_tail: 1, stderr_tail: 1
+            };
+            var SKILL_VIS_RICH_KEYS = {
+                chart: 1, charts: 1, plotly: 1, echarts: 1, plot_config: 1,
+                visualization: 1, report_html: 1, html_content: 1, iframe: 1,
+                mermaid: 1, vega: 1, figure: 1, figures: 1,
+                mol_block: 1, sdf_content: 1, sdf_text: 1
+            };
+            var SKILL_VIS_URL_KEYS = [
+                ['html_url', '预览 HTML 报告', 'bi-file-earmark-richtext'],
+                ['pdf_url', '预览 PDF', 'bi-file-earmark-pdf'],
+                ['csv_url', '下载 CSV', 'bi-filetype-csv'],
+                ['json_url', '下载 JSON', 'bi-filetype-json'],
+                ['zip_url', '下载 ZIP', 'bi-file-earmark-zip'],
+                ['image_url', '查看图片', 'bi-image']
+            ];
+            /** 对象数组 → 科研风表格（hits / BLAST 命中 / ChEMBL 检索等） */
+            var SKILL_VIS_TABLE_KEYS = {
+                hits: 1, results: 1, rows: 1, records: 1, matches: 1,
+                compounds: 1, molecules: 1, alignments: 1, experiments: 1,
+                epitopes: 1
+            };
+            var SKILL_VIS_TABLE_TITLE = {
+                hits: '命中列表', results: '结果列表', rows: '数据行',
+                records: '记录列表', matches: '匹配结果', compounds: '化合物列表',
+                molecules: '分子列表', alignments: '比对命中', experiments: '实验条目',
+                epitopes: '表位列表'
+            };
+            function _skillVisIsRecordTableArray(arr) {
+                if (!Array.isArray(arr) || arr.length === 0 || arr.length > 500) return false;
+                for (var i = 0; i < arr.length; i++) {
+                    var row = arr[i];
+                    if (!row || typeof row !== 'object' || Array.isArray(row)) return false;
+                    var keys = Object.keys(row);
+                    if (keys.length === 0 || keys.length > 16) return false;
+                    for (var ki = 0; ki < keys.length; ki++) {
+                        var cv = row[keys[ki]];
+                        if (cv !== null && cv !== undefined && typeof cv === 'object') return false;
+                    }
+                }
+                return true;
+            }
+            function _skillVisSplitPayload(payload) {
+                var scalars = {};
+                var tables = {};
+                if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+                    return { scalars: scalars, tables: tables };
+                }
+                Object.keys(payload).forEach(function (k) {
+                    if (SKILL_VIS_META_KEYS[k]) return;
+                    var v = payload[k];
+                    if (Array.isArray(v) && _skillVisIsRecordTableArray(v)) {
+                        tables[k] = v;
+                        return;
+                    }
+                    if (v !== null && typeof v === 'object') return;
+                    scalars[k] = v;
+                });
+                return { scalars: scalars, tables: tables };
+            }
+            function _skillVisCollectFromDataBlock(dataBlock, gridSkip) {
+                var scalars = {};
+                var tables = {};
+                if (!dataBlock || typeof dataBlock !== 'object' || Array.isArray(dataBlock)) {
+                    return { scalars: scalars, tables: tables };
+                }
+                Object.keys(dataBlock).forEach(function (k) {
+                    if (gridSkip && gridSkip[k]) {
+                        if (k === 'result' && dataBlock[k] && typeof dataBlock[k] === 'object' && !Array.isArray(dataBlock[k])) {
+                            var splitInner = _skillVisSplitPayload(dataBlock[k]);
+                            Object.keys(splitInner.scalars).forEach(function (sk) {
+                                if (!SKILL_VIS_META_KEYS[sk]) scalars[sk] = splitInner.scalars[sk];
+                            });
+                            Object.keys(splitInner.tables).forEach(function (tk) {
+                                tables[tk] = splitInner.tables[tk];
+                            });
+                        }
+                        return;
+                    }
+                    var val = dataBlock[k];
+                    if (Array.isArray(val) && _skillVisIsRecordTableArray(val)) {
+                        tables[k] = val;
+                        return;
+                    }
+                    if (val !== null && typeof val === 'object') return;
+                    if (SKILL_VIS_META_KEYS[k]) return;
+                    scalars[k] = val;
+                });
+                return { scalars: scalars, tables: tables };
+            }
+            function _skillVisTableColumns(rows) {
+                if (!rows || !rows.length) return [];
+                var seen = {};
+                var cols = [];
+                rows.forEach(function (row) {
+                    Object.keys(row || {}).forEach(function (k) {
+                        if (!seen[k]) { seen[k] = 1; cols.push(k); }
+                    });
+                });
+                return cols.slice(0, 12);
+            }
+            function _skillVisFormatCell(val) {
+                if (val === null || val === undefined || val === '') return '—';
+                if (typeof val === 'boolean') return val ? '是' : '否';
+                return String(val);
+            }
+            function _skillVisBuildRecordTableHtml(rows, esc, title, keyHint) {
+                if (!rows || !rows.length) {
+                    return '<p class="skill-ws-empty small mb-0 px-3 py-2">暂无命中记录</p>';
+                }
+                var cols = _skillVisTableColumns(rows);
+                if (!cols.length) return '';
+                var cap = (title || SKILL_VIS_TABLE_TITLE[keyHint] || _skillVisHumanLabel(keyHint || '') || '结果列表');
+                var thead = cols.map(function (c) {
+                    return '<th scope="col" class="small">' + esc(_skillVisHumanLabel(c)) + '</th>';
+                }).join('');
+                var tbody = rows.map(function (row, ri) {
+                    var tds = cols.map(function (c) {
+                        var raw = row[c];
+                        var disp = esc(_skillVisFormatCell(raw));
+                        var tdCls = 'small';
+                        if (c === 'smiles' || c === 'hit_smiles' || c === 'query_smiles') tdCls += ' custom-kimi-td-smiles';
+                        if (c === 'similarity' || c === 'pident' || c === 'bitscore' || c === 'evalue') tdCls += ' text-end';
+                        return '<td class="' + tdCls + '">' + disp + '</td>';
+                    }).join('');
+                    return '<tr>' + tds + '</tr>';
+                }).join('');
+                return (
+                    '<div class="skill-vis-table-wrap">' +
+                    '<div class="skill-vis-table-heading">' + esc(cap) +
+                    ' <span class="badge rounded-pill bg-light text-muted border ms-1">' + rows.length + ' 条</span></div>' +
+                    '<div class="table-responsive skill-vis-table-scroll">' +
+                    '<table class="table table-sm table-bordered table-hover skill-vis-table mb-0">' +
+                    '<thead class="table-light"><tr>' + thead + '</tr></thead>' +
+                    '<tbody>' + tbody + '</tbody></table></div></div>'
+                );
+            }
+            function _skillVisBuildAllTablesHtml(tables, esc) {
+                if (!tables || typeof tables !== 'object') return '';
+                var keys = Object.keys(tables);
+                if (!keys.length) return '';
+                var parts = [];
+                keys.forEach(function (k) {
+                    var rows = tables[k];
+                    if (!Array.isArray(rows) || !rows.length) return;
+                    parts.push(_skillVisBuildRecordTableHtml(rows, esc, null, k));
+                });
+                if (!parts.length) return '';
+                return '<div class="skill-mm-block skill-vis-tables-block">' + parts.join('') + '</div>';
+            }
+            function _skillVisIsPrimitiveArray(arr) {
+                if (!Array.isArray(arr) || arr.length === 0) return false;
+                for (var i = 0; i < arr.length; i++) {
+                    var t = typeof arr[i];
+                    if (t !== 'string' && t !== 'number' && t !== 'boolean') return false;
+                }
+                return true;
+            }
+            function _skillVisHasRichMarkers(obj, depth) {
+                if (!obj || typeof obj !== 'object' || depth > 3) return false;
+                if (Array.isArray(obj)) {
+                    for (var ai = 0; ai < obj.length && ai < 8; ai++) {
+                        if (_skillVisHasRichMarkers(obj[ai], depth + 1)) return true;
+                    }
+                    return false;
+                }
+                var keys = Object.keys(obj);
+                for (var ki = 0; ki < keys.length; ki++) {
+                    var k = keys[ki];
+                    if (SKILL_VIS_RICH_KEYS[k]) return true;
+                    var v = obj[k];
+                    if (v && typeof v === 'object' && !Array.isArray(v)) {
+                        if (depth >= 1 && keys.length > 6) return true;
+                        if (_skillVisHasRichMarkers(v, depth + 1)) return true;
+                    }
+                }
+                return false;
+            }
+            function _skillVisToolResultHasCustomUI(toolResult, skillId) {
+                if (!toolResult || typeof toolResult !== 'object') return false;
+                if (skillId && SKILL_VIS_PRESERVE_IDS[skillId]) return true;
+                if (skillPickUrl(toolResult, 'html_url') || skillPickUrl(toolResult, 'pdf_url')) return true;
+                var imgs = toolResult.image_urls;
+                if (Array.isArray(imgs) && imgs.length > 0) return true;
+                if (skillPickUrl(toolResult, 'image_url')) return true;
+                var md = toolResult.markdown;
+                if (typeof md === 'string' && md.length > 80) {
+                    if (/```\s*(html|mermaid|chart)/i.test(md)) return true;
+                    if (/<iframe|<svg|echarts|plotly/i.test(md)) return true;
+                }
+                return false;
+            }
+            function _skillVisIsFlatMetricsPayload(obj) {
+                if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+                if (_skillVisHasRichMarkers(obj, 0)) return false;
+                var split = _skillVisSplitPayload(obj);
+                var sk = Object.keys(split.scalars).filter(function (k) { return !SKILL_VIS_META_KEYS[k]; });
+                var tk = Object.keys(split.tables);
+                return sk.length > 0 || tk.length > 0;
+            }
+            function _skillVisNormalizePayload(dataObj) {
+                if (dataObj === null || dataObj === undefined) return null;
+                if (typeof dataObj === 'string') {
+                    try {
+                        var parsed = JSON.parse(dataObj);
+                        return (parsed && typeof parsed === 'object') ? _skillVisNormalizePayload(parsed) : null;
+                    } catch (eParse) {
+                        return null;
+                    }
+                }
+                if (typeof dataObj !== 'object') return null;
+                if (Array.isArray(dataObj)) return null;
+                var out = {};
+                var has = false;
+                function mergeFlat(src) {
+                    if (!src || typeof src !== 'object' || Array.isArray(src)) return;
+                    Object.keys(src).forEach(function (k) {
+                        if (SKILL_VIS_META_KEYS[k]) return;
+                        if (Object.prototype.hasOwnProperty.call(out, k)) return;
+                        out[k] = src[k];
+                        has = true;
+                    });
+                }
+                if (dataObj.data && typeof dataObj.data === 'object' && !Array.isArray(dataObj.data)) {
+                    mergeFlat(dataObj.data);
+                }
+                if (dataObj.result && typeof dataObj.result === 'object' && !Array.isArray(dataObj.result)) {
+                    mergeFlat(dataObj.result);
+                }
+                if (!has) {
+                    mergeFlat(dataObj);
+                }
+                return has ? out : null;
+            }
+            function _skillVisHumanLabel(key) {
+                var map = {
+                    MW: '分子量 (MW)', mw: '分子量 (MW)', logP: 'LogP', logp: 'LogP',
+                    HBD: '氢键供体 (HBD)', HBA: '氢键受体 (HBA)',
+                    is_druglike: '类药性', lipinski_violations: 'Lipinski 违规数',
+                    sa_score: 'SA Score', SAScore: 'SA Score',
+                    count: '数量', hit_count: '命中数', cids: 'PubChem CID', smiles: 'SMILES',
+                    query_smiles: '查询 SMILES', substructure: '子结构',
+                    violation_count: '违规条数', violations: '违规项',
+                    threshold: '相似度阈值 (%)', similarity_threshold: '相似度阈值 (%)',
+                    molecule_chembl_id: 'ChEMBL ID', pref_name: '首选名称', similarity: '相似度 (%)',
+                    max_phase: '最高研发阶段', molecule_type: '分子类型', drug_type: '药物类型',
+                    qseqid: '查询 ID', sseqid: '命中 ID', pident: '一致性 (%)',
+                    length: '比对长度', evalue: 'E-value', bitscore: 'Bit Score', title: '描述',
+                    index: '序号', query: '检索词', search_type: '检索类型', query_length: '查询长度',
+                    total: '候选总数'
+                };
+                if (map[key]) return map[key];
+                return String(key).replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+            }
+            function _skillVisRenderValueHtml(key, val, esc) {
+                if (val === null || val === undefined) {
+                    return '<span class="skill-mm-metric__value text-muted">—</span>';
+                }
+                if (typeof val === 'boolean') {
+                    var cls = val ? 'skill-vis-bool badge bg-success-subtle text-success border border-success-subtle' : 'skill-vis-bool badge bg-secondary-subtle text-secondary border border-secondary-subtle';
+                    var txt = val ? '是' : '否';
+                    return '<span class="skill-mm-metric__value"><span class="' + cls + '">' + esc(txt) + '</span></span>';
+                }
+                if (Array.isArray(val) && _skillVisIsPrimitiveArray(val)) {
+                    var maxShow = 16;
+                    var slice = val.slice(0, maxShow);
+                    var chips = slice.map(function (item) {
+                        return '<span class="skill-vis-chip badge rounded-pill bg-light text-dark border">' + esc(String(item)) + '</span>';
+                    }).join('');
+                    if (val.length > maxShow) {
+                        chips += '<span class="skill-vis-chip badge rounded-pill bg-light text-muted border">…共 ' + val.length + ' 项</span>';
+                    }
+                    return '<span class="skill-mm-metric__value"><div class="skill-vis-chip-list">' + chips + '</div></span>';
+                }
+                if (Array.isArray(val) && _skillVisIsRecordTableArray(val)) {
+                    return '<span class="skill-mm-metric__value text-muted small">见下方表格</span>';
+                }
+                if (val !== null && typeof val === 'object') {
+                    return '<span class="skill-mm-metric__value text-muted small">—</span>';
+                }
+                var display = esc(String(val));
+                return '<span class="skill-mm-metric__value">' + display + '</span>';
+            }
+            function _skillVisBuildMetricsGridHtml(payload, esc) {
+                if (!payload || typeof payload !== 'object') return '';
+                var split = _skillVisSplitPayload(payload);
+                var scalars = split.scalars;
+                var cardsHtml = '';
+                Object.keys(scalars).forEach(function (k) {
+                    if (SKILL_VIS_META_KEYS[k] || SKILL_VIS_TABLE_KEYS[k]) return;
+                    var v = scalars[k];
+                    if (Array.isArray(v) && _skillVisIsRecordTableArray(v)) return;
+                    cardsHtml += '<div class="skill-mm-metric skill-vis-metric-card">' +
+                        '<span class="skill-mm-metric__label">' + esc(_skillVisHumanLabel(k)) + '</span>' +
+                        _skillVisRenderValueHtml(k, v, esc) +
+                        '</div>';
+                });
+                if (!cardsHtml) return '';
+                return '<div class="skill-mm-data-grid skill-vis-data-grid">' + cardsHtml + '</div>';
+            }
+            function _skillVisPickSmilesFromRow(row) {
+                if (!row || typeof row !== 'object') return '';
+                var keys = ['smiles', 'SMILES', 'canonical_smiles', 'hit_smiles', 'query_smiles'];
+                for (var i = 0; i < keys.length; i++) {
+                    var v = row[keys[i]];
+                    if (typeof v === 'string' && v.trim()) return v.trim();
+                }
+                return '';
+            }
+            function _skillVisRowsHaveSmiles(rows) {
+                if (!Array.isArray(rows) || !rows.length) return false;
+                for (var i = 0; i < rows.length; i++) {
+                    if (_skillVisPickSmilesFromRow(rows[i])) return true;
+                }
+                return false;
+            }
+            /** 按 Return Schema 强制表格展示（ChEMBL 命中无 SMILES，禁止再画分子结构网格） */
+            var SKILL_VIS_TABLE_ONLY_SKILL_IDS = {
+                chembl_similar_molecules: true,
+                chembl_drug_search: true,
+                protein_sequence_blast: true,
+                nucleotide_sequence_blast: true
+            };
+            function _skillVisDepictUrlForRow(row) {
+                var smi = _skillVisPickSmilesFromRow(row);
+                if (smi) {
+                    return 'https://cactus.nci.nih.gov/chemical/structure/' + encodeURIComponent(smi) + '/image?format=png';
+                }
+                var cid = row && (row.molecule_chembl_id || row.chembl_id);
+                if (typeof cid === 'string' && /^CHEMBL\d+/i.test(cid.trim())) {
+                    return 'https://www.ebi.ac.uk/chembl/compound_structures/' + encodeURIComponent(cid.trim().toUpperCase()) + '/standard.svg';
+                }
+                return '';
+            }
+            function _skillVisBuildMoleculeHitGridHtml(rows, esc, title, keyHint) {
+                if (!rows || !rows.length) return '';
+                var cap = title || SKILL_VIS_TABLE_TITLE[keyHint] || '命中分子';
+                var cards = rows.map(function (row, idx) {
+                    var smi = _skillVisPickSmilesFromRow(row);
+                    var imgUrl = _skillVisDepictUrlForRow(row);
+                    var name = (row && (row.pref_name || row.name || row.title)) ? String(row.pref_name || row.name || row.title) : ('命中 #' + (idx + 1));
+                    var idLine = row && row.molecule_chembl_id ? String(row.molecule_chembl_id) : '';
+                    var sim = row && (row.similarity != null ? row.similarity : row.similarity_score);
+                    var meta = [];
+                    if (idLine) meta.push(idLine);
+                    if (sim != null && sim !== '') meta.push('相似度 ' + sim + (String(sim).indexOf('%') >= 0 ? '' : '%'));
+                    var imgHtml = imgUrl
+                        ? '<img class="skill-vis-mol-card__img" src="' + esc(imgUrl) + '" alt="' + esc(name) + '" loading="lazy" />'
+                        : '<div class="skill-vis-mol-card__img skill-vis-mol-card__img--empty text-muted small">无结构图</div>';
+                    var smiHtml = smi ? '<code class="skill-vis-mol-card__smiles">' + esc(smi) + '</code>' : '';
+                    return (
+                        '<article class="skill-vis-mol-card">' + imgHtml +
+                        '<div class="skill-vis-mol-card__body">' +
+                        '<div class="skill-vis-mol-card__title">' + esc(name) + '</div>' +
+                        (meta.length ? '<div class="skill-vis-mol-card__meta small text-muted">' + esc(meta.join(' · ')) + '</div>' : '') +
+                        smiHtml + '</div></article>'
+                    );
+                }).join('');
+                return (
+                    '<div class="skill-vis-mol-grid-wrap">' +
+                    '<div class="skill-vis-table-heading">' + esc(cap) +
+                    ' <span class="badge rounded-pill bg-light text-muted border ms-1">' + rows.length + ' 条</span></div>' +
+                    '<div class="skill-vis-mol-grid">' + cards + '</div></div>'
+                );
+            }
             /**
-             * 技能右栏：将对象渲染为与聊天区一致的 ```json 围栏代码块（高亮 + 复制钮）。
+             * 互斥渲染计划：分子网格 | 命中表格 | 仅指标卡，同一 hits 绝不重复输出。
              */
-            function renderSkillJsonMarkdownBlock(dataObj, heading) {
+            function _skillVisResolveRenderPlan(payload, skillId) {
+                var split = _skillVisSplitPayload(payload || {});
+                var tableKeys = Object.keys(split.tables);
+                var forceTable = !!(skillId && SKILL_VIS_TABLE_ONLY_SKILL_IDS[skillId]);
+                var molKey = null;
+                var molRows = null;
+                if (!forceTable) {
+                    tableKeys.forEach(function (k) {
+                        if (molRows) return;
+                        var arr = split.tables[k];
+                        if (arr && arr.length && _skillVisRowsHaveSmiles(arr)) {
+                            molKey = k;
+                            molRows = arr;
+                        }
+                    });
+                }
+                if (molRows && molRows.length) {
+                    var restTables = {};
+                    tableKeys.forEach(function (k) {
+                        if (k !== molKey) restTables[k] = split.tables[k];
+                    });
+                    return { mode: 'molecule_grid', molKey: molKey, molRows: molRows, tables: restTables, scalars: split.scalars };
+                }
+                if (tableKeys.length) {
+                    return { mode: 'tables', tables: split.tables, scalars: split.scalars };
+                }
+                if (Object.keys(split.scalars).filter(function (k) { return !SKILL_VIS_META_KEYS[k]; }).length) {
+                    return { mode: 'metrics', scalars: split.scalars };
+                }
+                return { mode: 'none', scalars: {}, tables: {} };
+            }
+            function _skillVisComposeExclusiveHtml(plan, esc, opts) {
+                if (!plan || plan.mode === 'none') return '';
+                opts = opts || {};
+                var heading = opts.heading
+                    ? ('<h6 class="skill-vis-heading small text-muted">' + esc(opts.heading) + '</h6>')
+                    : '';
+                var gridHtml = '';
+                var bodyHtml = '';
+                if (plan.mode === 'molecule_grid') {
+                    bodyHtml = _skillVisBuildMoleculeHitGridHtml(plan.molRows, esc, null, plan.molKey);
+                    gridHtml = _skillVisBuildMetricsGridHtml(plan.scalars, esc);
+                    if (plan.tables && Object.keys(plan.tables).length) {
+                        bodyHtml += _skillVisBuildAllTablesHtml(plan.tables, esc);
+                    }
+                } else if (plan.mode === 'tables') {
+                    gridHtml = _skillVisBuildMetricsGridHtml(plan.scalars, esc);
+                    bodyHtml = _skillVisBuildAllTablesHtml(plan.tables, esc);
+                } else if (plan.mode === 'metrics') {
+                    gridHtml = _skillVisBuildMetricsGridHtml(plan.scalars, esc);
+                }
+                var urlHtml = opts.urlSource ? _skillVisBuildUrlActionsHtml(opts.urlSource, esc, opts.linkResolver) : '';
+                if (!gridHtml && !bodyHtml && !urlHtml) return '';
+                return heading + gridHtml + bodyHtml + urlHtml;
+            }
+            function _skillVisMarkdownDuplicatesStructured(mdRaw, plan) {
+                if (!mdRaw || typeof mdRaw !== 'string') return false;
+                if (/```\s*json/i.test(mdRaw)) return true;
+                if (!plan || plan.mode === 'none') return false;
+                if ((plan.mode === 'tables' || plan.mode === 'molecule_grid') && /\*\*hits\*\*|\*\*results\*\*|命中列表/i.test(mdRaw)) {
+                    return true;
+                }
+                return false;
+            }
+            function _skillVisRenderDataBundle(dataBlock, toolName, toolResult, gridSkip) {
+                if (!dataBlock || typeof dataBlock !== 'object' || Array.isArray(dataBlock)) {
+                    return { handled: false, html: '', suppressMarkdown: false, plan: { mode: 'none' } };
+                }
+                var collected = _skillVisCollectFromDataBlock(dataBlock, gridSkip);
+                var payload = {};
+                Object.keys(collected.scalars).forEach(function (k) { payload[k] = collected.scalars[k]; });
+                Object.keys(collected.tables).forEach(function (k) { payload[k] = collected.tables[k]; });
+                if (!Object.keys(payload).length) {
+                    return { handled: false, html: '', suppressMarkdown: false, plan: { mode: 'none' } };
+                }
+                var plan = _skillVisResolveRenderPlan(payload, toolName);
+                if (plan.mode === 'none') {
+                    return { handled: false, html: '', suppressMarkdown: false, plan: plan };
+                }
+                var esc = _skillWsEscapeHtml;
+                var inner = _skillVisComposeExclusiveHtml(plan, esc, {
+                    urlSource: Object.assign({}, toolResult || {}, dataBlock, payload)
+                });
+                if (!inner) {
+                    return { handled: false, html: '', suppressMarkdown: false, plan: plan };
+                }
+                return {
+                    handled: true,
+                    plan: plan,
+                    suppressMarkdown: true,
+                    html: '<div class="skill-mm-block skill-vis-result-wrap skill-vis-exclusive w-100" data-skill-vis-exclusive="1" style="width:100%;max-width:100%;box-sizing:border-box;">' + inner + '</div>'
+                };
+            }
+            function _skillVisBuildUrlActionsHtml(obj, esc, linkResolver) {
+                if (!obj || typeof obj !== 'object') return '';
+                var resolve = linkResolver || function (u) {
+                    return (typeof skillWorkspaceAbsoluteMediaUrl === 'function')
+                        ? (skillWorkspaceAbsoluteMediaUrl(u) || skillWorkspaceSafeHref(u) || '')
+                        : (skillWorkspaceSafeHref(u) || '');
+                };
+                var btns = '';
+                SKILL_VIS_URL_KEYS.forEach(function (row) {
+                    var key = row[0], label = row[1], icon = row[2];
+                    var raw = obj[key];
+                    if (typeof raw !== 'string' || !raw.trim()) return;
+                    var href = resolve(raw.trim());
+                    if (!href) return;
+                    btns += '<a class="skill-ws-btn skill-vis-action-btn" href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' +
+                        '<i class="bi ' + icon + ' me-1"></i>' + esc(label) + '</a>';
+                });
+                if (!btns) return '';
+                return '<div class="skill-vis-actions">' + btns + '</div>';
+            }
+            /** 从技能 data 中提取 mol_block / sdf_content，供 3Dmol 专用渲染（禁止落入指标卡片） */
+            function _skillVisExtractMolStructure(dataObj) {
+                if (!dataObj || typeof dataObj !== 'object') return null;
+                var src = dataObj;
+                if (dataObj.data && typeof dataObj.data === 'object' && !Array.isArray(dataObj.data)) {
+                    src = Object.assign({}, dataObj.data);
+                }
+                var block = src.mol_block || src.sdf_content || src.sdf_text;
+                if (typeof block !== 'string' || block.trim().length < 24) return null;
+                var fmt = 'mol';
+                if (src.sdf_content || src.sdf_text) fmt = 'sdf';
+                else if (typeof src.format === 'string' && /sdf/i.test(src.format)) fmt = 'sdf';
+                var scalars = {};
+                Object.keys(src).forEach(function (k) {
+                    if (k === 'mol_block' || k === 'sdf_content' || k === 'sdf_text' || k === 'format') return;
+                    var v = src[k];
+                    if (v === null || v === undefined) return;
+                    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') scalars[k] = v;
+                });
+                return { text: block.trim(), format: fmt, scalars: scalars };
+            }
+            function _skillVisBuildMol3dViewerHtml(molInfo, esc, opts) {
+                if (!molInfo || !molInfo.text) return '';
+                opts = opts || {};
+                var fmt = (molInfo.format || 'mol').toLowerCase();
+                var heading = opts.heading
+                    ? ('<h6 class="skill-vis-heading small text-muted">' + esc(opts.heading) + '</h6>')
+                    : '';
+                var metrics = '';
+                if (molInfo.scalars && Object.keys(molInfo.scalars).length) {
+                    metrics = _skillVisBuildMetricsGridHtml(molInfo.scalars, esc);
+                }
+                var payloadJson = '';
+                try {
+                    payloadJson = JSON.stringify(molInfo.text);
+                } catch (eJson) {
+                    return '';
+                }
+                return heading + metrics +
+                    '<div class="skill-vis-mol3d-block skill-mm-block my-3" data-skill-mol3d="1" data-mol-format="' + esc(fmt) + '">' +
+                    '<p class="text-muted small mb-2"><i class="bi bi-hand-index-thumb me-1"></i>鼠标拖拽可旋转 · 滚轮缩放</p>' +
+                    '<div class="mol-viewer-container skill-vis-mol3d-viewer border rounded bg-light" ' +
+                    'style="height:400px;width:100%;max-width:100%;position:relative;min-width:0;box-sizing:border-box;"></div>' +
+                    '<script type="application/json" class="skill-vis-mol3d-payload">' +
+                    payloadJson.replace(/<\/script/gi, '<\\/script') +
+                    '</script></div>';
+            }
+            /**
+             * 自适应技能结果可视化：扁平 JSON → 指标卡片 + 下载按钮；富媒体/白名单技能原样放行。
+             * @returns {{ handled: boolean, html?: string }}
+             */
+            function renderSkillResultVisually(dataObj, skillId, opts) {
+                opts = opts || {};
+                var esc = opts.escapeFn || _skillWsEscapeHtml;
+                try {
+                    var molInfo = _skillVisExtractMolStructure(dataObj);
+                    if (!molInfo && opts.toolResult) {
+                        molInfo = _skillVisExtractMolStructure(opts.toolResult);
+                    }
+                    if (molInfo && molInfo.text) {
+                        var molHtml = _skillVisBuildMol3dViewerHtml(molInfo, esc, { heading: opts.heading });
+                        if (molHtml) {
+                            return {
+                                handled: true,
+                                html: '<div class="skill-mm-block skill-vis-result-wrap skill-vis-exclusive w-100" data-skill-vis-exclusive="1" data-skill-mol3d-mount="1">' + molHtml + '</div>'
+                            };
+                        }
+                    }
+                    if (opts.toolResult && _skillVisToolResultHasCustomUI(opts.toolResult, skillId)) {
+                        return { handled: false };
+                    }
+                    if (skillId && SKILL_VIS_PRESERVE_IDS[skillId] && opts.respectPreserve !== false) {
+                        return { handled: false };
+                    }
+                    if (Array.isArray(dataObj) && _skillVisIsRecordTableArray(dataObj)) {
+                        var planArr = _skillVisResolveRenderPlan({ hits: dataObj }, skillId);
+                        if (planArr.mode === 'molecule_grid' && _skillVisRowsHaveSmiles(dataObj)) {
+                            var molOnly = _skillVisComposeExclusiveHtml(planArr, esc, { heading: opts.heading });
+                            return {
+                                handled: true,
+                                html: '<div class="skill-mm-block skill-vis-result-wrap skill-vis-exclusive w-100" data-skill-vis-exclusive="1">' + molOnly + '</div>'
+                            };
+                        }
+                        var tableOnly = _skillVisBuildRecordTableHtml(dataObj, esc, opts.heading || '结果列表', 'hits');
+                        return {
+                            handled: true,
+                            html: '<div class="skill-mm-block skill-vis-result-wrap skill-vis-exclusive w-100" data-skill-vis-exclusive="1">' + tableOnly + '</div>'
+                        };
+                    }
+                    var payload = _skillVisNormalizePayload(dataObj);
+                    if (!payload || !_skillVisIsFlatMetricsPayload(payload)) {
+                        return { handled: false };
+                    }
+                    if (_skillVisHasRichMarkers(payload, 0)) {
+                        return { handled: false };
+                    }
+                    var plan = _skillVisResolveRenderPlan(payload, skillId);
+                    if (plan.mode === 'none') {
+                        return { handled: false };
+                    }
+                    var inner = _skillVisComposeExclusiveHtml(plan, esc, {
+                        heading: opts.heading,
+                        urlSource: Object.assign({}, opts.toolResult || {}, dataObj || {}, payload),
+                        linkResolver: opts.linkResolver
+                    });
+                    if (!inner) return { handled: false };
+                    return {
+                        handled: true,
+                        html: '<div class="skill-mm-block skill-vis-result-wrap skill-vis-exclusive w-100" data-skill-vis-exclusive="1" style="width:100%;max-width:100%;box-sizing:border-box;">' + inner + '</div>'
+                    };
+                } catch (errVis) {
+                    return {
+                        handled: true,
+                        html: '<div class="alert alert-warning small skill-vis-error mb-0 mx-3 my-2">结果渲染异常：' +
+                            esc(errVis && errVis.message ? errVis.message : String(errVis)) + '</div>'
+                    };
+                }
+            }
+            window.renderSkillResultVisually = renderSkillResultVisually;
+
+            /** 聊天区 / Markdown 内 JSON 代码块 → 指标卡片 + 命中表格（如 tool_output_memory） */
+            function hydrateSkillVisJsonBlocks(scope) {
+                var root = scope || document;
+                if (!root || !root.querySelectorAll) return;
+                root.querySelectorAll('.markdown-body pre code, .skill-mm-json-block pre code').forEach(function (codeEl) {
+                    if (codeEl.getAttribute('data-skill-vis-hydrated') === '1') return;
+                    if (codeEl.closest('[data-skill-vis-exclusive="1"], #skill-tool-workspace-root, .skill-mm-engine')) return;
+                    var text = (codeEl.textContent || '').trim();
+                    if (!text || text.length > 150000) return;
+                    if (!/^[\[{]/.test(text)) return;
+                    var parsed;
+                    try { parsed = JSON.parse(text); } catch (eJson) { return; }
+                    var visInput = null;
+                    var toolResultCtx = null;
+                    var skillIdHint = '';
+                    if (Array.isArray(parsed) && _skillVisIsRecordTableArray(parsed)) {
+                        visInput = parsed;
+                    } else if (parsed && typeof parsed === 'object') {
+                        toolResultCtx = parsed;
+                        if (parsed.data && typeof parsed.data === 'object' && !Array.isArray(parsed.data)) {
+                            visInput = parsed.data;
+                        } else if (_skillVisIsFlatMetricsPayload(parsed)) {
+                            visInput = parsed;
+                        }
+                    }
+                    if (!visInput) return;
+                    var vis = renderSkillResultVisually(visInput, skillIdHint, {
+                        toolResult: toolResultCtx,
+                        respectPreserve: false
+                    });
+                    if (!vis || !vis.handled || !vis.html) return;
+                    codeEl.setAttribute('data-skill-vis-hydrated', '1');
+                    var pre = codeEl.closest('pre');
+                    var wrapper = pre && (pre.closest('.code-block-wrapper') || pre.closest('.skill-mm-json-block'));
+                    var mount = wrapper || pre;
+                    if (!mount || !mount.parentNode) return;
+                    var parent = mount.parentNode;
+                    while (parent.firstChild) parent.removeChild(parent.firstChild);
+                    var box = document.createElement('div');
+                    box.className = 'skill-vis-chat-mount';
+                    box.setAttribute('data-skill-vis-exclusive', '1');
+                    box.innerHTML = vis.html;
+                    parent.appendChild(box);
+                    if (typeof hydrateSkillMol3dBlocks === 'function') hydrateSkillMol3dBlocks(box);
+                });
+            }
+            window.hydrateSkillVisJsonBlocks = hydrateSkillVisJsonBlocks;
+
+            /** 技能结果区：将 mol_block / SDF 文本挂载为 3Dmol 交互视图 */
+            function hydrateSkillMol3dBlocks(scope) {
+                var root = scope || document;
+                if (!root || !root.querySelectorAll) return;
+                root.querySelectorAll('[data-skill-mol3d="1"]').forEach(function (wrap) {
+                    if (wrap.getAttribute('data-mol-hydrated') === '1') return;
+                    var viewerEl = wrap.querySelector('.skill-vis-mol3d-viewer');
+                    var payloadEl = wrap.querySelector('.skill-vis-mol3d-payload');
+                    if (!viewerEl || !payloadEl) return;
+                    wrap.setAttribute('data-mol-hydrated', '1');
+                    var molText = '';
+                    try {
+                        molText = JSON.parse(payloadEl.textContent || '""');
+                    } catch (eParse) {
+                        console.warn('[hydrateSkillMol3dBlocks] parse failed', eParse);
+                        viewerEl.innerHTML = '<p class="text-muted small p-2 mb-0">3D 结构数据解析失败</p>';
+                        return;
+                    }
+                    var fmt = wrap.getAttribute('data-mol-format') || 'mol';
+                    if (typeof window.mountSkillMol3dViewer === 'function') {
+                        window.mountSkillMol3dViewer(viewerEl, molText, fmt);
+                    }
+                });
+            }
+            window.hydrateSkillMol3dBlocks = hydrateSkillMol3dBlocks;
+
+            /**
+             * 技能右栏：优先指标卡片可视化；无法识别时回退 ```json 围栏代码块。
+             */
+            function renderSkillJsonMarkdownBlock(dataObj, heading, skillId) {
                 if (dataObj === null || dataObj === undefined) return '';
+                if (typeof renderSkillResultVisually === 'function') {
+                    try {
+                        var vis = renderSkillResultVisually(dataObj, skillId || '', {
+                            heading: heading || '核心指标',
+                            toolResult: (arguments.length > 3 && arguments[3]) ? arguments[3] : null
+                        });
+                        if (vis && vis.handled && vis.html) return vis.html;
+                    } catch (eVisHook) {
+                        console.warn('[skill-vis] JSON block fallback', eVisHook);
+                    }
+                }
                 var jsonText;
                 try {
                     jsonText = (typeof dataObj === 'string') ? dataObj : JSON.stringify(dataObj, null, 2);
@@ -6864,8 +7564,21 @@
 
                 var parts = [];
 
+                var dataBlock = toolResult.data;
+                var gridSkip = {
+                    status: 1, message: 1, markdown: 1, data: 1,
+                    result: 1,
+                    html_url: 1, csv_url: 1, zip_url: 1, json_url: 1, pdf_url: 1,
+                    image_url: 1, image_urls: 1,
+                    image_paths: 1, json_paths: 1, script_path: 1, output_dir: 1,
+                    artifacts: 1,
+                    query_smiles: 1, stdout_tail: 1, stderr_tail: 1
+                };
+                var dataBundle = _skillVisRenderDataBundle(dataBlock, toolName, toolResult, gridSkip);
+                var suppressMd = dataBundle && dataBundle.suppressMarkdown;
+
                 var mdRaw = toolResult.markdown;
-                if (typeof mdRaw === 'string' && mdRaw.trim()) {
+                if (typeof mdRaw === 'string' && mdRaw.trim() && !suppressMd && !_skillVisMarkdownDuplicatesStructured(mdRaw, dataBundle ? dataBundle.plan : null)) {
                     var mdHtml = '';
                     try {
                         mdHtml = (typeof safeMarkedParse === 'function') ? safeMarkedParse(mdRaw) : ((typeof marked !== 'undefined' && marked.parse) ? marked.parse(String(mdRaw)) : _skillWsEscapeHtml(mdRaw));
@@ -6948,32 +7661,16 @@
                     parts.push('<div class="skill-mm-block skill-ws-empty" style="padding:16px;">未返回可展示的 <code>image_url</code>（或链接无效）。请确认 PySkills Worker 已成功渲染并写入 <code>/uploads/results/pyskills/</code>，且网关将 <code>/uploads/</code> 暴露到与页面同源。</div>');
                 }
 
-                var dataBlock = toolResult.data;
-                var gridSkip = {
-                    status: 1, message: 1, markdown: 1, data: 1,
-                    result: 1,
-                    html_url: 1, csv_url: 1, zip_url: 1, json_url: 1, pdf_url: 1,
-                    image_url: 1, image_urls: 1,
-                    image_paths: 1, json_paths: 1, script_path: 1, output_dir: 1,
-                    artifacts: 1,
-                    query_smiles: 1, stdout_tail: 1, stderr_tail: 1
-                };
-                if (dataBlock && typeof dataBlock === 'object' && !Array.isArray(dataBlock) && Object.keys(dataBlock).length > 0) {
-                    var cardsHtml = '';
-                    Object.keys(dataBlock).forEach(function(k) {
-                        if (gridSkip[k]) return;
-                        var val = dataBlock[k];
-                        if (val !== null && typeof val === 'object') return;
-                        var display = _skillWsEscapeHtml(skillFormatDataValue(val));
-                        cardsHtml += '<div class="skill-mm-metric"><span class="skill-mm-metric__label">' + _skillWsEscapeHtml(k) + '</span><span class="skill-mm-metric__value">' + display + '</span></div>';
-                    });
-                    if (cardsHtml) {
-                        parts.push('<div class="skill-mm-block skill-mm-data-grid-wrap w-100" style="width:100%;max-width:100%;box-sizing:border-box;"><div class="skill-mm-data-grid">' + cardsHtml + '</div></div>');
+                var hasMergedMetrics = false;
+                if (dataBundle && dataBundle.handled && dataBundle.html) {
+                    hasMergedMetrics = true;
+                    parts.push(dataBundle.html);
+                } else if (dataBlock && dataBlock.result != null && !mdHasJsonFence) {
+                    var _resJsonBlock = renderSkillJsonMarkdownBlock(dataBlock.result, '核心指标', toolName, toolResult);
+                    if (_resJsonBlock) {
+                        hasMergedMetrics = true;
+                        parts.push(_resJsonBlock);
                     }
-                }
-                if (!mdHasJsonFence && dataBlock && dataBlock.result != null) {
-                    var _resJsonBlock = renderSkillJsonMarkdownBlock(dataBlock.result, '完整结果 JSON');
-                    if (_resJsonBlock) parts.push(_resJsonBlock);
                 }
 
                 if (parts.length === 0) {
@@ -7066,6 +7763,7 @@
                         el.innerHTML = '<p class="skill-ws-empty small mb-0 skill-csv-error">' + _skillWsEscapeHtml(String(err && err.message ? err.message : err)) + '</p>';
                     });
                 });
+                if (typeof hydrateSkillMol3dBlocks === 'function') hydrateSkillMol3dBlocks(skillRoot);
             }
             function showSkillWorkspaceChrome() {
                 var wp = document.getElementById('workspace-pane');
@@ -14610,8 +15308,25 @@
                                     var _execMdHasJson = diagMarkdown && /```\s*json/i.test(diagMarkdown);
                                     var _rawResultObj = stepData.result || stepResult.result || null;
                                     if (!_execMdHasJson && _rawResultObj != null && typeof renderSkillJsonMarkdownBlock === 'function') {
-                                        var _execJsonBlock = renderSkillJsonMarkdownBlock(_rawResultObj, '完整结果 JSON');
+                                        var _execVisPayload = _rawResultObj;
+                                        var _execToolResult = Object.assign({}, stepResult || {}, stepData || {});
+                                        var _execJsonBlock = renderSkillJsonMarkdownBlock(_execVisPayload, '核心指标', tid, _execToolResult);
                                         if (_execJsonBlock) resultContentHtml += _execJsonBlock;
+                                    } else if (!_execMdHasJson && !_rawResultObj && (stepData.data || stepResult.data)) {
+                                        var _execDataOnly = stepData.data || stepResult.data;
+                                        if (typeof renderSkillResultVisually === 'function') {
+                                            try {
+                                                var _execDataVis = renderSkillResultVisually(_execDataOnly, tid, {
+                                                    heading: '核心指标',
+                                                    toolResult: Object.assign({}, stepResult || {}, stepData || {})
+                                                });
+                                                if (_execDataVis && _execDataVis.handled && _execDataVis.html) {
+                                                    resultContentHtml += _execDataVis.html;
+                                                }
+                                            } catch (eExecVis) {
+                                                console.warn('[skill-vis] workflow data fallback', eExecVis);
+                                            }
+                                        }
                                     }
                                 }
                                 if ((stepStatus === 'error' || stepStatus === 'skipped') && diagMarkdown) {
@@ -16248,6 +16963,54 @@
                 return html;
             };
             /**
+             * 技能/工具内联 mol_block 或 SDF 文本 → 3Dmol stick 模型（小分子专用）。
+             * @param {string} formatOpt  'mol' | 'sdf'
+             */
+            window.mountSkillMol3dViewer = function (containerElement, molText, formatOpt) {
+                if (!containerElement || molText == null) return;
+                var molFormat = (formatOpt || 'mol').toLowerCase();
+                if (molFormat === 'mol_block') molFormat = 'mol';
+                if (molFormat !== 'sdf') molFormat = 'mol';
+
+                function showErr(msg) {
+                    containerElement.innerHTML =
+                        '<p class="text-muted small mb-0 p-2">' + (msg || '3D 预览不可用') + '</p>';
+                }
+                function tryMount(raw) {
+                    if (typeof $3Dmol === 'undefined' || !$3Dmol.createViewer) return false;
+                    try {
+                        containerElement.innerHTML = '';
+                        var viewer = $3Dmol.createViewer(containerElement, {
+                            defaultBackgroundColor: '#f9fafb',
+                            backgroundColor: '#f9fafb'
+                        });
+                        viewer.addModel(String(raw), molFormat);
+                        viewer.setStyle({}, { stick: { radius: 0.12 }, sphere: { scale: 0.22 } });
+                        viewer.zoomTo();
+                        viewer.render();
+                        return true;
+                    } catch (e) {
+                        console.warn('[mountSkillMol3dViewer]', e);
+                        showErr('3D 结构渲染失败');
+                        return true;
+                    }
+                }
+                function waitThenMount(text) {
+                    if (tryMount(text)) return;
+                    var n = 0;
+                    var iv = setInterval(function () {
+                        n++;
+                        if (tryMount(text) || n > 200) {
+                            clearInterval(iv);
+                            if (n > 200 && !containerElement.querySelector('canvas')) {
+                                showErr('3Dmol 加载超时，请硬刷新后重试');
+                            }
+                        }
+                    }, 50);
+                }
+                waitThenMount(molText);
+            };
+            /**
              * 3Dmol 渲染（.pdb / mmCIF）。失败时若传入 hydrateOpts.wrap + fallbackPath 则回退为普通下载卡片。
              * @param {string} formatOpt  'pdb' | 'mmcif'
              */
@@ -16395,6 +17158,12 @@
                         host.innerHTML = '<p class="text-danger small mb-0">CSV 预览加载失败</p>';
                     });
                 });
+                if (typeof window.hydrateSkillVisJsonBlocks === 'function') {
+                    window.hydrateSkillVisJsonBlocks(scope);
+                }
+                if (typeof window.hydrateSkillMol3dBlocks === 'function') {
+                    window.hydrateSkillMol3dBlocks(scope);
+                }
             };
             function getUserId() {
                 // 从localStorage或session获取用户ID，未登录返回'guest'

@@ -5,9 +5,11 @@
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import logging
+import queue
 import re
 import time
 import uuid
@@ -18,6 +20,7 @@ from gibh_agent.core.openai_tools import tool_names_to_openai_tools
 from gibh_agent.core.stream_utils import THINK_CLOSE, THINK_OPEN, stream_from_llm_chunks
 from gibh_agent.core.tool_registry import registry
 from gibh_agent.core.tool_output_memory import build_tool_output_memory_text
+from gibh_agent.core.tool_stream_log import tool_log_emitter_scope
 from gibh_agent.core.utils import sanitize_for_json
 
 logger = logging.getLogger(__name__)
@@ -45,6 +48,58 @@ except Exception:
         "crispr_cas9_tool / bioml_batch3_tools 预加载失败（快车道 CRISPR/第三批生医仿真将不可用）",
         exc_info=True,
     )
+try:
+    from gibh_agent.skills import bootstrap_skills
+
+    bootstrap_skills()
+except Exception:
+    logger.warning("gibh_agent/skills BaseSkill 预加载失败（首发核心技能快车道可能不可用）", exc_info=True)
+
+# 首发核心技能 tool_id（与 gibh_agent/skills/skill_*.py · skill_id 一致）
+_LAUNCH_SMILES_TOOLS = frozenset(
+    {
+        "pubchem_smiles_to_cid",
+        "rdkit_3d_mol_render",
+        "chembl_similar_molecules",
+        "rdkit_substructure_search",
+    }
+)
+_LAUNCH_QUERY_TOOLS = frozenset({"chembl_drug_search", "chipatlas_experiment_search"})
+_LAUNCH_SEQUENCE_TOOLS = frozenset({"nucleotide_sequence_blast", "protein_sequence_blast"})
+
+try:
+    from gibh_agent.skills.launch_skill_demos import (
+        LAUNCH_SKILL_DEMO_ARGS,
+        apply_launch_demo_defaults as _apply_launch_demo_defaults,
+    )
+except Exception:
+    LAUNCH_SKILL_DEMO_ARGS = {}
+    _apply_launch_demo_defaults = None  # type: ignore
+
+
+def _extract_json_block_from_prompt(text: str) -> Dict[str, Any]:
+    """从 prompt_template 内 ```json ... ``` 广场一键体验块解析工具参数。"""
+    if not (text or "").strip():
+        return {}
+    m = re.search(r"```(?:json)?\s*\n(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
+    if not m:
+        return {}
+    try:
+        obj = json.loads(m.group(1))
+        return obj if isinstance(obj, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _merge_launch_tool_args(tool_name: str, args: Dict[str, Any], user_query: str) -> Dict[str, Any]:
+    """合并模板 JSON 演示块 + launch_skill_demos 默认值（不覆盖非空用户参数）。"""
+    if tool_name not in LAUNCH_SKILL_DEMO_ARGS or _apply_launch_demo_defaults is None:
+        return args
+    merged = dict(args)
+    for key, val in _extract_json_block_from_prompt(user_query).items():
+        if _arg_blank(merged.get(key)):
+            merged[key] = val
+    return _apply_launch_demo_defaults(tool_name, merged)
 
 # 药物相似性技能（逻辑 ID drug_similarity）：双工具 persona，供填参 LLM 对齐科学叙事
 DRUG_SIM_PERSONA_LIPINSKI = (
@@ -61,6 +116,10 @@ DRUG_SIM_PERSONA_SIMILARITY = (
 )
 
 _FASTA_SUFFIXES = (".fa", ".fasta", ".faa", ".ffn")
+
+
+def _arg_blank(v: Any) -> bool:
+    return v is None or (isinstance(v, str) and not v.strip())
 
 
 def _extract_inline_fasta_for_fallback(text: str) -> str:
@@ -482,6 +541,12 @@ class SkillAgent:
             "有上传文件时优先 file_path 并用列表中的绝对路径。"
             "若用户未单独写一行 SMILES，但正文中用反引号标出参考分子 SMILES（或列表项中带 SMILES），"
             "须将**第一个**可解析的 SMILES 填入 smiles_text，不得留空导致工具失败。"
+            "首发核心技能：chembl_drug_search→query；pubchem_smiles_to_cid/rdkit_3d_mol_render/chembl_similar_molecules→smiles；"
+            "rdkit_substructure_search→substructure_smiles+target_smiles；rdkit_mol_format_convert→input_text；"
+            "nucleotide_sequence_blast/protein_sequence_blast→sequence_text 或 sequence_or_path；"
+            "mhc_epitope_search→mhc_allele 和/或 peptide_sequence；chipatlas_experiment_search→query 或 expid。"
+            "首发技能广场模板内含 ```json``` 一键体验块：须优先解析该 JSON 填入工具参数；"
+            "用户未改需求且字段仍空时，使用模板 JSON 或 launch_skill_demos 默认值，禁止留空必填项。"
         )
         user_msg = (
             f"工具名称: `{tool_name}`\n\n"
@@ -638,7 +703,40 @@ class SkillAgent:
             out.setdefault("cdr_definition", "kabat")
             out.setdefault("threshold", "relaxed")
             out.setdefault("antibody_name", "Antibody")
-        return out
+        if tool_name in _LAUNCH_SMILES_TOOLS and "smiles" in fields and not file_paths:
+            ex_sm = _extract_inline_smiles_for_fallback(clean)
+            if ex_sm:
+                out["smiles"] = ex_sm
+        if tool_name == "rdkit_substructure_search":
+            if "substructure_smiles" in fields and _arg_blank(out.get("substructure_smiles")):
+                out.setdefault("substructure_smiles", "c1ccccc1")
+            if "target_smiles" in fields and _arg_blank(out.get("target_smiles")):
+                ex_t = _extract_inline_smiles_for_fallback(clean)
+                if ex_t:
+                    out["target_smiles"] = ex_t
+        if tool_name in _LAUNCH_QUERY_TOOLS and "query" in fields and _arg_blank(out.get("query")):
+            qline = re.sub(r"\[Skill_Route:[^\]]+\]", "", clean).strip()
+            if qline:
+                out["query"] = qline[:200]
+        if tool_name == "chipatlas_experiment_search" and "expid" in fields:
+            m_acc = re.search(r"\b(SRX|GSM|SRP)\d+\b", clean, re.I)
+            if m_acc and _arg_blank(out.get("expid")):
+                out["expid"] = m_acc.group(0)
+        if tool_name in _LAUNCH_SEQUENCE_TOOLS:
+            if "sequence_text" in fields and _arg_blank(out.get("sequence_text")):
+                seq = re.sub(r"[^A-Za-z]", "", clean)
+                if len(seq) >= 8:
+                    out["sequence_text"] = seq[:5000]
+        if tool_name == "rdkit_mol_format_convert" and "input_text" in fields:
+            if _arg_blank(out.get("input_text")):
+                ex_in = _extract_inline_smiles_for_fallback(clean)
+                if ex_in:
+                    out["input_text"] = ex_in
+        if tool_name == "mhc_epitope_search" and "mhc_allele" in fields:
+            m_hla = re.search(r"HLA-[A-Z0-9\*:\-]+", clean, re.I)
+            if m_hla and _arg_blank(out.get("mhc_allele")):
+                out["mhc_allele"] = m_hla.group(0)
+        return _merge_launch_tool_args(tool_name, out, clean)
 
     def _augment_args_from_user_text(
         self,
@@ -786,7 +884,23 @@ class SkillAgent:
                 args["threshold"] = "relaxed"
             if "antibody_name" in fields and _blank(args.get("antibody_name")):
                 args["antibody_name"] = "Antibody"
-        return args
+        if tool_name in _LAUNCH_SMILES_TOOLS and "smiles" in fields and _blank(args.get("smiles")) and not has_upload:
+            sm_l = _extract_inline_smiles_for_fallback(clean)
+            if sm_l:
+                args["smiles"] = sm_l
+        if tool_name == "rdkit_mol_format_convert" and "input_text" in fields and _blank(args.get("input_text")):
+            ex_l = _extract_inline_smiles_for_fallback(clean)
+            if ex_l:
+                args["input_text"] = ex_l
+        if tool_name in _LAUNCH_SEQUENCE_TOOLS and "sequence_text" in fields and _blank(args.get("sequence_text")):
+            fa = _extract_inline_fasta_for_fallback(clean)
+            if fa:
+                args["sequence_text"] = re.sub(r"[^A-Za-z]", "", fa)[:5000]
+        if tool_name == "mhc_epitope_search" and "mhc_allele" in fields and _blank(args.get("mhc_allele")):
+            m_hla2 = re.search(r"HLA-[A-Z0-9\*:\-]+", clean, re.I)
+            if m_hla2:
+                args["mhc_allele"] = m_hla2.group(0)
+        return _merge_launch_tool_args(tool_name, args, clean)
 
     async def _llm_extract_args(
         self,
@@ -1113,11 +1227,80 @@ class SkillAgent:
             }
         )
 
+        _remote_blast = tool_name in _LAUNCH_SEQUENCE_TOOLS and bool(
+            args.get("use_remote", True)
+        )
+        if _remote_blast:
+            yield self._emit(
+                "status",
+                {
+                    "content": (
+                        "📡 正在向 NCBI 全球公共集群提交比对任务，因官方队列波动，"
+                        "通常需要 1~5 分钟，请耐心等待..."
+                    ),
+                    "state": "running",
+                },
+            )
+
         try:
             if inspect.iscoroutinefunction(tool_fn):
                 result = await tool_fn(**args)
             else:
-                result = tool_fn(**args)
+                _log_q: queue.Queue = queue.Queue(maxsize=256)
+
+                def _tool_log_sink(content: str, state: str = "running") -> None:
+                    try:
+                        _log_q.put_nowait({"content": content, "state": state})
+                    except queue.Full:
+                        pass
+
+                def _run_sync_tool() -> Dict[str, Any]:
+                    with tool_log_emitter_scope(_tool_log_sink):
+                        out = tool_fn(**args)
+                        return out if isinstance(out, dict) else {"status": "success", "data": out}
+
+                _tool_task = asyncio.create_task(asyncio.to_thread(_run_sync_tool))
+                _last_hb = time.monotonic()
+                _hb_interval = 30.0
+                while not _tool_task.done():
+                    await asyncio.sleep(0.05)
+                    while True:
+                        try:
+                            _line = _log_q.get_nowait()
+                        except queue.Empty:
+                            break
+                        yield self._emit(
+                            "status",
+                            {
+                                "content": str(_line.get("content") or ""),
+                                "state": str(_line.get("state") or "running"),
+                            },
+                        )
+                    if _remote_blast and (time.monotonic() - _last_hb) >= _hb_interval:
+                        yield self._emit(
+                            "status",
+                            {
+                                "content": (
+                                    "⏳ NCBI 远程排队中...（官方集群负载波动属正常现象，"
+                                    "请勿关闭页面）"
+                                ),
+                                "state": "running",
+                            },
+                        )
+                        _last_hb = time.monotonic()
+                result = await _tool_task
+                while True:
+                    try:
+                        _line = _log_q.get_nowait()
+                    except queue.Empty:
+                        break
+                    yield self._emit(
+                        "status",
+                        {
+                            "content": str(_line.get("content") or ""),
+                            "state": str(_line.get("state") or "running"),
+                        },
+                    )
         except Exception as e:
             logger.exception("SkillAgent 工具调用异常: %s", e)
             result = {"status": "error", "message": str(e)}

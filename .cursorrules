@@ -7,3 +7,5 @@
 **Git 推送纪律（长记忆）**：已跟踪代码与配置中**不得**再提交真实内网 IP、明文 API 密钥/令牌、或与现网绑定的默认端口组合；默认值用 `127.0.0.1` / 环境变量，机密放 `.env`、`docker-compose.override.yml` 等已忽略路径。细则见 `.cursor/rules/git-no-secrets-in-tracked-files.mdc`。
 
 **Docker 构建（Agent 防卡死）**：禁止 `docker compose build ... | tail -N` 或 `| head -N`（管道会缓冲至子进程结束才输出）。请用 `scripts/build_api_server.sh`（`tee`）或 `docker compose --progress plain build api-server`。BepiPred 默认 `INSTALL_BEPIPRED3=1`；开发可挂载 `third_party/BepiPred-3.0/.venv` 并设 `BEPIPRED3_PYTHON`。
+
+**技能 Docker 验收（长记忆）**：修改首发 `gibh_agent/skills/` 或 `__dependencies__` 后，必须更新 `services/launch-skills/`、执行 `./scripts/build_launch_skills.sh`，在 `gibh_v2_launch_skills` 内跑 `verify_launch_skill_deps.sh`；`api-server` 经 `LAUNCH_SKILLS_BASE_URL` 委托。禁止仅改 api-server 全量镜像或仅宿主机 pytest 即交付（见 §5.11.1）。

@@ -11,6 +11,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from gibh_agent.db.chem_skill_prompt_templates import CHEM_PROMPTS_BY_SKILL_NAME
+from gibh_agent.db.launch_core_skill_prompt_templates import (
+    LAUNCH_CORE_PROMPTS_BY_SKILL_NAME,
+    LAUNCH_CORE_SKILL_SEEDS,
+)
 from gibh_agent.db.omics_skill_prompt_templates import OMICS_FAST_LANE_PROMPTS
 from gibh_agent.db.models import Skill as SkillModel
 from gibh_agent.db.panshi_skill_meta import apply_panshi_official_descriptions
@@ -768,6 +772,19 @@ for skill in ADDITIONAL_CHEMISTRY_SKILLS:
         skill["prompt_template"] = PLACEHOLDER_PROMPT
 CHEMISTRY_SKILLS.extend(ADDITIONAL_CHEMISTRY_SKILLS)
 
+# 首发核心技能（gibh_agent/skills/ BaseSkill）：Prompt 与广场卡片名对齐
+for _launch_lst in (ADDITIONAL_CHEMISTRY_SKILLS, BIOMEDICINE_SKILLS, ADDITIONAL_BIOMED_SKILLS):
+    for _launch_sk in _launch_lst:
+        _launch_nm = _launch_sk.get("name")
+        if _launch_nm in LAUNCH_CORE_PROMPTS_BY_SKILL_NAME:
+            _launch_sk["prompt_template"] = LAUNCH_CORE_PROMPTS_BY_SKILL_NAME[_launch_nm]
+
+LAUNCH_CORE_SKILLS: list = []
+for _launch_row in LAUNCH_CORE_SKILL_SEEDS:
+    _launch_item = dict(_launch_row)
+    _launch_item["prompt_template"] = LAUNCH_CORE_PROMPTS_BY_SKILL_NAME[_launch_row["name"]]
+    LAUNCH_CORE_SKILLS.append(_launch_item)
+
 
 def run_seed_core_skills(db: Session) -> int:
     """向当前 Session 插入编排快车道 + 核心组学技能（不 commit）。返回插入条数。"""
@@ -802,6 +819,7 @@ def get_all_system_skills_list() -> list:
         + BIOMEDICINE_SKILLS
         + ADDITIONAL_BIOMED_SKILLS
         + CHEMISTRY_SKILLS
+        + LAUNCH_CORE_SKILLS
     )
     return apply_panshi_official_descriptions(merged)
 
