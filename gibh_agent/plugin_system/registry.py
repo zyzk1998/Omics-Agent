@@ -138,7 +138,7 @@ def plugin_to_skill_plaza_payload(row: DynamicSkillPlugin) -> Dict[str, Any]:
         "id": f"dyn_{row.id}",
         "name": row.display_name or row.name,
         "description": row.description or "",
-        "main_category": "动态插件",
+        "main_category": "其他技能",
         "sub_category": "用户上传",
         "prompt_template": prompt,
         "author_id": row.author_id,

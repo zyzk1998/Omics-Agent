@@ -15,6 +15,10 @@ from gibh_agent.db.launch_core_skill_prompt_templates import (
     LAUNCH_CORE_PROMPTS_BY_SKILL_NAME,
     LAUNCH_CORE_SKILL_SEEDS,
 )
+from gibh_agent.db.prompt_soft_skill_templates import (
+    PROMPT_SOFT_SKILL_SEEDS,
+    PROMPT_SOFT_SKILL_TEMPLATES,
+)
 from gibh_agent.db.omics_skill_prompt_templates import OMICS_FAST_LANE_PROMPTS
 from gibh_agent.db.models import Skill as SkillModel
 from gibh_agent.db.panshi_skill_meta import apply_panshi_official_descriptions
@@ -785,6 +789,12 @@ for _launch_row in LAUNCH_CORE_SKILL_SEEDS:
     _launch_item["prompt_template"] = LAUNCH_CORE_PROMPTS_BY_SKILL_NAME[_launch_row["name"]]
     LAUNCH_CORE_SKILLS.append(_launch_item)
 
+PROMPT_SOFT_SKILLS: list = []
+for _soft_row in PROMPT_SOFT_SKILL_SEEDS:
+    _soft_item = dict(_soft_row)
+    _soft_item["prompt_template"] = PROMPT_SOFT_SKILL_TEMPLATES[_soft_row["name"]]
+    PROMPT_SOFT_SKILLS.append(_soft_item)
+
 
 def run_seed_core_skills(db: Session) -> int:
     """向当前 Session 插入编排快车道 + 核心组学技能（不 commit）。返回插入条数。"""
@@ -820,6 +830,7 @@ def get_all_system_skills_list() -> list:
         + ADDITIONAL_BIOMED_SKILLS
         + CHEMISTRY_SKILLS
         + LAUNCH_CORE_SKILLS
+        + PROMPT_SOFT_SKILLS
     )
     return apply_panshi_official_descriptions(merged)
 

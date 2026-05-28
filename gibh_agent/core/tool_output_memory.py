@@ -77,6 +77,34 @@ def _fallback_compact_json(result: Dict[str, Any], max_chars: int) -> str:
     return s
 
 
+def _brief_skill_summary(tool_name: str, result: Dict[str, Any]) -> str:
+    """右栏可专属渲染的技能：聊天区仅注入短摘要，避免整包 JSON 污染。"""
+    tid = (tool_name or "").strip()
+    phase = result.get("phase") or (result.get("data") or {}).get("phase")
+    if phase == "missing_params":
+        missing = result.get("missing_params") or (result.get("data") or {}).get("missing_params") or []
+        if missing:
+            return f"技能 `{tid}` 需补充：{'；'.join(str(m) for m in missing[:3])}"
+        return f"技能 `{tid}` 需补充关键信息（见右侧说明）。"
+
+    if tid == "ppt_outline":
+        outline = result.get("ppt_outline") or (result.get("data") or {}).get("ppt_outline") or {}
+        title = (outline.get("title") or "").strip() or "未命名主题"
+        pages = outline.get("total_pages") or len(outline.get("slides") or [])
+        return f"PPT 大纲「{title}」共 {pages} 页（右侧工作台可浏览分页卡片）。"
+    if tid == "mindmap_gen" and result.get("mermaid_code"):
+        return "思维导图已生成（右侧 Mermaid 可视化）。"
+    if tid == "blueprint_drafter" and result.get("html_content"):
+        return "工程蓝图 HTML 已生成（右侧 iframe 预览）。"
+    if result.get("markdown") and phase == "deliver":
+        md = str(result["markdown"])
+        preview = md[:280].replace("\n", " ").strip()
+        if len(md) > 280:
+            preview += "…"
+        return f"技能 `{tid}` 终稿已生成：{preview}（完整内容见右侧报告）。"
+    return ""
+
+
 def build_tool_output_memory_text(
     tool_name: str,
     result: Dict[str, Any],
@@ -91,6 +119,14 @@ def build_tool_output_memory_text(
     """
     if not isinstance(result, dict) or result.get("status") != "success":
         return ""
+
+    brief = _brief_skill_summary(tool_name, result)
+    if brief:
+        return (
+            f"【系统上下文｜上一轮工具 `{tool_name}` 执行摘要】\n"
+            f"{brief}\n"
+            "（结构化详情已在右侧工作台渲染，勿在回复中重复粘贴整段 JSON。）\n"
+        )
 
     body_parts: List[str] = []
     data = result.get("data")

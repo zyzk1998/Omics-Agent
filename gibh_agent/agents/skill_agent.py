@@ -1080,6 +1080,7 @@ class SkillAgent:
         file_paths: List[str],
         *,
         model_name: str,
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncIterator[str]:
         """
         异步生成器：产出 SSE（含 [AgenticLog] 结构化 status 与最终 message），由 Orchestrator 直接 yield。
@@ -1213,6 +1214,8 @@ class SkillAgent:
         else:
             args = dict(tool_kwargs)
         args = self._augment_args_from_user_text(tool_name, args, user_query, file_paths)
+        if conversation_history:
+            args["conversation_history"] = conversation_history
         logger.info("🧠 [SkillAgent] 最终执行参数: %s", args)
 
         yield self._agentic_emit(

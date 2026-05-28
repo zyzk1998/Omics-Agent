@@ -1079,6 +1079,7 @@ class AgentOrchestrator:
                     _query_str,
                     unique_paths,
                     model_name=model_name,
+                    conversation_history=history,
                 ):
                     yield _sse_chunk
                     await asyncio.sleep(0.01)
@@ -1313,6 +1314,7 @@ class AgentOrchestrator:
                     augmented_query,
                     unique_paths_fl,
                     model_name=model_name,
+                    conversation_history=history,
                 ):
                     yield _sse_chunk
                     await asyncio.sleep(0.01)

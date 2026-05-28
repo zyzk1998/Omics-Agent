@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""首发 BaseSkill 隔离运行时：仅含 BLAST / ChEMBL / RDKit / httpx 等轻依赖。"""
+"""首发 BaseSkill 隔离运行时：仅含 BLAST / ChEMBL / RDKit / httpx 等轻依赖。
+
+Prompt 软技能（ppt_outline、mindmap_gen、weekly_report_writer 等）在 api-server 本地执行，
+勿加入本白名单；见 ``LAUNCH_ISOLATED_TOOL_IDS``（gibh_agent/skills/launch_skill_demos.py）。
+"""
 from __future__ import annotations
 
 import logging

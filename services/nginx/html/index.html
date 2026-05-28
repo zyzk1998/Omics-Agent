@@ -27,6 +27,7 @@
         <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
         <!-- 3D 分子：defer 不阻塞首屏；由 hydrateToolAssetPreviews 按需挂载 -->
         <script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.0.4/3Dmol-min.js" defer></script>
+        <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" defer></script>
         
     </head>
     <body>
@@ -157,7 +158,7 @@
                         <button type="button" class="skills-nav-tab" data-main="生物医药">生物医药</button>
                         <button type="button" class="skills-nav-tab" data-main="化学">化学</button>
                         <button type="button" class="skills-nav-tab" data-main="特色科研流程">特色科研流程</button>
-                        <button type="button" class="skills-nav-tab" data-main="动态插件">动态插件</button>
+                        <button type="button" class="skills-nav-tab" data-main="其他技能">其他技能</button>
                         <button type="button" class="skills-nav-tab" data-main="我的">我的</button>
                     </div>
                 </div>
@@ -2734,26 +2735,176 @@
                     prompt_template: '帮我执行单细胞时空动力学分析。我希望基于最优传输理论（Optimal Transport），探索细胞在时间序列上的发育与分化轨迹。请执行包含数据校验、时序标准化、轨迹推断、动态可视化、驱动基因挖掘及通路富集分析的全流程，并最终生成专家解读报告。'
                 },
                 {
-                    id: 'research_ppt_outline_md',
+                    id: 'ppt_outline',
                     name: '科研汇报 PPT 大纲生成',
-                    main_category: '特色科研流程',
-                    sub_category: '文档产出',
+                    main_category: '其他技能',
+                    sub_category: '文本处理',
                     plain_doc_skill: true,
-                    description: '在分析完成后，将结论整理为分页面的 Markdown 幻灯片大纲（页间以 --- 分隔），便于导入演示文稿或组会汇报。',
+                    description: '将研究主题与结论整理为分页 PPT 大纲（JSON：总页数、每页标题与核心要点），便于导入演示文稿或组会汇报。',
                     tags: ['文档', '汇报'],
-                    prompt_template: '请根据之前的单细胞分析结果，为我生成一份结构清晰的科研汇报 PPT 大纲（Markdown 格式），包含研究背景、核心发现与结论。请调用 generate_presentation_md 工具完成生成与落盘。'
+                    prompt_template: [
+                        '[Skill_Route: ppt_outline]',
+                        '您好。请根据下列内容生成**科研汇报 PPT 大纲**（结构化 JSON）。',
+                        '',
+                        '**广场一键体验（助手侧：须写入下列 JSON）**',
+                        '```json',
+                        '{"user_request": "单细胞时空动力学分析：研究背景、最优传输轨迹推断、驱动基因与通路富集、核心结论与展望", "context": ""}',
+                        '```',
+                        '',
+                        '（助手侧：必填 `user_request`；有前序分析摘要时写入 `context`。）'
+                    ].join('\n')
                 },
                 {
-                    id: 'analysis_mindmap_md',
+                    id: 'mindmap_gen',
                     name: '分析逻辑思维导图生成',
-                    main_category: '特色科研流程',
-                    sub_category: '文档产出',
+                    main_category: '其他技能',
+                    sub_category: '文本处理',
                     plain_doc_skill: true,
-                    description: '将分析逻辑、关键节点与驱动因素整理为层级 Markdown 列表，便于在思维导图工具中展开。',
+                    description: '从分析逻辑中提取层级关系，生成 Mermaid 思维导图并在工作台可视化展示。',
                     tags: ['文档', '思维导图'],
-                    prompt_template: '请将本次时空动力学分析的核心逻辑与关键驱动基因，整理成一份层级分明的思维导图 Markdown 文档。请调用 generate_mindmap_md 工具完成生成与落盘。'
+                    prompt_template: [
+                        '[Skill_Route: mindmap_gen]',
+                        '您好。请将下列分析逻辑整理为 **Mermaid 思维导图**。',
+                        '',
+                        '**广场一键体验（助手侧：须写入下列 JSON）**',
+                        '```json',
+                        '{"user_request": "单细胞时空动力学：数据校验→时序标准化→轨迹推断→驱动基因→通路富集→专家解读", "context": ""}',
+                        '```',
+                        '',
+                        '（助手侧：必填 `user_request`；补充材料写入 `context`。）'
+                    ].join('\n')
                 }
             ];
+            /** 其他技能 · Prompt 软技能（首页「全部」置顶；与 API 按 name 去重） */
+            window.__FEATURED_RESEARCH_SKILLS = (window.__FEATURED_RESEARCH_SKILLS || []).concat([
+                {
+                    id: 'weekly_report_writer',
+                    name: '周报撰写助手',
+                    main_category: '其他技能',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    description: '按日期范围与笔记库日志合成周报：个人状态同步 + 团队对外同步，支持待办继承。',
+                    tags: ['周报', '文档'],
+                    prompt_template: '[Skill_Route: weekly_report_writer]\n请执行周报撰写技能。\n```json\n{"user_request": "周期：2026-05-19 至 2026-05-25；按 SKILL 合成周报", "context": "上一份报告路径与本周日志摘要"}\n```'
+                },
+                {
+                    id: 'tailored_resume',
+                    name: '定制化简历生成',
+                    main_category: '其他技能',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    description: '根据 JD 与背景生成 ATS 友好 Markdown 简历及求职建议。',
+                    tags: ['简历', '求职'],
+                    prompt_template: '[Skill_Route: tailored_resume]\n```json\n{"user_request": "职位：Senior Data Analyst；SQL/Python/可视化", "context": "候选人履历要点"}\n```'
+                },
+                {
+                    id: 'academic_poster_generator',
+                    name: '学术会议海报生成',
+                    main_category: '其他技能',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    description: '论文→会议海报 Markdown 故事板与配图方案。',
+                    tags: ['海报', '学术'],
+                    prompt_template: '[Skill_Route: academic_poster_generator]\n```json\n{"user_request": "单细胞轨迹推断会议海报故事板", "context": "论文摘要与主要图"}\n```'
+                },
+                {
+                    id: 'academic_abstract_refiner',
+                    name: '学术摘要精炼',
+                    main_category: '其他技能',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    description: '长文→中英双语单段 SCI 风格摘要（Summary_Report）。',
+                    tags: ['摘要', 'SCI'],
+                    prompt_template: '[Skill_Route: academic_abstract_refiner]\n```json\n{"user_request": "精炼为双语单段摘要", "context": "粘贴待精炼原文"}\n```'
+                },
+                {
+                    id: 'email_manager',
+                    name: '邮件管理助手',
+                    main_category: '其他技能',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    description: '撰写/润色/跟进/冷邮件文稿；不连接邮箱。',
+                    tags: ['邮件', '办公'],
+                    prompt_template: '[Skill_Route: email_manager]\n```json\n{"user_request": "给客户写项目延期说明邮件，专业语气"}\n```'
+                },
+                {
+                    id: 'pdf_extractor',
+                    name: 'PDF 内容提取助手',
+                    main_category: '其他技能',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    description: 'PDF 文本与结构提取摘要（可选 file_path）。',
+                    tags: ['PDF', '文档'],
+                    prompt_template: '[Skill_Route: pdf_extractor]\n```json\n{"user_request": "提取章节大纲与表格摘要", "file_path": ""}\n```'
+                },
+                {
+                    id: 'deep_research',
+                    name: '深度调研',
+                    main_category: '其他技能',
+                    sub_category: '信息检索',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    description: '多视角深度调研：摘要、发现、共识/争议与引用来源。',
+                    tags: ['调研', '综述'],
+                    prompt_template: '[Skill_Route: deep_research]\n```json\n{"user_request": "间歇性禁食与代谢健康：益处与风险", "context": ""}\n```'
+                },
+                {
+                    id: 'blueprint_drafter',
+                    name: '工程蓝图制图',
+                    main_category: '其他技能',
+                    sub_category: '数据可视化',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    description: '扁平工程/架构示意图 HTML，工作台 iframe 预览。',
+                    tags: ['蓝图', '架构图'],
+                    prompt_template: '[Skill_Route: blueprint_drafter]\n```json\n{"user_request": "绘制技能快车道架构蓝图", "context": "中文标签；含 SkillAgent 与 ToolRegistry"}\n```'
+                }
+            ]);
+
+            /** 「其他技能」Prompt 软技能 · 科研简约线条图标（按 skill id / 中文名匹配） */
+            (function () {
+                var SVG_HEAD = '<svg class="skill-icon-line-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+                var SVG_TAIL = '</svg>';
+                var PATHS = {
+                    weekly_report_writer: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 3v3h8"/><line x1="8" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="14" y2="15"/><line x1="8" y1="19" x2="12" y2="19"/>',
+                    tailored_resume: '<rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="9" r="2.5"/><path d="M8.5 15.5c.6-1.8 2.2-2.8 3.5-2.8s2.9 1 3.5 2.8"/><line x1="8" y1="19" x2="16" y2="19"/>',
+                    academic_poster_generator: '<rect x="3" y="4" width="18" height="16" rx="1"/><line x1="8" y1="4" x2="8" y2="20"/><rect x="10" y="7" width="9" height="4"/><rect x="10" y="13" width="9" height="4"/>',
+                    academic_abstract_refiner: '<line x1="5" y1="7" x2="19" y2="7"/><line x1="5" y1="11" x2="17" y2="11"/><line x1="5" y1="15" x2="15" y2="15"/><path d="M16 16l3 3"/><path d="M16 19v-3h3"/>',
+                    email_manager: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/><line x1="8" y1="13" x2="16" y2="13"/>',
+                    pdf_extractor: '<path d="M8 4h6l4 4v12a2 2 0 01-2 2H8a2 2 0 01-2-2V6a2 2 0 012-2z"/><path d="M14 4v4h4"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/>',
+                    deep_research: '<circle cx="10" cy="10" r="6"/><path d="M14.5 14.5L20 20"/><path d="M7 10h6"/><path d="M10 7v6"/>',
+                    blueprint_drafter: '<rect x="3" y="3" width="18" height="18" rx="1"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="12" y1="3" x2="12" y2="21"/><rect x="5" y="5" width="6" height="5"/><rect x="13" y="14" width="6" height="5"/>',
+                    ppt_outline: '<rect x="4" y="4" width="16" height="12" rx="1"/><line x1="7" y1="8" x2="17" y2="8"/><line x1="7" y1="11" x2="14" y2="11"/><rect x="15" y="16" width="5" height="4" rx=".5"/>',
+                    mindmap_gen: '<circle cx="12" cy="5" r="2"/><circle cx="6" cy="14" r="2"/><circle cx="18" cy="14" r="2"/><path d="M12 7v3"/><path d="M10.2 11.8L7.5 12.5"/><path d="M13.8 11.8l2.7.7"/>'
+                };
+                var NAME_TO_KEY = {
+                    '周报撰写助手': 'weekly_report_writer',
+                    '定制化简历生成': 'tailored_resume',
+                    '学术会议海报生成': 'academic_poster_generator',
+                    '学术摘要精炼': 'academic_abstract_refiner',
+                    '邮件管理助手': 'email_manager',
+                    'PDF 内容提取助手': 'pdf_extractor',
+                    '深度调研': 'deep_research',
+                    '工程蓝图制图': 'blueprint_drafter',
+                    '科研汇报 PPT 大纲生成': 'ppt_outline',
+                    '分析逻辑思维导图生成': 'mindmap_gen'
+                };
+                window.getSkillPlazaLineIconHtml = function (skill) {
+                    if (!skill) return '';
+                    var sid = String(skill.id || '').trim();
+                    var sname = String(skill.name || '').trim();
+                    var key = PATHS[sid] ? sid : (NAME_TO_KEY[sname] || '');
+                    var paths = key ? PATHS[key] : '';
+                    if (!paths) return '';
+                    return '<span class="skill-icon-line" aria-hidden="true">' + SVG_HEAD + paths + SVG_TAIL + '</span>';
+                };
+            })();
 
             /* 技能收藏状态 100% 来自后端 GET /api/skills 的 saved 字段与 UserSavedSkill 表，不使用 localStorage。*/
             /** 技能广场条目时间戳（与后端排序一致：同「已接入」档位内 created_at 越新越靠前） */
@@ -2868,7 +3019,7 @@
                         })));
                     } else if (mainCat === '') {
                         items = featuredAll.concat(dedupeAgainstFeatured(items));
-                    } else if (mainCat === '\u5316\u5b66' || mainCat === '\u751f\u7269\u533b\u836f') {
+                    } else if (mainCat === '\u5316\u5b66' || mainCat === '\u751f\u7269\u533b\u836f' || mainCat === '\u5176\u4ed6\u6280\u80fd') {
                         items = mergeFeaturedForPlaza(items, mainCat);
                     }
                 }
@@ -2941,7 +3092,7 @@
                         } else {
                             window._lastSkillsItems = items;
                             if (emptyEl) emptyEl.style.display = 'none';
-                            var skillCardIcons = { '转录组学': '🧬', '空间组学': '🗺️', '代谢组学': '🧪', '医学影像组学': '🩻', '基因组学': '🧬', '表观遗传组学': '📊', '蛋白质组学': '🔗', '轨迹推断': '📈', '动态插件': '⚡', '用户上传': '📦', '电化学': '🔋', '药物筛选': '💊', '分子计算': '⚗️', '数据分析': '📊', '预测与建模': '🔬', '临床应用': '🏥', '信息检索': '🔍', '数据处理': '📁', '数据可视化': '📈', '文本处理': '📝' };
+                            var skillCardIcons = { '转录组学': '🧬', '空间组学': '🗺️', '代谢组学': '🧪', '医学影像组学': '🩻', '基因组学': '🧬', '表观遗传组学': '📊', '蛋白质组学': '🔗', '轨迹推断': '📈', '其他技能': '⚡', '用户上传': '📦', '电化学': '🔋', '药物筛选': '💊', '分子计算': '⚗️', '数据分析': '📊', '预测与建模': '🔬', '临床应用': '🏥', '信息检索': '🔍', '数据处理': '📁', '数据可视化': '📈', '文本处理': '📝' };
                             grid.innerHTML = items.map(function(s) {
                                 try {
                                     var name = (s.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2951,9 +3102,13 @@
                                     var desc = descTrimmed.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
                                     var mainCat = (s.main_category || '').replace(/</g, '&lt;');
                                     var subCat = (s.sub_category || '').replace(/</g, '&lt;');
-                                    var icon = s.plain_doc_skill
-                                        ? '<span class="skill-icon-neutral" aria-hidden="true">Aa</span>'
-                                        : (skillCardIcons[s.sub_category] || '🧬');
+                                    var lineIcon = (typeof window.getSkillPlazaLineIconHtml === 'function')
+                                        ? window.getSkillPlazaLineIconHtml(s) : '';
+                                    var icon = lineIcon
+                                        ? lineIcon
+                                        : (s.plain_doc_skill
+                                            ? '<span class="skill-icon-neutral" aria-hidden="true">Aa</span>'
+                                            : (skillCardIcons[s.sub_category] || '🧬'));
                                     var cardClass = s.plain_doc_skill ? 'skill-card skill-card--research-doc' : 'skill-card';
                                     var catBadges = '';
                                     if (mainCat) catBadges += '<span class="cat-badge">' + mainCat + '</span>';
@@ -2975,7 +3130,7 @@
                                         ? '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>'
                                         : '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
                                     var bookmarkBlock = isDyn
-                                        ? '<span class="icon-btn icon-btn--disabled" title="动态插件暂不支持收藏" style="opacity:0.45;cursor:not-allowed;pointer-events:none;">' + addBtnSvg + '</span>'
+                                        ? '<span class="icon-btn icon-btn--disabled" title="用户上传技能暂不支持收藏" style="opacity:0.45;cursor:not-allowed;pointer-events:none;">' + addBtnSvg + '</span>'
                                         : '<button type="button" class="icon-btn btn-skill-bookmark" title="' + addBtnTitle + '" data-skill-id="' + s.id + '" data-saved="' + (isSaved ? '1' : '0') + '">' + addBtnSvg + '</button>';
                                     var footerActionsHtml = bookmarkBlock +
                                         '<button type="button" class="icon-btn" title="复制"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>';
@@ -5868,7 +6023,7 @@
 
             function toggleSkillBookmark(skillId, btnElement) {
                 if (!btnElement || !skillId) return;
-                if (String(skillId).indexOf('dyn_') === 0) { showToast('动态插件暂不支持收藏'); return; }
+                if (String(skillId).indexOf('dyn_') === 0) { showToast('用户上传技能暂不支持收藏'); return; }
                 var isSaved = btnElement.getAttribute('data-saved') === '1';
                 var url = '/api/skills/' + encodeURIComponent(String(skillId)) + '/bookmark';
                 var method = isSaved ? 'DELETE' : 'POST';
@@ -7358,8 +7513,326 @@
                     'style="height:400px;width:100%;max-width:100%;position:relative;min-width:0;box-sizing:border-box;"></div>' +
                     '<script type="application/json" class="skill-vis-mol3d-payload">' +
                     payloadJson.replace(/<\/script/gi, '<\\/script') +
-                    '</script></div>';
+                    '</scr' + 'ipt></div>';
             }
+            function _skillVisExtractPptOutline(dataObj, toolResult) {
+                var src = dataObj;
+                if ((!src || typeof src !== 'object') && toolResult && typeof toolResult === 'object') src = toolResult;
+                if (!src || typeof src !== 'object') return null;
+                var outline = src.ppt_outline;
+                if ((!outline || typeof outline !== 'object') && src.data && typeof src.data === 'object') {
+                    outline = src.data.ppt_outline;
+                }
+                if (!outline && Array.isArray(src.slides) && src.slides.length) outline = src;
+                if (!outline || !Array.isArray(outline.slides) || !outline.slides.length) return null;
+                if (!outline.title && outline.theme) outline.title = outline.theme;
+                outline.slides = outline.slides.map(function (slide, idx) {
+                    var s = slide && typeof slide === 'object' ? Object.assign({}, slide) : {};
+                    if (!Array.isArray(s.bullets) || !s.bullets.length) {
+                        s.bullets = s.content_bullets || s.key_points || s.points || [];
+                    }
+                    if (typeof s.bullets === 'string') s.bullets = [s.bullets];
+                    if (s.page == null) s.page = idx + 1;
+                    return s;
+                });
+                return outline;
+            }
+            function _skillVisBuildPptOutlineHtml(outline, esc, opts) {
+                opts = opts || {};
+                var slides = outline.slides || [];
+                var deckTitle = (outline.title || outline.theme || opts.heading || '科研汇报 PPT 大纲').trim();
+                var studioId = 'ppt-studio-' + Math.random().toString(36).slice(2, 9);
+                var parts = ['<div class="ppt-outline-deck skill-vis-ppt-outline ppt-outline-studio ppt-outline-studio--premium" id="' + esc(studioId) + '">'];
+                if (deckTitle) {
+                    parts.push('<h4 class="ppt-outline-deck-title mb-1">' + esc(deckTitle) + '</h4>');
+                }
+                parts.push('<p class="ppt-outline-deck-meta text-muted small mb-3">共 <strong>' + esc(String(outline.total_pages || slides.length)) + '</strong> 页 · 16:9 幻灯片预览 · 点击左侧缩略图切换</p>');
+                parts.push('<div class="ppt-outline-panels">');
+                parts.push('<nav class="ppt-outline-tree ppt-outline-thumb-rail" aria-label="幻灯片缩略图">');
+                slides.forEach(function (slide, idx) {
+                    var pageNo = slide.page != null ? slide.page : (idx + 1);
+                    var title = slide.title || ('第 ' + pageNo + ' 页');
+                    var active = idx === 0 ? ' ppt-outline-tree-item--active' : '';
+                    var thumbTitle = title.length > 28 ? (title.slice(0, 26) + '…') : title;
+                    parts.push(
+                        '<button type="button" class="ppt-outline-tree-item ppt-outline-thumb-btn' + active + '" data-ppt-index="' + idx + '">' +
+                        '<span class="ppt-slide-thumb ppt-slide-thumb--16x9" aria-hidden="true"><span class="ppt-slide-thumb-num">' + esc(String(pageNo)) + '</span></span>' +
+                        '<span class="ppt-outline-tree-copy"><span class="ppt-outline-tree-num">Slide ' + esc(String(pageNo)) + '</span>' +
+                        '<span class="ppt-outline-tree-label">' + esc(thumbTitle) + '</span></span></button>'
+                    );
+                });
+                parts.push('</nav>');
+                parts.push('<div class="ppt-outline-detail ppt-outline-stage">');
+                slides.forEach(function (slide, idx) {
+                    var pageNo = slide.page != null ? slide.page : (idx + 1);
+                    var title = slide.title || ('第 ' + pageNo + ' 页');
+                    var bullets = Array.isArray(slide.bullets) ? slide.bullets : [];
+                    var paneCls = 'ppt-outline-detail-pane' + (idx === 0 ? ' ppt-outline-detail-pane--active' : '');
+                    parts.push('<div class="' + paneCls + '" data-ppt-pane="' + idx + '">');
+                    parts.push('<div class="ppt-slide-card ppt-slide-card--16x9">');
+                    parts.push('<div class="ppt-slide-card-inner">');
+                    parts.push('<div class="ppt-slide-card-badge">第 ' + esc(String(pageNo)) + ' 页</div>');
+                    parts.push('<h2 class="ppt-slide-hero-title">' + esc(title) + '</h2>');
+                    if (bullets.length) {
+                        parts.push('<ul class="ppt-slide-bullets ppt-slide-bullets--hero">');
+                        bullets.forEach(function (b) {
+                            parts.push('<li>' + esc(String(b)) + '</li>');
+                        });
+                        parts.push('</ul>');
+                    } else {
+                        parts.push('<p class="ppt-slide-empty text-muted mb-0">（无要点）</p>');
+                    }
+                    parts.push('</div></div></div>');
+                });
+                parts.push('</div></div></div>');
+                return parts.join('');
+            }
+            /** PPT 左树右详情：事件委托（勿在 index 主脚本字符串中写 script 闭合标签，否则会截断整页 JS） */
+            function hydratePptOutlineStudios(scope) {
+                var root = scope || document;
+                if (!root || !root.querySelectorAll) return;
+                root.querySelectorAll('.ppt-outline-studio').forEach(function (studio) {
+                    if (studio.getAttribute('data-ppt-hydrated') === '1') return;
+                    studio.setAttribute('data-ppt-hydrated', '1');
+                    studio.addEventListener('click', function (ev) {
+                        var btn = ev.target && ev.target.closest ? ev.target.closest('[data-ppt-index]') : null;
+                        if (!btn || !studio.contains(btn)) return;
+                        var i = btn.getAttribute('data-ppt-index');
+                        studio.querySelectorAll('.ppt-outline-tree-item').forEach(function (el) {
+                            el.classList.toggle('ppt-outline-tree-item--active', el.getAttribute('data-ppt-index') === i);
+                        });
+                        studio.querySelectorAll('.ppt-outline-detail-pane').forEach(function (el) {
+                            el.classList.toggle('ppt-outline-detail-pane--active', el.getAttribute('data-ppt-pane') === i);
+                        });
+                    });
+                });
+            }
+            window.hydratePptOutlineStudios = hydratePptOutlineStudios;
+            function _skillVisResolveMarkdownDeliverClass(specId) {
+                var s = String(specId || '').toLowerCase();
+                if (s.indexOf('weekly_report') >= 0 || s === 'weekly_report_writer') return 'skill-md-deliver--weekly';
+                if (s.indexOf('tailored_resume') >= 0 || s.indexOf('resume') >= 0) return 'skill-md-deliver--resume';
+                return '';
+            }
+            function _skillVisBuildMarkdownDeliverableHtml(mdRaw, esc, opts) {
+                opts = opts || {};
+                var md = String(mdRaw || '').trim();
+                if (!md) return '';
+                var blockId = 'md-deliver-' + Math.random().toString(36).slice(2, 9);
+                var mdHtml = '';
+                try {
+                    mdHtml = (typeof safeMarkedParse === 'function') ? safeMarkedParse(md) : esc(md);
+                } catch (eMd) {
+                    mdHtml = '<pre class="small mb-0">' + esc(md) + '</pre>';
+                }
+                var payloadJson = JSON.stringify(md);
+                var exportTitle = (opts && opts.title) ? String(opts.title) : 'skill-deliverable';
+                var layoutCls = _skillVisResolveMarkdownDeliverClass(opts.specId || '');
+                var layoutAttr = layoutCls ? (' data-md-layout="' + esc(layoutCls.replace('skill-md-deliver--', '')) + '"') : '';
+                return (
+                    '<div class="skill-markdown-deliverable skill-mm-block' + (layoutCls ? (' ' + layoutCls) : '') + '" id="' + esc(blockId) + '" data-skill-md-deliver="1" data-md-title="' + esc(exportTitle) + '"' + layoutAttr + '>' +
+                    '<div class="skill-md-deliver-toolbar">' +
+                    '<button type="button" class="skill-ws-btn skill-md-copy-btn" data-md-copy="1">📋 一键复制</button>' +
+                    '<button type="button" class="skill-ws-btn skill-md-export-doc-btn" data-md-export="doc">⬇️ 导出 Word</button>' +
+                    '<button type="button" class="skill-ws-btn skill-ws-btn--ghost skill-md-export-pdf-btn" data-md-export="pdf">⬇️ 导出 PDF</button>' +
+                    '</div>' +
+                    '<div class="skill-md-deliver-body markdown-body">' + mdHtml + '</div>' +
+                    '<script type="application/json" class="skill-md-deliver-payload">' +
+                    payloadJson.replace(/<\/script/gi, '<\\/script') +
+                    '</scr' + 'ipt></div>'
+                );
+            }
+            function hydrateSkillMarkdownDeliverableBlocks(scope) {
+                var root = scope || document;
+                if (!root || !root.querySelectorAll) return;
+                root.querySelectorAll('[data-skill-md-deliver="1"]').forEach(function (wrap) {
+                    if (wrap.getAttribute('data-md-hydrated') === '1') return;
+                    wrap.setAttribute('data-md-hydrated', '1');
+                    var payloadEl = wrap.querySelector('.skill-md-deliver-payload');
+                    var copyBtn = wrap.querySelector('[data-md-copy="1"]');
+                    var exportBtns = wrap.querySelectorAll('[data-md-export]');
+                    var mdText = '';
+                    try { mdText = JSON.parse(payloadEl && payloadEl.textContent ? payloadEl.textContent : '""'); } catch (eP) { return; }
+                    if (copyBtn) {
+                        copyBtn.addEventListener('click', function () {
+                            var done = function () { copyBtn.textContent = '✓ 已复制'; setTimeout(function () { copyBtn.textContent = '📋 一键复制'; }, 2000); };
+                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                                navigator.clipboard.writeText(mdText).then(done).catch(function () { window.prompt('复制以下内容：', mdText); });
+                            } else {
+                                window.prompt('复制以下内容：', mdText);
+                            }
+                        });
+                    }
+                    exportBtns.forEach(function (btn) {
+                        btn.addEventListener('click', function () {
+                            var kind = btn.getAttribute('data-md-export');
+                            var title = wrap.getAttribute('data-md-title') || 'skill-deliverable';
+                            if (kind === 'doc') {
+                                var blob = new Blob(['\ufeff' + mdText], { type: 'application/msword;charset=utf-8' });
+                                var a = document.createElement('a');
+                                a.href = URL.createObjectURL(blob);
+                                a.download = title + '.doc';
+                                a.click();
+                                URL.revokeObjectURL(a.href);
+                            } else if (kind === 'pdf') {
+                                var w = window.open('', '_blank');
+                                if (!w) return;
+                                w.document.write('<html><head><meta charset="utf-8"><title>' + title + '</title></head><body><pre style="white-space:pre-wrap;font-family:sans-serif;">' + mdText.replace(/</g, '&lt;') + '</pre></body></html>');
+                                w.document.close();
+                                w.focus();
+                                w.print();
+                            }
+                        });
+                    });
+                });
+            }
+            window.hydrateSkillMarkdownDeliverableBlocks = hydrateSkillMarkdownDeliverableBlocks;
+
+            function _skillVisResolveTerminalPayload(dataObj, toolResult) {
+                var src = dataObj;
+                if ((!src || typeof src !== 'object') && toolResult && typeof toolResult === 'object') src = toolResult;
+                if (!src || typeof src !== 'object') return null;
+                var data = (src.data && typeof src.data === 'object') ? src.data : {};
+                var phase = src.phase || data.phase || '';
+                var missing = src.missing_params || data.missing_params;
+                var md = src.markdown || data.markdown || '';
+                var specId = src.spec_id || data.spec_id || '';
+                if (!phase && md && specId) phase = 'deliver';
+                if (!phase && !md && missing && missing.length) phase = 'missing_params';
+                return { phase: phase, missing_params: missing, markdown: md, spec_id: specId };
+            }
+
+            function _skillVisExtractMermaidCode(dataObj, toolResult) {
+                var src = dataObj;
+                if ((!src || typeof src !== 'object') && toolResult && typeof toolResult === 'object') src = toolResult;
+                if (!src || typeof src !== 'object') return '';
+                var code = src.mermaid_code || src.mermaid || '';
+                if (!code && src.data && typeof src.data === 'object') {
+                    code = src.data.mermaid_code || src.data.mermaid || '';
+                }
+                return (code && String(code).trim()) ? String(code).trim() : '';
+            }
+            var _skillVisMermaidThemeApplied = false;
+            function _skillVisApplyMermaidObsidianTheme() {
+                if (_skillVisMermaidThemeApplied || typeof mermaid === 'undefined' || typeof mermaid.initialize !== 'function') return;
+                mermaid.initialize({
+                    startOnLoad: false,
+                    securityLevel: 'loose',
+                    theme: 'base',
+                    themeVariables: {
+                        primaryColor: '#f3f4f6',
+                        primaryTextColor: '#1f2937',
+                        primaryBorderColor: '#d1d5db',
+                        secondaryColor: '#e5e7eb',
+                        tertiaryColor: '#f9fafb',
+                        lineColor: '#9ca3af',
+                        textColor: '#111827',
+                        mainBkg: '#f8fafc',
+                        nodeBorder: '#cbd5e1',
+                        clusterBkg: '#eef2ff',
+                        titleColor: '#312e81',
+                        fontFamily: '"Inter", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif'
+                    },
+                    flowchart: { curve: 'basis', htmlLabels: true, padding: 14 },
+                    mindmap: { padding: 12 }
+                });
+                _skillVisMermaidThemeApplied = true;
+            }
+            function _skillVisBuildMermaidHtml(mermaidCode, esc) {
+                var payloadJson = JSON.stringify(String(mermaidCode || ''));
+                return '<div class="skill-vis-mermaid-wrap skill-vis-mermaid-wrap--obsidian skill-mm-block my-3" data-skill-mermaid="1">' +
+                    '<div class="skill-vis-mermaid-header"><span class="skill-vis-mermaid-badge">Mindmap</span>' +
+                    '<span class="text-muted small">Obsidian 风格 · Mermaid</span></div>' +
+                    '<div class="mermaid skill-vis-mermaid-canvas" data-mermaid-pending="1"></div>' +
+                    '<script type="application/json" class="skill-vis-mermaid-payload">' +
+                    payloadJson.replace(/<\/script/gi, '<\\/script') +
+                    '</scr' + 'ipt></div>';
+            }
+            function hydrateSkillMermaidBlocks(scope) {
+                var root = scope || document;
+                if (!root || !root.querySelectorAll || typeof mermaid === 'undefined') return;
+                _skillVisApplyMermaidObsidianTheme();
+                root.querySelectorAll('[data-skill-mermaid="1"]').forEach(function (wrap) {
+                    if (wrap.getAttribute('data-mermaid-hydrated') === '1') return;
+                    var canvas = wrap.querySelector('.skill-vis-mermaid-canvas[data-mermaid-pending="1"]');
+                    var payloadEl = wrap.querySelector('.skill-vis-mermaid-payload');
+                    if (!canvas || !payloadEl) return;
+                    var code = '';
+                    try {
+                        code = JSON.parse(payloadEl.textContent || '""');
+                    } catch (eParse) {
+                        console.warn('[hydrateSkillMermaidBlocks] parse failed', eParse);
+                        canvas.innerHTML = '<p class="text-muted small mb-0">思维导图数据解析失败</p>';
+                        wrap.setAttribute('data-mermaid-hydrated', '1');
+                        return;
+                    }
+                    canvas.textContent = code;
+                    wrap.setAttribute('data-mermaid-hydrated', '1');
+                    try {
+                        var nodes = [canvas];
+                        var done = function () {
+                            canvas.removeAttribute('data-mermaid-pending');
+                            wrap.classList.add('skill-vis-mermaid-wrap--rendered');
+                        };
+                        if (typeof mermaid.run === 'function') {
+                            var p = mermaid.run({ nodes: nodes });
+                            if (p && typeof p.then === 'function') {
+                                p.then(done).catch(function (e) { console.warn('[hydrateSkillMermaidBlocks]', e); });
+                            } else {
+                                done();
+                            }
+                        } else if (typeof mermaid.init === 'function') {
+                            mermaid.init(undefined, nodes);
+                            done();
+                        }
+                    } catch (eMer) {
+                        console.warn('[hydrateSkillMermaidBlocks]', eMer);
+                    }
+                });
+            }
+            window.hydrateSkillMermaidBlocks = hydrateSkillMermaidBlocks;
+
+            function _skillVisExtractHtmlContent(dataObj, toolResult) {
+                var src = dataObj;
+                if ((!src || typeof src !== 'object') && toolResult && typeof toolResult === 'object') src = toolResult;
+                if (!src || typeof src !== 'object') return '';
+                var html = src.html_content || src.report_html || '';
+                if (!html && src.data && typeof src.data === 'object') {
+                    html = src.data.html_content || src.data.report_html || '';
+                }
+                return (html && String(html).trim()) ? String(html).trim() : '';
+            }
+            function _skillVisBuildHtmlPreviewHtml(htmlContent) {
+                var payloadJson = JSON.stringify(String(htmlContent || ''));
+                return '<div class="skill-vis-html-wrap skill-mm-block my-3" data-skill-html-preview="1">' +
+                    '<p class="text-muted small mb-2"><i class="bi bi-layout-text-window me-1"></i>工程蓝图 HTML 预览</p>' +
+                    '<iframe class="skill-vis-html-iframe border rounded bg-white w-100" style="min-height:420px;height:52vh;max-height:720px;width:100%;" ' +
+                    'sandbox="allow-same-origin allow-popups" title="HTML 蓝图预览"></iframe>' +
+                    '<script type="application/json" class="skill-vis-html-payload">' +
+                    payloadJson.replace(/<\/script/gi, '<\\/script') +
+                    '</scr' + 'ipt></div>';
+            }
+            function hydrateSkillHtmlPreviewBlocks(scope) {
+                var root = scope || document;
+                if (!root || !root.querySelectorAll) return;
+                root.querySelectorAll('[data-skill-html-preview="1"]').forEach(function (wrap) {
+                    if (wrap.getAttribute('data-html-hydrated') === '1') return;
+                    var iframe = wrap.querySelector('.skill-vis-html-iframe');
+                    var payloadEl = wrap.querySelector('.skill-vis-html-payload');
+                    if (!iframe || !payloadEl) return;
+                    var html = '';
+                    try {
+                        html = JSON.parse(payloadEl.textContent || '""');
+                    } catch (eParse) {
+                        console.warn('[hydrateSkillHtmlPreviewBlocks]', eParse);
+                        return;
+                    }
+                    wrap.setAttribute('data-html-hydrated', '1');
+                    iframe.srcdoc = html;
+                });
+            }
+            window.hydrateSkillHtmlPreviewBlocks = hydrateSkillHtmlPreviewBlocks;
+
             /**
              * 自适应技能结果可视化：扁平 JSON → 指标卡片 + 下载按钮；富媒体/白名单技能原样放行。
              * @returns {{ handled: boolean, html?: string }}
@@ -7368,6 +7841,54 @@
                 opts = opts || {};
                 var esc = opts.escapeFn || _skillWsEscapeHtml;
                 try {
+                    var terminal = _skillVisResolveTerminalPayload(dataObj, opts.toolResult);
+                    if (terminal && terminal.phase === 'missing_params') {
+                        var miss = Array.isArray(terminal.missing_params) ? terminal.missing_params : [];
+                        var missHtml = miss.length
+                            ? ('<ul class="mb-0 ps-3">' + miss.map(function (m) { return '<li>' + esc(String(m)) + '</li>'; }).join('') + '</ul>')
+                            : '<p class="mb-0 small">请在对话中补充关键信息后再次执行技能。</p>';
+                        return {
+                            handled: true,
+                            html: '<div class="skill-mm-block skill-vis-result-wrap skill-vis-exclusive w-100 alert alert-info" data-skill-vis-exclusive="1">' +
+                                '<p class="fw-semibold mb-2">尚需补充以下核心信息（最多 2 项，一句话即可）：</p>' + missHtml + '</div>'
+                        };
+                    }
+                    if (terminal && terminal.phase === 'deliver' && terminal.markdown) {
+                        var friendly = (typeof getFriendlySkillName === 'function') ? getFriendlySkillName(skillId) : skillId;
+                        var mdSpec = terminal.spec_id || skillId || '';
+                        return {
+                            handled: true,
+                            html: '<div class="skill-mm-block skill-vis-result-wrap skill-vis-exclusive w-100" data-skill-vis-exclusive="1" data-skill-md-mount="1">' +
+                                _skillVisBuildMarkdownDeliverableHtml(terminal.markdown, esc, {
+                                    title: friendly || skillId || 'deliverable',
+                                    specId: mdSpec
+                                }) + '</div>'
+                        };
+                    }
+                    var pptOutline = _skillVisExtractPptOutline(dataObj, opts.toolResult);
+                    if (pptOutline) {
+                        return {
+                            handled: true,
+                            html: '<div class="skill-mm-block skill-vis-result-wrap skill-vis-exclusive w-100" data-skill-vis-exclusive="1">' +
+                                _skillVisBuildPptOutlineHtml(pptOutline, esc, { heading: opts.heading }) + '</div>'
+                        };
+                    }
+                    var mermaidCode = _skillVisExtractMermaidCode(dataObj, opts.toolResult);
+                    if (mermaidCode) {
+                        return {
+                            handled: true,
+                            html: '<div class="skill-mm-block skill-vis-result-wrap skill-vis-exclusive w-100" data-skill-vis-exclusive="1" data-skill-mermaid-mount="1">' +
+                                _skillVisBuildMermaidHtml(mermaidCode, esc) + '</div>'
+                        };
+                    }
+                    var htmlContent = _skillVisExtractHtmlContent(dataObj, opts.toolResult);
+                    if (htmlContent) {
+                        return {
+                            handled: true,
+                            html: '<div class="skill-mm-block skill-vis-result-wrap skill-vis-exclusive w-100" data-skill-vis-exclusive="1" data-skill-html-mount="1">' +
+                                _skillVisBuildHtmlPreviewHtml(htmlContent) + '</div>'
+                        };
+                    }
                     var molInfo = _skillVisExtractMolStructure(dataObj);
                     if (!molInfo && opts.toolResult) {
                         molInfo = _skillVisExtractMolStructure(opts.toolResult);
@@ -7563,6 +8084,21 @@
                 footerActions += '<button type="button" class="skill-ws-btn skill-ws-btn--ghost skill-mm-footer__btn skill-ws-print-btn">打印报告</button>';
 
                 var parts = [];
+                var hasExclusiveVis = false;
+                if (typeof renderSkillResultVisually === 'function') {
+                    try {
+                        var topVis = renderSkillResultVisually(toolResult, toolName, {
+                            toolResult: toolResult,
+                            heading: ''
+                        });
+                        if (topVis && topVis.handled && topVis.html) {
+                            parts.push(topVis.html);
+                            hasExclusiveVis = true;
+                        }
+                    } catch (eTopVis) {
+                        console.warn('[skill-ws] top-level vis failed', eTopVis);
+                    }
+                }
 
                 var dataBlock = toolResult.data;
                 var gridSkip = {
@@ -7578,17 +8114,37 @@
                 var suppressMd = dataBundle && dataBundle.suppressMarkdown;
 
                 var mdRaw = toolResult.markdown;
-                if (typeof mdRaw === 'string' && mdRaw.trim() && !suppressMd && !_skillVisMarkdownDuplicatesStructured(mdRaw, dataBundle ? dataBundle.plan : null)) {
-                    var mdHtml = '';
-                    try {
-                        mdHtml = (typeof safeMarkedParse === 'function') ? safeMarkedParse(mdRaw) : ((typeof marked !== 'undefined' && marked.parse) ? marked.parse(String(mdRaw)) : _skillWsEscapeHtml(mdRaw));
-                    } catch (e) {
-                        mdHtml = '<p class="skill-ws-empty">' + _skillWsEscapeHtml(String(e && e.message ? e.message : e)) + '</p>';
+                var termPhase = toolResult.phase || (toolResult.data && toolResult.data.phase) || '';
+                if (typeof mdRaw === 'string' && mdRaw.trim() && !suppressMd && !hasExclusiveVis
+                    && !_skillVisMarkdownDuplicatesStructured(mdRaw, dataBundle ? dataBundle.plan : null)) {
+                    var friendlyMd = (typeof getFriendlySkillName === 'function') ? getFriendlySkillName(toolName) : toolName;
+                    if (termPhase === 'deliver' || toolResult.spec_id) {
+                        parts.push(_skillVisBuildMarkdownDeliverableHtml(mdRaw, _skillWsEscapeHtml, { title: friendlyMd || toolName || 'report' }));
+                    } else {
+                        var mdHtml = '';
+                        try {
+                            mdHtml = (typeof safeMarkedParse === 'function') ? safeMarkedParse(mdRaw) : ((typeof marked !== 'undefined' && marked.parse) ? marked.parse(String(mdRaw)) : _skillWsEscapeHtml(mdRaw));
+                        } catch (e) {
+                            mdHtml = '<p class="skill-ws-empty">' + _skillWsEscapeHtml(String(e && e.message ? e.message : e)) + '</p>';
+                        }
+                        parts.push('<div class="skill-mm-block skill-mm-markdown markdown-body w-100" style="width:100%;max-width:100%;box-sizing:border-box;">' + mdHtml + '</div>');
                     }
-                    parts.push('<div class="skill-mm-block skill-mm-markdown markdown-body w-100" style="width:100%;max-width:100%;box-sizing:border-box;">' + mdHtml + '</div>');
                 }
                 var mdHasJsonFence = typeof mdRaw === 'string' && /```\s*json/i.test(mdRaw);
 
+                var inlineHtml = pick('html_content') || (toolResult.data && toolResult.data.html_content);
+                if (inlineHtml && String(inlineHtml).indexOf('<') !== -1) {
+                    var htmlPayload = JSON.stringify(String(inlineHtml));
+                    parts.push(
+                        '<div class="skill-mm-block skill-mm-iframe-wrap skill-mm-iframe-preview-wrap" data-skill-html-preview="1">' +
+                        '<div class="skill-mm-csv-table-heading">工程蓝图 HTML</div>' +
+                        '<iframe class="skill-vis-html-iframe skill-mm-iframe" style="min-height:420px;height:52vh;max-height:720px;" ' +
+                        'sandbox="allow-same-origin allow-popups" title="HTML 蓝图"></iframe>' +
+                        '<script type="application/json" class="skill-vis-html-payload">' +
+                        htmlPayload.replace(/<\/script/gi, '<\\/script') +
+                        '</scr' + 'ipt></div>'
+                    );
+                }
                 var htmlUrl = pick('html_url');
                 var pdfUrl = pick('pdf_url');
                 var isDrugSim = toolName && String(toolName).indexOf('drug_similarity') !== -1;
@@ -7662,10 +8218,10 @@
                 }
 
                 var hasMergedMetrics = false;
-                if (dataBundle && dataBundle.handled && dataBundle.html) {
+                if (!hasExclusiveVis && dataBundle && dataBundle.handled && dataBundle.html) {
                     hasMergedMetrics = true;
                     parts.push(dataBundle.html);
-                } else if (dataBlock && dataBlock.result != null && !mdHasJsonFence) {
+                } else if (!hasExclusiveVis && dataBlock && dataBlock.result != null && !mdHasJsonFence) {
                     var _resJsonBlock = renderSkillJsonMarkdownBlock(dataBlock.result, '核心指标', toolName, toolResult);
                     if (_resJsonBlock) {
                         hasMergedMetrics = true;
@@ -7764,6 +8320,10 @@
                     });
                 });
                 if (typeof hydrateSkillMol3dBlocks === 'function') hydrateSkillMol3dBlocks(skillRoot);
+                if (typeof hydrateSkillMermaidBlocks === 'function') hydrateSkillMermaidBlocks(skillRoot);
+                if (typeof hydrateSkillHtmlPreviewBlocks === 'function') hydrateSkillHtmlPreviewBlocks(skillRoot);
+                if (typeof hydrateSkillMarkdownDeliverableBlocks === 'function') hydrateSkillMarkdownDeliverableBlocks(skillRoot);
+                if (typeof hydratePptOutlineStudios === 'function') hydratePptOutlineStudios(skillRoot);
             }
             function showSkillWorkspaceChrome() {
                 var wp = document.getElementById('workspace-pane');
@@ -17163,6 +17723,18 @@
                 }
                 if (typeof window.hydrateSkillMol3dBlocks === 'function') {
                     window.hydrateSkillMol3dBlocks(scope);
+                }
+                if (typeof window.hydrateSkillMermaidBlocks === 'function') {
+                    window.hydrateSkillMermaidBlocks(scope);
+                }
+                if (typeof window.hydrateSkillHtmlPreviewBlocks === 'function') {
+                    window.hydrateSkillHtmlPreviewBlocks(scope);
+                }
+                if (typeof window.hydrateSkillMarkdownDeliverableBlocks === 'function') {
+                    window.hydrateSkillMarkdownDeliverableBlocks(scope);
+                }
+                if (typeof window.hydratePptOutlineStudios === 'function') {
+                    window.hydratePptOutlineStudios(scope);
                 }
             };
             function getUserId() {

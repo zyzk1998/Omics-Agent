@@ -8,11 +8,12 @@ from typing import Any, Dict, FrozenSet
 
 import requests
 
-from gibh_agent.skills.launch_skill_demos import LAUNCH_SKILL_DEMO_ARGS
+from gibh_agent.skills.launch_skill_demos import LAUNCH_ISOLATED_TOOL_IDS
 
 logger = logging.getLogger(__name__)
 
-LAUNCH_CORE_TOOL_IDS: FrozenSet[str] = frozenset(LAUNCH_SKILL_DEMO_ARGS.keys())
+# 向后兼容旧名：仅指 launch-skills 隔离栈，不含 Prompt 软技能
+LAUNCH_CORE_TOOL_IDS: FrozenSet[str] = LAUNCH_ISOLATED_TOOL_IDS
 
 
 def launch_skills_in_worker() -> bool:
@@ -29,7 +30,7 @@ def should_delegate_to_launch_worker(skill_id: str) -> bool:
     base = launch_skills_base_url()
     if not base:
         return False
-    return (skill_id or "").strip() in LAUNCH_CORE_TOOL_IDS
+    return (skill_id or "").strip() in LAUNCH_ISOLATED_TOOL_IDS
 
 
 def delegate_launch_skill_execute(skill_id: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:

@@ -1855,6 +1855,26 @@
                 justify-content: center;
                 flex-shrink: 0;
             }
+            /* 其他技能 · Prompt 软技能线条图标（与侧栏/工作台 stroke 体系一致） */
+            .skill-card.skill-card--research-doc .skill-icon-line {
+                width: 36px;
+                height: 36px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+                background: #f8fafc;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                color: #334155;
+            }
+            .skill-card.skill-card--research-doc .skill-icon-line-svg {
+                display: block;
+            }
+            .skill-card.skill-card--research-doc:hover .skill-icon-line {
+                border-color: #94a3b8;
+                color: #1e293b;
+            }
             .skill-card.skill-card--research-doc .cat-badge {
                 color: #374151;
                 background: #e5e7eb;

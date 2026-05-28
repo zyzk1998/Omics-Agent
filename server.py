@@ -428,7 +428,7 @@ def list_skills_public(
                 dyn_items = [plugin_to_skill_plaza_payload(r) for r in dyn_rows]
                 mc_f = (mc or "").strip().lower()
                 sc_f = (sc or "").strip().lower()
-                if mc_f and mc_f != "动态插件":
+                if mc_f and mc_f not in ("动态插件", "其他技能"):
                     dyn_items = []
                 if sc_f:
                     dyn_items = [
