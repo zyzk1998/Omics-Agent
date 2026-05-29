@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Slide(BaseModel):
@@ -70,6 +70,15 @@ class PromptSkillTerminalResponse(BaseModel):
     markdown: str = ""
     missing_params: List[str] = Field(default_factory=list)
     summary: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_markdown_aliases(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        from gibh_agent.skills._prompt_skill_llm import normalize_terminal_response_payload
+
+        return normalize_terminal_response_payload(data)
 
     @field_validator("missing_params", mode="before")
     @classmethod

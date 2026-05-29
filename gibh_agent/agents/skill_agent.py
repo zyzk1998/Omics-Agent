@@ -67,6 +67,20 @@ _LAUNCH_SMILES_TOOLS = frozenset(
 _LAUNCH_QUERY_TOOLS = frozenset({"chembl_drug_search", "chipatlas_experiment_search"})
 _LAUNCH_SEQUENCE_TOOLS = frozenset({"nucleotide_sequence_blast", "protein_sequence_blast"})
 
+# 右侧工作台专属渲染：聊天区仅展示固定成功句，结构化载荷不入 message 正文
+_SKILL_WORKSPACE_VIS_SILENT_IDS = frozenset(
+    {
+        "weekly_report_writer",
+        "tailored_resume",
+        "ppt_outline",
+        "mindmap_gen",
+        "blueprint_drafter",
+        "academic_poster_generator",
+        "academic_abstract_refiner",
+    }
+)
+_SKILL_CHAT_SUCCESS_UX = "✅ 技能执行成功，请在右侧工作台查看详细报告。"
+
 try:
     from gibh_agent.skills.launch_skill_demos import (
         LAUNCH_SKILL_DEMO_ARGS,
@@ -120,6 +134,24 @@ _FASTA_SUFFIXES = (".fa", ".fasta", ".faa", ".ffn")
 
 def _arg_blank(v: Any) -> bool:
     return v is None or (isinstance(v, str) and not v.strip())
+
+
+def _skill_should_silence_chat_summary(tool_name: str, result: Dict[str, Any]) -> bool:
+    """重型可视化/终稿技能：禁止把 Markdown/系统摘要灌入聊天主栏。"""
+    if not isinstance(result, dict) or result.get("status") != "success":
+        return False
+    phase = result.get("phase") or (result.get("data") or {}).get("phase")
+    if phase == "missing_params":
+        return False
+    tid = (tool_name or "").strip()
+    if tid in _SKILL_WORKSPACE_VIS_SILENT_IDS:
+        return True
+    phase = result.get("phase") or (result.get("data") or {}).get("phase")
+    if phase == "deliver" and result.get("markdown"):
+        return True
+    if result.get("ppt_outline") or result.get("mermaid_code") or result.get("html_content"):
+        return True
+    return False
 
 
 def _extract_inline_fasta_for_fallback(text: str) -> str:
@@ -1333,12 +1365,21 @@ class SkillAgent:
                 mem = build_tool_output_memory_text(tool_name, tr)
             except Exception as mem_exc:  # noqa: BLE001
                 logger.warning("工具输出记忆注入构建失败（忽略）: %s", mem_exc, exc_info=True)
-            ux = "✅ **技能执行成功，请在右侧工作台查看详细报告。**"
-            full_text = f"{ux}\n\n{mem}" if mem else ux
+            if _skill_should_silence_chat_summary(tool_name, tr):
+                chat_text = _SKILL_CHAT_SUCCESS_UX
+            else:
+                phase = tr.get("phase") or (tr.get("data") or {}).get("phase")
+                tool_msg = str(tr.get("message") or "").strip()
+                if phase == "missing_params" and tool_msg:
+                    chat_text = tool_msg
+                else:
+                    chat_text = _SKILL_CHAT_SUCCESS_UX
+                    if mem:
+                        chat_text = f"{chat_text}\n\n{mem}"
             yield self._emit(
                 "message",
                 {
-                    "content": full_text,
+                    "content": chat_text,
                     **({"tool_output_memory": mem} if mem else {}),
                 },
             )

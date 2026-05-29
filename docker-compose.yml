@@ -171,6 +171,44 @@ services:
       - gibh-network
 
   # =========================================
+  # 2a3. IM 频道网关（Webhook 接收；与 api-server 解耦）
+  # =========================================
+  im-gateway:
+    build:
+      context: .
+      dockerfile: services/im-gateway/Dockerfile
+    image: gibh-v2-im-gateway:latest
+    container_name: gibh_v2_im_gateway
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai
+      - REDIS_URL=redis://redis:6379/0
+      - API_SERVER_INTERNAL_URL=${API_SERVER_INTERNAL_URL:-http://api-server:8028}
+      # 各平台密钥占位（正式接入时从 .env 注入，勿写入跟踪文件）
+      - DINGTALK_APP_KEY=${DINGTALK_APP_KEY:-}
+      - DINGTALK_APP_SECRET=${DINGTALK_APP_SECRET:-}
+      - WECOM_CORP_ID=${WECOM_CORP_ID:-}
+      - WECOM_AGENT_SECRET=${WECOM_AGENT_SECRET:-}
+      - FEISHU_APP_ID=${FEISHU_APP_ID:-}
+      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET:-}
+      - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET:-}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
+      - IM_WEBHOOK_SHARED_SECRET=${IM_WEBHOOK_SHARED_SECRET:-}
+    ports:
+      - "8030:8030"
+    depends_on:
+      redis:
+        condition: service_started
+    networks:
+      - gibh-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8030/ping', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # =========================================
   # 2a2. 首发 BaseSkill 轻量栈（BLAST + ChEMBL + RDKit；与 api-server 解耦，单独重建）
   # =========================================
   launch-skills:

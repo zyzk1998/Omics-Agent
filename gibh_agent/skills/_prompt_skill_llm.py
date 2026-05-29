@@ -99,6 +99,68 @@ def llm_chat_json(
     return parsed
 
 
+_MARKDOWN_FIELD_ALIASES = (
+    "markdown",
+    "markmarkdown",
+    "mark_down",
+    "markDown",
+    "md",
+    "content",
+    "body",
+    "report_markdown",
+    "report",
+    "text",
+    "正文",
+)
+
+
+def _extract_markdown_from_mapping(raw: Dict[str, Any]) -> str:
+    for key in _MARKDOWN_FIELD_ALIASES:
+        val = raw.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return ""
+
+
+def normalize_terminal_response_payload(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """将 LLM 终结态 JSON 规范为固定 markdown 字段（兼容错别字键名）。"""
+    if not isinstance(parsed, dict):
+        raise ValueError("终结态 JSON 根节点须为对象")
+    root = dict(parsed)
+    merged: Dict[str, Any] = dict(root)
+    if isinstance(root.get("data"), dict):
+        merged.update(root["data"])
+
+    md = _extract_markdown_from_mapping(merged)
+    if not md:
+        for val in merged.values():
+            if not isinstance(val, str):
+                continue
+            snippet = val.strip()
+            if not snippet.startswith("{"):
+                continue
+            try:
+                inner = json.loads(snippet)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(inner, dict):
+                md = _extract_markdown_from_mapping(inner)
+                if md:
+                    break
+
+    if md:
+        merged["markdown"] = md
+
+    action = str(merged.get("action") or merged.get("phase") or "").strip().lower()
+    if action not in ("deliver", "missing_params"):
+        if merged.get("markdown") and not merged.get("missing_params"):
+            action = "deliver"
+        else:
+            action = "missing_params"
+    merged["action"] = action
+    return merged
+
+
 def normalize_ppt_outline_payload(parsed: Dict[str, Any]) -> Dict[str, Any]:
     """将 LLM 输出规范为前端可渲染的 ppt_outline 结构。"""
     root = parsed

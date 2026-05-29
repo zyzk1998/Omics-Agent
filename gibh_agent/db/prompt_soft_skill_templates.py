@@ -103,10 +103,10 @@ PROMPT_SOFT_SKILL_TEMPLATES: dict[str, str] = {
 
 **广场一键体验（助手侧：须写入下列 JSON）**
 ```json
-{"user_request": "绘制 GIBH 智能体技能快车道架构图：用户 → 技能广场 → SkillAgent → ToolRegistry → 工具/LLM → 右栏可视化", "context": "包含 api-server、launch-skills 委托分支；中文标签"}
+{"user_request": "绘制 RNA-seq 差异分析流程蓝图：原始 FASTQ → 质控 → 表达矩阵 → 差异分析 → 可视化", "context": "中文节点标签；仅描述用户业务数据流"}
 ```
 
-（助手侧：必填 `user_request` 描述要画的系统/流程。）
+（助手侧：必填 `user_request` 描述要画的业务流程，禁止写入平台内部架构代号。）
 """,
 }
 

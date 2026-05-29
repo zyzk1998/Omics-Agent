@@ -106,6 +106,83 @@ def test_weekly_report_terminal_deliver_mock(mock_json):
     assert res["phase"] == "deliver"
     assert "markdown" in res
     assert "待确认项" not in res["markdown"]
+    assert "70" not in res["message"]
+    assert "边界" not in res["message"]
+    assert "右侧" in res["message"]
+
+
+@patch("gibh_agent.skills._prompt_skill_terminal.llm_chat_json")
+def test_weekly_report_force_deliver_empty_markdown_fallback(mock_json):
+    mock_json.return_value = {
+        "action": "missing_params",
+        "markdown": "",
+        "missing_params": ["周期"],
+        "summary": "已按 70 分边界直接交付终稿",
+    }
+    from gibh_agent.skills.skill_weekly_report_writer import WeeklyReportWriterSkill
+
+    res = WeeklyReportWriterSkill().execute(
+        user_request="周期 2026-05-19 至 2026-05-25；本周完成项目 A；下周推进 B"
+    )
+    assert res["status"] == "success"
+    assert res["phase"] == "deliver"
+    assert res["markdown"].strip()
+    assert "70" not in res["message"]
+    assert "边界" not in res["message"]
+
+
+@patch("gibh_agent.skills._prompt_skill_terminal.llm_chat_json")
+def test_weekly_report_typo_markmarkdown_key_mock(mock_json):
+    mock_json.return_value = {
+        "action": "deliver",
+        "markmarkdown": "# 周报\n\n## 本周完成\n\n项目 A 里程碑",
+        "missing_params": [],
+    }
+    from gibh_agent.skills.skill_weekly_report_writer import WeeklyReportWriterSkill
+
+    res = WeeklyReportWriterSkill().execute(
+        user_request="周期 2026-05-19 至 2026-05-25；本周完成项目 A"
+    )
+    assert res["status"] == "success"
+    assert res["phase"] == "deliver"
+    assert res["markdown"].startswith("# 周报")
+    assert res["data"]["markdown"].startswith("# 周报")
+
+
+@patch("gibh_agent.skills._prompt_skill_terminal.llm_chat_json")
+def test_academic_abstract_placeholder_uses_demo(mock_json):
+    mock_json.return_value = {
+        "action": "deliver",
+        "markdown": "## Summary_Report\n\n**中文摘要：** 演示润色结果\n\n**English Abstract:** Demo polished abstract.",
+        "missing_params": [],
+    }
+    from gibh_agent.skills.skill_academic_abstract_refiner import AcademicAbstractRefinerSkill
+
+    res = AcademicAbstractRefinerSkill().execute(
+        user_request="精炼为双语单段摘要",
+        context="粘贴待精炼原文",
+    )
+    assert res["status"] == "success"
+    assert res["phase"] == "deliver"
+    assert "Summary_Report" in res["markdown"]
+    assert "missing_params" not in res["message"]
+
+
+@patch("gibh_agent.skills._prompt_skill_terminal.llm_chat_json")
+def test_academic_abstract_json_blob_not_in_markdown(mock_json):
+    mock_json.return_value = {
+        "action": "deliver",
+        "markdown": '{"action": "missing_params", "markdown": "", "missing_params": ["x"], "summary": "y"}',
+        "missing_params": [],
+    }
+    from gibh_agent.skills.skill_academic_abstract_refiner import AcademicAbstractRefinerSkill
+
+    res = AcademicAbstractRefinerSkill().execute(
+        user_request="精炼摘要",
+        context="Background: test methods results conclusions demo content long enough for heuristic",
+    )
+    assert res["phase"] == "missing_params"
+    assert res["markdown"] == ""
 
 
 def test_blueprint_drafter_html_mock():

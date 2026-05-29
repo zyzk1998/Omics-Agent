@@ -92,16 +92,16 @@ def _brief_skill_summary(tool_name: str, result: Dict[str, Any]) -> str:
         title = (outline.get("title") or "").strip() or "未命名主题"
         pages = outline.get("total_pages") or len(outline.get("slides") or [])
         return f"PPT 大纲「{title}」共 {pages} 页（右侧工作台可浏览分页卡片）。"
+    if tid == "weekly_report_writer" and phase == "deliver":
+        return "周报终稿已生成（完整内容见右侧工作台，勿在聊天区复述正文）。"
+    if tid == "tailored_resume" and phase == "deliver":
+        return "简历终稿已生成（完整内容见右侧工作台，勿在聊天区复述正文）。"
     if tid == "mindmap_gen" and result.get("mermaid_code"):
         return "思维导图已生成（右侧 Mermaid 可视化）。"
     if tid == "blueprint_drafter" and result.get("html_content"):
         return "工程蓝图 HTML 已生成（右侧 iframe 预览）。"
     if result.get("markdown") and phase == "deliver":
-        md = str(result["markdown"])
-        preview = md[:280].replace("\n", " ").strip()
-        if len(md) > 280:
-            preview += "…"
-        return f"技能 `{tid}` 终稿已生成：{preview}（完整内容见右侧报告）。"
+        return f"技能 `{tid}` 终稿已生成（完整内容见右侧工作台，勿在聊天区复述正文）。"
     return ""
 
 

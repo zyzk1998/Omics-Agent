@@ -108,8 +108,15 @@ LAUNCH_SKILL_DEMO_ARGS: Dict[str, Dict[str, Any]] = {
         "context": "摘要：最优传输轨迹推断；结果含 UMAP 与驱动基因（见用户附件）",
     },
     "academic_abstract_refiner": {
-        "user_request": "将 context 中长文精炼为中英双语单段 SCI 风格摘要",
-        "context": "请用户粘贴待精炼原文；禁止编造未出现的实验数据。",
+        "user_request": "将下列英文草稿精炼为中英双语 SCI 风格单段摘要（无小标题）",
+        "context": (
+            "Background: Single-cell RNA sequencing enables high-resolution profiling, but batch effects "
+            "limit cross-cohort integration. Methods: We developed OT-Integrate, an optimal-transport "
+            "framework with graph smoothing for atlas-level alignment. Results: On 12 public datasets, "
+            "OT-Integrate improved cluster purity by 15% (ARI +0.12) and preserved rare cell states. "
+            "Conclusions: The method supports reproducible cross-study comparison for translational "
+            "single-cell analysis. (Demo 演示原文，可直接体验润色效果)"
+        ),
     },
     "email_manager": {
         "user_request": "write email to client about project delay — professional, milestones + revised date",
@@ -126,10 +133,10 @@ LAUNCH_SKILL_DEMO_ARGS: Dict[str, Dict[str, Any]] = {
     },
     "blueprint_drafter": {
         "user_request": (
-            "GIBH 技能快车道：用户 → 技能广场 → SkillAgent → ToolRegistry → "
-            "ppt_outline/mindmap_gen 等工具 → 右栏 Markdown/Mermaid/HTML 可视化"
+            "绘制转录组差异分析流程蓝图：原始 FASTQ → 质控(QC) → 比对定量 → "
+            "基因表达矩阵 → 差异表达分析(DEG) → 火山图/热图可视化"
         ),
-        "context": "扁平工程图；中文节点标签；含 launch-skills 委托支路",
+        "context": "扁平工程图；中文节点标签；突出质控与统计步骤",
     },
 }
 

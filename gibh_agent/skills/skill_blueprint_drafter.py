@@ -18,6 +18,12 @@ _HTML_SUFFIX = (
     "\n【输出附加约束】仅返回完整 HTML 文档正文，以 <!DOCTYPE html> 开头，"
     "禁止 Markdown 代码围栏与解释性前后文。"
 )
+_SANITIZATION_SUFFIX = (
+    "\n【⚠️ 绝对红线】你的任务是帮助用户绘制**其业务领域**的工程蓝图，"
+    "绝对禁止在输出的蓝图节点、标题、副标题、徽章文字中包含任何与本智能体平台底层实现相关的代号"
+    "（如 Skill_Fast_Lane、SkillAgent、ToolRegistry、Orchestrator、launch-skills、api-server、"
+    "OmicsAssetManager、LLM、SSE、WorkflowExecutor 等），必须只输出用户指定领域的业务节点与数据流！"
+)
 
 
 def _normalize_blueprint_html(raw: str) -> str:
@@ -73,7 +79,7 @@ class BlueprintDrafterSkill(BaseSkill):
         except ValueError as exc:
             return {"status": "error", "message": str(exc)}
 
-        system = spec[:100_000] + _HTML_SUFFIX
+        system = spec[:100_000] + _SANITIZATION_SUFFIX + _HTML_SUFFIX
         try:
             raw = llm_chat_text(system, user, max_tokens=8192, temperature=0.25)
             html = _normalize_blueprint_html(raw)
