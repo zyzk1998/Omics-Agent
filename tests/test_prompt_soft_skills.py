@@ -12,6 +12,7 @@ from gibh_agent.core.tool_registry import registry
 from gibh_agent.skills._prompt_skill_llm import normalize_mermaid_code
 from gibh_agent.skills._prompt_skill_schemas import PPTOutline, Slide
 from gibh_agent.skills.skill_mindmap_gen import MindmapGenSkill
+from gibh_agent.skills.skill_oral_presentation_outline import OralPresentationOutlineSkill
 from gibh_agent.skills.skill_ppt_outline import PptOutlineSkill
 
 
@@ -36,6 +37,24 @@ def test_prompt_skills_not_delegated_to_launch_worker():
         "pdf_extractor",
         "deep_research",
         "blueprint_drafter",
+        "diff_expr_interpreter",
+        "go_kegg_narrative",
+        "single_cell_checklist",
+        "journal_cover_letter",
+        "review_rebuttal_outline",
+        "acmg_variant_interpretation",
+        "pipeline_selection_memo",
+        "omics_metadata_review",
+        "qpcr_primer_design_guide",
+        "oral_presentation_outline",
+        "clinical_trial_protocol_skeleton",
+        "drug_repositioning_memo",
+        "protein_function_hypothesis",
+        "experiment_failure_postmortem",
+        "literature_matrix_notes",
+        "multi_omics_storyline",
+        "ethics_consent_checklist",
+        "stats_method_advisor",
     ):
         assert tid not in LAUNCH_ISOLATED_TOOL_IDS
         assert should_delegate_to_launch_worker(tid) is False
@@ -48,6 +67,12 @@ def test_tools_registered():
     assert registry.get_tool("email_manager") is not None
     assert registry.get_tool("deep_research") is not None
     assert registry.get_tool("blueprint_drafter") is not None
+    assert registry.get_tool("diff_expr_interpreter") is not None
+    assert registry.get_tool("journal_cover_letter") is not None
+    assert registry.get_tool("review_rebuttal_outline") is not None
+    assert registry.get_tool("acmg_variant_interpretation") is not None
+    assert registry.get_tool("stats_method_advisor") is not None
+    assert registry.get_tool("oral_presentation_outline") is not None
 
 
 def test_prompt_specs_load():
@@ -206,3 +231,67 @@ def test_mindmap_gen_execute_mock(mock_text):
     assert res["status"] == "success"
     assert "mermaid_code" in res
     assert res["mermaid_code"].startswith("graph TD")
+
+
+@patch("gibh_agent.skills._prompt_skill_markdown.llm_chat_text")
+def test_journal_cover_letter_demo_deliver_mock(mock_text):
+    mock_text.return_value = (
+        "# Cover Letter\n\n**Journal:** Nature Communications\n\nDear Editor-in-Chief,\n\nDemo body."
+    )
+    from gibh_agent.skills.skill_journal_cover_letter import JournalCoverLetterSkill
+
+    res = JournalCoverLetterSkill().execute()
+    assert res["status"] == "success"
+    assert res["phase"] == "deliver"
+    assert res["markdown"].startswith("# Cover Letter")
+    assert "好的" not in res["markdown"][:20]
+
+
+@patch("gibh_agent.skills._prompt_skill_markdown.llm_chat_text")
+def test_diff_expr_interpreter_empty_uses_demo_defaults(mock_text):
+    mock_text.return_value = "# 差异表达结果解读报告\n\n| 基因 | log2FC | padj |\n| TP53 | 2.1 | 1e-8 |"
+    from gibh_agent.skills.skill_diff_expr_interpreter import DiffExprInterpreterSkill
+
+    res = DiffExprInterpreterSkill().execute()
+    assert res["status"] == "success"
+    assert "markdown" in res
+    assert "TP53" in mock_text.call_args[0][1]
+
+
+@patch("gibh_agent.skills._prompt_skill_markdown.llm_chat_text")
+def test_array1_batch2_acmg_demo_deliver(mock_text):
+    mock_text.return_value = "# 变异临床意义解读草案（ACMG 风格）\n\n> **警示**：草稿\n\n## 2. ACMG 证据条目草稿\n| PM1 | … |"
+    from gibh_agent.skills.skill_acmg_variant_interpretation import AcmgVariantInterpretationSkill
+
+    res = AcmgVariantInterpretationSkill().execute()
+    assert res["status"] == "success"
+    assert res["phase"] == "deliver"
+    assert "ACMG" in res["markdown"]
+
+
+@patch("gibh_agent.skills.skill_oral_presentation_outline.llm_chat_structured")
+def test_oral_presentation_outline_mock(mock_structured):
+    mock_structured.return_value = PPTOutline(
+        theme="Demo Talk",
+        slides=[Slide(title="背景", content_bullets=["约 2 分钟", "要点 A"])],
+    )
+    res = OralPresentationOutlineSkill().execute(user_request="demo talk")
+    assert res["status"] == "success"
+    assert res["total_pages"] == 1
+    assert res["ppt_outline"]["slides"][0]["title"] == "背景"
+
+
+def test_prompt_soft_skill_templates_cover_array1_batch2():
+    from gibh_agent.db.prompt_soft_skill_templates import (
+        PROMPT_SOFT_SKILL_SEEDS,
+        PROMPT_SOFT_SKILL_TEMPLATES,
+    )
+
+    names = {r["name"] for r in PROMPT_SOFT_SKILL_SEEDS}
+    for key in (
+        "变异临床意义解读草案（ACMG 风格）",
+        "统计方法选择建议书",
+        "会议口头报告讲稿大纲",
+    ):
+        assert key in names
+        assert "[Skill_Route:" in PROMPT_SOFT_SKILL_TEMPLATES[key]

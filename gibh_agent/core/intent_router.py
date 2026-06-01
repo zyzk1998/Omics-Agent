@@ -91,6 +91,118 @@ _SKILL_REQUIRED_PARAMETERS: Dict[str, List[str]] = {
     "rdkit_mol_format_convert": [
         "待转换结构文本（input_text）及 input_format / output_format",
     ],
+    # 阵列一 Batch1 · 纯 Prompt 生信软技能（文本粘贴即可，无需大文件）
+    "diff_expr_interpreter": [
+        "DEG 结果表或火山图/Top 基因文字摘要（粘贴至 context 即可）",
+    ],
+    "go_kegg_narrative": [
+        "GO/KEGG 富集结果表或通路条目（粘贴至 context）",
+    ],
+    "single_cell_checklist": [
+        "研究问题、物种、平台与分组设计（user_request / context 文本）",
+    ],
+    "journal_cover_letter": [
+        "论文题目、核心亮点与目标期刊名称",
+    ],
+    "review_rebuttal_outline": [
+        "审稿意见原文或要点列表（粘贴至 context）",
+    ],
+    "acmg_variant_interpretation": [
+        "变异位点、基因、HGVS、人群频率与功能预测（粘贴至 context）",
+    ],
+    "pipeline_selection_memo": [
+        "分析目标、组学类型、样本量与计算资源约束（文本）",
+    ],
+    "omics_metadata_review": [
+        "样本 metadata 表或字段列表（粘贴至 context）",
+    ],
+    "qpcr_primer_design_guide": [
+        "扩增目标、样本类型与可选引物序列（文本）",
+    ],
+    "oral_presentation_outline": [
+        "报告主题、时长、听众；论文结构或摘要（context）",
+    ],
+    "clinical_trial_protocol_skeleton": [
+        "试验设计类型、人群、主要/次要终点描述",
+    ],
+    "drug_repositioning_memo": [
+        "疾病—靶点—药物与已知证据（文字）",
+    ],
+    "protein_function_hypothesis": [
+        "蛋白结构域、修饰、定位等注释（粘贴至 context）",
+    ],
+    "experiment_failure_postmortem": [
+        "实验目标、失败现象与已尝试排查（文本）",
+    ],
+    "literature_matrix_notes": [
+        "多篇文献摘要或笔记（粘贴至 context）",
+    ],
+    "multi_omics_storyline": [
+        "各组学层级关键发现文字摘要",
+    ],
+    "ethics_consent_checklist": [
+        "研究类型、干预风险与人群特征",
+    ],
+    "stats_method_advisor": [
+        "研究设计、分组、结局变量与样本量结构",
+    ],
+    "pubmed_query": [
+        "PubMed 检索关键词或主题词（query）",
+    ],
+    "uniprot_query": [
+        "蛋白名、基因名或 UniProt accession（query）",
+    ],
+    "smiles_to_cid": [
+        "化合物 SMILES 字符串（smiles）",
+    ],
+    "seq_format_converter": [
+        "核酸/蛋白序列文本（sequence_text）或 FASTA 文件（sequence_or_path）",
+    ],
+    "calc_molecular_weight": [
+        "小分子 SMILES 结构式（smiles）",
+    ],
+    "clinvar_query": [
+        "基因名、rsID 或 HGVS 变异描述（query）",
+    ],
+    "dbsnp_query": [
+        "rsID、基因名或染色体位置（query）",
+    ],
+    "gwas_catalog_query": [
+        "rsID 或疾病/性状名称（query）",
+    ],
+    "reactome_query": [
+        "通路名或关键词（query，如 apoptosis）",
+    ],
+    "interpro_query": [
+        "结构域名、IPR 编号或关键词（query）",
+    ],
+    "geo_query": [
+        "关键词、GSE accession 或 MeSH 主题（query）",
+    ],
+    "gene_protein_info_query": [
+        "人类基因符号（query，如 TP53）",
+    ],
+    "mrna_sequence_fetch": [
+        "人类基因符号（sequence_or_path 或 query）",
+    ],
+    "drug_id_crossref": [
+        "药物名称（query）或 SMILES（smiles）",
+    ],
+    "refmet_metabolite_search": [
+        "代谢物名称（query）",
+    ],
+    "rnacentral_query": [
+        "RNAcentral URS 编号或 RNA 关键词（query）",
+    ],
+    "ensembl_go_descendants": [
+        "GO 术语 ID（query，如 GO:0006915）",
+    ],
+    "opentargets_chembl_hierarchy": [
+        "ChEMBL 药物/分子 ID（query，如 CHEMBL25）",
+    ],
+    "fda_drug_label_search": [
+        "药品品牌名或通用名（query）",
+    ],
 }
 
 # 工作流必填参数（按注册表 id）

@@ -57,8 +57,8 @@ def execute_dynamic_skill(
     db = SessionLocal()
     try:
         row = db.query(DynamicSkillPlugin).filter(DynamicSkillPlugin.name == key).first()
-        if not row or (row.status or "") != "approved":
-            return {"status": "error", "message": f"未找到已审核的动态技能: {key!r}"}
+        if not row or (row.status or "") not in ("approved", "published"):
+            return {"status": "error", "message": f"未找到已上架的动态技能: {key!r}"}
 
         st = (row.skill_type or "script").strip().lower()
         if st == "prompt":

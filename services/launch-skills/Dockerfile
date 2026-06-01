@@ -32,7 +32,7 @@ COPY services/launch-skills/requirements.txt /tmp/launch-skills-requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     python -m pip install --upgrade pip && \
     python -m pip install --no-cache-dir -r /tmp/launch-skills-requirements.txt && \
-    python -c "import httpx, chembl_webresource_client; from rdkit import Chem; print('launch-skills venv ok')"
+    python -c "import httpx, chembl_webresource_client; from rdkit import Chem; from Bio import Entrez; print('launch-skills venv ok')"
 
 COPY gibh_agent/ /app/gibh_agent/
 COPY services/launch-skills/main.py /app/main.py

@@ -123,3 +123,17 @@ class UserFeedback(Base):
     error_context = Column(Text, nullable=True)
     client_timestamp = Column(String(64), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class UserNotification(Base):
+    """用户站内通知：技能审核进度、上架结果等。"""
+
+    __tablename__ = "user_notifications"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(255), nullable=False, index=True)  # username / owner_id
+    type = Column(String(64), nullable=False, default="system_notice")  # skill_review | skill_published | system_notice
+    title = Column(String(512), nullable=False)
+    content = Column(Text, nullable=False)
+    is_read = Column(Integer, nullable=False, default=0)  # 0/1 兼容 SQLite/MySQL
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

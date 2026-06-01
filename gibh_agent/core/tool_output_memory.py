@@ -102,6 +102,8 @@ def _brief_skill_summary(tool_name: str, result: Dict[str, Any]) -> str:
         return "工程蓝图 HTML 已生成（右侧 iframe 预览）。"
     if result.get("markdown") and phase == "deliver":
         return f"技能 `{tid}` 终稿已生成（完整内容见右侧工作台，勿在聊天区复述正文）。"
+    if result.get("status") == "empty":
+        return str(result.get("message") or "未检索到结果。")
     return ""
 
 
@@ -117,7 +119,7 @@ def build_tool_output_memory_text(
     成功路径下优先读取输出目录中的 chem_summary.json 或 json_paths 中的摘要文件；
     否则回退为精简后的整包 JSON。
     """
-    if not isinstance(result, dict) or result.get("status") != "success":
+    if not isinstance(result, dict) or result.get("status") not in ("success", "empty"):
         return ""
 
     brief = _brief_skill_summary(tool_name, result)

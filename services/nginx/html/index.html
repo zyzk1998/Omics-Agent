@@ -111,6 +111,13 @@
                         <span class="sidebar-workspace-indicator__icon" aria-hidden="true">📂</span>
                         <span class="sidebar-workspace-indicator__text" id="sidebar-workspace-indicator-text">未挂载</span>
                     </button>
+                    <div class="sidebar-notifications-row" id="sidebar-notifications-row" style="display: none;">
+                        <button type="button" class="sidebar-notifications-bell" id="user-notifications-bell" title="消息通知" aria-label="消息通知" aria-expanded="false" aria-controls="user-notifications-panel">
+                            <i class="bi bi-bell" aria-hidden="true"></i>
+                            <span class="sidebar-notifications-badge" id="user-notifications-badge" style="display: none;" aria-hidden="true">0</span>
+                        </button>
+                    </div>
+                    <div id="user-notifications-panel" class="user-notifications-panel popover-menu" role="menu" aria-hidden="true" style="display: none;"></div>
                     <div class="sidebar-user" id="sidebar-user-area" title="点击登录/注册" role="button" aria-expanded="false" aria-haspopup="true" aria-controls="user-profile-menu" style="cursor:pointer;">
                         <i class="bi bi-person-circle sidebar-user-icon" style="font-size:1.5rem;color:#6b7280;"></i>
                         <div class="d-flex flex-column sidebar-user-text">
@@ -657,18 +664,39 @@
                     <h3 class="skill-upload-modal__heading" id="skill-upload-modal-title">安装技能</h3>
                     <button type="button" class="skill-upload-modal__close" id="skill-upload-modal-close" title="关闭" aria-label="关闭">&times;</button>
                 </div>
+                <fieldset class="skill-upload-driver-fieldset" id="skill-upload-driver-fieldset">
+                    <legend class="skill-upload-driver-legend">驱动类型</legend>
+                    <div class="skill-upload-driver-options" role="radiogroup" aria-label="技能驱动类型">
+                        <label class="skill-upload-driver-option">
+                            <input type="radio" name="skill-driver-type" value="prompt" checked>
+                            <span>纯 Prompt 驱动</span>
+                        </label>
+                        <label class="skill-upload-driver-option">
+                            <input type="radio" name="skill-driver-type" value="script">
+                            <span>单脚本驱动</span>
+                        </label>
+                        <label class="skill-upload-driver-option">
+                            <input type="radio" name="skill-driver-type" value="model">
+                            <span>模型驱动</span>
+                        </label>
+                    </div>
+                </fieldset>
+                <div id="skill-prompt-text-wrap" class="skill-upload-prompt-wrap">
+                    <label for="skill-prompt-textarea" class="skill-upload-prompt-label">Prompt 提示词 / JSON 配置（可选，与下方文件二选一或同时使用）</label>
+                    <textarea id="skill-prompt-textarea" class="skill-upload-prompt-textarea" rows="6" placeholder="可直接在此处粘贴您的 Prompt 提示词 / JSON 配置…"></textarea>
+                </div>
                 <div id="skill-dropzone" class="skill-plugin-dropzone" tabindex="0" role="button" aria-label="拖放或点击选择技能文件">
                     <svg class="skill-plugin-dropzone__icon" width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
                         <path stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                     </svg>
-                    <span class="skill-plugin-dropzone__title">拖放 .zip 或 SKILL.md 文件，或点击选择</span>
+                    <span id="skill-dropzone-title" class="skill-plugin-dropzone__title">拖放 .zip 或 SKILL.md 文件，或点击选择</span>
                     <span id="skill-dropzone-filename" class="skill-plugin-dropzone__filename" style="display: none;"></span>
                 </div>
                 <div class="skill-upload-hints skill-upload-modal__hints">
                     <p class="skill-upload-hints__label">文件要求</p>
-                    <ul class="skill-upload-hints__list">
-                        <li>包含 SKILL.md 文件的 .zip 压缩包</li>
-                        <li>或直接拖入 SKILL.md 文件</li>
+                    <ul id="skill-upload-hints-list" class="skill-upload-hints__list">
+                        <li>包含 SKILL.md 的 .zip 压缩包，或直接拖入 SKILL.md</li>
+                        <li>也可在上方文本框直接粘贴 Prompt</li>
                     </ul>
                 </div>
                 <p id="skill-upload-error" class="skill-upload-modal__error" style="display: none;"></p>
@@ -769,6 +797,58 @@
             }
             #skill-upload-modal #skill-upload-submit.skill-upload-modal__submit:not(:disabled) {
                 background-color: var(--primary-color, #4d6bfe) !important;
+            }
+            #skill-upload-modal .skill-upload-driver-fieldset {
+                border: none !important;
+                margin: 0 0 14px 0 !important;
+                padding: 0 !important;
+            }
+            #skill-upload-modal .skill-upload-driver-legend {
+                font-size: 13px !important;
+                font-weight: 600 !important;
+                color: #374151 !important;
+                margin-bottom: 8px !important;
+                padding: 0 !important;
+            }
+            #skill-upload-modal .skill-upload-driver-options {
+                display: flex !important;
+                flex-wrap: wrap !important;
+                gap: 10px 16px !important;
+            }
+            #skill-upload-modal .skill-upload-driver-option {
+                display: inline-flex !important;
+                align-items: center !important;
+                gap: 6px !important;
+                font-size: 13px !important;
+                color: #374151 !important;
+                cursor: pointer !important;
+                margin: 0 !important;
+            }
+            #skill-upload-modal .skill-upload-prompt-wrap {
+                margin-bottom: 12px !important;
+            }
+            #skill-upload-modal .skill-upload-prompt-label {
+                display: block !important;
+                font-size: 12px !important;
+                color: #6b7280 !important;
+                margin-bottom: 6px !important;
+            }
+            #skill-upload-modal .skill-upload-prompt-textarea {
+                width: 100% !important;
+                min-height: 120px !important;
+                padding: 10px 12px !important;
+                border: 1px solid #d1d5db !important;
+                border-radius: 8px !important;
+                font-size: 13px !important;
+                line-height: 1.5 !important;
+                resize: vertical !important;
+                box-sizing: border-box !important;
+                font-family: inherit !important;
+            }
+            #skill-upload-modal .skill-upload-prompt-textarea:focus {
+                outline: none !important;
+                border-color: var(--primary-color, #4d6bfe) !important;
+                box-shadow: 0 0 0 2px rgba(77, 107, 254, 0.15) !important;
             }
         </style>
 
@@ -2547,7 +2627,25 @@
             var skillsCurrentMain = '';
             var skillsCurrentPage = 1;
             var skillsTotal = 0;
-            var skillsPageSize = 12;
+            var SKILLS_PAGE_SIZE_STORAGE_KEY = 'gibh_skills_plaza_page_size';
+            var SKILLS_PAGE_SIZE_OPTIONS = [12, 20, 30, 50];
+            function loadSkillsPageSizeFromStorage() {
+                try {
+                    var raw = localStorage.getItem(SKILLS_PAGE_SIZE_STORAGE_KEY);
+                    var v = parseInt(raw, 10);
+                    if (SKILLS_PAGE_SIZE_OPTIONS.indexOf(v) >= 0) return v;
+                } catch (e) { /* ignore */ }
+                return 12;
+            }
+            function saveSkillsPageSizeToStorage(size) {
+                try {
+                    var v = parseInt(size, 10);
+                    if (SKILLS_PAGE_SIZE_OPTIONS.indexOf(v) >= 0) {
+                        localStorage.setItem(SKILLS_PAGE_SIZE_STORAGE_KEY, String(v));
+                    }
+                } catch (e) { /* ignore */ }
+            }
+            var skillsPageSize = loadSkillsPageSizeFromStorage();
             /** 当前分类下去重后的完整技能目录（分页切片唯一数据源） */
             window.allUniqueSkills = [];
             window._skillsPlazaCatalogCache = {};
@@ -2971,8 +3069,377 @@
                     description: '扁平工程/架构示意图 HTML，工作台 iframe 预览。',
                     tags: ['蓝图', '架构图'],
                     prompt_template: '[Skill_Route: blueprint_drafter]\n```json\n{"user_request": "绘制 RNA-seq 差异分析流程蓝图：原始数据 → 质控 → 表达矩阵 → 差异分析 → 可视化", "context": "中文节点标签；仅描述业务数据流"}\n```'
+                },
+                {
+                    id: 'diff_expr_interpreter',
+                    name: '差异表达结果解读助手',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    description: 'DEG 表→生物学叙事报告（Markdown + 基因表）。',
+                    tags: ['DEG', '转录组'],
+                    prompt_template: '[Skill_Route: diff_expr_interpreter]\n```json\n{"user_request": "解读下列 Demo DEG 结果并给出验证建议", "context": "对比：处理组 vs 对照组；阈值 padj<0.05, |log2FC|>1\\nTP53\\t2.1\\t1.2e-8\\nCDKN1A\\t1.8\\t3.4e-6"}\n```'
+                },
+                {
+                    id: 'go_kegg_narrative',
+                    name: 'GO/KEGG 富集结果叙事生成',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    description: '富集表→机制—疾病—验证方向分节叙事。',
+                    tags: ['GO', 'KEGG', '富集'],
+                    prompt_template: '[Skill_Route: go_kegg_narrative]\n```json\n{"user_request": "撰写富集结果叙事，突出免疫与代谢主题", "context": "GO:0006955 immune response\\tpadj=2.1e-5\\tGeneRatio=12/180"}\n```'
+                },
+                {
+                    id: 'single_cell_checklist',
+                    name: '单细胞实验设计检查清单',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    description: 'scRNA-seq 实验设计可勾选 Checklist。',
+                    tags: ['单细胞', '实验设计'],
+                    prompt_template: '[Skill_Route: single_cell_checklist]\n```json\n{"user_request": "人肺腺癌免疫治疗前后 scRNA-seq；10x 3\' v3", "context": "每组 6 例重复；关注 T 细胞耗竭"}\n```'
+                },
+                {
+                    id: 'journal_cover_letter',
+                    name: '期刊 Cover Letter 草稿',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    description: '题目与亮点→Cover Letter Markdown 草稿。',
+                    tags: ['投稿', 'Cover Letter'],
+                    prompt_template: '[Skill_Route: journal_cover_letter]\n```json\n{"user_request": "目标期刊：Nature Communications；英文", "context": "Title: scRNA atlas under PD-1 blockade\\nHighlights: trajectory; validation; biomarkers"}\n```'
+                },
+                {
+                    id: 'review_rebuttal_outline',
+                    name: '审稿意见 Rebuttal 要点提纲',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    description: '审稿意见→分条回复策略与实验优先级提纲。',
+                    tags: ['Rebuttal', '返修'],
+                    prompt_template: '[Skill_Route: review_rebuttal_outline]\n```json\n{"user_request": "scRNA-seq 免疫治疗；Major revision", "context": "Reviewer 1: 缺少验证队列；双胞阈值未说明"}\n```'
+                },
+                {
+                    id: 'acmg_variant_interpretation',
+                    name: '变异临床意义解读草案（ACMG 风格）',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'ACMG 证据条目草稿（须数据库核实）。',
+                    tags: ['ACMG', '变异'],
+                    prompt_template: '[Skill_Route: acmg_variant_interpretation]\n```json\n{"user_request": "BRCA1 胚系变异草稿", "context": "c.5266dupC; 家族史; 蛋白截断预测"}\n```'
+                },
+                {
+                    id: 'pipeline_selection_memo',
+                    name: '生物信息 Pipeline 选型备忘录',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'RNA-seq/WGS 等工具链对比（不执行计算）。',
+                    tags: ['Pipeline', '选型'],
+                    prompt_template: '[Skill_Route: pipeline_selection_memo]\n```json\n{"user_request": "bulk RNA-seq 肿瘤/癌旁；差异+通路", "context": "开源；32核128G"}\n```'
+                },
+                {
+                    id: 'omics_metadata_review',
+                    name: '组学样本 Metadata 规范审查',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: '样本表字段与批次混杂审查。',
+                    tags: ['metadata', '样本表'],
+                    prompt_template: '[Skill_Route: omics_metadata_review]\n```json\n{"user_request": "RNA-seq metadata 审查", "context": "SampleID\\tGroup\\tBatch\\nS1\\tTumor\\tB1"}\n```'
+                },
+                {
+                    id: 'qpcr_primer_design_guide',
+                    name: '引物/qPCR 实验设计说明',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: '引物、对照与 qPCR 参数建议。',
+                    tags: ['qPCR', '引物'],
+                    prompt_template: '[Skill_Route: qpcr_primer_design_guide]\n```json\n{"user_request": "IL6 mRNA 定量；SYBR", "context": "内参 GAPDH"}\n```'
+                },
+                {
+                    id: 'oral_presentation_outline',
+                    name: '会议口头报告讲稿大纲',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: '10–15 分钟口述分页提纲（JSON）。',
+                    tags: ['口头报告', '讲稿'],
+                    prompt_template: '[Skill_Route: oral_presentation_outline]\n```json\n{"user_request": "组会 12 分钟", "context": "PD-1 阻断；T 细胞耗竭轨迹"}\n```'
+                },
+                {
+                    id: 'clinical_trial_protocol_skeleton',
+                    name: '临床注册方案骨架生成（CONSORT 导向）',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'CONSORT 方案骨架：终点与统计框架。',
+                    tags: ['临床试验', 'CONSORT'],
+                    prompt_template: '[Skill_Route: clinical_trial_protocol_skeleton]\n```json\n{"user_request": "II 期 NSCLC；ORR", "context": "单臂免疫联合"}\n```'
+                },
+                {
+                    id: 'drug_repositioning_memo',
+                    name: '药物重定位假说备忘录',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: '重定位假说与检索关键词。',
+                    tags: ['重定位', '假说'],
+                    prompt_template: '[Skill_Route: drug_repositioning_memo]\n```json\n{"user_request": "二甲双胍 IPF", "context": "AMPK；TGF-β 通路"}\n```'
+                },
+                {
+                    id: 'protein_function_hypothesis',
+                    name: '蛋白质功能假说推演',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: '注释→功能假说与验证路线。',
+                    tags: ['蛋白功能'],
+                    prompt_template: '[Skill_Route: protein_function_hypothesis]\n```json\n{"user_request": "TP53 假说", "context": "DNA 结合域；核定位"}\n```'
+                },
+                {
+                    id: 'experiment_failure_postmortem',
+                    name: '实验失败复盘报告',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: '失败原因树与重复实验建议。',
+                    tags: ['复盘', '排障'],
+                    prompt_template: '[Skill_Route: experiment_failure_postmortem]\n```json\n{"user_request": "WB 无特异条带", "context": "冻融组织；一抗过夜"}\n```'
+                },
+                {
+                    id: 'literature_matrix_notes',
+                    name: '文献矩阵精读笔记',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: '多篇摘要→对比矩阵表。',
+                    tags: ['文献矩阵'],
+                    prompt_template: '[Skill_Route: literature_matrix_notes]\n```json\n{"user_request": "免疫标志物 3 篇", "context": "A scRNA; B bulk; C 空间"}\n```'
+                },
+                {
+                    id: 'multi_omics_storyline',
+                    name: '多组学整合分析故事线',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: '多组学叙事与 Figure 编排。',
+                    tags: ['多组学', '故事线'],
+                    prompt_template: '[Skill_Route: multi_omics_storyline]\n```json\n{"user_request": "肺癌耐药", "context": "WGS TP53; RNA 耗竭; 蛋白 STAT3-p"}\n```'
+                },
+                {
+                    id: 'ethics_consent_checklist',
+                    name: '伦理与知情同意要点清单',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: '伦理 Q&A 与知情同意 Checklist。',
+                    tags: ['伦理', 'ICF'],
+                    prompt_template: '[Skill_Route: ethics_consent_checklist]\n```json\n{"user_request": "生物样本库；抽血", "context": "可识别；可能测序"}\n```'
+                },
+                {
+                    id: 'stats_method_advisor',
+                    name: '统计方法选择建议书',
+                    main_category: '生物医药',
+                    sub_category: '文本处理',
+                    plain_doc_skill: true,
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: '检验方法、前提与报告规范建议。',
+                    tags: ['统计', '方法学'],
+                    prompt_template: '[Skill_Route: stats_method_advisor]\n```json\n{"user_request": "两组；连续；非正态", "context": "n=18 vs 20；需多重校正"}\n```'
                 }
             ]);
+            /** 阵列二 Batch2 · Launch DB 检索技能（生物医药/化学置顶 + 上新角标） */
+            window.__FEATURED_RESEARCH_SKILLS = (window.__FEATURED_RESEARCH_SKILLS || []).concat([
+                {
+                    id: 'clinvar_query',
+                    name: 'ClinVar 数据库查询',
+                    main_category: '生物医药',
+                    sub_category: '信息检索',
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'ClinVar E-utilities 变异临床意义检索，表格 + Markdown。',
+                    tags: ['ClinVar', '变异', '临床'],
+                    prompt_template: '[Skill_Route: clinvar_query]\n```json\n{"query": "BRCA1[gene]", "limit": 8}\n```'
+                },
+                {
+                    id: 'dbsnp_query',
+                    name: 'dbSNP 数据库查询',
+                    main_category: '生物医药',
+                    sub_category: '信息检索',
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'dbSNP SNP 位点、基因关联与临床意义概览。',
+                    tags: ['dbSNP', 'SNP', 'rsID'],
+                    prompt_template: '[Skill_Route: dbsnp_query]\n```json\n{"query": "rs699", "limit": 5}\n```'
+                },
+                {
+                    id: 'gwas_catalog_query',
+                    name: 'GWAS catalog 数据库查询',
+                    main_category: '生物医药',
+                    sub_category: '信息检索',
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'GWAS Catalog 性状—SNP 关联与研究元数据检索。',
+                    tags: ['GWAS', '关联分析'],
+                    prompt_template: '[Skill_Route: gwas_catalog_query]\n```json\n{"query": "type 2 diabetes", "limit": 8}\n```'
+                },
+                {
+                    id: 'reactome_query',
+                    name: 'Reactome 数据库查询',
+                    main_category: '生物医药',
+                    sub_category: '信息检索',
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'Reactome 人类通路层级、稳定 ID 与摘要。',
+                    tags: ['Reactome', '通路'],
+                    prompt_template: '[Skill_Route: reactome_query]\n```json\n{"query": "apoptosis", "limit": 8}\n```'
+                },
+                {
+                    id: 'interpro_query',
+                    name: 'InterPro 数据库查询',
+                    main_category: '生物医药',
+                    sub_category: '信息检索',
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'InterPro 蛋白结构域、家族与功能分类检索。',
+                    tags: ['InterPro', '结构域'],
+                    prompt_template: '[Skill_Route: interpro_query]\n```json\n{"query": "kinase", "limit": 8}\n```'
+                },
+                {
+                    id: 'geo_query',
+                    name: 'GEO 数据库查询',
+                    main_category: '生物医药',
+                    sub_category: '信息检索',
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'NCBI GEO 表达数据集元数据检索（不下载矩阵）。',
+                    tags: ['GEO', '表达组学'],
+                    prompt_template: '[Skill_Route: geo_query]\n```json\n{"query": "breast cancer", "limit": 8}\n```'
+                },
+                {
+                    id: 'gene_protein_info_query',
+                    name: '基因蛋白信息查询器',
+                    main_category: '生物医药',
+                    sub_category: '信息检索',
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'Ensembl 人类基因注释、定位与转录本概览。',
+                    tags: ['Ensembl', '基因注释'],
+                    prompt_template: '[Skill_Route: gene_protein_info_query]\n```json\n{"query": "TP53"}\n```'
+                },
+                {
+                    id: 'mrna_sequence_fetch',
+                    name: '获取mRNA序列工具',
+                    main_category: '生物医药',
+                    sub_category: '信息检索',
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: '按基因符号获取 Ensembl 代表性 cDNA 序列（FASTA）。',
+                    tags: ['mRNA', 'cDNA', '序列'],
+                    prompt_template: '[Skill_Route: mrna_sequence_fetch]\n```json\n{"sequence_or_path": "TP53"}\n```'
+                },
+                {
+                    id: 'rnacentral_query',
+                    name: 'RNAcentral 按编号查询',
+                    main_category: '生物医药',
+                    sub_category: '信息检索',
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'RNAcentral URS 条目与交叉 ID 检索。',
+                    tags: ['RNAcentral', 'ncRNA'],
+                    prompt_template: '[Skill_Route: rnacentral_query]\n```json\n{"query": "URS000065FE5A"}\n```'
+                },
+                {
+                    id: 'ensembl_go_descendants',
+                    name: 'Ensembl GO术语后代查询',
+                    main_category: '生物医药',
+                    sub_category: '信息检索',
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'GO 术语子术语与 QuickGO 后代 ID 列表。',
+                    tags: ['GO', 'Ensembl', '本体'],
+                    prompt_template: '[Skill_Route: ensembl_go_descendants]\n```json\n{"query": "GO:0006915", "limit": 15}\n```'
+                },
+                {
+                    id: 'drug_id_crossref',
+                    name: '药物标识符交叉检索',
+                    main_category: '化学',
+                    sub_category: '信息检索',
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'PubChem / ChEMBL / Registry 药物标识符交叉引用宽表。',
+                    tags: ['PubChem', 'ChEMBL', 'ID'],
+                    prompt_template: '[Skill_Route: drug_id_crossref]\n```json\n{"query": "aspirin"}\n```'
+                },
+                {
+                    id: 'refmet_metabolite_search',
+                    name: '代谢物名称检索',
+                    main_category: '化学',
+                    sub_category: '信息检索',
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'RefMet 代谢物标准化名称、分子式与分类。',
+                    tags: ['RefMet', '代谢物'],
+                    prompt_template: '[Skill_Route: refmet_metabolite_search]\n```json\n{"query": "cholesterol", "match_threshold": 0.8}\n```'
+                },
+                {
+                    id: 'opentargets_chembl_hierarchy',
+                    name: 'OpenTargets_按ChEMBL ID获取父分子和子分子',
+                    main_category: '化学',
+                    sub_category: '信息检索',
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'Open Targets GraphQL 药物分子父子层级。',
+                    tags: ['OpenTargets', 'ChEMBL'],
+                    prompt_template: '[Skill_Route: opentargets_chembl_hierarchy]\n```json\n{"query": "CHEMBL25"}\n```'
+                },
+                {
+                    id: 'fda_drug_label_search',
+                    name: 'FDA药品标签字段检索',
+                    main_category: '化学',
+                    sub_category: '信息检索',
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: 'openFDA 药品标签适应症、警告与用法字段检索。',
+                    tags: ['FDA', '药品标签'],
+                    prompt_template: '[Skill_Route: fda_drug_label_search]\n```json\n{"query": "aspirin", "limit": 3}\n```'
+                }
+            ]);
+
 
             /** 「其他技能」Prompt 软技能 · 科研简约线条图标（按 skill id / 中文名匹配） */
             (function () {
@@ -2988,7 +3455,43 @@
                     deep_research: '<circle cx="10" cy="10" r="6"/><path d="M14.5 14.5L20 20"/><path d="M7 10h6"/><path d="M10 7v6"/>',
                     blueprint_drafter: '<rect x="3" y="3" width="18" height="18" rx="1"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="12" y1="3" x2="12" y2="21"/><rect x="5" y="5" width="6" height="5"/><rect x="13" y="14" width="6" height="5"/>',
                     ppt_outline: '<rect x="4" y="4" width="16" height="12" rx="1"/><line x1="7" y1="8" x2="17" y2="8"/><line x1="7" y1="11" x2="14" y2="11"/><rect x="15" y="16" width="5" height="4" rx=".5"/>',
-                    mindmap_gen: '<circle cx="12" cy="5" r="2"/><circle cx="6" cy="14" r="2"/><circle cx="18" cy="14" r="2"/><path d="M12 7v3"/><path d="M10.2 11.8L7.5 12.5"/><path d="M13.8 11.8l2.7.7"/>'
+                    mindmap_gen: '<circle cx="12" cy="5" r="2"/><circle cx="6" cy="14" r="2"/><circle cx="18" cy="14" r="2"/><path d="M12 7v3"/><path d="M10.2 11.8L7.5 12.5"/><path d="M13.8 11.8l2.7.7"/>',
+                    diff_expr_interpreter: '<path d="M4 6h16v12H4z"/><line x1="7" y1="10" x2="17" y2="10"/><line x1="7" y1="14" x2="14" y2="14"/><path d="M16 4v4"/><path d="M14 6h4"/>',
+                    go_kegg_narrative: '<circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.8 10.5L15.5 7.5"/><path d="M8.8 13.5L15.5 16.5"/>',
+                    single_cell_checklist: '<rect x="5" y="4" width="14" height="16" rx="2"/><path d="M8 8h2l1.5 3L13 8h2"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/>',
+                    journal_cover_letter: '<rect x="4" y="5" width="16" height="14" rx="2"/><line x1="7" y1="9" x2="17" y2="9"/><line x1="7" y1="13" x2="15" y2="13"/><line x1="7" y1="17" x2="12" y2="17"/>',
+                    review_rebuttal_outline: '<line x1="8" y1="6" x2="8" y2="18"/><line x1="12" y1="8" x2="18" y2="8"/><line x1="12" y1="12" x2="18" y2="12"/><line x1="12" y1="16" x2="18" y2="16"/>',
+
+                };
+                /** 阵列一 Batch2 · 与老技能一致的彩色 emoji 图标（浅蓝底圆角块，非灰色线条） */
+                var EMOJI_ICONS = {
+                    acmg_variant_interpretation: '🧬',
+                    pipeline_selection_memo: '🔀',
+                    omics_metadata_review: '📋',
+                    qpcr_primer_design_guide: '🧪',
+                    oral_presentation_outline: '🎤',
+                    clinical_trial_protocol_skeleton: '🏥',
+                    drug_repositioning_memo: '💊',
+                    protein_function_hypothesis: '🔬',
+                    experiment_failure_postmortem: '🔧',
+                    literature_matrix_notes: '📚',
+                    multi_omics_storyline: '🧩',
+                    ethics_consent_checklist: '⚖️',
+                    stats_method_advisor: '📈',
+                    clinvar_query: '🧬',
+                    dbsnp_query: '🔬',
+                    gwas_catalog_query: '📊',
+                    reactome_query: '🔄',
+                    interpro_query: '🧩',
+                    geo_query: '📈',
+                    gene_protein_info_query: '🧬',
+                    mrna_sequence_fetch: '🧬',
+                    rnacentral_query: '🧬',
+                    ensembl_go_descendants: '🌳',
+                    drug_id_crossref: '💊',
+                    refmet_metabolite_search: '⚗️',
+                    opentargets_chembl_hierarchy: '🔗',
+                    fda_drug_label_search: '🏥'
                 };
                 var NAME_TO_KEY = {
                     '周报撰写助手': 'weekly_report_writer',
@@ -3000,20 +3503,142 @@
                     '深度调研': 'deep_research',
                     '工程蓝图制图': 'blueprint_drafter',
                     '科研汇报 PPT 大纲生成': 'ppt_outline',
-                    '分析逻辑思维导图生成': 'mindmap_gen'
+                    '分析逻辑思维导图生成': 'mindmap_gen',
+                    '差异表达结果解读助手': 'diff_expr_interpreter',
+                    'GO/KEGG 富集结果叙事生成': 'go_kegg_narrative',
+                    '单细胞实验设计检查清单': 'single_cell_checklist',
+                    '期刊 Cover Letter 草稿': 'journal_cover_letter',
+                    '审稿意见 Rebuttal 要点提纲': 'review_rebuttal_outline',
+                    '变异临床意义解读草案（ACMG 风格）': 'acmg_variant_interpretation',
+                    '生物信息 Pipeline 选型备忘录': 'pipeline_selection_memo',
+                    '组学样本 Metadata 规范审查': 'omics_metadata_review',
+                    '引物/qPCR 实验设计说明': 'qpcr_primer_design_guide',
+                    '会议口头报告讲稿大纲': 'oral_presentation_outline',
+                    '临床注册方案骨架生成（CONSORT 导向）': 'clinical_trial_protocol_skeleton',
+                    '药物重定位假说备忘录': 'drug_repositioning_memo',
+                    '蛋白质功能假说推演': 'protein_function_hypothesis',
+                    '实验失败复盘报告': 'experiment_failure_postmortem',
+                    '文献矩阵精读笔记': 'literature_matrix_notes',
+                    '多组学整合分析故事线': 'multi_omics_storyline',
+                    '伦理与知情同意要点清单': 'ethics_consent_checklist',
+                    '统计方法选择建议书': 'stats_method_advisor',
+                    'ClinVar 数据库查询': 'clinvar_query',
+                    'dbSNP 数据库查询': 'dbsnp_query',
+                    'GWAS catalog 数据库查询': 'gwas_catalog_query',
+                    'Reactome 数据库查询': 'reactome_query',
+                    'InterPro 数据库查询': 'interpro_query',
+                    'GEO 数据库查询': 'geo_query',
+                    '基因蛋白信息查询器': 'gene_protein_info_query',
+                    '获取mRNA序列工具': 'mrna_sequence_fetch',
+                    'RNAcentral 按编号查询': 'rnacentral_query',
+                    'Ensembl GO术语后代查询': 'ensembl_go_descendants',
+                    '药物标识符交叉检索': 'drug_id_crossref',
+                    '代谢物名称检索': 'refmet_metabolite_search',
+                    'OpenTargets_按ChEMBL ID获取父分子和子分子': 'opentargets_chembl_hierarchy',
+                    'FDA药品标签字段检索': 'fda_drug_label_search'
+                };
+                function _skillPlazaIconKey(skill) {
+                    if (!skill) return '';
+                    var sid = String(skill.id || skill.tool_name || skill.toolName || '').trim();
+                    if (sid && (PATHS[sid] || EMOJI_ICONS[sid])) return sid;
+                    var sname = String(skill.name || '').trim();
+                    return NAME_TO_KEY[sname] || '';
+                }
+                window.getSkillPlazaEmojiIconHtml = function (skill) {
+                    var key = _skillPlazaIconKey(skill);
+                    if (!key || !EMOJI_ICONS[key]) return '';
+                    return EMOJI_ICONS[key];
                 };
                 window.getSkillPlazaLineIconHtml = function (skill) {
                     if (!skill) return '';
-                    var sid = String(skill.id || '').trim();
-                    var sname = String(skill.name || '').trim();
-                    var key = PATHS[sid] ? sid : (NAME_TO_KEY[sname] || '');
-                    var paths = key ? PATHS[key] : '';
+                    var key = _skillPlazaIconKey(skill);
+                    if (!key || EMOJI_ICONS[key]) return '';
+                    var paths = PATHS[key] || '';
                     if (!paths) return '';
                     return '<span class="skill-icon-line" aria-hidden="true">' + SVG_HEAD + paths + SVG_TAIL + '</span>';
                 };
             })();
 
             /* 技能收藏状态 100% 来自后端 GET /api/skills 的 saved 字段与 UserSavedSkill 表，不使用 localStorage。*/
+            /** 阵列一 Batch2 + 阵列二 Batch2 · 上新技能（橱窗置顶 + 卡片角标「新」） */
+            window.__PLAZA_NEW_SKILL_IDS = {
+                acmg_variant_interpretation: true,
+                pipeline_selection_memo: true,
+                omics_metadata_review: true,
+                qpcr_primer_design_guide: true,
+                oral_presentation_outline: true,
+                clinical_trial_protocol_skeleton: true,
+                drug_repositioning_memo: true,
+                protein_function_hypothesis: true,
+                experiment_failure_postmortem: true,
+                literature_matrix_notes: true,
+                multi_omics_storyline: true,
+                ethics_consent_checklist: true,
+                stats_method_advisor: true,
+                clinvar_query: true,
+                dbsnp_query: true,
+                gwas_catalog_query: true,
+                reactome_query: true,
+                interpro_query: true,
+                geo_query: true,
+                gene_protein_info_query: true,
+                mrna_sequence_fetch: true,
+                rnacentral_query: true,
+                ensembl_go_descendants: true,
+                drug_id_crossref: true,
+                refmet_metabolite_search: true,
+                opentargets_chembl_hierarchy: true,
+                fda_drug_label_search: true
+            };
+            window.__PLAZA_NEW_SKILL_NAMES = {
+                '变异临床意义解读草案（ACMG 风格）': true,
+                '生物信息 Pipeline 选型备忘录': true,
+                '组学样本 Metadata 规范审查': true,
+                '引物/qPCR 实验设计说明': true,
+                '会议口头报告讲稿大纲': true,
+                '临床注册方案骨架生成（CONSORT 导向）': true,
+                '药物重定位假说备忘录': true,
+                '蛋白质功能假说推演': true,
+                '实验失败复盘报告': true,
+                '文献矩阵精读笔记': true,
+                '多组学整合分析故事线': true,
+                '伦理与知情同意要点清单': true,
+                '统计方法选择建议书': true,
+                'ClinVar 数据库查询': true,
+                'dbSNP 数据库查询': true,
+                'GWAS catalog 数据库查询': true,
+                'Reactome 数据库查询': true,
+                'InterPro 数据库查询': true,
+                'GEO 数据库查询': true,
+                '基因蛋白信息查询器': true,
+                '获取mRNA序列工具': true,
+                'RNAcentral 按编号查询': true,
+                'Ensembl GO术语后代查询': true,
+                '药物标识符交叉检索': true,
+                '代谢物名称检索': true,
+                'OpenTargets_按ChEMBL ID获取父分子和子分子': true,
+                'FDA药品标签字段检索': true
+            };
+            function skillPlazaIsNewSkill(skill) {
+                if (!skill) return false;
+                if (skill.is_new_skill === true || skill.is_new_skill === 1) return true;
+                var sid = String(skill.id || '').trim();
+                if (sid && window.__PLAZA_NEW_SKILL_IDS && window.__PLAZA_NEW_SKILL_IDS[sid]) return true;
+                var nm = String(skill.name || '').trim();
+                return !!(nm && window.__PLAZA_NEW_SKILL_NAMES && window.__PLAZA_NEW_SKILL_NAMES[nm]);
+            }
+            function annotatePlazaNewSkills(items) {
+                return (items || []).map(function(s) {
+                    if (!s || !skillPlazaIsNewSkill(s)) return s;
+                    var c = {};
+                    for (var k in s) {
+                        if (Object.prototype.hasOwnProperty.call(s, k)) c[k] = s[k];
+                    }
+                    c.is_new_skill = true;
+                    if (c.is_implemented !== true && c.is_implemented !== 1) c.is_implemented = true;
+                    return c;
+                });
+            }
             /** 技能广场条目时间戳（与后端排序一致：同「已接入」档位内 created_at 越新越靠前） */
             function skillPlazaCreatedTs(skill) {
                 var t = skill && skill.created_at;
@@ -3024,6 +3649,18 @@
             /** 已实现/已对接后端的技能置顶（同档内再按 created_at 降序，与 GET /api/skills 及 PATCH 刷新时间戳一致） */
             function sortSkillsPinImplemented(items) {
                 return (items || []).slice().sort(function(a, b) {
+                    var ia = (a && (a.is_implemented === true || a.is_implemented === 1)) ? 1 : 0;
+                    var ib = (b && (b.is_implemented === true || b.is_implemented === 1)) ? 1 : 0;
+                    if (ib !== ia) return ib - ia;
+                    return skillPlazaCreatedTs(b) - skillPlazaCreatedTs(a);
+                });
+            }
+            /** 橱窗排序：上新「新」> 已接入 > created_at 降序 */
+            function sortSkillsPlazaDisplayOrder(items) {
+                return annotatePlazaNewSkills(items).slice().sort(function(a, b) {
+                    var na = skillPlazaIsNewSkill(a) ? 1 : 0;
+                    var nb = skillPlazaIsNewSkill(b) ? 1 : 0;
+                    if (nb !== na) return nb - na;
                     var ia = (a && (a.is_implemented === true || a.is_implemented === 1)) ? 1 : 0;
                     var ib = (b && (b.is_implemented === true || b.is_implemented === 1)) ? 1 : 0;
                     if (ib !== ia) return ib - ia;
@@ -3111,7 +3748,7 @@
             /** 合并 Featured、过滤占位/暂缓项后立即 Map 去重 → 干净目录 */
             function buildSkillsPlazaCleanCatalog(apiItems, mainCat, isMyTab) {
                 var items = (apiItems || []).slice();
-                items = sortSkillsPinImplemented(items);
+                items = sortSkillsPlazaDisplayOrder(items);
                 var featuredAll = window.__FEATURED_RESEARCH_SKILLS || [];
                 var featNames = {};
                 featuredAll.forEach(function(f) { if (f && f.name) featNames[f.name] = true; });
@@ -3137,7 +3774,7 @@
                 if (preDedupeLen > items.length) {
                     console.log('[Skills Plaza] 目录去重: 移除 ' + (preDedupeLen - items.length) + ' 条重复，唯一技能 ' + items.length + ' 条');
                 }
-                return items;
+                return sortSkillsPlazaDisplayOrder(items);
             }
             /** 「特色科研流程」页仅展示 main_category 为该类的置顶项，避免与化学/生物医药等重复橱窗 */
             function getFeaturedSkillsForPlazaTab(mainCat) {
@@ -3170,7 +3807,10 @@
                     return c;
                 });
                 pinnedCopy.forEach(function(f) { names[f.name] = true; });
-                var rest = (items || []).filter(function(s) { return s && s.name && !names[s.name]; });
+                pinnedCopy = sortSkillsPlazaDisplayOrder(pinnedCopy);
+                var rest = sortSkillsPlazaDisplayOrder((items || []).filter(function(s) {
+                    return s && s.name && !names[s.name];
+                }));
                 return pinnedCopy.concat(rest);
             }
             function fetchSkills(mainCat, page) {
@@ -3209,13 +3849,17 @@
                                     var desc = descTrimmed.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
                                     var mainCat = (s.main_category || '').replace(/</g, '&lt;');
                                     var subCat = (s.sub_category || '').replace(/</g, '&lt;');
-                                    var lineIcon = (typeof window.getSkillPlazaLineIconHtml === 'function')
+                                    var emojiIcon = (typeof window.getSkillPlazaEmojiIconHtml === 'function')
+                                        ? window.getSkillPlazaEmojiIconHtml(s) : '';
+                                    var lineIcon = !emojiIcon && (typeof window.getSkillPlazaLineIconHtml === 'function')
                                         ? window.getSkillPlazaLineIconHtml(s) : '';
-                                    var icon = lineIcon
-                                        ? lineIcon
-                                        : (s.plain_doc_skill
-                                            ? '<span class="skill-icon-neutral" aria-hidden="true">Aa</span>'
-                                            : (skillCardIcons[s.sub_category] || '🧬'));
+                                    var icon = emojiIcon
+                                        ? emojiIcon
+                                        : (lineIcon
+                                            ? lineIcon
+                                            : (s.plain_doc_skill
+                                                ? '<span class="skill-icon-neutral" aria-hidden="true">Aa</span>'
+                                                : (skillCardIcons[s.sub_category] || '🧬')));
                                     var cardClass = s.plain_doc_skill ? 'skill-card skill-card--research-doc' : 'skill-card';
                                     var catBadges = '';
                                     if (mainCat) catBadges += '<span class="cat-badge">' + mainCat + '</span>';
@@ -3241,7 +3885,11 @@
                                         : '<button type="button" class="icon-btn btn-skill-bookmark" title="' + addBtnTitle + '" data-skill-id="' + s.id + '" data-saved="' + (isSaved ? '1' : '0') + '">' + addBtnSvg + '</button>';
                                     var footerActionsHtml = bookmarkBlock +
                                         '<button type="button" class="icon-btn" title="复制"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>';
+                                    var newBadgeHtml = skillPlazaIsNewSkill(s)
+                                        ? '<span class="skill-plaza-new-badge" title="上新技能" aria-label="上新">新</span>'
+                                        : '';
                                     return '<div class="' + cardClass + '" data-skill-id="' + s.id + '">' +
+                                        newBadgeHtml +
                                         '<div class="skill-card-header">' +
                                         '<div class="skill-icon">' + icon + '</div>' +
                                         '<div class="skill-title-group">' +
@@ -3317,7 +3965,7 @@
                                 nums = [1, '...'].concat([skillsCurrentPage - 1, skillsCurrentPage, skillsCurrentPage + 1].filter(function(n) { return n >= 1 && n <= totalPages; }));
                                 if (skillsCurrentPage + 1 < totalPages) nums.push('...', totalPages);
                             } else if (totalPages > 7) nums.push('...', totalPages);
-                            var sizeOpts = [12, 20, 30, 50];
+                            var sizeOpts = SKILLS_PAGE_SIZE_OPTIONS;
                             var sizeSelectHtml = '<select id="skills-page-size" style="margin-left:12px;border:1px solid #e5e7eb;border-radius:6px;padding:4px 8px;outline:none;cursor:pointer;background:#fff;color:#374151;">' +
                                 sizeOpts.map(function(v) { return '<option value="' + v + '"' + (v === skillsPageSize ? ' selected' : '') + '>' + v + ' 条/页</option>'; }).join('') + '</select>';
                             pagerEl.innerHTML = '<button type="button" class="pager-btn" data-action="prev"' + (prevDisabled ? ' disabled' : '') + '>&lt;</button>' +
@@ -3341,7 +3989,12 @@
                             if (pageSizeEl) {
                                 pageSizeEl.addEventListener('change', function() {
                                     var v = parseInt(this.value, 10);
-                                    if (!isNaN(v) && v > 0) { skillsPageSize = v; skillsCurrentPage = 1; fetchSkills(skillsCurrentMain, 1); }
+                                    if (!isNaN(v) && v > 0) {
+                                        skillsPageSize = v;
+                                        saveSkillsPageSizeToStorage(v);
+                                        skillsCurrentPage = 1;
+                                        fetchSkills(skillsCurrentMain, 1);
+                                    }
                                 });
                             }
                         }
@@ -7423,7 +8076,23 @@
                 chembl_similar_molecules: true,
                 chembl_drug_search: true,
                 protein_sequence_blast: true,
-                nucleotide_sequence_blast: true
+                nucleotide_sequence_blast: true,
+                pubmed_query: true,
+                uniprot_query: true,
+                smiles_to_cid: true,
+                clinvar_query: true,
+                dbsnp_query: true,
+                gwas_catalog_query: true,
+                reactome_query: true,
+                interpro_query: true,
+                geo_query: true,
+                gene_protein_info_query: true,
+                drug_id_crossref: true,
+                refmet_metabolite_search: true,
+                rnacentral_query: true,
+                ensembl_go_descendants: true,
+                opentargets_chembl_hierarchy: true,
+                fda_drug_label_search: true
             };
             function _skillVisDepictUrlForRow(row) {
                 var smi = _skillVisPickSmilesFromRow(row);
@@ -12449,6 +13118,8 @@
                     var dz = document.getElementById('skill-dropzone');
                     var fi = document.getElementById('skill-file-input');
                     var submitBtn = document.getElementById('skill-upload-submit');
+                    var promptTa = document.getElementById('skill-prompt-textarea');
+                    var promptRadio = document.querySelector('input[name="skill-driver-type"][value="prompt"]');
                     if (el) {
                         el.style.display = 'flex';
                         el.setAttribute('aria-hidden', 'false');
@@ -12459,6 +13130,9 @@
                     if (fnEl) { fnEl.style.display = 'none'; fnEl.textContent = ''; }
                     if (dz) dz.classList.remove('dragover');
                     if (fi) fi.value = '';
+                    if (promptTa) promptTa.value = '';
+                    if (promptRadio) promptRadio.checked = true;
+                    if (typeof _updateSkillUploadDriverUI === 'function') _updateSkillUploadDriverUI();
                     _skillDropzoneEnterCount = 0;
                     if (!_skillModalDragBlocker) {
                         _skillModalDragBlocker = function(e) {
@@ -12481,6 +13155,8 @@
                     _skillPluginPendingFile = null;
                     var sb = document.getElementById('skill-upload-submit');
                     if (sb) { sb.disabled = true; sb.textContent = '安装'; }
+                    var promptTa = document.getElementById('skill-prompt-textarea');
+                    if (promptTa) promptTa.value = '';
                 }
                 var btnUploadSkill = document.getElementById('btn-upload-skill');
                 if (btnUploadSkill) btnUploadSkill.onclick = function() {
@@ -12496,40 +13172,102 @@
                     var fi = document.getElementById('skill-file-input');
                     var errEl = document.getElementById('skill-upload-error');
                     var fnEl = document.getElementById('skill-dropzone-filename');
+                    var dzTitle = document.getElementById('skill-dropzone-title');
+                    var hintsList = document.getElementById('skill-upload-hints-list');
+                    var promptWrap = document.getElementById('skill-prompt-text-wrap');
+                    var promptTa = document.getElementById('skill-prompt-textarea');
                     var submitBtn = document.getElementById('skill-upload-submit');
                     if (!dz || !fi) return;
-                    function _validExt(name) {
-                        var n = (name || '').toLowerCase();
-                        return n.endsWith('.zip') || n.endsWith('.md');
+
+                    function _getDriverType() {
+                        var checked = document.querySelector('input[name="skill-driver-type"]:checked');
+                        return (checked && checked.value) ? checked.value : 'prompt';
                     }
+
+                    function _validExt(name, driver) {
+                        var n = (name || '').toLowerCase();
+                        if (driver === 'prompt') return n.endsWith('.zip') || n.endsWith('.md');
+                        return n.endsWith('.zip');
+                    }
+
+                    function _syncFileInputAccept(driver) {
+                        fi.setAttribute('accept', driver === 'prompt' ? '.zip,.md,application/zip,text/markdown' : '.zip,application/zip');
+                    }
+
+                    function _canSubmit() {
+                        var driver = _getDriverType();
+                        if (driver === 'prompt') {
+                            var hasText = promptTa && (promptTa.value || '').trim().length > 0;
+                            return !!(_skillPluginPendingFile || hasText);
+                        }
+                        return !!_skillPluginPendingFile;
+                    }
+
+                    function _refreshSubmitState() {
+                        if (submitBtn) submitBtn.disabled = !_canSubmit();
+                    }
+
+                    window._updateSkillUploadDriverUI = function() {
+                        var driver = _getDriverType();
+                        _syncFileInputAccept(driver);
+                        if (promptWrap) promptWrap.style.display = (driver === 'prompt') ? 'block' : 'none';
+                        if (dzTitle) {
+                            dzTitle.textContent = (driver === 'prompt')
+                                ? '拖放 .zip 或 SKILL.md 文件，或点击选择'
+                                : '请上传包含脚本及环境依赖的 .zip 技能包';
+                        }
+                        if (hintsList) {
+                            hintsList.innerHTML = (driver === 'prompt')
+                                ? '<li>包含 SKILL.md 的 .zip 压缩包，或直接拖入 SKILL.md</li><li>也可在上方文本框直接粘贴 Prompt</li>'
+                                : '<li>请上传包含 main.py / 依赖声明 / SKILL.md 的 .zip 技能包</li><li>提交后进入管理员审核，通过后上架</li>';
+                        }
+                        if (driver !== 'prompt' && _skillPluginPendingFile && !_validExt(_skillPluginPendingFile.name, driver)) {
+                            _skillPluginPendingFile = null;
+                            if (fnEl) { fnEl.style.display = 'none'; fnEl.textContent = ''; }
+                            fi.value = '';
+                        }
+                        _refreshSubmitState();
+                    };
+
                     function _showErr(msg) {
                         if (!errEl) return;
                         errEl.textContent = msg || '';
                         errEl.style.display = msg ? 'block' : 'none';
                     }
+
                     function _setPendingFile(file) {
-                        if (!file || !_validExt(file.name)) {
+                        var driver = _getDriverType();
+                        if (!file || !_validExt(file.name, driver)) {
                             _skillPluginPendingFile = null;
-                            if (submitBtn) submitBtn.disabled = true;
-                            _showErr('仅支持 .zip 或 .md 文件');
+                            _refreshSubmitState();
+                            _showErr(driver === 'prompt' ? '仅支持 .zip 或 .md 文件' : '单脚本/模型驱动仅支持 .zip 压缩包');
                             if (fnEl) { fnEl.style.display = 'none'; fnEl.textContent = ''; }
                             return;
                         }
                         _skillPluginPendingFile = file;
                         _showErr('');
                         if (fnEl) { fnEl.textContent = file.name; fnEl.style.display = 'block'; }
-                        if (submitBtn) submitBtn.disabled = false;
+                        _refreshSubmitState();
                     }
-                    function _uploadPluginFile(file) {
-                        if (!file || !_validExt(file.name)) {
-                            _showErr('仅支持 .zip 或 .md 文件');
+
+                    function _submitSkillUpload() {
+                        var driver = _getDriverType();
+                        var hasText = promptTa && (promptTa.value || '').trim().length > 0;
+                        if (driver === 'prompt' && !_skillPluginPendingFile && !hasText) {
+                            _showErr('请填写 Prompt 或选择 .md/.zip 文件');
+                            return;
+                        }
+                        if (driver !== 'prompt' && !_skillPluginPendingFile) {
+                            _showErr('请上传 .zip 技能包');
                             return;
                         }
                         _showErr('');
-                        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '安装中…'; }
+                        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '提交中…'; }
                         dz.classList.add('skill-plugin-dropzone--busy');
                         var fd = new FormData();
-                        fd.append('file', file, file.name);
+                        fd.append('driver_type', driver);
+                        if (hasText) fd.append('prompt_text', (promptTa.value || '').trim());
+                        if (_skillPluginPendingFile) fd.append('file', _skillPluginPendingFile, _skillPluginPendingFile.name);
                         fetch('/api/plugins/upload', { method: 'POST', headers: getAuthHeaders(), body: fd })
                             .then(function(r) {
                                 return r.json().then(function(d) {
@@ -12540,36 +13278,44 @@
                             .then(function(data) {
                                 if (submitBtn) { submitBtn.textContent = '安装'; submitBtn.disabled = true; }
                                 closeSkillUploadModal();
-                                if (typeof showToast === 'function') showToast((data && data.name) ? ('已上架：' + data.name) : '安装成功');
-                                else alert((data && data.name) ? ('已上架：' + data.name) : '安装成功');
-                                if (typeof fetchSkills === 'function') fetchSkills(typeof skillsCurrentMain !== 'undefined' ? skillsCurrentMain : '', 1);
+                                var okMsg = '✅ 技能提交成功！已进入管理员审核队列，通过后将上架至技能广场。';
+                                if (typeof showToast === 'function') showToast(okMsg);
+                                else alert(okMsg);
                                 fi.value = '';
                                 if (fnEl) fnEl.style.display = 'none';
                             })
                             .catch(function(err) {
-                                var msg = '安装失败';
+                                var msg = '提交失败';
                                 if (err && err.detail != null) {
                                     if (typeof err.detail === 'string') msg = err.detail;
                                     else if (Array.isArray(err.detail)) msg = err.detail.map(function(x) { return (x && (x.msg || x.message)) || String(x); }).join('; ');
                                     else msg = JSON.stringify(err.detail);
                                 } else if (err && err.message) msg = err.message;
                                 _showErr(msg);
-                                if (submitBtn) { submitBtn.disabled = !_skillPluginPendingFile; submitBtn.textContent = '安装'; }
+                                if (submitBtn) { submitBtn.disabled = !_canSubmit(); submitBtn.textContent = '安装'; }
                             })
                             .finally(function() {
                                 dz.classList.remove('skill-plugin-dropzone--busy');
                             });
                     }
+
                     if (submitBtn) {
                         submitBtn.onclick = function() {
                             if (!isLoggedIn()) { openAuthModal(); return; }
-                            if (!_skillPluginPendingFile) {
-                                _showErr('请先选择 .zip 或 SKILL.md 文件');
-                                return;
-                            }
-                            _uploadPluginFile(_skillPluginPendingFile);
+                            _submitSkillUpload();
                         };
                     }
+                    document.querySelectorAll('input[name="skill-driver-type"]').forEach(function(radio) {
+                        radio.addEventListener('change', function() {
+                            _updateSkillUploadDriverUI();
+                        });
+                    });
+                    if (promptTa) {
+                        promptTa.addEventListener('input', function() {
+                            _refreshSubmitState();
+                        });
+                    }
+                    _updateSkillUploadDriverUI();
                     dz.addEventListener('click', function() { fi.click(); });
                     dz.addEventListener('keydown', function(e) {
                         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fi.click(); }
@@ -20172,6 +20918,7 @@
         <script src="/js/components/im_channels_modal.js" defer></script>
         <script src="/js/feedback_ui.js"></script>
         <script type="module" src="/js/components/admin_console.js"></script>
+        <script type="module" src="/js/components/user_notifications.js"></script>
         <div id="client-download-modal" class="omics-modal-overlay" style="display: none;" aria-modal="true" role="dialog" aria-labelledby="client-download-modal-title" onclick="if (event.target === this && typeof closeClientDownloadModal === 'function') closeClientDownloadModal();">
             <div class="omics-update-dialog" style="max-width: 480px;" onclick="event.stopPropagation();">
                 <div class="update-header">

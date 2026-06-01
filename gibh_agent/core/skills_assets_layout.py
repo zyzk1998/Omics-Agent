@@ -20,6 +20,7 @@ __all__ = [
     "get_models_skills_dir",
     "get_dynamic_skills_dir",
     "get_dynamic_skills_root",
+    "get_skills_review_staging_dir",
 ]
 
 
@@ -81,3 +82,12 @@ def get_dynamic_skills_dir() -> Path:
 # plugin_system/parser 等场所沿用的对外名称
 def get_dynamic_skills_root() -> Path:
     return get_dynamic_skills_dir()
+
+
+def get_skills_review_staging_dir() -> Path:
+    """
+    用户上传技能的管理员审核暂存根目录。
+    默认：${UPLOAD_DIR}/skills_review_staging（与 api-server 挂载 ./data/uploads 一致）。
+    """
+    upload = os.environ.get("UPLOAD_DIR", "/app/uploads").strip()
+    return _mkdir(Path(os.path.abspath(upload)) / "skills_review_staging")

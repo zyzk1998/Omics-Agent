@@ -208,6 +208,14 @@ except Exception as e:
     logger.warning("⚠️ PluginSystem 路由注册失败: %s", e)
 
 try:
+    from gibh_agent.api.routers.notifications import router as notifications_router
+
+    app.include_router(notifications_router)
+    logger.info("✅ Notifications 路由已注册: GET /api/user/notifications/unread")
+except Exception as e:
+    logger.warning("⚠️ Notifications 路由注册失败: %s", e)
+
+try:
     from gibh_agent.api.routers.mcp_config import router as mcp_config_router
 
     app.include_router(mcp_config_router, prefix="/api/config")
@@ -420,7 +428,7 @@ def list_skills_public(
 
             dyn_rows = (
                 db.query(DynamicSkillPlugin)
-                .filter(DynamicSkillPlugin.status == "approved")
+                .filter(DynamicSkillPlugin.status.in_(("approved", "published")))
                 .order_by(DynamicSkillPlugin.created_at.desc())
                 .all()
             )

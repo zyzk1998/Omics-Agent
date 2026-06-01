@@ -79,7 +79,8 @@ function ensureAdminModal() {
         const id = btn.getAttribute('data-skill-id');
         const action = btn.getAttribute('data-review-action');
         if (id && (action === 'approve' || action === 'reject')) {
-            void reviewSkill(id, action);
+            const src = btn.getAttribute('data-source-type') || 'ugc';
+            void reviewSkill(id, action, src);
         }
     });
     const uwrap = document.getElementById('admin-users-table-wrap');
@@ -161,18 +162,20 @@ async function fetchPendingUsers() {
     return res.json();
 }
 
-async function reviewSkill(skillId, action) {
+async function reviewSkill(skillId, action, sourceType) {
     const errEl = document.getElementById('admin-console-error');
     setInlineError(errEl, '');
+    const src = (sourceType || 'ugc').toLowerCase();
+    const reviewUrl =
+        src === 'plugin'
+            ? '/api/admin/plugins/' + encodeURIComponent(String(skillId)) + '/review'
+            : '/api/admin/skills/' + encodeURIComponent(String(skillId)) + '/review';
     try {
-        const res = await fetch(
-            '/api/admin/skills/' + encodeURIComponent(String(skillId)) + '/review',
-            {
-                method: 'POST',
-                headers: getAuthHeadersMerged(),
-                body: JSON.stringify({ action }),
-            }
-        );
+        const res = await fetch(reviewUrl, {
+            method: 'POST',
+            headers: getAuthHeadersMerged(),
+            body: JSON.stringify({ action }),
+        });
         if (res.status === 403) throw new Error('需要管理员权限');
         if (!res.ok) {
             let detail = '操作失败';
@@ -242,6 +245,11 @@ async function refreshAdminTable() {
         const rows = list
             .map((s) => {
                 const id = s.id;
+                const sourceType = s.source_type || 'ugc';
+                const sourceLabel =
+                    sourceType === 'plugin'
+                        ? '<span class="badge bg-info text-dark me-1">安装技能</span>'
+                        : '<span class="badge bg-secondary me-1">UGC</span>';
                 const name = escapeHtml(s.name || '');
                 const mc = escapeHtml(s.main_category || '—');
                 const sc = escapeHtml(s.sub_category || '—');
@@ -250,9 +258,43 @@ async function refreshAdminTable() {
                 const rawDesc = s.description || '';
                 const descShort = escapeHtml(rawDesc.slice(0, 100));
                 const ell = rawDesc.length > 100 ? '…' : '';
+                const st = (s.status || 'pending').toLowerCase();
+                const statusBadge =
+                    '<span class="badge bg-light text-dark border me-1">' + escapeHtml(st) + '</span>';
+                let actionHtml = '';
+                if (sourceType === 'plugin') {
+                    if (st === 'pending') {
+                        actionHtml =
+                            '<button type="button" class="btn btn-sm btn-primary me-1" data-skill-id="' +
+                            id +
+                            '" data-source-type="plugin" data-review-action="accept">受理</button>' +
+                            '<button type="button" class="btn btn-sm btn-outline-danger" data-skill-id="' +
+                            id +
+                            '" data-source-type="plugin" data-review-action="reject">驳回</button>';
+                    } else if (st === 'accepted') {
+                        actionHtml =
+                            '<button type="button" class="btn btn-sm btn-success me-1" data-skill-id="' +
+                            id +
+                            '" data-source-type="plugin" data-review-action="publish">上架</button>' +
+                            '<button type="button" class="btn btn-sm btn-outline-danger" data-skill-id="' +
+                            id +
+                            '" data-source-type="plugin" data-review-action="reject">驳回</button>';
+                    } else {
+                        actionHtml = '<span class="text-muted small">—</span>';
+                    }
+                } else {
+                    actionHtml =
+                        '<button type="button" class="btn btn-sm btn-success me-1" data-skill-id="' +
+                        id +
+                        '" data-source-type="ugc" data-review-action="approve">通过</button>' +
+                        '<button type="button" class="btn btn-sm btn-outline-danger" data-skill-id="' +
+                        id +
+                        '" data-source-type="ugc" data-review-action="reject">驳回</button>';
+                }
                 return (
                     '<tr>' +
                     '<td>' +
+                    sourceLabel +
                     name +
                     '</td><td>' +
                     mc +
@@ -265,21 +307,18 @@ async function refreshAdminTable() {
                     '</small></td><td><small class="text-secondary">' +
                     descShort +
                     ell +
-                    '</small></td>' +
+                    '</small></td><td>' +
+                    statusBadge +
+                    '</td>' +
                     '<td class="text-nowrap">' +
-                    '<button type="button" class="btn btn-sm btn-success me-1" data-skill-id="' +
-                    id +
-                    '" data-review-action="approve">通过</button>' +
-                    '<button type="button" class="btn btn-sm btn-outline-danger" data-skill-id="' +
-                    id +
-                    '" data-review-action="reject">驳回</button>' +
+                    actionHtml +
                     '</td></tr>'
                 );
             })
             .join('');
         wrap.innerHTML =
             '<table class="table table-hover table-sm align-middle mb-0">' +
-            '<thead><tr><th>名称</th><th>大类</th><th>标签</th><th>作者</th><th>提交时间</th><th>描述摘要</th><th>操作</th></tr></thead>' +
+            '<thead><tr><th>名称</th><th>大类</th><th>标签</th><th>作者</th><th>提交时间</th><th>描述摘要</th><th>状态</th><th>操作</th></tr></thead>' +
             '<tbody>' +
             rows +
             '</tbody></table>';

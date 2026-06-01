@@ -43,6 +43,37 @@ _LAUNCH_SKILL_CLASSES: Dict[str, Tuple[str, str]] = {
     "rdkit_mol_format_convert": ("gibh_agent.skills.skill_mol_format_convert", "RdkitMolFormatConvertSkill"),
     "nucleotide_sequence_blast": ("gibh_agent.skills.skill_nucleotide_alignment", "NucleotideSequenceAlignmentSkill"),
     "protein_sequence_blast": ("gibh_agent.skills.skill_protein_alignment", "ProteinSequenceAlignmentSkill"),
+    "pubmed_query": ("gibh_agent.skills.skill_pubmed_query", "PubmedQuerySkill"),
+    "uniprot_query": ("gibh_agent.skills.skill_uniprot_query", "UniprotQuerySkill"),
+    "smiles_to_cid": ("gibh_agent.skills.skill_smiles_to_cid", "SmilesToCidSkill"),
+    "seq_format_converter": ("gibh_agent.skills.skill_seq_format_converter", "SeqFormatConverterSkill"),
+    "calc_molecular_weight": ("gibh_agent.skills.skill_calc_molecular_weight", "CalcMolecularWeightSkill"),
+    "clinvar_query": ("gibh_agent.skills.skill_clinvar_query", "ClinvarQuerySkill"),
+    "dbsnp_query": ("gibh_agent.skills.skill_dbsnp_query", "DbsnpQuerySkill"),
+    "gwas_catalog_query": ("gibh_agent.skills.skill_gwas_catalog_query", "GwasCatalogQuerySkill"),
+    "reactome_query": ("gibh_agent.skills.skill_reactome_query", "ReactomeQuerySkill"),
+    "interpro_query": ("gibh_agent.skills.skill_interpro_query", "InterproQuerySkill"),
+    "geo_query": ("gibh_agent.skills.skill_geo_query", "GeoQuerySkill"),
+    "gene_protein_info_query": (
+        "gibh_agent.skills.skill_gene_protein_info_query",
+        "GeneProteinInfoQuerySkill",
+    ),
+    "mrna_sequence_fetch": ("gibh_agent.skills.skill_mrna_sequence_fetch", "MrnaSequenceFetchSkill"),
+    "drug_id_crossref": ("gibh_agent.skills.skill_drug_id_crossref", "DrugIdCrossrefSkill"),
+    "refmet_metabolite_search": (
+        "gibh_agent.skills.skill_refmet_metabolite_search",
+        "RefmetMetaboliteSearchSkill",
+    ),
+    "rnacentral_query": ("gibh_agent.skills.skill_rnacentral_query", "RnacentralQuerySkill"),
+    "ensembl_go_descendants": (
+        "gibh_agent.skills.skill_ensembl_go_descendants",
+        "EnsemblGoDescendantsSkill",
+    ),
+    "opentargets_chembl_hierarchy": (
+        "gibh_agent.skills.skill_opentargets_chembl_hierarchy",
+        "OpentargetsChemblHierarchySkill",
+    ),
+    "fda_drug_label_search": ("gibh_agent.skills.skill_fda_drug_label_search", "FdaDrugLabelSearchSkill"),
 }
 
 

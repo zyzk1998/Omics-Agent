@@ -1795,13 +1795,17 @@
                 flex: 1;
                 min-height: 0;
                 overflow-y: auto;
-                padding: 24px 20px 100px;
+                overflow-x: hidden;
+                padding: 24px 20px 128px;
+                box-sizing: border-box;
             }
             .skills-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
                 gap: 20px;
                 align-items: stretch;
+                position: relative;
+                z-index: 1;
             }
             .skill-card {
                 position: relative;
@@ -1813,11 +1817,36 @@
                 flex-direction: column;
                 gap: 12px;
                 min-height: 200px;
+                overflow: hidden;
                 transition: box-shadow 0.2s ease, border-color 0.2s ease;
             }
             .skill-card:hover {
                 border-color: #93c5fd;
                 box-shadow: 0 12px 28px rgba(17, 24, 39, 0.10);
+            }
+            /* 技能广场 · 上新角标（阵列一 Batch2 等 · 橘黄色） */
+            .skill-plaza-new-badge {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                z-index: 2;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-width: 22px;
+                height: 22px;
+                padding: 0 6px;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 700;
+                line-height: 1;
+                letter-spacing: 0.02em;
+                color: #92400e;
+                background: linear-gradient(135deg, #fde68a 0%, #fbbf24 55%, #f59e0b 100%);
+                border: 1px solid #f59e0b;
+                box-shadow: 0 2px 6px rgba(245, 158, 11, 0.35);
+                pointer-events: none;
+                user-select: none;
             }
             .skill-card-header {
                 display: flex;
@@ -2085,6 +2114,7 @@
                 left: 0;
                 right: 0;
                 flex-shrink: 0;
+                z-index: 30;
                 background: #fff;
                 border-top: 1px solid #e2e8f0;
                 padding: 12px 20px;
@@ -2094,6 +2124,8 @@
                 gap: 8px;
                 font-size: 13px;
                 color: #64748b;
+                box-shadow: 0 -6px 16px rgba(15, 23, 42, 0.06);
+                pointer-events: auto;
             }
             .skills-square-pager .pager-btn, .skills-square-pager .pager-num {
                 background: #ffffff;
@@ -2109,6 +2141,94 @@
             .skills-square-pager .pager-num.current { background: #3b82f6; color: #ffffff; border-color: #3b82f6; }
             .skills-square-pager #skills-page-size { margin-left: 12px; border: 1px solid #e5e7eb; border-radius: 6px; padding: 4px 8px; outline: none; cursor: pointer; background: #fff; color: #374151; }
             .skills-square-empty { text-align: center; padding: 48px 20px; color: #94a3b8; font-size: 15px; }
+            /* 侧栏 · 用户消息铃铛 */
+            .sidebar-notifications-row {
+                display: flex;
+                justify-content: flex-end;
+                padding: 0 12px 6px;
+            }
+            .sidebar-notifications-bell {
+                position: relative;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 36px;
+                height: 36px;
+                border: 1px solid #e5e7eb;
+                border-radius: 10px;
+                background: #fff;
+                color: #374151;
+                cursor: pointer;
+                transition: background 0.15s ease, border-color 0.15s ease;
+            }
+            .sidebar-notifications-bell:hover {
+                background: #f3f4f6;
+                border-color: #d1d5db;
+            }
+            .sidebar-notifications-badge {
+                position: absolute;
+                top: -4px;
+                right: -4px;
+                min-width: 16px;
+                height: 16px;
+                padding: 0 4px;
+                border-radius: 999px;
+                background: #ef4444;
+                color: #fff;
+                font-size: 10px;
+                font-weight: 700;
+                line-height: 16px;
+                align-items: center;
+                justify-content: center;
+                box-sizing: border-box;
+            }
+            .user-notifications-panel {
+                max-height: min(420px, 60vh);
+                overflow: hidden;
+                display: flex;
+                flex-direction: column;
+                padding: 0;
+            }
+            .user-notifications-panel__header {
+                padding: 10px 14px;
+                font-size: 13px;
+                font-weight: 600;
+                color: #111827;
+                border-bottom: 1px solid #f3f4f6;
+            }
+            .user-notifications-panel__list {
+                overflow-y: auto;
+                max-height: min(320px, 50vh);
+            }
+            .user-notifications-item {
+                display: block;
+                width: 100%;
+                text-align: left;
+                border: none;
+                border-bottom: 1px solid #f3f4f6;
+                background: #fff;
+                padding: 10px 14px;
+                cursor: pointer;
+            }
+            .user-notifications-item:hover { background: #f9fafb; }
+            .user-notifications-item--unread .user-notifications-item__title { font-weight: 700; }
+            .user-notifications-item__title { font-size: 13px; color: #111827; margin-bottom: 4px; }
+            .user-notifications-item__content { font-size: 12px; color: #4b5563; line-height: 1.45; white-space: pre-wrap; }
+            .user-notifications-item__time { font-size: 11px; color: #9ca3af; margin-top: 4px; }
+            .user-notifications-panel__empty { padding: 16px 14px; font-size: 13px; color: #6b7280; }
+            .user-notifications-panel__footer {
+                padding: 8px 10px;
+                border-top: 1px solid #f3f4f6;
+                text-align: right;
+            }
+            .user-notifications-panel__read-all {
+                border: none;
+                background: transparent;
+                color: #3b82f6;
+                font-size: 12px;
+                cursor: pointer;
+                padding: 4px 6px;
+            }
             /* ================= 历史专属页 Kimi 级布局 ================= */
             .history-page-container { max-width: 800px; margin: 0 auto; padding: 40px 20px; width: 100%; }
             .history-page-title { margin: 12px 0 20px 0; font-size: 1.5rem; color: #111827; }

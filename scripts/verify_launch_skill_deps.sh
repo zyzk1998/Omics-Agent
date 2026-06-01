@@ -40,6 +40,7 @@ check_cli blastp
 check_py "import httpx" httpx
 check_py "import chembl_webresource_client" chembl_webresource_client
 check_py "import rdkit; from rdkit.Chem import AllChem" rdkit-pypi
+check_py "from Bio import Entrez, SeqIO" biopython
 
 if [[ "$fail" -ne 0 ]]; then
   echo "==> 依赖验收失败；请重建 api-server: ./scripts/build_api_server.sh && docker compose up -d api-server"

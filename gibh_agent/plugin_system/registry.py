@@ -76,11 +76,12 @@ def persist_plugin(
     worker_route: Optional[str] = None,
     status: str = "approved",
 ) -> DynamicSkillPlugin:
-    """写入 dynamic_skill_plugins；name 全局唯一；script 类必须提供 script_path。"""
+    """写入 dynamic_skill_plugins；name 全局唯一；script 类在 approved 时必须提供 script_path。"""
     st = (skill_type or "script").strip().lower()
-    if st not in ("prompt", "script"):
-        raise ValueError("skill_type 必须是 prompt 或 script")
-    if st == "script" and not (script_path and str(script_path).strip()):
+    if st not in ("prompt", "script", "model"):
+        raise ValueError("skill_type 必须是 prompt、script 或 model")
+    pending = (status or "").strip().lower() == "pending"
+    if st == "script" and not pending and not (script_path and str(script_path).strip()):
         raise ValueError("script 类型技能必须提供 main.py 的 script_path")
     route = (worker_route or _DEFAULT_WORKER_ROUTE).strip() or _DEFAULT_WORKER_ROUTE
     sp = os.path.abspath(script_path) if script_path else None
