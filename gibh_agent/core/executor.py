@@ -928,6 +928,42 @@ class WorkflowExecutor:
         # 防幻觉 + 类型转换：只保留签名内参数并做类型转换（如 resolution="0.8" -> 0.8）
         processed_params = self._filter_and_coerce_params_to_signature(processed_params, tool_func)
 
+        # 全局工具参数整形与路径安检门
+        from gibh_agent.core.tool_input_validator import (
+            reset_tool_input_context,
+            set_tool_input_context,
+            validate_and_normalize_inputs,
+        )
+
+        _validator_ctx = dict(step_context or {})
+        _validator_ctx.setdefault("upload_dir", self.upload_dir)
+        _validator_ctx.setdefault("owner_id", (step_context or {}).get("owner_id"))
+        _validator_ctx.setdefault("db", (step_context or {}).get("db"))
+        _tok = set_tool_input_context(_validator_ctx)
+        try:
+            processed_params, _path_err = validate_and_normalize_inputs(
+                tool_id,
+                processed_params,
+                tool_func=tool_func,
+                context=_validator_ctx,
+            )
+        finally:
+            reset_tool_input_context(_tok)
+        if _path_err:
+            _elastic = self._is_elastic_skip_tool(tool_id)
+            return {
+                "status": "error",
+                "step_id": step_id,
+                "step_name": step_name,
+                "tool_id": tool_id,
+                "error": _path_err.get("error"),
+                "message": _path_err.get("message"),
+                "user_message": _path_err.get("user_message"),
+                "error_category": _path_err.get("error_category", "input_path_not_found"),
+                "path_validation": _path_err.get("path_validation"),
+                "can_skip": _elastic,
+            }
+
         # 执行工具（可选 ContextVar 流式日志，供工具内 emit_tool_log → SSE）
         _tl_sink = None
         if step_context and step_context.get("tool_log_sink") is not None:
@@ -975,6 +1011,10 @@ class WorkflowExecutor:
                     formatted_error["user_message"] = user_message  # 优先保留工具侧用户向文案
                 else:
                     formatted_error = ErrorFormatter.format_error(error_msg, tool_id, step_name)
+                if result.get("can_skip") is not None:
+                    formatted_error["can_skip"] = bool(result.get("can_skip"))
+                elif self._is_elastic_skip_tool(tool_id):
+                    formatted_error["can_skip"] = True
                 if result.get("fatal_env_prereq") or result.get("error_category") == "host_env_prereq":
                     formatted_error["can_skip"] = False
                     formatted_error["error_category"] = "host_env_prereq"
@@ -1026,6 +1066,8 @@ class WorkflowExecutor:
             if isinstance(e, ValueError) and len(error_msg.strip()) >= 15 and any(c in error_msg for c in ["请", "需要", "检查", "上传", "指定"]):
                 formatted_error["user_message"] = error_msg
                 formatted_error["error_category"] = "data_issue"
+            if self._is_elastic_skip_tool(tool_id):
+                formatted_error["can_skip"] = True
             
             return {
                 "status": "error",
@@ -1109,17 +1151,116 @@ class WorkflowExecutor:
         st = res.get("status")
         if st is not None and st != "success" and st != "skipped":
             return None
-        for key in ("adata_path", "h5ad_path", "output_h5ad"):
+
+        def _pick_h5ad_file(path_str: str) -> Optional[str]:
+            p = path_str.strip()
+            if not p:
+                return None
+            if os.path.isfile(p) and p.lower().endswith(".h5ad"):
+                return p
+            if os.path.isdir(p):
+                for name in (
+                    "filtered.h5ad",
+                    "normalized.h5ad",
+                    "doublet_detected.h5ad",
+                    "scaled.h5ad",
+                    "hvg.h5ad",
+                    "pca.h5ad",
+                ):
+                    candidate = os.path.join(p, name)
+                    if os.path.isfile(candidate):
+                        return candidate
+            return None
+
+        for key in ("output_h5ad", "h5ad_path", "adata_path"):
             v = res.get(key)
-            if isinstance(v, str) and v.strip():
-                return v.strip()
-        op = res.get("output_path")
-        if isinstance(op, str) and op.strip().lower().endswith(".h5ad"):
-            return op.strip()
-        of = res.get("output_file")
-        if isinstance(of, str) and of.strip().lower().endswith(".h5ad"):
-            return of.strip()
+            if isinstance(v, str):
+                picked = _pick_h5ad_file(v)
+                if picked:
+                    return picked
+        for key in ("output_path", "output_file"):
+            v = res.get(key)
+            if isinstance(v, str):
+                picked = _pick_h5ad_file(v)
+                if picked:
+                    return picked
         return None
+
+    _SCRNA_RAW_10X_INPUT_TOOLS = frozenset(
+        {"rna_data_validation", "rna_qc_filter"}
+    )
+
+    # 弹性容错：校验/预览类步骤失败不掐断整条管线（标记定义见 omics_io_registry）
+    @classmethod
+    def _is_elastic_skip_tool(cls, tool_id: Optional[str]) -> bool:
+        from gibh_agent.core.omics_io_registry import is_elastic_skip_tool
+
+        return is_elastic_skip_tool(tool_id)
+
+    def _should_halt_workflow_on_error(
+        self,
+        step_result: Dict[str, Any],
+        tool_id: Optional[str] = None,
+    ) -> bool:
+        """
+        弹性 DAG 熔断：默认不因单步 error 中止；仅核心卡点或显式不可跳过时 break。
+
+        中止条件（任一满足）：
+        - 工具/步骤显式 can_skip=False
+        - 宿主环境致命缺失（host_env_prereq）
+        - 非弹性工具 + 核心输入路径丢失（input_path_not_found）
+        """
+        if step_result.get("status") != "error":
+            return False
+
+        tid = tool_id or step_result.get("tool_id") or ""
+
+        if step_result.get("can_skip") is False:
+            return True
+        if step_result.get("can_skip") is True:
+            return False
+
+        err_cat = str(step_result.get("error_category") or "").lower()
+        if err_cat == "host_env_prereq":
+            return True
+
+        if self._is_elastic_skip_tool(tid):
+            logger.info(
+                "⏭ [Executor] 弹性容错：非主干工具 %s 报错，继续下游",
+                tid,
+            )
+            return False
+
+        if err_cat == "input_path_not_found":
+            return True
+
+        return False
+
+    @staticmethod
+    def _path_looks_like_upload_bundle(path_val: object) -> bool:
+        if not isinstance(path_val, str) or not path_val.strip():
+            return False
+        p = Path(path_val.strip())
+        if p.is_dir():
+            low = str(p).lower()
+            if "10x_data" in low or "10x_mtx" in low:
+                return True
+            try:
+                names = {x.lower() for x in os.listdir(p)}
+            except OSError:
+                return False
+            return any(
+                n in names
+                for n in (
+                    "matrix.mtx",
+                    "matrix.mtx.gz",
+                    "barcodes.tsv",
+                    "barcodes.tsv.gz",
+                    "features.tsv",
+                    "features.tsv.gz",
+                )
+            )
+        return False
 
     def _find_prior_step_ann_data_path(
         self,
@@ -1159,19 +1300,38 @@ class WorkflowExecutor:
         valid = self._tool_accepted_param_names(current_tool_id or "", tf)
         prior = self._find_prior_step_ann_data_path(step_context, current_step_id)
         if not prior and step_context:
-            for rp in reversed(step_context.get("resolved_input_paths") or []):
-                if isinstance(rp, str) and rp.strip().lower().endswith(".h5ad"):
-                    try:
-                        prior = self._resolve_file_path(rp.strip())
-                    except Exception:
-                        prior = rp.strip()
-                    break
+            cfp = step_context.get("current_file_path")
+            if isinstance(cfp, str) and cfp.strip().lower().endswith(".h5ad") and os.path.isfile(cfp.strip()):
+                prior = cfp.strip()
+            else:
+                for rp in reversed(step_context.get("resolved_input_paths") or []):
+                    if isinstance(rp, str) and rp.strip().lower().endswith(".h5ad"):
+                        try:
+                            prior = self._resolve_file_path(rp.strip())
+                        except Exception:
+                            prior = rp.strip()
+                        break
         if not prior:
             return
         for key in ("h5ad_path", "adata_path"):
             if key not in valid:
                 continue
+            cur = processed.get(key)
             if not self._param_slot_empty(processed, key):
+                if (
+                    tool_category == "scRNA-seq"
+                    and prior
+                    and str(prior).lower().endswith(".h5ad")
+                    and self._path_looks_like_upload_bundle(cur)
+                    and current_tool_id not in self._SCRNA_RAW_10X_INPUT_TOOLS
+                ):
+                    processed[key] = prior
+                    logger.info(
+                        "🔄 数据流: 用前序 h5ad 替换上传目录 %s = %s -> %s",
+                        key,
+                        cur,
+                        prior,
+                    )
                 continue
             processed[key] = prior
             logger.info("🔄 数据流: 兜底写入 %s = %s（前序 AnnData 输出/输入列表）", key, prior)
@@ -1339,6 +1499,33 @@ class WorkflowExecutor:
                                 prior,
                             )
                             continue
+
+                if placeholder == "previous_step_output":
+                    prior_h5ad = self._find_prior_step_ann_data_path(
+                        step_context, current_step_id
+                    )
+                    if not prior_h5ad and step_context:
+                        cfp = step_context.get("current_file_path")
+                        if (
+                            isinstance(cfp, str)
+                            and cfp.strip().lower().endswith(".h5ad")
+                            and os.path.isfile(cfp.strip())
+                        ):
+                            prior_h5ad = cfp.strip()
+                    if prior_h5ad and key in (
+                        "h5ad_path",
+                        "adata_path",
+                        "file_path",
+                        "trajectory_data_path",
+                        "data_path",
+                    ):
+                        processed[key] = prior_h5ad
+                        logger.info(
+                            "🔄 数据流: %s = <previous_step_output> -> %s",
+                            key,
+                            prior_h5ad,
+                        )
+                        continue
 
                 # 🔥 CRITICAL FIX: 特殊处理 preprocess_data_output 占位符
                 # 用于 PCA、PLS-DA、差异分析等步骤，需要从 preprocess_data 步骤获取输出文件路径
@@ -2434,7 +2621,11 @@ class WorkflowExecutor:
             steps_order = [s.get("step_id") or s.get("tool_id") or s.get("id") for s in steps if (s.get("step_id") or s.get("tool_id") or s.get("id"))]
             step_context = {
                 "file_paths": file_paths or [],
+                "uploaded_files": workflow_data.get("uploaded_files") or [],
                 "output_dir": self.output_dir,
+                "upload_dir": self.upload_dir,
+                "owner_id": workflow_data.get("owner_id"),
+                "db": workflow_data.get("_db"),
                 "workflow_name": workflow_name,
                 "current_file_path": current_file_path,
                 "omics_resolved": omics_resolved,
@@ -2710,14 +2901,23 @@ class WorkflowExecutor:
                 step_detail["debug_info"] = step_result.get("debug_info", "") or step_result.get("traceback", "")
             elif step_result.get("status") == "skipped":
                 # 与前端 checklist 对齐：step.error / step.message 供「⏭ 步骤已跳过」折叠区展示
+                from .error_formatter import ErrorFormatter
+
                 _inner = step_result.get("result")
                 _sk_msg = (step_result.get("message") or "").strip()
                 if isinstance(_inner, dict) and not _sk_msg:
                     _sk_msg = (str(_inner.get("message") or "")).strip()
                 if not _sk_msg:
                     _sk_msg = "条件不足，此步骤已跳过"
-                step_detail["message"] = _sk_msg
-                step_detail["error"] = _sk_msg
+                _sk_fmt = ErrorFormatter.format_error(
+                    _sk_msg, step.get("tool_id") or "", step_name
+                )
+                _sk_user = (step_result.get("user_message") or _sk_fmt.get("user_message") or _sk_msg).strip()
+                step_detail["message"] = _sk_user
+                step_detail["error"] = _sk_user
+                step_detail["user_message"] = _sk_user
+                if _sk_fmt.get("technical_details") and _sk_fmt["technical_details"] != _sk_user:
+                    step_detail["technical_details"] = _sk_fmt["technical_details"]
                 if isinstance(_inner, dict) and _inner.get("can_skip") is not None:
                     step_detail["can_skip"] = bool(_inner.get("can_skip"))
                 else:
@@ -2759,13 +2959,15 @@ class WorkflowExecutor:
                     step_detail["job_id"] = step_result["job_id"]
                 break  # STOP HERE - Do not execute next steps
             
-            # 失败处理：不可跳过（如宿主环境致命缺失）时熔断，防止下游与 LLM 对空结果幻觉结题
+            # 失败处理：弹性容错 — 仅核心卡点或显式不可跳过时 break
             if step_result.get("status") == "error":
                 error_msg = step_result.get("error") or step_result.get("message") or "未知错误"
                 logger.error(f"❌ 步骤 {step_id} 失败: {error_msg}")
-                if step_result.get("can_skip") is False:
+                if self._should_halt_workflow_on_error(step_result, tool_id=step.get("tool_id")):
                     logger.error(
-                        "🛑 [Executor] 熔断：本步标记为不可跳过（致命错误），终止后续步骤"
+                        "🛑 [Executor] 核心熔断：步骤 %s (%s) 失败，终止后续步骤",
+                        step_id,
+                        step.get("tool_id"),
                     )
                     self._workflow_circuit_breaker = {
                         "failed_step_id": step_id,
@@ -2773,10 +2975,12 @@ class WorkflowExecutor:
                         "message": error_msg,
                         "user_message": step_result.get("user_message") or error_msg,
                         "error_category": step_result.get("error_category"),
+                        "halt_reason": "core_dag_halt",
                     }
                     break
                 logger.warning(
-                    "⚠️ [Executor] 本步错误但允许跳过（can_skip≠False），继续执行后续步骤"
+                    "⚠️ [Executor] 弹性容错：步骤 %s 失败但允许跳过，继续执行后续步骤",
+                    step_id,
                 )
         
         # 确定最终状态：success 与 skipped 均视为非失败（skipped 为依赖未满足时的优雅跳过）

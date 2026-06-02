@@ -95,6 +95,7 @@ class Skill(Base):
     main_category = Column(String(128), nullable=True)
     sub_category = Column(String(128), nullable=True)
     prompt_template = Column(Text, nullable=True)
+    detailed_spec = Column(JSON, nullable=True)  # 技能详情 Modal：见 docs/技能详情 Demo 页面规范.md
     author_id = Column(String(255), nullable=False, index=True)  # username
     status = Column(String(32), nullable=False, default="pending")  # pending | approved | rejected
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

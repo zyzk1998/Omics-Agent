@@ -851,6 +851,25 @@ class AgentOrchestrator:
         }
         owner_id = kwargs.get("owner_id") or kwargs.get("user_id")
         db = kwargs.get("db")
+        # 🔥 第一入口：数据资产 asset_id 查库映射 + preemptive basename 自愈（早于 FileInspector / Planner）
+        if files:
+            try:
+                from gibh_agent.core.asset_locator import bridge_uploaded_files_at_entry
+
+                files, _bridge_warnings = bridge_uploaded_files_at_entry(
+                    files,
+                    upload_dir=str(self.upload_dir),
+                    owner_id=owner_id,
+                    db=db,
+                    strict=False,
+                )
+                if _bridge_warnings:
+                    logger.warning(
+                        "[Orchestrator] 入口资产桥接/自愈警告: %s",
+                        _bridge_warnings[:5],
+                    )
+            except Exception as _bridge_exc:
+                logger.error("[Orchestrator] 入口资产桥接失败（软放行）: %s", _bridge_exc)
         try:
             model_name = validate_and_resolve_model_name(
                 (kwargs.get("model_name") or "").strip() or None
@@ -1507,8 +1526,46 @@ class AgentOrchestrator:
                 upload_dir_str = str(upload_dir) if isinstance(upload_dir, Path) else upload_dir
                 executor = WorkflowExecutor(upload_dir=upload_dir_str)
                 
-                # 2. Extract file paths（去重 + 强制绝对路径，防止传入 Executor/工具 为相对路径）
+                # 2. Extract file paths（去重 + 统一资源定位符解析）
                 file_paths = workflow_data.get("file_paths", []) or []
+                db = kwargs.get("db")
+                owner_id = kwargs.get("owner_id")
+                if files:
+                    try:
+                        from gibh_agent.core.asset_locator import (
+                            AssetLocatorError,
+                            bridge_uploaded_files_at_entry,
+                        )
+
+                        _resolved_files, _loc_warns = bridge_uploaded_files_at_entry(
+                            files,
+                            upload_dir=upload_dir_str,
+                            owner_id=owner_id,
+                            db=db,
+                            strict=False,
+                        )
+                        files = _resolved_files
+                        workflow_config["uploaded_files"] = _resolved_files
+                        workflow_config["owner_id"] = owner_id
+                        if _loc_warns:
+                            workflow_config["path_warnings"] = _loc_warns
+                            yield self._emit_sse(state_snapshot, "status", {
+                                "content": "⚠️ 部分数据路径经自愈/映射后仍待确认，将继续尝试执行。",
+                                "state": "warning",
+                            })
+                        file_paths = [f.get("path") for f in _resolved_files if f.get("path")]
+                    except AssetLocatorError as _loc_err:
+                        logger.warning("⚠️ [Orchestrator] 资产路径解析未完全成功（软放行）: %s", _loc_err)
+                        yield self._emit_sse(state_snapshot, "status", {
+                            "content": f"⚠️ 数据路径警告: {_loc_err}",
+                            "state": "warning",
+                        })
+                        workflow_config["path_warnings"] = [str(_loc_err)]
+                        file_paths = [
+                            f.get("path") or f.get("file_path")
+                            for f in files
+                            if isinstance(f, dict) and (f.get("path") or f.get("file_path"))
+                        ]
                 if not file_paths and files:
                     file_paths = [f.get("path") or f.get("file_path") or f.get("name") for f in files if f]
                 file_paths = list(dict.fromkeys([p for p in file_paths if p]))
@@ -1531,26 +1588,23 @@ class AgentOrchestrator:
                         upload_dir=upload_dir_str,
                     )
                     if not _inj:
-                        logger.error(
-                            "❌ [Orchestrator] 首步 file_path 注入失败（容器内找不到文件） paths=%s upload_dir=%s",
+                        logger.warning(
+                            "⚠️ [Orchestrator] 首步 file_path 注入未命中 paths=%s upload_dir=%s（软放行）",
                             file_paths,
                             upload_dir_str,
                         )
-                        yield self._emit_sse(state_snapshot, "error", {
-                            "error": "execution_preflight_failed",
-                            "message": "无法在容器内定位上传文件，请检查 Docker 挂载与路径。",
-                            "file_paths": file_paths,
-                            "upload_dir": upload_dir_str,
+                        workflow_config["path_warnings"] = workflow_config.get("path_warnings") or []
+                        workflow_config["path_warnings"].append(
+                            "首步 file_path 注入未能在容器内定位文件，将由执行器/LLM 继续尝试。"
+                        )
+                        yield self._emit_sse(state_snapshot, "status", {
+                            "content": "⚠️ 首步数据路径未完全确认，将继续尝试执行工作流。",
+                            "state": "warning",
                         })
-                        state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
-                        yield self._format_sse("state_snapshot", state_snapshot)
-                        return
                 except Exception as _inj_err:
                     logger.error("⚠️ [Orchestrator] 首步 file_path 注入异常: %s", _inj_err, exc_info=True)
                 
                 # 🔥 直接执行时也按 workflow 类型更新未分类资产的 modality，使左侧栏数据资产实时归到对应组学
-                db = kwargs.get("db")
-                owner_id = kwargs.get("owner_id")
                 if db and owner_id and file_paths:
                     try:
                         workflow_name = (workflow_config.get("workflow_name") or "").strip().lower()
@@ -1661,8 +1715,13 @@ class AgentOrchestrator:
                             logger.warning("工具流式日志队列已满，丢弃一条")
 
                     def _run_wf():
+                        _wf_cfg = dict(workflow_config)
+                        if db is not None:
+                            _wf_cfg["_db"] = db
+                        if owner_id:
+                            _wf_cfg["owner_id"] = owner_id
                         return executor.execute_workflow(
-                            workflow_config,
+                            _wf_cfg,
                             file_paths,
                             _run_dir,
                             self.agent,
@@ -2279,63 +2338,26 @@ class AgentOrchestrator:
                     logger.info(f"✅ [Orchestrator] 查询重写: '{query}' -> '{refined_query}'")
             
             # 🔥 CRITICAL FIX: Step 3.0: Normalize Files (BEFORE Resume Check)
-            # Normalize files to a list of valid file dictionaries
-            valid_files = []
+            # 保留 asset_id/source 等字段；复用入口资产桥接 + fuzzy heal
+            valid_files: List[Dict[str, Any]] = []
             if files:
-                logger.info(f"🔍 [Orchestrator] 开始规范化文件，原始 files 类型: {type(files)}, 长度: {len(files)}")
-                for i, f in enumerate(files):
-                    logger.info(f"🔍 [Orchestrator] 处理文件 [{i}]: {f}, 类型: {type(f)}")
-                    file_dict = None
-                    if isinstance(f, dict):
-                        # Already a dictionary
-                        path = f.get("path") or f.get("file_path")
-                        name = f.get("name") or f.get("file_name") or ""
-                        logger.info(f"🔍 [Orchestrator] 字典格式 - path: {path}, name: {name}")
-                        if path:
-                            # 🔥 CRITICAL: 验证路径是否存在（如果不存在，尝试在 upload_dir 中查找）
-                            path_obj = Path(path)
-                            if not path_obj.is_absolute():
-                                path_obj = Path(self.upload_dir) / path_obj
-                            elif not path_obj.exists():
-                                # 绝对路径不存在，尝试在 upload_dir 中查找文件名
-                                filename = path_obj.name
-                                potential_path = Path(self.upload_dir) / filename
-                                if potential_path.exists():
-                                    path_obj = potential_path
-                                    logger.info(f"✅ [Orchestrator] 在 upload_dir 中找到文件: {path_obj}")
-                            
-                            file_dict = {
-                                "name": name or path_obj.name,
-                                "path": str(path_obj)
-                            }
-                            logger.info(f"✅ [Orchestrator] 规范化文件: {file_dict}")
-                    elif isinstance(f, str):
-                        # String path
-                        path_obj = Path(f)
-                        if not path_obj.is_absolute():
-                            path_obj = Path(self.upload_dir) / path_obj
-                        file_dict = {
-                            "name": path_obj.name,
-                            "path": str(path_obj)
-                        }
-                        logger.info(f"✅ [Orchestrator] 字符串路径规范化: {file_dict}")
-                    elif hasattr(f, "path"):
-                        # Pydantic model or object with path attribute
-                        path = f.path if hasattr(f, "path") else str(f)
-                        name = getattr(f, "name", "") or getattr(f, "file_name", "") or os.path.basename(path)
-                        path_obj = Path(path)
-                        if not path_obj.is_absolute():
-                            path_obj = Path(self.upload_dir) / path_obj
-                        file_dict = {
-                            "name": name,
-                            "path": str(path_obj)
-                        }
-                        logger.info(f"✅ [Orchestrator] 对象格式规范化: {file_dict}")
-                    
-                    if file_dict:
-                        valid_files.append(file_dict)
+                try:
+                    from gibh_agent.core.asset_locator import bridge_uploaded_files_at_entry
 
-            # 🔥 多轮对话文件继承：本轮无新附件时，从 Session 或 history 回溯最近一次上传，避免诊断/规划「数据集为空」与工作流第一步空载
+                    valid_files, _vf_warns = bridge_uploaded_files_at_entry(
+                        files,
+                        upload_dir=str(self.upload_dir),
+                        owner_id=owner_id,
+                        db=db,
+                        strict=False,
+                    )
+                    if _vf_warns:
+                        logger.warning("[Orchestrator] 文件规范化警告: %s", _vf_warns[:5])
+                except Exception as _vf_exc:
+                    logger.error("[Orchestrator] bridge_uploaded_files 失败，回退原列表: %s", _vf_exc)
+                    valid_files = [f for f in files if isinstance(f, dict)]
+
+            # 🔥 多轮对话文件继承：本轮无新附件时，从 Session 或 history 回溯最近一次上传
             if not valid_files:
                 _inh = self._resolve_inherited_upload_files(
                     session_state, history, str(self.upload_dir)
@@ -2344,22 +2366,22 @@ class AgentOrchestrator:
                     path = f.get("path")
                     if not path:
                         continue
-                    path_obj = Path(path)
-                    if not path_obj.is_absolute():
-                        path_obj = Path(self.upload_dir) / path_obj
-                    elif not path_obj.exists():
-                        _fn = path_obj.name
-                        _pot = Path(self.upload_dir) / _fn
-                        if _pot.exists():
-                            path_obj = _pot
-                            logger.info(f"✅ [Orchestrator] 继承路径在 upload_dir 命中: {path_obj}")
-                    valid_files.append(
-                        {
-                            "name": f.get("name") or path_obj.name,
-                            "path": str(path_obj),
-                        }
-                    )
-                    logger.info(f"✅ [Orchestrator] 已合并继承文件: {valid_files[-1]}")
+                    valid_files.append(dict(f))
+                if valid_files:
+                    try:
+                        from gibh_agent.core.asset_locator import bridge_uploaded_files_at_entry
+
+                        valid_files, _ = bridge_uploaded_files_at_entry(
+                            valid_files,
+                            upload_dir=str(self.upload_dir),
+                            owner_id=owner_id,
+                            db=db,
+                            strict=False,
+                        )
+                    except Exception:
+                        pass
+                    for vf in valid_files:
+                        logger.info(f"✅ [Orchestrator] 已合并继承文件: {vf}")
             
             logger.info(f"✅ [Orchestrator] 规范化后的文件列表: {valid_files}, 数量: {len(valid_files)}")
             
@@ -2509,7 +2531,12 @@ class AgentOrchestrator:
                             logger.info(f"🔍 [Orchestrator] 解析后的绝对路径: {file_path}")
                             try:
                                 _t_inspect_start = time.time()
-                                file_metadata_for_intent = self.file_inspector.inspect_file(file_path)
+                                file_metadata_for_intent = self.file_inspector.inspect_file(
+                                    file_path,
+                                    owner_id=owner_id,
+                                    uploaded_files=files,
+                                    db=db,
+                                )
                                 logger.info("[Profiler] 数据预检完成 - 耗时: %.2fs", time.time() - _t_inspect_start)
                                 logger.info(f"✅ [Orchestrator] 文件检查成功，文件类型: {file_metadata_for_intent.get('file_type', 'unknown')}")
                             except Exception as e:
@@ -2912,7 +2939,12 @@ class AgentOrchestrator:
                 # Step 2: Inspect（有文件时必做，快车道与老路均不可跳过）
                 file_metadata = None
                 try:
-                    file_metadata = self.file_inspector.inspect_file(path_for_inspect)
+                    file_metadata = self.file_inspector.inspect_file(
+                        path_for_inspect,
+                        owner_id=owner_id,
+                        uploaded_files=files,
+                        db=db,
+                    )
                     logger.info(f"✅ [Orchestrator] Path A: 文件检查完成: {file_path}")
                 
                     if file_metadata and file_metadata.get("status") == "success":
@@ -3092,23 +3124,42 @@ class AgentOrchestrator:
                         except Exception as _snap_e:
                             logger.debug("persist last_session_upload_files skip: %s", _snap_e)
                     elif file_metadata:
-                        # 文件检查未通过（类型无法识别或读取失败），避免进入规划阶段导致“工作流规划失败”
+                        # 软放行：预检失败不阻断规划，将警告写入上下文供 LLM 决策
                         err_msg = file_metadata.get("error") or "无法识别该文件类型或读取失败"
-                        if isinstance(err_msg, str) and len(err_msg) > 200:
-                            err_msg = err_msg[:200] + "..."
-                        logger.warning("❌ [Orchestrator] Path A: 文件检查未通过: %s", file_metadata.get("file_type", "unknown"))
-                        yield self._emit_sse(state_snapshot,"error", {
-                            "error": "文件类型不支持或无法读取",
-                            "message": f"{err_msg}\n\n支持格式：单细胞 RNA 请上传 .h5ad 或解压后的 10x 目录（含 matrix.mtx、barcodes.tsv、features.tsv）；代谢组学请上传 CSV；影像组学请上传 .nii / .nii.gz / .dcm。"
+                        if isinstance(err_msg, str) and len(err_msg) > 400:
+                            err_msg = err_msg[:400] + "..."
+                        logger.warning(
+                            "⚠️ [Orchestrator] Path A: 文件预检未完全通过（软放行）: %s",
+                            file_metadata.get("file_type", "unknown"),
+                        )
+                        from gibh_agent.utils.path_resolver import infer_loose_file_type_from_path_string
+
+                        yield self._emit_sse(state_snapshot, "status", {
+                            "content": f"⚠️ 文件预检警告：{err_msg}",
+                            "state": "warning",
                         })
-                        return
+                        file_metadata = {
+                            "status": "degraded",
+                            "success": False,
+                            "file_type": infer_loose_file_type_from_path_string(path_for_inspect or ""),
+                            "file_path": path_for_inspect,
+                            "path_warning": err_msg,
+                            "message": "文件预检未完全通过，已软放行并继续规划。",
+                        }
                 except Exception as e:
-                    logger.error(f"❌ [Orchestrator] Path A: 文件检查失败: {e}", exc_info=True)
-                    yield self._emit_sse(state_snapshot,"error", {
-                        "error": str(e),
-                        "message": f"文件检查失败: {str(e)}"
+                    logger.error(f"⚠️ [Orchestrator] Path A: 文件检查异常（软放行）: {e}", exc_info=True)
+                    yield self._emit_sse(state_snapshot, "status", {
+                        "content": f"⚠️ 文件检查异常: {str(e)}",
+                        "state": "warning",
                     })
-                    return
+                    from gibh_agent.utils.path_resolver import infer_loose_file_type_from_path_string
+
+                    file_metadata = {
+                        "status": "degraded",
+                        "file_type": infer_loose_file_type_from_path_string(path_for_inspect or ""),
+                        "file_path": path_for_inspect,
+                        "path_warning": str(e),
+                    }
             
                 # A2. Plan (With Metadata) - CRITICAL: Explicitly tell planner this is NOT a template
                 yield self._emit_sse(state_snapshot,"status", {

@@ -428,14 +428,24 @@ class DeepReActRunner:
                     )
                 except Exception as e:
                     error_trace = traceback.format_exc()
+                    from .error_formatter import ErrorFormatter
+
+                    _fmt = ErrorFormatter.format_tool_exception_message(
+                        e, tool_id=tool_name, step_name=tool_name
+                    )
+                    _user_msg = _fmt.get("user_message") or str(e)
                     await emit_callback(
                         "process_log",
-                        {"message": f"❌ {tool_name} 执行异常，已触发自主反思..."},
+                        {"message": f"❌ {tool_name}：{_user_msg}"},
                     )
                     messages.append(
                         {
                             "role": "tool",
                             "tool_call_id": call_id,
-                            "content": f"Error: {str(e)}\nTraceback:\n{error_trace}",
+                            "content": (
+                                f"Error: {_user_msg}\n"
+                                f"technical_details: {_fmt.get('technical_details', str(e))}\n"
+                                f"Traceback:\n{error_trace}"
+                            ),
                         }
                     )

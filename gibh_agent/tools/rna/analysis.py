@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 from ...core.tool_registry import registry
 from ...core.utils import sanitize_plot_path
-from .quality_control import _resolve_adata_path
+from .quality_control import _resolve_adata_path, load_adata_from_path
 
 logger = logging.getLogger(__name__)
 
@@ -42,25 +42,7 @@ def run_normalize(
     try:
         import scanpy as sc
         adata_path = _resolve_adata_path(adata_path)
-        # 🔥 CRITICAL FIX: 支持目录输入（向后兼容）和文件输入
-        # 如果输入是目录，尝试读取其中的 filtered.h5ad 文件
-        if os.path.isdir(adata_path):
-            # 检查目录中是否有 filtered.h5ad（来自 rna_qc_filter 的输出）
-            filtered_h5ad = os.path.join(adata_path, "filtered.h5ad")
-            if os.path.exists(filtered_h5ad):
-                logger.info(f"📖 [Normalize] Reading filtered.h5ad from directory: {filtered_h5ad}")
-                adata = sc.read_h5ad(filtered_h5ad)
-            else:
-                # 如果是 10x 目录，尝试读取
-                from ...core.rna_utils import read_10x_data
-                logger.info(f"📖 [Normalize] Reading 10x data from directory: {adata_path}")
-                adata = read_10x_data(adata_path, var_names='gene_symbols', cache=False)
-        elif adata_path.endswith('.h5ad'):
-            # 标准 .h5ad 文件
-            adata = sc.read_h5ad(adata_path)
-        else:
-            # 其他格式
-            adata = sc.read(adata_path)
+        adata = load_adata_from_path(adata_path)
         
         # 标准化
         sc.pp.normalize_total(adata, target_sum=target_sum)
@@ -132,8 +114,7 @@ def run_hvg(
     try:
         import scanpy as sc
         adata_path = _resolve_adata_path(adata_path)
-        # 加载数据
-        adata = sc.read_h5ad(adata_path)
+        adata = load_adata_from_path(adata_path)
         
         # 寻找高变基因
         sc.pp.highly_variable_genes(adata, n_top_genes=n_top_genes)
@@ -204,8 +185,7 @@ def run_scale(
     try:
         import scanpy as sc
         adata_path = _resolve_adata_path(adata_path)
-        # 加载数据
-        adata = sc.read_h5ad(adata_path)
+        adata = load_adata_from_path(adata_path)
         
         # 缩放
         sc.pp.scale(adata, max_value=max_value)
@@ -263,8 +243,7 @@ def run_pca(
     try:
         import scanpy as sc
         adata_path = _resolve_adata_path(adata_path)
-        # 加载数据
-        adata = sc.read_h5ad(adata_path)
+        adata = load_adata_from_path(adata_path)
         
         # PCA
         sc.tl.pca(adata, n_comps=n_comps, svd_solver=svd_solver)
@@ -343,8 +322,7 @@ def run_neighbors(
         import scanpy as sc
         
         adata_path = _resolve_adata_path(adata_path)
-        # 加载数据
-        adata = sc.read_h5ad(adata_path)
+        adata = load_adata_from_path(adata_path)
         
         # 计算邻居
         sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
@@ -404,8 +382,7 @@ def run_clustering(
     try:
         import scanpy as sc
         adata_path = _resolve_adata_path(adata_path)
-        # 加载数据
-        adata = sc.read_h5ad(adata_path)
+        adata = load_adata_from_path(adata_path)
         
         # 聚类（resolution 可能被 LLM 传成 str，强制转为 float）
         res_f = float(resolution)
@@ -485,7 +462,7 @@ def run_clustering_comparison(
     try:
         import scanpy as sc
         adata_path = _resolve_adata_path(adata_path)
-        adata = sc.read_h5ad(adata_path)
+        adata = load_adata_from_path(adata_path)
         if "X_umap" not in adata.obsm.keys():
             if "neighbors" not in adata.uns:
                 sc.pp.neighbors(adata, use_rep="X_pca" if "X_pca" in adata.obsm else None)
@@ -544,8 +521,7 @@ def run_umap(
     try:
         import scanpy as sc
         adata_path = _resolve_adata_path(adata_path)
-        # 加载数据
-        adata = sc.read_h5ad(adata_path)
+        adata = load_adata_from_path(adata_path)
         
         # 计算 UMAP
         sc.tl.umap(adata)
@@ -632,8 +608,7 @@ def run_tsne(
     try:
         import scanpy as sc
         adata_path = _resolve_adata_path(adata_path)
-        # 加载数据
-        adata = sc.read_h5ad(adata_path)
+        adata = load_adata_from_path(adata_path)
         
         # 检查细胞数（t-SNE 对大数据集较慢）
         if adata.n_obs > 5000:
@@ -731,8 +706,7 @@ def run_find_markers(
         import scanpy as sc
         import pandas as pd
         adata_path = _resolve_adata_path(adata_path)
-        # 加载数据
-        adata = sc.read_h5ad(adata_path)
+        adata = load_adata_from_path(adata_path)
         
         # 检查是否有聚类结果
         if cluster_key not in adata.obs.columns:

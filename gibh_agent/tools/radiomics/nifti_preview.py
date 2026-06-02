@@ -41,7 +41,7 @@ def _volume_array_from_nifti(path: str) -> Optional[np.ndarray]:
         img = sitk.ReadImage(str(p))
         return sitk.GetArrayFromImage(img).astype(np.float32, copy=False)
     except Exception as e2:
-        logger.warning("SimpleITK slice preview failed: %s", e2)
+        logger.warning("SimpleITK slice preview render failed: %s", e2)
         return None
 
 
@@ -55,6 +55,7 @@ def build_radiomics_nifti_preview_markdown(
     """
     截取体数据中间层，matplotlib(Agg) → PNG → data URI，嵌入 Markdown。
 
+    图片直接可见；冗长元数据由调用方放入 <details>，勿与此函数混排折叠。
     失败时返回空字符串（调用方仍可展示纯文本摘要）。
     """
     vol = _volume_array_from_nifti(image_path)
@@ -86,7 +87,10 @@ def build_radiomics_nifti_preview_markdown(
         fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.08)
         plt.close(fig)
         b64 = base64.standard_b64encode(buf.getvalue()).decode("ascii")
-        return f"#### {title}\n\n![](data:image/png;base64,{b64})\n\n"
+        return (
+            f"#### {title}\n\n"
+            f"![{title}](data:image/png;base64,{b64})\n\n"
+        )
     except Exception as e:
         logger.warning("matplotlib NIfTI preview render failed: %s", e)
         return ""

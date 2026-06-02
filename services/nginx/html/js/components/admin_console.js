@@ -39,7 +39,7 @@ function ensureAdminModal() {
     const holder = document.createElement('div');
     holder.innerHTML = `
 <div class="modal fade" id="admin-console-modal" tabindex="-1" aria-labelledby="admin-console-modal-label" aria-hidden="true">
-  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable admin-console-modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="admin-console-modal-label">管理员控制台</h5>
@@ -91,6 +91,16 @@ function ensureAdminModal() {
         const action = btn.getAttribute('data-user-action');
         if (id && (action === 'approve' || action === 'reject')) {
             void reviewUser(id, action);
+        }
+    });
+    const fbwrap = document.getElementById('admin-feedbacks-table-wrap');
+    fbwrap.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-feedback-action]');
+        if (!btn) return;
+        const id = btn.getAttribute('data-feedback-id');
+        const action = btn.getAttribute('data-feedback-action');
+        if (id && (action === 'acknowledge' || action === 'resolve')) {
+            void resolveFeedback(id, action);
         }
     });
     document.getElementById('admin-console-tabs').addEventListener('click', (ev) => {
@@ -196,6 +206,12 @@ async function reviewSkill(skillId, action, sourceType) {
     }
 }
 
+function adminToast(msg, variant) {
+    if (typeof window.showToast === 'function') {
+        window.showToast(msg, variant || 'success');
+    }
+}
+
 async function reviewUser(userId, action) {
     const errEl = document.getElementById('admin-console-error');
     setInlineError(errEl, '');
@@ -222,6 +238,44 @@ async function reviewUser(userId, action) {
             throw new Error(detail);
         }
         await refreshAdminUsersTable();
+        adminToast(action === 'approve' ? '已通过该用户注册申请，并已发送通知' : '已拒绝该用户注册申请，并已发送通知', 'success');
+    } catch (e) {
+        const msg = e && e.message ? String(e.message) : '操作失败';
+        setInlineError(errEl, msg);
+    }
+}
+
+async function resolveFeedback(feedbackId, action) {
+    const errEl = document.getElementById('admin-console-error');
+    setInlineError(errEl, '');
+    const act = action === 'resolve' ? 'resolve' : 'acknowledge';
+    try {
+        const res = await fetch(
+            '/api/admin/feedback/' + encodeURIComponent(String(feedbackId)) + '/resolve',
+            {
+                method: 'POST',
+                headers: getAuthHeadersMerged(),
+                body: JSON.stringify({ action: act }),
+            }
+        );
+        if (res.status === 403) throw new Error('需要管理员权限');
+        if (!res.ok) {
+            let detail = '操作失败';
+            try {
+                const j = await res.json();
+                if (j && j.detail != null) {
+                    detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
+                }
+            } catch (_) {
+                /* ignore */
+            }
+            throw new Error(detail);
+        }
+        await refreshAdminFeedbacksTable();
+        adminToast(
+            act === 'resolve' ? '已标记落实并向用户发送通知' : '已标记收到并向用户发送通知',
+            'success'
+        );
     } catch (e) {
         const msg = e && e.message ? String(e.message) : '操作失败';
         setInlineError(errEl, msg);
@@ -251,7 +305,6 @@ async function refreshAdminTable() {
                         ? '<span class="badge bg-info text-dark me-1">安装技能</span>'
                         : '<span class="badge bg-secondary me-1">UGC</span>';
                 const name = escapeHtml(s.name || '');
-                const mc = escapeHtml(s.main_category || '—');
                 const sc = escapeHtml(s.sub_category || '—');
                 const author = escapeHtml(s.author_id || '—');
                 const created = escapeHtml(String(s.created_at || '').slice(0, 19));
@@ -297,8 +350,6 @@ async function refreshAdminTable() {
                     sourceLabel +
                     name +
                     '</td><td>' +
-                    mc +
-                    '</td><td>' +
                     sc +
                     '</td><td>' +
                     author +
@@ -318,7 +369,7 @@ async function refreshAdminTable() {
             .join('');
         wrap.innerHTML =
             '<table class="table table-hover table-sm align-middle mb-0">' +
-            '<thead><tr><th>名称</th><th>大类</th><th>标签</th><th>作者</th><th>提交时间</th><th>描述摘要</th><th>状态</th><th>操作</th></tr></thead>' +
+            '<thead><tr><th>名称</th><th>标签</th><th>作者</th><th>提交时间</th><th>描述摘要</th><th>状态</th><th>操作</th></tr></thead>' +
             '<tbody>' +
             rows +
             '</tbody></table>';
@@ -366,6 +417,25 @@ async function refreshAdminFeedbacksTable() {
                 const ec = escapeHtml((r.error_context || '').slice(0, 240));
                 const ell2 = (r.error_context || '').length > 240 ? '…' : '';
                 const ts = escapeHtml(String(r.created_at || '').slice(0, 19));
+                const st = (r.status || 'open').toLowerCase();
+                let actionHtml = '';
+                if (st === 'resolved') {
+                    actionHtml = '<span class="badge bg-success text-white">已落实</span>';
+                } else if (st === 'acknowledged') {
+                    actionHtml =
+                        '<span class="badge bg-info text-dark me-1">已收到</span>' +
+                        '<button type="button" class="btn btn-sm btn-success btn-resolve" data-feedback-id="' +
+                        id +
+                        '" data-feedback-action="resolve">已落实</button>';
+                } else {
+                    actionHtml =
+                        '<button type="button" class="btn btn-sm btn-info btn-ack me-1" data-feedback-id="' +
+                        id +
+                        '" data-feedback-action="acknowledge">收到</button>' +
+                        '<button type="button" class="btn btn-sm btn-success btn-resolve" data-feedback-id="' +
+                        id +
+                        '" data-feedback-action="resolve">已落实</button>';
+                }
                 return (
                     '<tr><td>' +
                     id +
@@ -381,13 +451,15 @@ async function refreshAdminFeedbacksTable() {
                     ell2 +
                     '</small></td><td><small>' +
                     ts +
-                    '</small></td></tr>'
+                    '</small></td><td class="text-nowrap">' +
+                    actionHtml +
+                    '</td></tr>'
                 );
             })
             .join('');
         wrap.innerHTML =
             '<table class="table table-hover table-sm align-middle mb-0">' +
-            '<thead><tr><th>ID</th><th>用户</th><th>类型</th><th>内容</th><th>错误上下文</th><th>时间</th></tr></thead>' +
+            '<thead><tr><th>ID</th><th>用户</th><th>类型</th><th>内容</th><th>错误上下文</th><th>时间</th><th>操作</th></tr></thead>' +
             '<tbody>' +
             rows +
             '</tbody></table>';

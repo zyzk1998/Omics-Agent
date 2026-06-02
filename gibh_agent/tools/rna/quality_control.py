@@ -18,17 +18,59 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_adata_path(raw_path: str) -> str:
-    """经全局总线解析：优先 10x_mtx 目录，其次 h5ad；否则抛异常。"""
-    if not raw_path or ("," not in raw_path and ";" not in raw_path):
+    """经全局总线解析：优先 10x_mtx 目录，其次 h5ad；否则返回原路径。"""
+    if not raw_path or not str(raw_path).strip():
         return raw_path
-    resolved = resolve_omics_paths(raw_path)
-    tenx = resolved.get("10x_mtx") or []
-    h5ad_list = resolved.get("h5ad") or []
-    if tenx:
-        return tenx[0]
-    if h5ad_list:
-        return h5ad_list[0]
-    raise ValueError("未找到有效的单细胞数据：请上传 10x 目录（含 matrix.mtx + barcodes/features）或 .h5ad 文件")
+    s = str(raw_path).strip()
+    if "," in s or ";" in s or os.path.isdir(s):
+        resolved = resolve_omics_paths(s)
+        tenx = resolved.get("10x_mtx") or []
+        h5ad_list = resolved.get("h5ad") or []
+        if tenx:
+            return tenx[0]
+        if h5ad_list:
+            return h5ad_list[0]
+    nl = Path(s).name.lower()
+    if any(tok in nl for tok in ("matrix.mtx", "barcodes", "features", "genes")):
+        resolved = resolve_omics_paths(s)
+        tenx = resolved.get("10x_mtx") or []
+        if tenx:
+            return tenx[0]
+    return s
+
+
+def load_adata_from_path(adata_path: str):
+    """
+    统一 AnnData 加载：支持 .h5ad、10x 目录、压缩包；目录内优先读 filtered/normalized 等中间 h5ad。
+    """
+    import scanpy as sc
+
+    adata_path = _resolve_adata_path(adata_path)
+    if (
+        adata_path.endswith(".tar.gz")
+        or adata_path.endswith(".tgz")
+        or (adata_path.lower().endswith(".zip") and os.path.isfile(adata_path))
+    ):
+        adata, _base = load_10x_from_tarball(adata_path, var_names="gene_symbols", persist_h5ad=True)
+        return adata
+    if os.path.isdir(adata_path):
+        for name in (
+            "filtered.h5ad",
+            "normalized.h5ad",
+            "doublet_detected.h5ad",
+            "scaled.h5ad",
+            "hvg.h5ad",
+            "pca.h5ad",
+        ):
+            candidate = os.path.join(adata_path, name)
+            if os.path.isfile(candidate):
+                logger.info("[load_adata] 目录内命中中间产物: %s", candidate)
+                return sc.read_h5ad(candidate)
+        logger.info("[load_adata] 从 10x 目录读取: %s", adata_path)
+        return read_10x_data(adata_path, var_names="gene_symbols", cache=False)
+    if adata_path.endswith(".h5ad"):
+        return sc.read_h5ad(adata_path)
+    return sc.read(adata_path)
 
 
 @registry.register(
@@ -54,13 +96,16 @@ def run_data_validation(adata_path: str) -> Dict[str, Any]:
         n_genes = adata.n_vars
         if not (hasattr(adata, "obs") and adata.obs is not None and hasattr(adata, "var") and adata.var is not None):
             return {"status": "error", "error": "Missing obs or var in AnnData."}
-        return {
+        result = {
             "status": "success",
             "message": f"数据校验通过，包含 {n_cells} 个细胞，{n_genes} 个基因，内存预分配完成。",
             "n_cells": int(n_cells),
             "n_genes": int(n_genes),
-            "output_h5ad": adata_path,
         }
+        # 校验步不写盘：仅当输入本身为 h5ad 文件时才链式传递 output_h5ad，避免把 10x 目录误当作下游输入
+        if os.path.isfile(adata_path) and str(adata_path).lower().endswith(".h5ad"):
+            result["output_h5ad"] = adata_path
+        return result
     except Exception as e:
         logger.warning("rna_data_validation failed: %s", e)
         return {"status": "error", "error": str(e)}
@@ -233,8 +278,7 @@ def run_doublet_detection(
     try:
         import scanpy as sc
         adata_path = _resolve_adata_path(adata_path)
-        # 加载数据
-        adata = sc.read_h5ad(adata_path)
+        adata = load_adata_from_path(adata_path)
         
         if method == "scrublet":
             try:

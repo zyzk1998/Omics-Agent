@@ -51,6 +51,39 @@ class PendingUserOut(BaseModel):
     created_at: Optional[datetime] = None
 
 
+class UserReviewAction(BaseModel):
+    action: str = Field(..., pattern="^(approve|reject)$")
+
+
+def _notify_user_registration_review(
+    db: Session,
+    user: User,
+    *,
+    approved: bool,
+) -> None:
+    try:
+        if approved:
+            create_user_notification(
+                db,
+                user_id=user.username,
+                ntype="account_approved",
+                title="注册审核通过",
+                content="您的注册申请已通过！欢迎使用 Omics Agent。",
+                commit=False,
+            )
+        else:
+            create_user_notification(
+                db,
+                user_id=user.username,
+                ntype="account_rejected",
+                title="注册审核未通过",
+                content="很遗憾，您的注册申请未通过审核。如有疑问请联系管理员。",
+                commit=False,
+            )
+    except Exception as e:
+        logger.warning("写入用户注册审核通知失败 user_id=%s: %s", user.id, e)
+
+
 def _plugin_display_name(row: DynamicSkillPlugin) -> str:
     return (row.display_name or row.name or "未命名技能").strip()
 
@@ -304,6 +337,7 @@ def approve_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
     user.approval_status = "approved"
+    _notify_user_registration_review(db, user, approved=True)
     db.commit()
     logger.info("管理员审核通过用户: id=%s username=%s by=%s", user_id, user.username, _admin.username)
     return {"ok": True, "user_id": user_id, "approval_status": "approved"}
@@ -319,6 +353,37 @@ def reject_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
     user.approval_status = "rejected"
+    _notify_user_registration_review(db, user, approved=False)
     db.commit()
     logger.info("管理员拒绝用户: id=%s username=%s by=%s", user_id, user.username, _admin.username)
     return {"ok": True, "user_id": user_id, "approval_status": "rejected"}
+
+
+@router.post("/admin/users/{user_id}/review")
+def review_user_by_action(
+    user_id: int,
+    body: UserReviewAction,
+    db: Session = Depends(get_db_session),
+    _admin: User = Depends(get_current_admin_user),
+) -> Dict[str, Any]:
+    """统一审核入口：approve | reject，并写入用户通知。"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    approved = body.action == "approve"
+    user.approval_status = "approved" if approved else "rejected"
+    _notify_user_registration_review(db, user, approved=approved)
+    db.commit()
+    logger.info(
+        "管理员审核用户: id=%s action=%s username=%s by=%s",
+        user_id,
+        body.action,
+        user.username,
+        _admin.username,
+    )
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "approval_status": user.approval_status,
+        "action": body.action,
+    }

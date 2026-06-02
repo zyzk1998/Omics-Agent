@@ -365,8 +365,11 @@ class RNAWorkflow(BaseWorkflow):
                                 "rna_clustering_comparison", "rna_find_markers", "rna_cell_annotation"]:
                     if is_fastq:
                         step_config["params"]["adata_path"] = "<rna_convert_cellranger_to_h5ad_output>" if step_id == "rna_qc_filter" else "<previous_step_output>"
-                    else:
+                    elif step_id in ("rna_data_validation", "rna_qc_filter"):
+                        # 仅首步消费原始 10x / h5ad 上传路径
                         step_config["params"]["adata_path"] = file_path
+                    else:
+                        step_config["params"]["adata_path"] = "<previous_step_output>"
                     if step_id == "rna_clustering_comparison":
                         step_config["params"]["output_plot_path"] = "<output_dir>/multires_leiden_umap.png"
             else:

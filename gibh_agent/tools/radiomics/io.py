@@ -78,10 +78,19 @@ def load_medical_image(
             f"- **文件**：`{p.name}`\n"
             f"- **体素尺寸**：{size}\n"
             f"- **间距 (mm)**：{spacing}\n"
+            f"- **原点 (mm)**：{origin}\n"
+            f"- **方向矩阵**：{direction}\n"
         )
-        out["markdown"] = (_preview_md + "### 影像元数据\n" + _meta_lines) if _preview_md else ("### 影像元数据\n" + _meta_lines)
-        out["summary"] = out["markdown"]
-        out["message"] = f"已从 `{p.name}` 加载医学影像（维度 {size}）。"
+        _meta_block = (
+            '<details class="omics-dirty-accordion mb-2">'
+            '<summary class="small text-muted py-1">展开查看影像元数据（体素尺寸、间距、方向矩阵等）</summary>\n\n'
+            f"{_meta_lines}\n"
+            "</details>\n"
+        )
+        out["markdown"] = (_preview_md + _meta_block) if _preview_md else ("### 影像元数据\n" + _meta_lines)
+        # summary 仅用于清单副标题，禁止内嵌 Base64（富内容走 markdown 字段）
+        out["summary"] = f"已从 `{p.name}` 加载医学影像（维度 {size}）。"
+        out["message"] = out["summary"]
         return out
     except Exception as e:
         logger.exception("load_medical_image failed: %s", e)

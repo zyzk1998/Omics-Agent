@@ -133,122 +133,93 @@ def resolve_real_path(path_str: str, upload_dir: str = "/app/uploads") -> Resolv
     )
 
 
-def resolve_upload_path_for_container(raw: str, upload_dir: str) -> str:
+def resolve_upload_path_for_container(
+    raw: str,
+    upload_dir: str,
+    *,
+    owner_id: Optional[str] = None,
+    db: Any = None,
+    asset_id: Optional[int] = None,
+    context_paths: Optional[list] = None,
+    uploaded_entries: Optional[list] = None,
+) -> str:
     """编排器 / Agent：统一得到用于容器内访问的路径字符串；Local/HPC 返回原始串。"""
-    r = resolve_real_path(normalize_duplicate_tail_filename((raw or "").strip()), upload_dir)
+    s = normalize_duplicate_tail_filename((raw or "").strip())
+    if not s:
+        return ""
+    # 第一道门：preemptive 资产映射 + basename 模糊自愈（Web 上传语义）
+    if not is_windows_abs_path(s) and not is_hpc_style_path(s):
+        try:
+            from gibh_agent.core.asset_locator import resolve_asset_path
+
+            healed = resolve_asset_path(
+                s,
+                upload_dir=upload_dir,
+                owner_id=owner_id,
+                db=db,
+                asset_id=asset_id,
+                context_paths=context_paths,
+                uploaded_entries=uploaded_entries,
+                must_exist=False,
+            )
+            if healed:
+                try:
+                    if Path(healed).exists():
+                        s = healed
+                except OSError:
+                    s = healed
+        except Exception as exc:
+            logger.debug("resolve_upload_path_for_container preemptive heal skip: %s", exc)
+
+    r = resolve_real_path(s, upload_dir)
     if r.kind == "web":
         return r.web_absolute_path or ""
     return r.original
 
 
-# --- 格式门禁（仅路径字符串，不读盘）---
-
-_FORBIDDEN_EXT = {".txt"}
-_ALLOWED_EXT = {
-    ".h5ad",
-    ".h5",
-    ".mtx",
-    ".mzml",
-    ".raw",
-    ".csv",
-    ".tsv",
-    ".xlsx",
-    ".parquet",
-    ".vcf",
-    ".fastq",
-    ".fq",
-    ".bam",
-    ".cram",
-    ".sam",
-    ".bed",
-    ".bw",
-    ".bigwig",
-    ".gz",
-    ".nii",
-    ".dcm",
-    ".tif",
-    ".tiff",
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".pdf",
-    ".zip",
-    ".tar",
-    ".tar.gz",
-}
-
-_COMPUND_OK = (
-    ".nii.gz",
-    ".mtx.gz",
-    ".tsv.gz",
-    ".csv.gz",
-    ".fq.gz",
-    ".fastq.gz",
-    ".vcf.gz",
-    ".tar.gz",
-)
+# --- 格式门禁（仅路径字符串，不读盘；未知后缀不阻断）---
 
 
 def _suffix_for_inspector_gate(path_str: str) -> str:
-    """用于白名单判断的后缀（尽量贴近 pathlib 的多后缀语义）。"""
-    name = Path(path_str.replace("\\", "/")).name.lower()
-    for compound in _COMPUND_OK:
-        if name.endswith(compound):
-            return compound
-    return Path(name).suffix.lower()
+    """用于扩展名分类的后缀（委托全组学注册表）。"""
+    from gibh_agent.core.omics_io_registry import get_path_suffix
+
+    return get_path_suffix(path_str)
 
 
 def validate_inspector_file_format(path_str: str) -> Optional[Dict[str, Any]]:
     """
     第一步：仅解析后缀，不访问磁盘。
-    返回 None 表示放行；否则返回 FileInspector 风格的 error dict。
+    返回 None 表示放行；未知后缀不再返回 error，改由 get_inspector_format_warning 记录 warning。
     """
     if not path_str or not str(path_str).strip():
         return None
-    raw = str(path_str).strip()
-    # 无前缀点号的「目录风格」名称（如 my_run_folder）放行给 10x 目录
-    base = Path(raw.replace("\\", "/")).name
+    base = Path(str(path_str).replace("\\", "/")).name
     if base and "." not in base:
         return None
+    return None
 
-    suf = _suffix_for_inspector_gate(raw)
-    if suf in _FORBIDDEN_EXT:
-        return {
-            "status": "error",
-            "success": False,
-            "error": (
-                "不支持该文件扩展名（已禁止 .txt 作为数据入口）。\n\n"
-                "支持格式：单细胞 RNA 请上传 .h5ad 或解压后的 10x 目录（含 matrix.mtx、barcodes.tsv、features.tsv）；"
-                "代谢组学请上传 CSV；影像组学请上传 .nii / .nii.gz / .dcm；"
-                "蛋白组学请上传 .mzML / .raw；基因组/表观组测序请上传 .fastq.gz / .fq.gz（或按流程上传 BAM/VCF）。"
-            ),
-            "file_type": "unknown",
-            "file_path": raw,
-        }
-    if not suf:
-        return None
-    if suf in _ALLOWED_EXT or suf in _COMPUND_OK:
-        return None
-    # 未知后缀：保持硬编码提示风格，与 orchestrator SSE 文案对齐
-    return {
-        "status": "error",
-        "success": False,
-        "error": (
-            f"不支持的文件扩展名: {suf}\n\n"
-            "支持格式：单细胞 RNA 请上传 .h5ad 或解压后的 10x 目录（含 matrix.mtx、barcodes.tsv、features.tsv）；"
-            "代谢组学请上传 CSV；影像组学请上传 .nii / .nii.gz / .dcm；"
-            "蛋白组学请上传 .mzML / .raw；基因组/表观组测序请上传 .fastq.gz / .fq.gz（或按流程上传 BAM/VCF）。"
-        ),
-        "file_type": "unknown",
-        "file_path": raw,
-    }
+
+def get_inspector_format_warning(path_str: str) -> Optional[str]:
+    """供 FileInspector 写入结果的非阻断 warning。"""
+    from gibh_agent.core.omics_io_registry import get_extension_warning
+
+    return get_extension_warning(path_str)
 
 
 def _local_sidecar_base() -> str:
     return os.getenv("OMICS_LOCAL_SIDECAR_URL", "http://127.0.0.1:8019").rstrip("/")
 
 
-def verify_path_exists_after_resolve(resolved: ResolvedMount, timeout: float = 8.0) -> Tuple[bool, str]:
+def verify_path_exists_after_resolve(
+    resolved: ResolvedMount,
+    timeout: float = 8.0,
+    *,
+    upload_dir: Optional[str] = None,
+    owner_id: Optional[str] = None,
+    context_paths: Optional[list] = None,
+    uploaded_entries: Optional[list] = None,
+) -> Tuple[bool, str]:
     """
     第二步：存在性校验。
     Web：容器内 os.path.exists。
@@ -260,13 +231,28 @@ def verify_path_exists_after_resolve(resolved: ResolvedMount, timeout: float = 8
         if not wp:
             return False, "内部错误：web 路径未解析"
         ok = Path(wp).exists()
+        if ok:
+            return True, ""
+        # Basename 模糊自愈：LLM/历史路径 timestamp 目录漂移时按文件名找回
+        ud = upload_dir or os.getenv("UPLOAD_DIR", "/app/uploads")
+        from gibh_agent.core.omics_io_registry import heal_web_path_if_missing
+
+        healed, _attempts = heal_web_path_if_missing(
+            resolved.original,
+            ud,
+            owner_id=owner_id,
+            context_paths=context_paths,
+            uploaded_entries=uploaded_entries,
+            allow_dir=True,
+        )
+        if healed and Path(healed).exists():
+            logger.info("[PathResolver] 模糊自愈命中: %s -> %s", resolved.original, healed)
+            return True, ""
         return (
-            ok,
-            ""
-            if ok
-            else (
+            False,
+            (
                 f"File or directory not found: '{resolved.original}'\n\n"
-                f"**Upload directory (configured):** {os.getenv('UPLOAD_DIR', '/app/uploads')}"
+                f"**Upload directory (configured):** {ud}"
             ),
         )
 
@@ -321,10 +307,18 @@ def infer_loose_file_type_from_path_string(path_str: str) -> str:
         return "h5ad"
     if "matrix.mtx" in lower:
         return "10x_mtx"
+    if lower.endswith((".fastq.gz", ".fq.gz", ".fastq", ".fq")):
+        return "fastq"
+    if lower.endswith((".bam", ".sam", ".cram")):
+        return "alignments"
+    if lower.endswith((".vcf", ".vcf.gz")):
+        return "vcf"
     if lower.endswith(".csv"):
         return "tabular"
     if ".nii" in lower or lower.endswith(".dcm"):
         return "radiomics"
+    if lower.endswith((".mzml", ".mzxml", ".raw")):
+        return "proteomics_ms"
     if lower.endswith(".mtx"):
         return "mtx"
     return "unknown"

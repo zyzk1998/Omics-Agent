@@ -66,13 +66,14 @@ def resolve_primary_upload_path(
     upload_dir: Optional[str] = None,
 ) -> Optional[str]:
     """
-    在 API 容器内解析「首个真实存在的文件」绝对路径。
+    在 API 容器内解析「首个真实存在的文件或目录」绝对路径。
     依次尝试：原始字符串绝对路径、basename 落在 UPLOAD_DIR、相对 uploads 的子路径。
+    10x 等组学目录（非普通文件）同样视为有效主路径。
     """
     paths = [str(p).strip() for p in file_paths if str(p).strip()]
     if not paths:
         return None
-    raw = paths[0]
+
     ud: Optional[Path] = None
     if upload_dir:
         try:
@@ -80,32 +81,36 @@ def resolve_primary_upload_path(
         except OSError:
             ud = None
 
-    trials: list[Path] = []
-    p = Path(raw)
-    trials.append(p)
-    if not p.is_absolute() and ud is not None:
-        trials.append(ud / raw)
-        trials.append(ud / p.name)
-    if p.is_absolute():
-        trials.append(p)
-
     seen: set[str] = set()
-    for cand in trials:
-        try:
-            rp = cand.resolve()
-        except OSError:
-            continue
-        key = str(rp)
-        if key in seen:
-            continue
-        seen.add(key)
-        if rp.is_file():
-            logger.info("[Preflight] 解析到容器内可读文件: %s", key)
-            return key
+    for raw in paths:
+        trials: list[Path] = []
+        p = Path(raw)
+        trials.append(p)
+        if not p.is_absolute() and ud is not None:
+            trials.append(ud / raw)
+            trials.append(ud / p.name)
+        if p.is_absolute():
+            trials.append(p)
+
+        for cand in trials:
+            try:
+                rp = cand.resolve()
+            except OSError:
+                continue
+            key = str(rp)
+            if key in seen:
+                continue
+            seen.add(key)
+            if rp.is_file():
+                logger.info("[Preflight] 解析到容器内可读文件: %s", key)
+                return key
+            if rp.is_dir():
+                logger.info("[Preflight] 解析到容器内可读目录: %s", key)
+                return key
 
     logger.error(
-        "[Preflight] 文件注入失败：容器内找不到路径 raw=%r upload_dir=%r ",
-        raw,
+        "[Preflight] 文件注入失败：容器内找不到路径 candidates=%r upload_dir=%r ",
+        list(paths),
         str(ud) if ud else None,
     )
     return None
@@ -128,8 +133,8 @@ def inject_primary_file_path_into_workflow(
     if not all_existing:
         return False
     primary = all_existing[0]
-    if not os.path.isfile(primary):
-        logger.error("[Preflight] 注入中止：路径非文件 %s", primary)
+    if not (os.path.isfile(primary) or os.path.isdir(primary)):
+        logger.error("[Preflight] 注入中止：路径非文件/目录 %s", primary)
         return False
 
     steps = workflow_data.get("steps")
@@ -148,6 +153,9 @@ def inject_primary_file_path_into_workflow(
             params = {}
             st["params"] = params
         params["file_path"] = primary
+        if "adata_path" in params and _path_slot_empty(params.get("adata_path")):
+            params["adata_path"] = primary
+            logger.info("[Preflight] 已同步首步 adata_path=%s", primary)
         multi = ",".join(all_existing) if len(all_existing) > 1 else primary
         if "data_path" in params and _path_slot_empty(params.get("data_path")):
             params["data_path"] = multi

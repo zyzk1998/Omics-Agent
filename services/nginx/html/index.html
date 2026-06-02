@@ -706,6 +706,47 @@
             </div>
         </div>
 
+        <!-- 技能广场 · 详情抽屉页（Phase 1 重构：Offcanvas 宽幅覆盖） -->
+        <div id="skill-detail-drawer" class="skill-detail-drawer" aria-hidden="true">
+            <div class="skill-detail-drawer__backdrop" id="skill-detail-drawer-backdrop"></div>
+            <aside class="skill-detail-drawer__panel" role="dialog" aria-labelledby="skill-detail-drawer-title" aria-modal="true">
+                <header class="skill-detail-drawer__header">
+                    <div class="skill-detail-drawer__header-left">
+                        <button type="button" class="skill-detail-drawer__back" id="skill-detail-drawer-back" title="返回">
+                            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M15 18l-6-6 6-6"/></svg>
+                            返回
+                        </button>
+                        <div class="skill-detail-drawer__identity">
+                            <span class="skill-detail-drawer__icon" id="skill-detail-drawer-icon" aria-hidden="true"></span>
+                            <div class="skill-detail-drawer__titles">
+                                <h2 class="skill-detail-drawer__heading" id="skill-detail-drawer-title">技能详情</h2>
+                                <p class="skill-detail-drawer__subtitle" id="skill-detail-drawer-subtitle"></p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="skill-detail-drawer__actions">
+                        <button type="button" class="skill-detail-drawer__btn skill-detail-drawer__btn--ghost" id="skill-detail-drawer-bookmark" title="添加到我的工具">
+                            <i class="bi bi-bookmark-plus" aria-hidden="true"></i> 添加到我的工具
+                        </button>
+                        <button type="button" class="skill-detail-drawer__btn skill-detail-drawer__btn--primary" id="skill-detail-drawer-use" title="立即使用">
+                            <i class="bi bi-box-arrow-in-right" aria-hidden="true"></i> 使用
+                        </button>
+                    </div>
+                </header>
+                <div class="skill-detail-drawer__body">
+                    <div class="skill-detail-drawer__scroll" id="skill-detail-drawer-scroll">
+                        <div id="skill-detail-drawer-main">
+                            <p class="skill-detail-drawer__loading text-muted">加载中…</p>
+                        </div>
+                    </div>
+                    <aside class="skill-detail-drawer__preview-col" id="skill-detail-drawer-preview-col" style="display:none;" aria-label="输出效果预览">
+                        <h4 class="skill-detail-drawer__preview-title">输出效果预览</h4>
+                        <div class="skill-detail-drawer__preview-inner" id="skill-detail-drawer-preview"></div>
+                    </aside>
+                </div>
+            </aside>
+        </div>
+
         <div id="custom-context-menu" class="custom-context-menu" style="display:none;" aria-hidden="true">
             <button type="button" class="custom-context-menu__item" data-action="add-to-chat"><i class="bi bi-chat-left-text"></i><span>添加到对话框</span></button>
             <button type="button" class="custom-context-menu__item" data-action="copy-path"><i class="bi bi-clipboard"></i><span>复制文件路径</span></button>
@@ -1998,20 +2039,123 @@
             }
             window.stripAllInferenceTagsAggressive = stripAllInferenceTagsAggressive;
             window.stripInferenceTagsForMarkdown = stripInferenceTagsForMarkdown;
+            /** 判断是否为应折叠的超长底层文本（NumPy/矩阵/元数据裸奔），非图片 URI */
+            function _omicsShouldFoldDirtyTextBlock(block) {
+                if (!block || typeof block !== 'string') return false;
+                var t = block.trim();
+                if (t.length < 800) return false;
+                if (/^data:image\//i.test(t)) return false;
+                if (/^!\[[^\]]*\]\(\s*data:image\//i.test(t)) return false;
+                if (/^<img\b/i.test(t)) return false;
+                if (/[A-Za-z0-9+/]{500,}={0,3}/.test(t) && t.length >= 400) return true;
+                if (/\[\[\[/.test(t)) return true;
+                if (/\barray\s*\(\s*\[\[/.test(t)) return true;
+                if (/\[\s*0\.\s*0\./.test(t) && (t.match(/\[\s*0\./g) || []).length >= 8) return true;
+                if ((t.match(/[\[\(]/g) || []).length >= 40 && (t.match(/[\d.]+/g) || []).length >= 60) return true;
+                return t.length >= 800;
+            }
+            function _omicsFoldDirtyTextBlock(block, esc) {
+                var t = String(block);
+                var preview = t.length > 1200 ? t.slice(0, 1200) + '\n…' : t;
+                return (
+                    '<details class="omics-dirty-accordion mb-2">' +
+                    '<summary class="small text-muted py-1"><i class="bi bi-text-wrap me-1"></i>展开查看底层数据详情</summary>' +
+                    '<pre class="small bg-light p-2 rounded mb-0 omics-dirty-pre" style="max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-all;">' +
+                    esc(preview) + '</pre></details>'
+                );
+            }
+            function foldDirtyContentInMarkdownSource(text) {
+                if (!text || typeof text !== 'string') return text;
+                var esc = (typeof _skillWsEscapeHtml === 'function') ? _skillWsEscapeHtml : function(x) { return String(x); };
+                var imgPlaceholders = [];
+                function stashImageHtml(html) {
+                    var token = '\uE000OMICS_IMG_' + imgPlaceholders.length + '\uE001';
+                    imgPlaceholders.push({ token: token, html: html });
+                    return token;
+                }
+                // 1) 已有 HTML <img data:image> — 直接可见，禁止折叠或破坏 src
+                text = text.replace(/<img\b[^>]*\bsrc\s*=\s*["'](data:image\/[^"']+)["'][^>]*\/?>/gi, function(_full, uri) {
+                    var altM = /alt\s*=\s*["']([^"']*)["']/i.exec(_full);
+                    var label = (altM && altM[1]) ? altM[1] : '影像预览';
+                    return stashImageHtml(
+                        '<p class="omics-inline-preview mb-2">' +
+                        '<img src="' + uri + '" alt="' + esc(label) + '" class="img-fluid rounded border" ' +
+                        'style="max-width:100%;max-height:320px;object-fit:contain;" loading="lazy"/></p>'
+                    );
+                });
+                // 2) Markdown 内嵌 Base64 图片 — 直接渲染 <img>，不折叠
+                text = text.replace(/!\[([^\]]*)\]\(\s*(data:image\/[^)]+)\)/gi, function(_m, alt, uri) {
+                    if (!uri) return _m;
+                    var label = (alt && String(alt).trim()) ? String(alt).trim() : '影像预览';
+                    return stashImageHtml(
+                        '<p class="omics-inline-preview mb-2">' +
+                        '<img src="' + uri + '" alt="' + esc(label) + '" class="img-fluid rounded border" ' +
+                        'style="max-width:100%;max-height:320px;object-fit:contain;" loading="lazy"/></p>'
+                    );
+                });
+                // 3) 超长单行纯文本
+                text = text.replace(/^(.+)$/gm, function(line) {
+                    if (!_omicsShouldFoldDirtyTextBlock(line)) return line;
+                    return _omicsFoldDirtyTextBlock(line, esc);
+                });
+                // 4) 连续多行大块（NumPy 矩阵等）
+                text = text.replace(/(?:^[^\n\uE000]{80,}\n){2,}[^\n\uE000]{40,}/gm, function(block) {
+                    if (block.indexOf('\uE000OMICS_IMG_') >= 0) return block;
+                    if (!_omicsShouldFoldDirtyTextBlock(block)) return block;
+                    return _omicsFoldDirtyTextBlock(block, esc);
+                });
+                // 5) 还原占位图片
+                for (var pi = 0; pi < imgPlaceholders.length; pi++) {
+                    text = text.split(imgPlaceholders[pi].token).join(imgPlaceholders[pi].html);
+                }
+                return text;
+            }
+            window.foldDirtyContentInMarkdownSource = foldDirtyContentInMarkdownSource;
+
+            /** 影像组「加载医学影像」：预览图直出 + 元数据/长文本折叠（工作流执行结果详情专用） */
+            var WORKFLOW_RAD_LOAD_TOOL_IDS = { radiomics_load_medical_image: 1 };
+            function renderRadiomicsLoadMedicalImageStepHtml(stepData, mdSource) {
+                var esc = (typeof escapeHtml === 'function') ? escapeHtml : function(x) { return String(x == null ? '' : x); };
+                var md = String(mdSource || stepData.markdown || '').trim();
+                var html = '';
+                if (md) {
+                    try {
+                        html = (typeof safeMarkedParse === 'function') ? safeMarkedParse(md) : esc(md);
+                    } catch (eMd) {
+                        html = esc(md);
+                    }
+                    html = '<div class="radiomics-load-step-markdown markdown-body">' + html + '</div>';
+                }
+                var d = stepData || {};
+                var techLines = [];
+                if (d.size != null) techLines.push('- **体素尺寸**：' + esc(JSON.stringify(d.size)));
+                if (d.spacing != null) techLines.push('- **间距 (mm)**：' + esc(JSON.stringify(d.spacing)));
+                if (d.origin != null) techLines.push('- **原点 (mm)**：' + esc(JSON.stringify(d.origin)));
+                if (d.direction != null) techLines.push('- **方向矩阵**：' + esc(JSON.stringify(d.direction)));
+                if (d.image_path) techLines.push('- **路径**：`' + esc(String(d.image_path).split(/[/\\]/).pop()) + '`');
+                if (techLines.length && md.indexOf('omics-dirty-accordion') < 0) {
+                    html += (
+                        '<details class="omics-dirty-accordion mb-2 mt-2">' +
+                        '<summary class="small text-muted py-1"><i class="bi bi-sliders me-1"></i>展开查看影像元数据（体素尺寸、间距、方向矩阵等）</summary>' +
+                        '<div class="small p-2">' + techLines.join('<br>') + '</div></details>'
+                    );
+                }
+                return html;
+            }
+            window.renderRadiomicsLoadMedicalImageStepHtml = renderRadiomicsLoadMedicalImageStepHtml;
+
             // 安全的 marked 包装函数
             function safeMarkedParse(text) {
                 if (text === null || text === undefined) return '';
                 var s = normalizeReportMarkdownInput(text);
                 s = stripInferenceTagsForMarkdown(s);
-                // Sidecar / 挂载调试用前缀行不透出 UI
                 s = s.replace(/^\s*(?:\[Local[^\]\n]*\]|local_workspace_mounted\s*=\s*\S+)\s*$/gim, '');
-                // 剔除大模型生成的黄色警示图标
                 s = s.replace(/⚠️/g, '');
-                // #region agent log
-                // 已禁用调试请求: fetch('http://localhost:7242/ingest/...',...).catch(()=>{});
-                // #endregion
                 if (/^\s*<div class="smart-content-wrapper\b/.test(s)) {
                     return s;
+                }
+                if (typeof foldDirtyContentInMarkdownSource === 'function') {
+                    s = foldDirtyContentInMarkdownSource(s);
                 }
                 if (typeof marked !== 'undefined' && marked.parse) {
                     return marked.parse(s);
@@ -3745,6 +3889,61 @@
                 }
                 return loadNext();
             }
+            /** 将 Featured 静态条目的 id 对齐为 API 返回的数字主键，确保收藏接口可用 */
+            function attachApiIdsToFeaturedSkills(items, apiItems) {
+                var byName = {};
+                (apiItems || []).forEach(function(s) {
+                    if (!s || !s.name) return;
+                    var sid = s.id != null ? String(s.id).trim() : '';
+                    if (/^\d+$/.test(sid)) byName[s.name] = s;
+                });
+                return (items || []).map(function(s) {
+                    if (!s || !s.name) return s;
+                    var api = byName[s.name];
+                    if (!api) return s;
+                    var merged = {};
+                    for (var k in s) {
+                        if (Object.prototype.hasOwnProperty.call(s, k)) merged[k] = s[k];
+                    }
+                    merged.id = api.id;
+                    if (api.saved != null) merged.saved = api.saved;
+                    if (api.created_at) merged.created_at = api.created_at;
+                    return merged;
+                });
+            }
+            function resolveBookmarkSkillId(skillOrId) {
+                if (skillOrId != null && typeof skillOrId === 'object') {
+                    var sid = skillOrId.id != null ? String(skillOrId.id).trim() : '';
+                    if (sid && sid.indexOf('dyn_') !== 0 && /^\d+$/.test(sid)) return parseInt(sid, 10);
+                    if (skillOrId.name) {
+                        var catalog = window.allUniqueSkills || [];
+                        for (var i = 0; i < catalog.length; i++) {
+                            var row = catalog[i];
+                            if (row && row.name === skillOrId.name && row.id != null && /^\d+$/.test(String(row.id))) {
+                                return parseInt(String(row.id), 10);
+                            }
+                        }
+                    }
+                    return null;
+                }
+                var idStr = String(skillOrId || '').trim();
+                if (idStr && /^\d+$/.test(idStr)) return parseInt(idStr, 10);
+                return null;
+            }
+            function renderSkillBookmarkButtonContent(btnElement, newSaved) {
+                if (!btnElement) return;
+                var isDrawer = btnElement.id === 'skill-detail-drawer-bookmark'
+                    || (btnElement.classList && btnElement.classList.contains('skill-detail-drawer__btn'));
+                if (isDrawer) {
+                    btnElement.innerHTML = newSaved
+                        ? '<i class="bi bi-bookmark-check" aria-hidden="true"></i> 已收藏'
+                        : '<i class="bi bi-bookmark-plus" aria-hidden="true"></i> 添加到我的工具';
+                    return;
+                }
+                btnElement.innerHTML = newSaved
+                    ? '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+                    : '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+            }
             /** 合并 Featured、过滤占位/暂缓项后立即 Map 去重 → 干净目录 */
             function buildSkillsPlazaCleanCatalog(apiItems, mainCat, isMyTab) {
                 var items = (apiItems || []).slice();
@@ -3774,6 +3973,7 @@
                 if (preDedupeLen > items.length) {
                     console.log('[Skills Plaza] 目录去重: 移除 ' + (preDedupeLen - items.length) + ' 条重复，唯一技能 ' + items.length + ' 条');
                 }
+                items = attachApiIdsToFeaturedSkills(items, apiItems);
                 return sortSkillsPlazaDisplayOrder(items);
             }
             /** 「特色科研流程」页仅展示 main_category 为该类的置顶项，避免与化学/生物医药等重复橱窗 */
@@ -3813,6 +4013,219 @@
                 }));
                 return pinnedCopy.concat(rest);
             }
+            window._skillDetailedSpecsMap = window._skillDetailedSpecsMap || {};
+            window._skillDetailedSpecsFetchPromise = null;
+            function fetchSkillDetailedSpecsOnce() {
+                if (window._skillDetailedSpecsFetchPromise) return window._skillDetailedSpecsFetchPromise;
+                window._skillDetailedSpecsFetchPromise = fetch('/api/skills/detailed-specs', { method: 'GET' })
+                    .then(function(r) { return r.ok ? r.json() : { specs: {} }; })
+                    .then(function(data) {
+                        window._skillDetailedSpecsMap = (data && data.specs) || {};
+                        return window._skillDetailedSpecsMap;
+                    })
+                    .catch(function() {
+                        window._skillDetailedSpecsMap = {};
+                        return window._skillDetailedSpecsMap;
+                    });
+                return window._skillDetailedSpecsFetchPromise;
+            }
+            function resolveSkillDetailedSpec(skill) {
+                if (!skill) return null;
+                if (skill.detailed_spec && typeof skill.detailed_spec === 'object') return skill.detailed_spec;
+                var tid = _extractSkillRouteFromPrompt(skill.prompt_template)
+                    || String(skill.tool_name || skill.toolName || '').trim();
+                if (tid && window._skillDetailedSpecsMap && window._skillDetailedSpecsMap[tid]) {
+                    return window._skillDetailedSpecsMap[tid];
+                }
+                if (tid && window._skillDetailedSpecsMap && window._skillDetailedSpecsMap[String(skill.id)]) {
+                    return window._skillDetailedSpecsMap[String(skill.id)];
+                }
+                return null;
+            }
+            function escSkillDetailHtml(s) {
+                return String(s == null ? '' : s)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            }
+            function renderSkillDetailVisualization(viz) {
+                var previewCol = document.getElementById('skill-detail-drawer-preview-col');
+                var previewInner = document.getElementById('skill-detail-drawer-preview');
+                if (!previewCol || !previewInner) return;
+                var raw = viz == null ? '' : String(viz).trim();
+                if (!raw) {
+                    previewCol.style.display = 'none';
+                    previewInner.innerHTML = '';
+                    return;
+                }
+                previewCol.style.display = '';
+                if (/^(\/|https?:\/\/).+\.(png|jpe?g|gif|webp|svg)(\?.*)?$/i.test(raw)) {
+                    previewInner.innerHTML = '<img class="skill-detail-viz__img" src="' + escSkillDetailHtml(raw) + '" alt="输出效果预览" loading="lazy" />';
+                    return;
+                }
+                if (raw.indexOf('<') !== -1) {
+                    previewInner.innerHTML = raw;
+                    return;
+                }
+                previewInner.innerHTML = '<img class="skill-detail-viz__img" src="' + escSkillDetailHtml(raw) + '" alt="输出效果预览" loading="lazy" />';
+            }
+            function syncSkillDetailDrawerBookmarkBtn(skill) {
+                var btn = document.getElementById('skill-detail-drawer-bookmark');
+                if (!btn || !skill) return;
+                var isDyn = !!(skill.is_dynamic_plugin === true);
+                var numericId = resolveBookmarkSkillId(skill);
+                if (isDyn || !numericId) {
+                    btn.disabled = true;
+                    btn.setAttribute('title', '该技能暂不支持收藏');
+                    btn.classList.add('is-disabled');
+                    return;
+                }
+                btn.disabled = false;
+                btn.classList.remove('is-disabled');
+                var saved = !!(skill.saved === true);
+                btn.setAttribute('data-skill-id', String(numericId));
+                btn.setAttribute('data-saved', saved ? '1' : '0');
+                btn.setAttribute('title', saved ? '已收藏' : '添加到我的工具');
+                renderSkillBookmarkButtonContent(btn, saved);
+            }
+            function renderSkillDetailDrawerBody(skill, spec) {
+                var main = document.getElementById('skill-detail-drawer-main');
+                if (!main) return;
+                if (!spec) {
+                    main.innerHTML = '<p class="skill-detail-drawer__empty">该技能尚未配置详细说明书。后续批次将陆续补充。</p>';
+                    renderSkillDetailVisualization('');
+                    return;
+                }
+                var hint = spec.usage_hint
+                    ? '<div class="skill-detail-drawer__banner">' + escSkillDetailHtml(spec.usage_hint) + '</div>'
+                    : '';
+                var overview = '<section class="skill-detail-section"><h4 class="skill-detail-section__title">描述</h4><p class="skill-detail-section__text">'
+                    + escSkillDetailHtml(spec.description_long || skill.description || '') + '</p></section>';
+                var inputs = (spec.inputs || []).map(function(row) {
+                    return '<li><strong>' + escSkillDetailHtml(row.name) + '</strong>（' + escSkillDetailHtml(row.type) + '，'
+                        + (row.required ? '必填' : '选填') + '）— ' + escSkillDetailHtml(row.description || '') + '</li>';
+                }).join('');
+                var outputs = (spec.outputs || []).map(function(row) {
+                    return '<li><strong>' + escSkillDetailHtml(row.name) + '</strong>（' + escSkillDetailHtml(row.type) + '）— '
+                        + escSkillDetailHtml(row.description || '') + '</li>';
+                }).join('');
+                var ioBlock = '<section class="skill-detail-section"><h4 class="skill-detail-section__title">输入</h4><ul class="skill-detail-list">'
+                    + (inputs || '<li class="text-muted">见参数表</li>') + '</ul>'
+                    + '<h4 class="skill-detail-section__title skill-detail-section__title--sub">输出</h4><ul class="skill-detail-list">'
+                    + (outputs || '<li class="text-muted">Markdown / 结构化 JSON</li>') + '</ul></section>';
+                var paramRows = (spec.parameters_table || []).map(function(p) {
+                    return '<tr><td><code>' + escSkillDetailHtml(p.name) + '</code></td><td>' + escSkillDetailHtml(p.type)
+                        + '</td><td>' + (p.required ? '是' : '否') + '</td><td>' + escSkillDetailHtml(p.description || '') + '</td></tr>';
+                }).join('');
+                var paramBlock = '<section class="skill-detail-section"><h4 class="skill-detail-section__title">参数</h4>'
+                    + '<div class="skill-detail-table-wrap"><table class="skill-detail-table"><thead><tr>'
+                    + '<th>参数名</th><th>类型</th><th>必填</th><th>说明</th></tr></thead><tbody>'
+                    + (paramRows || '<tr><td colspan="4" class="text-muted">无结构化参数</td></tr>') + '</tbody></table></div></section>';
+                var examples = (spec.query_examples || []);
+                var demoText = examples.length ? String(examples[0]) : (skill.prompt_template || '');
+                var demoBlock = '<section class="skill-detail-section"><div class="skill-detail-demo__head">'
+                    + '<h4 class="skill-detail-section__title">对话调用示例</h4>'
+                    + '<button type="button" class="skill-detail-demo__copy" id="skill-detail-demo-copy">一键复制</button></div>'
+                    + '<pre class="skill-detail-demo__pre"><code id="skill-detail-demo-code">'
+                    + escSkillDetailHtml(demoText) + '</code></pre></section>';
+                main.innerHTML = hint + overview + ioBlock + paramBlock + demoBlock;
+                renderSkillDetailVisualization(spec.demo_visualization || '');
+                var copyDemoBtn = document.getElementById('skill-detail-demo-copy');
+                var demoCodeEl = document.getElementById('skill-detail-demo-code');
+                if (copyDemoBtn && demoCodeEl) {
+                    copyDemoBtn.onclick = function() {
+                        var text = demoCodeEl.textContent || '';
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                            navigator.clipboard.writeText(text).then(function() {
+                                if (typeof showToast === 'function') showToast('已复制调用示例', 'success');
+                            }).catch(function() {
+                                if (typeof showToast === 'function') showToast('复制失败，请手动选择文本', 'warning');
+                            });
+                        } else if (typeof showToast === 'function') {
+                            showToast('浏览器不支持自动复制', 'warning');
+                        }
+                    };
+                }
+            }
+            function closeSkillDetailDrawer() {
+                var drawer = document.getElementById('skill-detail-drawer');
+                if (!drawer) return;
+                drawer.classList.remove('skill-detail-drawer--open');
+                drawer.setAttribute('aria-hidden', 'true');
+                document.body.classList.remove('skill-detail-drawer-open');
+                window._skillDetailDrawerSkill = null;
+            }
+            function openSkillDetailDrawer(skill) {
+                if (!skill) return;
+                fetchSkillDetailedSpecsOnce().then(function() {
+                    var drawer = document.getElementById('skill-detail-drawer');
+                    var titleEl = document.getElementById('skill-detail-drawer-title');
+                    var subtitleEl = document.getElementById('skill-detail-drawer-subtitle');
+                    var iconEl = document.getElementById('skill-detail-drawer-icon');
+                    var main = document.getElementById('skill-detail-drawer-main');
+                    var scrollEl = document.getElementById('skill-detail-drawer-scroll');
+                    if (!drawer || !titleEl || !main) return;
+                    window._skillDetailDrawerSkill = skill;
+                    titleEl.textContent = skill.name || '技能详情';
+                    if (subtitleEl) {
+                        var subParts = [];
+                        if (skill.main_category) subParts.push(skill.main_category);
+                        if (skill.sub_category) subParts.push(skill.sub_category);
+                        subtitleEl.textContent = subParts.join(' · ') || (skill.description || '').slice(0, 120);
+                    }
+                    if (iconEl) {
+                        var iconHtml = (typeof window.getSkillPlazaEmojiIconHtml === 'function')
+                            ? window.getSkillPlazaEmojiIconHtml(skill) : '';
+                        if (!iconHtml && typeof window.getSkillPlazaLineIconHtml === 'function') {
+                            iconHtml = window.getSkillPlazaLineIconHtml(skill);
+                        }
+                        iconEl.innerHTML = iconHtml || '<span class="skill-icon-neutral" aria-hidden="true">🧬</span>';
+                    }
+                    main.innerHTML = '<p class="skill-detail-drawer__loading text-muted">加载中…</p>';
+                    if (scrollEl) scrollEl.scrollTop = 0;
+                    syncSkillDetailDrawerBookmarkBtn(skill);
+                    drawer.classList.add('skill-detail-drawer--open');
+                    drawer.setAttribute('aria-hidden', 'false');
+                    document.body.classList.add('skill-detail-drawer-open');
+                    var spec = resolveSkillDetailedSpec(skill);
+                    renderSkillDetailDrawerBody(skill, spec);
+                });
+            }
+            function useSkillFromDetailDrawer() {
+                var skill = window._skillDetailDrawerSkill;
+                if (!skill) return;
+                closeSkillDetailDrawer();
+                if (typeof useSkillFromApi === 'function') useSkillFromApi(skill, 'new');
+            }
+            window.openSkillDetailDrawer = openSkillDetailDrawer;
+            window.closeSkillDetailDrawer = closeSkillDetailDrawer;
+            window.openSkillDetailModal = openSkillDetailDrawer;
+            window.closeSkillDetailModal = closeSkillDetailDrawer;
+            (function bindSkillDetailDrawerChrome() {
+                if (window.__skillDetailDrawerBound) return;
+                window.__skillDetailDrawerBound = true;
+                var backdrop = document.getElementById('skill-detail-drawer-backdrop');
+                var backBtn = document.getElementById('skill-detail-drawer-back');
+                var useBtn = document.getElementById('skill-detail-drawer-use');
+                var bookmarkBtn = document.getElementById('skill-detail-drawer-bookmark');
+                if (backdrop) backdrop.addEventListener('click', closeSkillDetailDrawer);
+                if (backBtn) backBtn.addEventListener('click', closeSkillDetailDrawer);
+                if (useBtn) useBtn.addEventListener('click', useSkillFromDetailDrawer);
+                if (bookmarkBtn) {
+                    bookmarkBtn.addEventListener('click', function() {
+                        if (bookmarkBtn.disabled) return;
+                        var skill = window._skillDetailDrawerSkill;
+                        if (typeof toggleSkillBookmark === 'function') {
+                            toggleSkillBookmark(skill || bookmarkBtn.getAttribute('data-skill-id'), bookmarkBtn);
+                        }
+                    });
+                }
+                document.addEventListener('keydown', function(ev) {
+                    if (ev.key === 'Escape') {
+                        var d = document.getElementById('skill-detail-drawer');
+                        if (d && d.classList.contains('skill-detail-drawer--open')) closeSkillDetailDrawer();
+                    }
+                });
+            })();
+
             function fetchSkills(mainCat, page) {
                 skillsCurrentMain = (mainCat != null && mainCat !== undefined) ? (mainCat || '') : skillsCurrentMain;
                 skillsCurrentPage = page || 1;
@@ -3884,7 +4297,8 @@
                                         ? '<span class="icon-btn icon-btn--disabled" title="用户上传技能暂不支持收藏" style="opacity:0.45;cursor:not-allowed;pointer-events:none;">' + addBtnSvg + '</span>'
                                         : '<button type="button" class="icon-btn btn-skill-bookmark" title="' + addBtnTitle + '" data-skill-id="' + s.id + '" data-saved="' + (isSaved ? '1' : '0') + '">' + addBtnSvg + '</button>';
                                     var footerActionsHtml = bookmarkBlock +
-                                        '<button type="button" class="icon-btn" title="复制"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>';
+                                        '<button type="button" class="icon-btn btn-skill-detail" title="查看详细描述" aria-label="详细描述"><i class="bi bi-info-circle" aria-hidden="true"></i></button>' +
+                                        '<button type="button" class="icon-btn btn-skill-copy" title="复制 Prompt"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>';
                                     var newBadgeHtml = skillPlazaIsNewSkill(s)
                                         ? '<span class="skill-plaza-new-badge" title="上新技能" aria-label="上新">新</span>'
                                         : '';
@@ -3951,6 +4365,34 @@
                                     var skillId = btn.getAttribute('data-skill-id');
                                     if (skillId && typeof toggleSkillBookmark === 'function') toggleSkillBookmark(skillId, btn);
                                 };
+                            });
+                            grid.querySelectorAll('.skill-card').forEach(function(card) {
+                                var sid = card.getAttribute('data-skill-id');
+                                var item = items.find(function(x) { return String(x.id) === String(sid); });
+                                if (!item) return;
+                                var detailBtn = card.querySelector('.btn-skill-detail');
+                                if (detailBtn) {
+                                    detailBtn.onclick = function(e) {
+                                        e.stopPropagation();
+                                        if (typeof openSkillDetailDrawer === 'function') openSkillDetailDrawer(item);
+                                    };
+                                }
+                                var copyBtn = card.querySelector('.btn-skill-copy');
+                                if (copyBtn) {
+                                    copyBtn.onclick = function(e) {
+                                        e.stopPropagation();
+                                        var pt = (item.prompt_template || '').trim();
+                                        if (!pt) {
+                                            if (typeof showToast === 'function') showToast('该技能暂无 Prompt 模板', 'warning');
+                                            return;
+                                        }
+                                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                                            navigator.clipboard.writeText(pt).then(function() {
+                                                if (typeof showToast === 'function') showToast('已复制 Prompt', 'success');
+                                            });
+                                        }
+                                    };
+                                }
                             });
                         }
                         totalPages = Math.max(1, Math.ceil(skillsTotal / skillsPageSize));
@@ -6789,28 +7231,51 @@
                 }, 3000);
             };
 
-            function toggleSkillBookmark(skillId, btnElement) {
-                if (!btnElement || !skillId) return;
-                if (String(skillId).indexOf('dyn_') === 0) { showToast('用户上传技能暂不支持收藏'); return; }
+            function toggleSkillBookmark(skillIdOrSkill, btnElement) {
+                if (!btnElement) return;
+                if (String(skillIdOrSkill || '').indexOf('dyn_') === 0 || (skillIdOrSkill && skillIdOrSkill.is_dynamic_plugin)) {
+                    showToast('用户上传技能暂不支持收藏');
+                    return;
+                }
+                var skillId = resolveBookmarkSkillId(skillIdOrSkill);
+                if (!skillId) {
+                    showToast('该技能暂不支持收藏', 'warning');
+                    return;
+                }
                 var isSaved = btnElement.getAttribute('data-saved') === '1';
-                var url = '/api/skills/' + encodeURIComponent(String(skillId)) + '/bookmark';
+                var url = '/api/skills/favorites';
                 var method = isSaved ? 'DELETE' : 'POST';
-                var opts = { method: method, headers: getAuthHeaders() };
+                var headers = getAuthHeaders();
+                headers['Content-Type'] = 'application/json';
+                var opts = { method: method, headers: headers };
+                if (method === 'POST') {
+                    opts.body = JSON.stringify({ skill_id: skillId });
+                } else {
+                    url = url + '?skill_id=' + encodeURIComponent(String(skillId));
+                }
                 fetch(url, opts)
                     .then(function(r) {
                         if (r.status === 401) { showToast('请先登录或提供身份'); return null; }
-                        return r.json();
+                        if (r.status === 405) {
+                            return fetch('/api/skills/' + encodeURIComponent(String(skillId)) + '/bookmark', {
+                                method: method,
+                                headers: getAuthHeaders()
+                            }).then(function(r2) { return r2.ok ? r2.json() : null; });
+                        }
+                        return r.ok ? r.json() : null;
                     })
                     .then(function(data) {
-                        if (!data) return;
+                        if (!data) { showToast('操作失败，请重试'); return; }
                         var newSaved = !!(data.saved === true);
                         btnElement.setAttribute('data-saved', newSaved ? '1' : '0');
+                        btnElement.setAttribute('data-skill-id', String(skillId));
                         btnElement.setAttribute('title', newSaved ? '已收藏' : '添加到我的工具');
-                        btnElement.innerHTML = newSaved
-                            ? '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>'
-                            : '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+                        renderSkillBookmarkButtonContent(btnElement, newSaved);
                         if (newSaved) showToast('已添加到我的工具');
                         else showToast('已取消收藏');
+                        if (window._skillDetailDrawerSkill && resolveBookmarkSkillId(window._skillDetailDrawerSkill) === skillId) {
+                            window._skillDetailDrawerSkill.saved = newSaved;
+                        }
                         if (skillsCurrentMain === '我的') {
                             delete window._skillsPlazaCatalogCache[getSkillsPlazaCatalogCacheKey('我的', true)];
                             if (typeof fetchSkills === 'function') fetchSkills('我的', skillsCurrentPage);
@@ -7200,6 +7665,7 @@
                 });
             }
             function showSkillsView() {
+                if (typeof fetchSkillDetailedSpecsOnce === 'function') fetchSkillDetailedSpecsOnce();
                 syncVolatileReturnSessionFromChatBeforeLeavingToSkillsOrAssets();
                 persistLastChatSessionBeforeLeaving();
                 hideAllMainPanes();
@@ -7751,7 +8217,9 @@
             };
             var SKILL_VIS_META_KEYS = {
                 status: 1, message: 1, Status: 1, Message: 1,
-                markdown: 1, data: 1, result: 1,
+                markdown: 1, summary: 1, data: 1, result: 1,
+                size: 1, spacing: 1, origin: 1, direction: 1,
+                image_path: 1, mask_path: 1, mask_size: 1, mask_warning: 1,
                 html_url: 1, csv_url: 1, zip_url: 1, json_url: 1, pdf_url: 1,
                 image_url: 1, image_urls: 1, image_paths: 1, json_paths: 1,
                 script_path: 1, output_dir: 1, artifacts: 1,
@@ -8036,7 +8504,45 @@
                     return '<span class="skill-mm-metric__value text-muted small">—</span>';
                 }
                 var display = esc(String(val));
+                if (/^data:image\/[^;]+;base64,/.test(String(val))) {
+                    var _uri = String(val);
+                    return (
+                        '<span class="skill-mm-metric__value">' +
+                        '<img src="' + _uri + '" alt="preview" class="img-fluid rounded border" style="max-width:100%;max-height:200px;object-fit:contain;" loading="lazy"/>' +
+                        '</span>'
+                    );
+                }
+                if (String(val).length > 900) {
+                    return (
+                        '<span class="skill-mm-metric__value">' +
+                        '<details class="omics-dirty-accordion mb-0">' +
+                        '<summary class="small text-muted">展开查看长文本（' + String(val).length + ' 字符）</summary>' +
+                        '<pre class="small bg-light p-2 rounded mb-0 omics-dirty-pre" style="max-height:100px;overflow:auto;white-space:pre-wrap;">' +
+                        esc(String(val).slice(0, 400) + '…') + '</pre></details></span>'
+                    );
+                }
                 return '<span class="skill-mm-metric__value">' + display + '</span>';
+            }
+            var _skillVisMetricsAccordionSeq = 0;
+            function _skillVisWrapMetricsInAccordion(cardsHtml) {
+                var seq = ++_skillVisMetricsAccordionSeq;
+                var accId = 'omicsMetricsAccordion-' + seq;
+                var headingId = 'headingMetrics-' + seq;
+                var collapseId = 'collapseMetrics-' + seq;
+                var containerId = 'metricsCardsContainer-' + seq;
+                return (
+                    '<div class="accordion mb-3 omics-metrics-accordion" id="' + accId + '">' +
+                    '<div class="accordion-item border-0 shadow-sm">' +
+                    '<h2 class="accordion-header" id="' + headingId + '">' +
+                    '<button class="accordion-button collapsed py-2" type="button" data-bs-toggle="collapse" ' +
+                    'data-bs-target="#' + collapseId + '" aria-expanded="false" aria-controls="' + collapseId + '">' +
+                    '<i class="bi bi-bar-chart-steps me-2"></i> 核心指标概览' +
+                    '</button></h2>' +
+                    '<div id="' + collapseId + '" class="accordion-collapse collapse" aria-labelledby="' + headingId + '" data-bs-parent="#' + accId + '">' +
+                    '<div class="accordion-body bg-light p-3">' +
+                    '<div class="row g-2 metrics-cards-container" id="' + containerId + '">' + cardsHtml + '</div>' +
+                    '</div></div></div></div>'
+                );
             }
             function _skillVisBuildMetricsGridHtml(payload, esc) {
                 if (!payload || typeof payload !== 'object') return '';
@@ -8047,13 +8553,14 @@
                     if (SKILL_VIS_META_KEYS[k] || SKILL_VIS_TABLE_KEYS[k]) return;
                     var v = scalars[k];
                     if (Array.isArray(v) && _skillVisIsRecordTableArray(v)) return;
-                    cardsHtml += '<div class="skill-mm-metric skill-vis-metric-card">' +
+                    cardsHtml += '<div class="col-6 col-lg-4">' +
+                        '<div class="skill-mm-metric skill-vis-metric-card h-100">' +
                         '<span class="skill-mm-metric__label">' + esc(_skillVisHumanLabel(k)) + '</span>' +
                         _skillVisRenderValueHtml(k, v, esc) +
-                        '</div>';
+                        '</div></div>';
                 });
                 if (!cardsHtml) return '';
-                return '<div class="skill-mm-data-grid skill-vis-data-grid">' + cardsHtml + '</div>';
+                return _skillVisWrapMetricsInAccordion(cardsHtml);
             }
             function _skillVisPickSmilesFromRow(row) {
                 if (!row || typeof row !== 'object') return '';
@@ -8174,9 +8681,6 @@
             function _skillVisComposeExclusiveHtml(plan, esc, opts) {
                 if (!plan || plan.mode === 'none') return '';
                 opts = opts || {};
-                var heading = opts.heading
-                    ? ('<h6 class="skill-vis-heading small text-muted">' + esc(opts.heading) + '</h6>')
-                    : '';
                 var gridHtml = '';
                 var bodyHtml = '';
                 if (plan.mode === 'molecule_grid') {
@@ -8193,6 +8697,9 @@
                 }
                 var urlHtml = opts.urlSource ? _skillVisBuildUrlActionsHtml(opts.urlSource, esc, opts.linkResolver) : '';
                 if (!gridHtml && !bodyHtml && !urlHtml) return '';
+                var heading = (opts.heading && !gridHtml)
+                    ? ('<h6 class="skill-vis-heading small text-muted">' + esc(opts.heading) + '</h6>')
+                    : '';
                 return heading + gridHtml + bodyHtml + urlHtml;
             }
             function _skillVisMarkdownDuplicatesStructured(mdRaw, plan) {
@@ -8463,13 +8970,13 @@
                 if (!molInfo || !molInfo.text) return '';
                 opts = opts || {};
                 var fmt = (molInfo.format || 'mol').toLowerCase();
-                var heading = opts.heading
-                    ? ('<h6 class="skill-vis-heading small text-muted">' + esc(opts.heading) + '</h6>')
-                    : '';
                 var metrics = '';
                 if (molInfo.scalars && Object.keys(molInfo.scalars).length) {
                     metrics = _skillVisBuildMetricsGridHtml(molInfo.scalars, esc);
                 }
+                var heading = (opts.heading && !metrics)
+                    ? ('<h6 class="skill-vis-heading small text-muted">' + esc(opts.heading) + '</h6>')
+                    : '';
                 var payloadJson = '';
                 try {
                     payloadJson = JSON.stringify(molInfo.text);
@@ -11349,7 +11856,7 @@
                                     ev.preventDefault();
                                     ev.stopPropagation();
                                     if (typeof setSidebarSecondaryNavActive === 'function') setSidebarSecondaryNavActive(item);
-                                    addAssetAsAttachment(a.file_path, a.file_name || a.file_path || '文件');
+                                    addAssetAsAttachment(a.file_path, a.file_name || a.file_path || '文件', a.id);
                                 };
                                 fileList.appendChild(item);
                             });
@@ -11479,7 +11986,7 @@
                 }
             });
             // 任务3：从侧栏「数据资产」添加文件 — 仅写入 uploadedFiles + renderFilePreviewArea（禁止旧版 .asset-tag 药丸 DOM）
-            function addAssetAsAttachment(filePath, fileName) {
+            function addAssetAsAttachment(filePath, fileName, assetId) {
                 if (!filePath) return;
                 var norm = String(filePath).replace(/\/+$/, '') || String(filePath);
                 if (uploadedFiles.some(function(f) {
@@ -11495,7 +12002,8 @@
                     file_path: filePath,
                     name: fileName || filePath,
                     file_name: fileName || filePath,
-                    source: normalizeFileSource('data_asset', filePath)
+                    source: normalizeFileSource('data_asset', filePath),
+                    asset_id: assetId != null ? assetId : undefined
                 });
                 if (typeof renderFilePreviewArea === 'function') renderFilePreviewArea();
                 if (typeof window.scheduleComposerDraftAutoSave === 'function') window.scheduleComposerDraftAutoSave();
@@ -16813,7 +17321,7 @@
                                 const isSuccess = ['success', 'completed', 'done', 'warning'].includes(rawStatus);
                                 const isSkipped = rawStatus === 'skipped';
                                 const stepStatus = isSkipped ? 'skipped' : (isSuccess ? 'success' : (rawStatus === 'error' || rawStatus === 'failed' ? 'error' : rawStatus === 'running' ? 'running' : 'pending'));
-                                const stepError = step.error || step.message || '';
+                                const stepError = step.user_message || step.error || step.message || '';
                                 const stepId = `step-${index}-${accordionId}`;
                                 
                                 // 🔥 Error transparency: log full traceback to console for debugging（仅不可跳过错误）
@@ -16898,22 +17406,27 @@
                                 
                                 // 🔥 PHASE 1: Always show content if available (even for warnings)
                                 if (stepStatus === 'success' || stepStatus === 'warning') {
-                                    
-                                    // Render summary：STED-EC Obs 透视长表默认折叠在 <details> 内
-                                    if (summary) {
-                                        resultContentHtml += renderStepSummaryContentHtml(summary, step, stepName, tid);
-                                    }
-                                    if (diagMarkdown && (stepStatus === 'success' || stepStatus === 'warning')) {
-                                        var dTrim = diagMarkdown.trim();
-                                        var sTrim = (summary || '').trim();
-                                        if (dTrim && dTrim !== sTrim) {
-                                        let lineageHtml = '';
-                                        try {
-                                            lineageHtml = (typeof safeMarkedParse === 'function') ? safeMarkedParse(diagMarkdown) : escapeHtml(diagMarkdown);
-                                        } catch (e) {
-                                            lineageHtml = escapeHtml(diagMarkdown);
+                                    var _isRadLoadStep = !!(WORKFLOW_RAD_LOAD_TOOL_IDS[tid]);
+                                    var _radMd = (diagMarkdown || (stepData && stepData.markdown) || '').trim();
+                                    if (_isRadLoadStep && (_radMd || summary)) {
+                                        resultContentHtml += renderRadiomicsLoadMedicalImageStepHtml(stepData, _radMd || summary);
+                                    } else {
+                                        // Render summary：STED-EC Obs 透视长表默认折叠在 <details> 内
+                                        if (summary) {
+                                            resultContentHtml += renderStepSummaryContentHtml(summary, step, stepName, tid);
                                         }
-                                        resultContentHtml += '<div class="mt-2 radiomics-step-markdown markdown-body">' + lineageHtml + '</div>';
+                                        if (diagMarkdown && (stepStatus === 'success' || stepStatus === 'warning')) {
+                                            var dTrim = diagMarkdown.trim();
+                                            var sTrim = (summary || '').trim();
+                                            if (dTrim && dTrim !== sTrim) {
+                                            let lineageHtml = '';
+                                            try {
+                                                lineageHtml = (typeof safeMarkedParse === 'function') ? safeMarkedParse(diagMarkdown) : escapeHtml(diagMarkdown);
+                                            } catch (e) {
+                                                lineageHtml = escapeHtml(diagMarkdown);
+                                            }
+                                            resultContentHtml += '<div class="mt-2 radiomics-step-markdown markdown-body">' + lineageHtml + '</div>';
+                                            }
                                         }
                                     }
                                     
@@ -17070,12 +17583,12 @@
                                     }
                                     var _execMdHasJson = diagMarkdown && /```\s*json/i.test(diagMarkdown);
                                     var _rawResultObj = stepData.result || stepResult.result || null;
-                                    if (!_execMdHasJson && _rawResultObj != null && typeof renderSkillJsonMarkdownBlock === 'function') {
+                                    if (!_isRadLoadStep && !_execMdHasJson && _rawResultObj != null && typeof renderSkillJsonMarkdownBlock === 'function') {
                                         var _execVisPayload = _rawResultObj;
                                         var _execToolResult = Object.assign({}, stepResult || {}, stepData || {});
                                         var _execJsonBlock = renderSkillJsonMarkdownBlock(_execVisPayload, '核心指标', tid, _execToolResult);
                                         if (_execJsonBlock) resultContentHtml += _execJsonBlock;
-                                    } else if (!_execMdHasJson && !_rawResultObj && (stepData.data || stepResult.data)) {
+                                    } else if (!_isRadLoadStep && !_execMdHasJson && !_rawResultObj && (stepData.data || stepResult.data)) {
                                         var _execDataOnly = stepData.data || stepResult.data;
                                         if (typeof renderSkillResultVisually === 'function') {
                                             try {
@@ -17123,15 +17636,17 @@
                                                                     <div class="alert alert-sm mb-2 error-box ${stepStatus === 'skipped' ? 'skipped-box' : 'alert-danger'}" style="font-size: 0.875rem; padding: 0.5rem;">
                                                                         <strong class="error-title">${stepStatus === 'skipped' ? '⏭ 步骤已跳过' : '❌ 执行失败：'}</strong>
                                                                         <div class="mt-2">
-                                                                            ${stepStatus === 'skipped' ? '<div class="small text-muted">条件不足，此步骤已跳过，不影响其他分析。</div>' : (
+                                                                            ${stepStatus === 'skipped' ? (
+                                                                                (step.user_message || stepError) ? `<div class="mb-2">${escapeHtml(step.user_message || stepError)}</div>` : '<div class="small text-muted">条件不足，此步骤已跳过，不影响其他分析。</div>'
+                                                                            ) : (
                                                                                 (step.user_message ? `<div class="mb-2"><strong>问题：</strong>${escapeHtml(step.user_message)}</div>` : `<div class="mb-2">${escapeHtml(stepError)}</div>`) +
                                                                                 (step.error_category ? `<div class="small text-muted mb-1"><strong>错误类型：</strong>${escapeHtml(step.error_category)}</div>` : '') +
                                                                                 (step.suggestion ? `<div class="small text-info mb-1"><strong>💡 建议：</strong>${escapeHtml(step.suggestion)}</div>` : '') +
                                                                                 (step.can_skip ? `<div class="small text-success mb-1"><strong>✓ 可跳过：</strong>此步骤可以跳过，不影响其他分析</div>` : '')
                                                                             )}
-                                                                            ${stepStatus !== 'skipped' && step.technical_details ? `
+                                                                            ${step.technical_details && String(step.technical_details).trim() && String(step.technical_details).trim() !== String(step.user_message || '').trim() ? `
                                                                                 <details class="mt-2">
-                                                                                    <summary class="small text-muted" style="cursor: pointer;">查看技术细节</summary>
+                                                                                    <summary class="small text-muted" style="cursor: pointer;">查看详细技术日志</summary>
                                                                                     <pre class="small mt-2 p-2 bg-light rounded" style="max-height: 200px; overflow-y: auto; font-size: 11px;">${escapeHtml(step.technical_details)}</pre>
                                                                                 </details>
                                                                             ` : ''}

@@ -275,6 +275,17 @@ def _run_create_all():
     Base.metadata.create_all(bind=engine)
     _migrate_users_approval_columns()
     try:
+        from gibh_agent.db.connection import SessionLocal
+        from gibh_agent.db.seed_skills import _hotfix_ensure_detailed_spec_column
+
+        _db = SessionLocal()
+        try:
+            _hotfix_ensure_detailed_spec_column(_db)
+        finally:
+            _db.close()
+    except Exception as _ds:
+        logger.debug("skills.detailed_spec 列热修复跳过或失败: %s", _ds)
+    try:
         from gibh_agent.plugin_system.registry import migrate_dynamic_skill_plugins_schema
 
         migrate_dynamic_skill_plugins_schema(engine)
@@ -382,6 +393,12 @@ def list_skills_public(
     """技能广场公开分页查询：仅 status=approved；saved_only=True 时需鉴权并只返回收藏。无数据时自动补种 7 大核心组学。"""
     if SkillModel is None:
         return JSONResponse(status_code=503, content={"detail": "技能服务不可用", "items": [], "total": 0})
+    try:
+        from gibh_agent.db.seed_skills import _hotfix_ensure_detailed_spec_column
+
+        _hotfix_ensure_detailed_spec_column(db)
+    except Exception as _col_e:
+        logger.warning("[Skills] detailed_spec 列热修复失败: %s", _col_e)
     owner_id = None
     try:
         owner_id = get_current_owner_id(request)
@@ -493,28 +510,58 @@ def list_skills_public(
     if owner_id and UserSavedSkill is not None:
         saved_rows = db.query(UserSavedSkill.skill_id).filter(UserSavedSkill.owner_id == owner_id).all()
         saved_ids = {r[0] for r in saved_rows}
+    from gibh_agent.core.skill_detailed_spec_utils import build_skill_plaza_payload
+
     items = [
-        {
-            "id": r.id,
-            "name": r.name,
-            "description": r.description,
-            "main_category": r.main_category,
-            "sub_category": r.sub_category,
-            "prompt_template": r.prompt_template,
-            "is_implemented": infer_skill_implemented_from_prompt(r.prompt_template or ""),
-            "author_id": r.author_id,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-            "saved": r.id in saved_ids,
-        }
+        build_skill_plaza_payload(
+            skill_id=r.id,
+            name=r.name,
+            description=r.description,
+            main_category=r.main_category,
+            sub_category=r.sub_category,
+            prompt_template=r.prompt_template,
+            is_implemented=infer_skill_implemented_from_prompt(r.prompt_template or ""),
+            author_id=r.author_id,
+            created_at=r.created_at.isoformat() if r.created_at else None,
+            saved=r.id in saved_ids,
+            db_detailed_spec=getattr(r, "detailed_spec", None),
+        )
         for r in page_rows
     ]
     if page == 1 and D > 0:
+        from gibh_agent.db.skill_detailed_specs import enrich_skill_plaza_item
+
         for dit in dyn_items:
             dit["is_implemented"] = infer_skill_implemented_from_prompt((dit.get("prompt_template") or ""))
+            enrich_skill_plaza_item(dit)
         items = dyn_items + items
     # total 必须与过滤后的 sorted_rows 一致（含占位 / 暂缓子类剔除）
     total = len(sorted_rows) + D
     return {"items": items, "total": total}
+
+
+class _SkillFavoriteBody(BaseModel):
+    skill_id: int
+
+
+@app.post("/api/skills/favorites")
+def add_skill_favorite_public(
+    body: _SkillFavoriteBody,
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+):
+    """收藏技能（与 POST /api/skills/{id}/bookmark 等价；供广场抽屉/卡片统一调用）。"""
+    return bookmark_skill(body.skill_id, owner_id=owner_id, db=db)
+
+
+@app.delete("/api/skills/favorites")
+def remove_skill_favorite_public(
+    skill_id: int = Query(..., ge=1),
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+):
+    """取消收藏（与 DELETE /api/skills/{id}/bookmark 等价）。"""
+    return remove_skill_bookmark(skill_id, owner_id=owner_id, db=db)
 
 
 @app.post("/api/skills/{skill_id}/bookmark")
@@ -2938,86 +2985,50 @@ async def chat_endpoint(
     if req.stream:
         logger.info(f"🔥 [SSE] 启用流式传输模式")
         try:
-            # 🔥 CRITICAL FIX: 转换文件格式（健壮处理）
-            uploaded_files = []
-            logger.info(f"🔍 [ChatEndpoint] 原始 uploaded_files: {req.uploaded_files}")
-            logger.info(f"🔍 [ChatEndpoint] uploaded_files 类型: {type(req.uploaded_files)}, 长度: {len(req.uploaded_files) if req.uploaded_files else 0}")
-            
-            for i, file_info in enumerate(req.uploaded_files):
-                logger.info(f"🔍 [ChatEndpoint] 处理文件 [{i}]: {file_info}, 类型: {type(file_info)}")
-                
-                # 🔥 CRITICAL: 支持多种格式（dict, Pydantic model, string）
-                file_name = ""
-                file_path_str = ""
-                
-                if isinstance(file_info, dict):
-                    file_name = file_info.get("file_name") or file_info.get("name", "")
-                    file_path_str = file_info.get("file_path") or file_info.get("path", "")
-                elif hasattr(file_info, "path"):
-                    # Pydantic model
-                    file_path_str = file_info.path
-                    file_name = getattr(file_info, "name", "") or getattr(file_info, "file_name", "")
-                elif isinstance(file_info, str):
-                    # 直接是路径字符串
-                    file_path_str = file_info
-                    file_name = os.path.basename(file_path_str)
-                else:
-                    logger.warning(f"⚠️ [ChatEndpoint] 未知的文件格式: {type(file_info)}")
-                    continue
-                
-                logger.info(f"🔍 [ChatEndpoint] 提取的文件名: {file_name}, 路径: {file_path_str}")
-                
-                # 🔥 CRITICAL: 构建文件路径（支持绝对路径和相对路径）
-                if file_path_str:
-                    file_path = Path(file_path_str)
-                    if not file_path.is_absolute():
-                        # 相对路径：相对于 UPLOAD_DIR
-                        file_path = UPLOAD_DIR / file_path
-                    # 如果路径不存在，尝试使用文件名查找
-                    if not file_path.exists() and file_name:
-                        # 尝试在 UPLOAD_DIR 中查找文件名
-                        potential_path = UPLOAD_DIR / file_name
-                        if potential_path.exists():
-                            file_path = potential_path
-                            logger.info(f"✅ [ChatEndpoint] 在 UPLOAD_DIR 中找到文件: {file_path}")
-                        else:
-                            logger.warning(f"⚠️ [ChatEndpoint] 文件不存在: {file_path}, 尝试: {potential_path}")
-                elif file_name:
-                    file_path = UPLOAD_DIR / file_name
-                else:
-                    logger.warning(f"⚠️ [ChatEndpoint] 无法确定文件路径，跳过")
-                    continue
-                
-                # 始终加入文件项（路径存在则用绝对路径，不存在也保留以便进入执行分支，体检时再报错）
-                file_dict = {
-                    "name": file_name or os.path.basename(str(file_path)),
-                    "path": str(file_path.resolve()) if file_path.exists() else str(file_path)
-                }
-                uploaded_files.append(file_dict)
-                if file_path.exists():
-                    logger.info(f"✅ [ChatEndpoint] 添加文件: {file_dict}")
-                else:
-                    logger.warning(f"⚠️ [ChatEndpoint] 路径暂不存在，仍加入列表以便执行分支: {file_path}")
-            
+            # 🔥 CRITICAL FIX: 转换文件格式（统一资源定位符）
+            from gibh_agent.core.asset_locator import bridge_uploaded_files_at_entry
+
+            uploaded_files, _chat_bridge_warnings = bridge_uploaded_files_at_entry(
+                req.uploaded_files or [],
+                upload_dir=str(UPLOAD_DIR),
+                owner_id=owner_id,
+                db=db,
+                strict=False,
+            )
+            if _chat_bridge_warnings:
+                logger.warning(
+                    "[ChatEndpoint] 入口资产桥接警告: %s",
+                    _chat_bridge_warnings[:5],
+                )
             logger.info(f"✅ [ChatEndpoint] 转换后的 uploaded_files: {uploaded_files}")
             logger.info(f"✅ [ChatEndpoint] uploaded_files 数量: {len(uploaded_files)}")
-            
-            # 🔥 任务2：从 prompt 中提取「系统注入」的历史资产路径，并入 uploaded_files；强制绝对路径
+
+            # 🔥 任务2：从 prompt 中提取「系统注入」的历史资产路径，并入 uploaded_files
+            from gibh_agent.core.asset_locator import resolve_asset_path
+
             injected = re.findall(r'\[系统注入：用户选择了历史资产文件：(.*?)\]', (req.message or ""))
             for p in injected:
                 p = (p or "").strip()
                 if not p:
                     continue
-                abs_p = _ensure_absolute_upload_path(p)
+                try:
+                    abs_p = resolve_asset_path(
+                        p,
+                        upload_dir=str(UPLOAD_DIR),
+                        owner_id=owner_id,
+                        db=db,
+                        must_exist=False,
+                    )
+                except Exception:
+                    abs_p = _ensure_absolute_upload_path(p)
                 if any((f.get("path") or "").rstrip("/") == abs_p.rstrip("/") for f in uploaded_files):
                     continue
-                path_obj = Path(abs_p)
-                if path_obj.exists():
-                    uploaded_files.append({"name": path_obj.name, "path": abs_p})
-                    logger.info("✅ [ChatEndpoint] 注入历史资产路径(绝对): %s", abs_p)
-                else:
-                    uploaded_files.append({"name": os.path.basename(p), "path": abs_p})
-                    logger.warning("⚠️ [ChatEndpoint] 注入路径不存在，仍加入列表: %s", abs_p)
+                uploaded_files.append({
+                    "name": os.path.basename(abs_p),
+                    "path": abs_p,
+                    "source": "data_asset",
+                })
+                logger.info("✅ [ChatEndpoint] 注入历史资产路径: %s", abs_p)
             
             # 返回 SSE 流式响应（Phase 4: 首包下发 session_id，流结束后写 agent 消息，不阻塞 SSE）
             async def generate_sse():

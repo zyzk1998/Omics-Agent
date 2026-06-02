@@ -885,6 +885,20 @@ def _hotfix_dedupe_system_skills(db: Session) -> int:
         return 0
 
 
+def _hotfix_ensure_detailed_spec_column(db: Session) -> bool:
+    """热修复：skills 表补 detailed_spec JSON 列（ORM 已声明；create_all 不 ALTER 旧表）。"""
+    try:
+        db.execute(text("ALTER TABLE skills ADD COLUMN detailed_spec JSON NULL"))
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        err = str(e).lower() if e else ""
+        if "duplicate column" in err or "1060" in err or "already exists" in err:
+            return True
+        raise
+
+
 def _hotfix_ensure_unique_name_index(db: Session) -> bool:
     """热修复：若 name 上尚无唯一索引，则 ALTER TABLE 添加强制锁。create_all 不会改旧表，故需手写补丁。"""
     try:
@@ -905,6 +919,7 @@ def run_upsert_system_skills(db: Session) -> int:
     仅当已存在行 author_id='system' 时才覆盖，不覆盖用户上传技能。"""
     _hotfix_dedupe_system_skills(db)
     _hotfix_ensure_unique_name_index(db)
+    _hotfix_ensure_detailed_spec_column(db)
 
     all_skills = get_all_system_skills_list()
     now = datetime.utcnow()

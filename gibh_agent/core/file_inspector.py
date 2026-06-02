@@ -1787,12 +1787,21 @@ class FileInspector:
             return normalized, searched_paths
         return None, searched_paths
 
-    def inspect_file(self, file_path: str) -> Dict[str, Any]:
+    def inspect_file(
+        self,
+        file_path: str,
+        *,
+        owner_id: Optional[str] = None,
+        uploaded_files: Optional[List[Dict[str, Any]]] = None,
+        db: Any = None,
+    ) -> Dict[str, Any]:
         """
         多模态文件检查主入口（分发器）
         
         Args:
             file_path: 文件路径（相对或绝对）
+            owner_id: 当前用户/租户 ID（用于 basename 模糊自愈隔离）
+            uploaded_files: 当前会话已上传文件列表（用于同名路径兜底）
         
         Returns:
             包含检查结果的字典
@@ -1802,14 +1811,53 @@ class FileInspector:
             normalize_duplicate_tail_filename,
             resolve_real_path,
             validate_inspector_file_format,
+            get_inspector_format_warning,
             verify_path_exists_after_resolve,
         )
+        from gibh_agent.core.omics_io_registry import heal_web_path_if_missing
 
         normalized = normalize_duplicate_tail_filename((file_path or "").strip())
+        format_warning = get_inspector_format_warning(normalized)
+
+        # 第一道门：preemptive 资产映射 + basename 自愈（早于格式/存在性校验）
+        from gibh_agent.core.asset_locator import bridge_data_asset_to_physical_path
+
+        _pre_ctx = context_paths or []
+        _pre_entries = uploaded_files or []
+        if normalized:
+            _pre_resolved, _pre_warns = bridge_data_asset_to_physical_path(
+                {
+                    "path": normalized,
+                    "file_path": normalized,
+                    "name": Path(normalized).name,
+                },
+                upload_dir=str(self.upload_dir),
+                owner_id=owner_id,
+                db=db,
+                context_paths=_pre_ctx,
+                uploaded_entries=_pre_entries,
+            )
+            if _pre_resolved and _pre_resolved != normalized:
+                logger.info(
+                    "[FileInspector] 入口 preemptive heal: %s -> %s",
+                    normalized,
+                    _pre_resolved,
+                )
+                normalized = _pre_resolved
+                if _pre_warns:
+                    format_warning = (format_warning or "") + " " + "; ".join(_pre_warns)
 
         fmt_err = validate_inspector_file_format(normalized)
         if fmt_err:
             return fmt_err
+
+        context_paths: List[str] = []
+        for entry in uploaded_files or []:
+            if isinstance(entry, dict):
+                for k in ("path", "file_path", "group_dir"):
+                    v = entry.get(k)
+                    if v:
+                        context_paths.append(str(v))
 
         searched_paths: List[str] = []
         try:
@@ -1823,17 +1871,36 @@ class FileInspector:
                 "file_path": file_path,
             }
 
-        ok, exist_err = verify_path_exists_after_resolve(resolved)
+        ok, exist_err = verify_path_exists_after_resolve(
+            resolved,
+            upload_dir=str(self.upload_dir),
+            owner_id=owner_id,
+            context_paths=context_paths,
+            uploaded_entries=uploaded_files,
+        )
         actual_path: Optional[str] = None
         if resolved.kind == "web":
             actual_path = resolved.web_absolute_path
             if actual_path:
                 searched_paths.append(actual_path)
             if not ok:
-                fuzzy = self._legacy_filename_scan(normalized, searched_paths)
-                if fuzzy:
-                    actual_path = fuzzy
+                healed, heal_attempts = heal_web_path_if_missing(
+                    normalized,
+                    str(self.upload_dir),
+                    owner_id=owner_id,
+                    context_paths=context_paths,
+                    uploaded_entries=uploaded_files,
+                    allow_dir=True,
+                )
+                searched_paths.extend(heal_attempts)
+                if healed:
+                    actual_path = healed
                     ok = True
+                else:
+                    fuzzy = self._legacy_filename_scan(normalized, searched_paths)
+                    if fuzzy:
+                        actual_path = fuzzy
+                        ok = True
         else:
             searched_paths.append(normalized)
             if ok:
@@ -1882,13 +1949,21 @@ class FileInspector:
         # Step 2: Web → 转换为 Path 对象（容器内可读）
         path = Path(actual_path)
 
+        def _attach_format_warning(result: Dict[str, Any]) -> Dict[str, Any]:
+            if format_warning:
+                result["format_warning"] = format_warning
+                warns = list(result.get("warnings") or [])
+                warns.append(format_warning)
+                result["warnings"] = warns
+            return result
+
         # Step 2b: 医学影像（.nii / .nii.gz / .dcm）严禁走表格类 pandas 逻辑，优先旁路体检
         if path.is_file() and path_looks_like_medical_imaging(path):
             result = build_medical_imaging_inspection_result(path)
             if result.get("status") == "success":
                 result["file_path"] = str(path.resolve())
                 result["success"] = True
-            return result
+            return _attach_format_warning(result)
         
         # Step 3: 遍历所有检查器，找到第一个可以处理的
         for handler in self.handlers:
@@ -1900,7 +1975,7 @@ class FileInspector:
                     if result.get("status") == "success":
                         result["file_path"] = str(path.resolve())
                         result["success"] = True
-                    return result
+                    return _attach_format_warning(result)
             except Exception as e:
                 logger.warning(f"⚠️ Handler {handler.__class__.__name__} failed: {e}")
                 # 继续尝试下一个检查器
@@ -1919,7 +1994,7 @@ class FileInspector:
             elif name_l.endswith((".vcf", ".vcf.gz")):
                 omics_loose = "variants"
             if omics_loose:
-                return {
+                return _attach_format_warning({
                     "status": "success",
                     "success": True,
                     "file_path": str(path.resolve()),
@@ -1930,7 +2005,7 @@ class FileInspector:
                     "remote_mount": False,
                     "mount_kind": resolved.kind,
                     "message": "组学原始文件：无深度解析 FileHandler，已按扩展名通过路径级体检。",
-                }
+                })
 
         # Step 4: 特殊处理：单独的 .mtx 文件
         if path.suffix == '.mtx' or path.name.lower() == 'matrix.mtx':

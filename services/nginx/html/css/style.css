@@ -1089,6 +1089,53 @@ body.widget-fullscreen-active {
 .skill-vis-data-grid {
     padding-top: 12px;
 }
+/* 核心指标手风琴：默认折叠，卡片嵌于 bg-light 内 */
+.omics-metrics-accordion {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+.omics-metrics-accordion .accordion-button {
+    font-size: 13px;
+    font-weight: 600;
+    color: #475569;
+    background: #fff;
+    box-shadow: none;
+}
+.omics-metrics-accordion .accordion-button:not(.collapsed) {
+    color: #1e4a7a;
+    background: #f8fafc;
+}
+.omics-metrics-accordion .accordion-button:focus {
+    box-shadow: none;
+    border-color: rgba(30, 74, 122, 0.15);
+}
+.omics-metrics-accordion .accordion-body.bg-light {
+    background-color: #f1f5f9 !important;
+}
+.omics-metrics-accordion .skill-mm-metric {
+    height: 100%;
+}
+.omics-dirty-accordion {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.omics-dirty-accordion > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 8px 12px;
+    font-weight: 600;
+}
+.omics-dirty-accordion > summary::-webkit-details-marker {
+    display: none;
+}
+.omics-dirty-pre {
+    font-size: 11px;
+    line-height: 1.35;
+}
+
 .skill-vis-metric-card {
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }

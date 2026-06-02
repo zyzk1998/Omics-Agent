@@ -186,7 +186,19 @@ class ToolRegistry:
                     try:
                         bound_args = sig.bind(*args, **kwargs)
                         bound_args.apply_defaults()
-                        validated_args = schema(**bound_args.arguments)
+                        call_kwargs = dict(bound_args.arguments)
+                        from gibh_agent.core.tool_input_validator import validate_and_normalize_inputs
+
+                        call_kwargs, path_err = validate_and_normalize_inputs(
+                            name, call_kwargs, tool_func=func
+                        )
+                        if path_err:
+                            from gibh_agent.core.omics_io_registry import is_elastic_skip_tool
+
+                            if is_elastic_skip_tool(name) and path_err.get("can_skip") is not False:
+                                path_err["can_skip"] = True
+                            return path_err
+                        validated_args = schema(**call_kwargs)
                         return await func(**validated_args.model_dump())
                     except Exception as e:
                         logger.error(f"❌ 工具 '{name}' 执行失败: {e}", exc_info=True)
@@ -202,7 +214,19 @@ class ToolRegistry:
                 try:
                     bound_args = sig.bind(*args, **kwargs)
                     bound_args.apply_defaults()
-                    validated_args = schema(**bound_args.arguments)
+                    call_kwargs = dict(bound_args.arguments)
+                    from gibh_agent.core.tool_input_validator import validate_and_normalize_inputs
+
+                    call_kwargs, path_err = validate_and_normalize_inputs(
+                        name, call_kwargs, tool_func=func
+                    )
+                    if path_err:
+                        from gibh_agent.core.omics_io_registry import is_elastic_skip_tool
+
+                        if is_elastic_skip_tool(name) and path_err.get("can_skip") is not False:
+                            path_err["can_skip"] = True
+                        return path_err
+                    validated_args = schema(**call_kwargs)
                     return func(**validated_args.model_dump())
                 except Exception as e:
                     logger.error(f"❌ 工具 '{name}' 执行失败: {e}", exc_info=True)

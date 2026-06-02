@@ -6,6 +6,8 @@ UGC 技能上传与管理员审核 API
 - POST   /api/skills: 用户上传；普通用户 pending，管理员 approved
 - POST   /api/skills/{skill_id}/bookmark: 收藏技能（防重复）
 - DELETE /api/skills/{skill_id}/bookmark: 取消收藏
+- POST   /api/skills/favorites: 收藏技能（body.skill_id，与 bookmark 等价）
+- DELETE /api/skills/favorites: 取消收藏（query skill_id）
 - 管理员审核技能接口已迁至 gibh_agent.api.routers.admin（与 /api/admin/users/* 同路由挂载）
 """
 import logging
@@ -41,6 +43,14 @@ MAX_DESCRIPTION = 10000
 MAX_PROMPT = 50000
 
 
+@router.get("/skills/detailed-specs")
+def get_skill_detailed_specs():
+    """Phase 1+ 技能详情说明书索引（tool_id → detailed_spec），供广场 Modal 与离线 Featured 兜底。"""
+    from gibh_agent.db.skill_detailed_specs import SKILL_DETAILED_SPECS_BY_TOOL_ID
+
+    return {"specs": SKILL_DETAILED_SPECS_BY_TOOL_ID, "version": 1}
+
+
 @router.get("/skills/omics-fast-lane-prompts")
 def get_omics_fast_lane_prompts():
     """三大组学快车道 Prompt：与 `omics_skill_prompt_templates.OMICS_FAST_LANE_PROMPTS` 同源，供前端注入输入框与离线兜底对齐。"""
@@ -68,6 +78,11 @@ class SkillCreate(BaseModel):
     prompt_template: Optional[str] = Field(None, max_length=MAX_PROMPT)
 
 
+class SkillFavoriteBody(BaseModel):
+    """收藏/取消收藏请求体（与 POST /api/skills/favorites 对齐）。"""
+    skill_id: int = Field(..., ge=1, description="skills 表主键 id")
+
+
 @router.get("/skills")
 def list_skills_public(
     request: Request,
@@ -79,6 +94,13 @@ def list_skills_public(
     db: Session = Depends(get_db_session),
 ):
     """公开分页查询：仅 status=approved；可无 Token/X-Guest（橱窗）。saved_only=True 时需 owner_id。若当前无技能则自动补种后重查。"""
+    try:
+        from gibh_agent.db.seed_skills import _hotfix_ensure_detailed_spec_column
+
+        _hotfix_ensure_detailed_spec_column(db)
+    except Exception as _col_e:
+        logger.warning("[Skills] detailed_spec 列热修复失败: %s", _col_e)
+
     owner_id: Optional[str] = get_optional_owner_id(request)
     if saved_only and not owner_id:
         raise HTTPException(
@@ -147,19 +169,22 @@ def list_skills_public(
             .all()
         )
         saved_ids = {r[0] for r in saved_rows}
+    from gibh_agent.core.skill_detailed_spec_utils import build_skill_plaza_payload
+
     items = [
-        {
-            "id": r.id,
-            "name": r.name,
-            "description": r.description,
-            "main_category": r.main_category,
-            "sub_category": r.sub_category,
-            "prompt_template": r.prompt_template,
-            "is_implemented": infer_skill_implemented_from_prompt(r.prompt_template or ""),
-            "author_id": r.author_id,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-            "saved": r.id in saved_ids,
-        }
+        build_skill_plaza_payload(
+            skill_id=r.id,
+            name=r.name,
+            description=r.description,
+            main_category=r.main_category,
+            sub_category=r.sub_category,
+            prompt_template=r.prompt_template,
+            is_implemented=infer_skill_implemented_from_prompt(r.prompt_template or ""),
+            author_id=r.author_id,
+            created_at=r.created_at.isoformat() if r.created_at else None,
+            saved=r.id in saved_ids,
+            db_detailed_spec=getattr(r, "detailed_spec", None),
+        )
         for r in page_rows
     ]
     return {"items": items, "total": total}
@@ -203,6 +228,26 @@ def create_skill(
         db.rollback()
         logger.exception("创建技能失败: %s", e)
         raise HTTPException(status_code=500, detail="提交失败")
+
+
+@router.post("/skills/favorites")
+def add_skill_favorite(
+    body: SkillFavoriteBody,
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+):
+    """收藏技能（广场「添加到我的工具」标准入口；与 POST …/bookmark 等价）。"""
+    return bookmark_skill(body.skill_id, owner_id=owner_id, db=db)
+
+
+@router.delete("/skills/favorites")
+def remove_skill_favorite(
+    skill_id: int = Query(..., ge=1, description="skills 表主键 id"),
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+):
+    """取消收藏（与 DELETE …/bookmark 等价）。"""
+    return unbookmark_skill(skill_id, owner_id=owner_id, db=db)
 
 
 @router.post("/skills/{skill_id}/bookmark")
