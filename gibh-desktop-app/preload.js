@@ -18,6 +18,11 @@ window.downloadAppUpdate = function downloadAppUpdate() {
   ipcRenderer.send('app-download-update');
 };
 
+/** 清空 session 磁盘缓存并忽略缓存重载（「检查更新」已是最新时同步远程前端） */
+window.hardReloadFrontend = function hardReloadFrontend() {
+  ipcRenderer.send('omics-hard-reload');
+};
+
 /**
  * @param {(payload: {
  *   type: 'checking-for-update'|'update-available'|'update-not-available'|'download-progress'|'update-downloaded'|'error',

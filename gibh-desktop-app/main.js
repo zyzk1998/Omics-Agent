@@ -1034,6 +1034,24 @@ if (gotSingleInstanceLock) {
       const w = BrowserWindow.fromWebContents(event.sender);
       if (w && !w.isDestroyed()) loadRemote(w);
     });
+
+    ipcMain.on('omics-hard-reload', async (event) => {
+      const w = BrowserWindow.fromWebContents(event.sender);
+      if (!w || w.isDestroyed()) return;
+      const wc = w.webContents;
+      if (!wc || wc.isDestroyed()) return;
+      try {
+        await wc.session.clearCache();
+        console.log('[Omics Agent] omics-hard-reload: session.clearCache() 完成');
+      } catch (err) {
+        console.warn('[Omics Agent] omics-hard-reload clearCache:', err && err.message);
+      }
+      try {
+        wc.reloadIgnoringCache();
+      } catch (err2) {
+        console.warn('[Omics Agent] omics-hard-reload reloadIgnoringCache:', err2 && err2.message);
+      }
+    });
     ipcMain.on('app-print-report', async (event) => {
       const win = BrowserWindow.fromWebContents(event.sender);
       if (!win || win.isDestroyed()) return;

@@ -537,6 +537,65 @@ from gibh_agent.db.skill_detailed_specs_bulk import SKILL_DETAILED_SPECS_BULK  #
 
 SKILL_DETAILED_SPECS_BY_TOOL_ID.update(SKILL_DETAILED_SPECS_BULK)
 
+# 生物医药大类 · demo_visualization 精修（覆盖 Bulk 通用占位 HTML）
+from gibh_agent.db.skill_detailed_specs_biopharma import SKILL_DETAILED_SPECS_BIOPHARMA_VIZ  # noqa: E402
+
+for _bio_tid, _bio_patch in SKILL_DETAILED_SPECS_BIOPHARMA_VIZ.items():
+    if _bio_tid in SKILL_DETAILED_SPECS_BY_TOOL_ID:
+        SKILL_DETAILED_SPECS_BY_TOOL_ID[_bio_tid].update(_bio_patch)
+    else:
+        SKILL_DETAILED_SPECS_BY_TOOL_ID[_bio_tid] = dict(_bio_patch)
+
+# 化学大类 · demo_visualization 精修（覆盖 Bulk 通用占位 HTML）
+from gibh_agent.db.skill_detailed_specs_chemistry import SKILL_DETAILED_SPECS_CHEMISTRY_VIZ  # noqa: E402
+
+for _chem_tid, _chem_patch in SKILL_DETAILED_SPECS_CHEMISTRY_VIZ.items():
+    if _chem_tid in SKILL_DETAILED_SPECS_BY_TOOL_ID:
+        SKILL_DETAILED_SPECS_BY_TOOL_ID[_chem_tid].update(_chem_patch)
+    else:
+        SKILL_DETAILED_SPECS_BY_TOOL_ID[_chem_tid] = dict(_chem_patch)
+
+# 无 [Skill_Route] 占位技能：按广场 name 解析完整说明书
+from gibh_agent.db.skill_detailed_specs_unrouted import (  # noqa: E402
+    SKILL_DETAILED_SPECS_UNROUTED,
+    SKILL_NAME_TO_UNROUTED_TOOL_ID,
+)
+
+SKILL_DETAILED_SPECS_BY_TOOL_ID.update(SKILL_DETAILED_SPECS_UNROUTED)
+
+# 多模态组学 · 7 条旗舰管线（结构化 Prompt 工程指南 + 专业 demo_visualization）
+from gibh_agent.db.skill_pipeline_specs import (  # noqa: E402
+    OMICS_PIPELINE_SPECS_BY_TOOL_ID,
+    SKILL_NAME_TO_PIPELINE_TOOL_ID,
+)
+
+SKILL_DETAILED_SPECS_BY_TOOL_ID.update(OMICS_PIPELINE_SPECS_BY_TOOL_ID)
+
+# 特色科研流程 · STED-EC / 时空动力学（Featured 卡片 id 解析）
+from gibh_agent.db.skill_research_flow_specs import (  # noqa: E402
+    RESEARCH_FLOW_SPECS_BY_TOOL_ID,
+    SKILL_NAME_TO_RESEARCH_FLOW_TOOL_ID,
+)
+
+SKILL_DETAILED_SPECS_BY_TOOL_ID.update(RESEARCH_FLOW_SPECS_BY_TOOL_ID)
+
+
+def build_skill_name_to_tool_id_map() -> Dict[str, str]:
+    """广场卡片 name → tool_id（含 [Skill_Route] 与无 Route 占位项），供前端兜底解析。"""
+    from gibh_agent.db.seed_skills import get_all_system_skills_list
+
+    out: Dict[str, str] = dict(SKILL_NAME_TO_UNROUTED_TOOL_ID)
+    out.update(SKILL_NAME_TO_PIPELINE_TOOL_ID)
+    out.update(SKILL_NAME_TO_RESEARCH_FLOW_TOOL_ID)
+    for skill in get_all_system_skills_list():
+        name = (skill.get("name") or "").strip()
+        if not name:
+            continue
+        tid = extract_tool_id_from_prompt(skill.get("prompt_template") or "")
+        if tid:
+            out[name] = tid
+    return out
+
 
 def extract_tool_id_from_prompt(prompt_template: Optional[str]) -> str:
     """从 prompt_template 解析 Skill_Route tool_id。"""
@@ -571,11 +630,22 @@ def resolve_detailed_spec(
 def enrich_skill_plaza_item(item: Dict[str, Any], db_detailed_spec: Any = None) -> Dict[str, Any]:
     """为广场列表项附加 tool_name 与 detailed_spec（若有）。"""
     pt = item.get("prompt_template") or ""
+    name = (item.get("name") or "").strip()
     hint = str(item.get("tool_name") or item.get("id") or "").strip()
+    route_tid = extract_tool_id_from_prompt(pt)
+    pipeline_tid = SKILL_NAME_TO_PIPELINE_TOOL_ID.get(name, "")
+    research_tid = SKILL_NAME_TO_RESEARCH_FLOW_TOOL_ID.get(name, "")
+    unrouted_tid = SKILL_NAME_TO_UNROUTED_TOOL_ID.get(name, "")
     if hint and not _SKILL_ROUTE_RE.search(str(hint)):
-        tool_id = hint if hint in SKILL_DETAILED_SPECS_BY_TOOL_ID else extract_tool_id_from_prompt(pt)
+        tool_id = (
+            route_tid
+            or pipeline_tid
+            or research_tid
+            or unrouted_tid
+            or (hint if hint in SKILL_DETAILED_SPECS_BY_TOOL_ID else "")
+        )
     else:
-        tool_id = extract_tool_id_from_prompt(pt) or (
+        tool_id = route_tid or pipeline_tid or research_tid or unrouted_tid or (
             hint if hint in SKILL_DETAILED_SPECS_BY_TOOL_ID else ""
         )
     if tool_id:

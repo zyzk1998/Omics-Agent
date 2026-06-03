@@ -1,7 +1,10 @@
 /**
- * 用户站内通知：入口在用户头像下拉菜单；列表以居中 Modal 展示
+ * 用户/管理员站内通知：头像菜单「消息通知」+ 右下角 Toast
  * API: GET /api/user/notifications/unread, POST .../read, POST .../read-all
  */
+
+const _SEEN_NOTIF_STORAGE_KEY = 'omics_seen_notif_ids';
+const _POLL_INTERVAL_MS = 45000;
 
 function _notifAuthHeaders() {
     if (typeof window.getAuthHeaders === 'function') {
@@ -19,7 +22,82 @@ function _notifEscapeHtml(text) {
         .replace(/"/g, '&quot;');
 }
 
+function _hasNotificationIdentity() {
+    try {
+        if (localStorage.getItem('access_token')) return true;
+        if (localStorage.getItem('guest_uuid')) return true;
+    } catch (_e) {
+        /* ignore */
+    }
+    return typeof window.getAuthHeaders === 'function';
+}
+
+function _loadSeenNotifIds() {
+    try {
+        const raw = sessionStorage.getItem(_SEEN_NOTIF_STORAGE_KEY);
+        if (!raw) return new Set();
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr)) return new Set();
+        return new Set(arr.map(function (x) {
+            return String(x);
+        }));
+    } catch (_e) {
+        return new Set();
+    }
+}
+
+function _saveSeenNotifIds(set) {
+    try {
+        const arr = Array.from(set).slice(-200);
+        sessionStorage.setItem(_SEEN_NOTIF_STORAGE_KEY, JSON.stringify(arr));
+    } catch (_e) {
+        /* ignore */
+    }
+}
+
 let _notifPollTimer = null;
+let _seenNotifIds = _loadSeenNotifIds();
+let _notifBootstrapped = false;
+
+function showNotificationToast(title, content, meta) {
+    const existing = document.getElementById('omics-notif-toast');
+    if (existing) existing.remove();
+    const el = document.createElement('div');
+    el.id = 'omics-notif-toast';
+    el.className = 'omics-notif-toast';
+    el.setAttribute('role', 'status');
+    const t = _notifEscapeHtml(title || '新消息');
+    const c = _notifEscapeHtml(content || '');
+    el.innerHTML =
+        '<button type="button" class="omics-notif-toast__close" aria-label="关闭">&times;</button>' +
+        '<div class="omics-notif-toast__title">' +
+        t +
+        '</div>' +
+        (c ? '<div class="omics-notif-toast__content">' + c + '</div>' : '') +
+        '<div class="omics-notif-toast__hint">点击查看全部</div>';
+    el.querySelector('.omics-notif-toast__close').addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        el.remove();
+    });
+    el.addEventListener('click', function () {
+        el.remove();
+        void openUserNotificationsModal();
+        if (meta && meta.type && String(meta.type).indexOf('admin_') === 0) {
+            if (typeof window.showAdminConsole === 'function') {
+                window.showAdminConsole();
+            }
+        }
+    });
+    document.body.appendChild(el);
+    setTimeout(function () {
+        if (el.parentNode) {
+            el.classList.add('omics-notif-toast--fade');
+            setTimeout(function () {
+                if (el.parentNode) el.remove();
+            }, 320);
+        }
+    }, 8000);
+}
 
 function ensureNotificationsModal() {
     if (document.getElementById('user-notifications-modal')) return;
@@ -64,6 +142,12 @@ function ensureNotificationsModal() {
     });
 }
 
+function updateNotificationEntryVisibility() {
+    const show = _hasNotificationIdentity();
+    const menuItem = document.getElementById('user-menu-notifications');
+    if (menuItem) menuItem.style.display = show ? 'flex' : 'none';
+}
+
 async function fetchUnreadNotifications() {
     const res = await fetch('/api/user/notifications/unread', {
         method: 'GET',
@@ -75,20 +159,39 @@ async function fetchUnreadNotifications() {
 }
 
 function updateNotificationBadge(count) {
-    const badge = document.getElementById('user-menu-unread-badge');
-    const menuItem = document.getElementById('user-menu-notifications');
     const n = Number(count) || 0;
-    if (!badge) return;
-    if (n > 0) {
-        badge.textContent = n > 99 ? '99+' : String(n);
-        badge.style.display = 'inline-flex';
-        badge.removeAttribute('aria-hidden');
-        if (menuItem) menuItem.setAttribute('data-has-unread', '1');
-    } else {
-        badge.style.display = 'none';
-        badge.setAttribute('aria-hidden', 'true');
-        if (menuItem) menuItem.removeAttribute('data-has-unread');
+    const label = n > 99 ? '99+' : String(n);
+    const badge = document.getElementById('user-menu-unread-badge');
+    if (badge) {
+        if (n > 0) {
+            badge.textContent = label;
+            badge.style.display = 'inline-flex';
+            badge.removeAttribute('aria-hidden');
+        } else {
+            badge.style.display = 'none';
+            badge.setAttribute('aria-hidden', 'true');
+        }
     }
+    const menuItem = document.getElementById('user-menu-notifications');
+    if (menuItem) {
+        if (n > 0) menuItem.setAttribute('data-has-unread', '1');
+        else menuItem.removeAttribute('data-has-unread');
+    }
+}
+
+function _toastNewNotifications(items) {
+    if (!Array.isArray(items) || !items.length) return;
+    let newest = null;
+    items.forEach(function (n) {
+        const id = String(n.id);
+        if (_seenNotifIds.has(id)) return;
+        _seenNotifIds.add(id);
+        if (!newest) newest = n;
+    });
+    _saveSeenNotifIds(_seenNotifIds);
+    if (!newest) return;
+    if (!_notifBootstrapped) return;
+    showNotificationToast(newest.title, newest.content, { type: newest.type, id: newest.id });
 }
 
 function renderNotificationsModalBody(items) {
@@ -122,18 +225,19 @@ function renderNotificationsModalBody(items) {
             );
         })
         .join('');
-    body.innerHTML =
-        '<div class="user-notifications-panel__list">' + rows + '</div>';
+    body.innerHTML = '<div class="user-notifications-panel__list">' + rows + '</div>';
 }
 
 async function refreshUserNotifications() {
-    if (typeof window.isLoggedIn === 'function' && !window.isLoggedIn()) {
+    updateNotificationEntryVisibility();
+    if (!_hasNotificationIdentity()) {
         updateNotificationBadge(0);
         return;
     }
     try {
         const data = await fetchUnreadNotifications();
         updateNotificationBadge(data.unread_count);
+        _toastNewNotifications(data.items || []);
         const modalEl = document.getElementById('user-notifications-modal');
         if (modalEl && modalEl.classList.contains('show')) {
             const res = await fetch('/api/user/notifications?limit=30', {
@@ -145,6 +249,8 @@ async function refreshUserNotifications() {
         }
     } catch (e) {
         console.warn('[notifications] poll failed', e);
+    } finally {
+        _notifBootstrapped = true;
     }
 }
 
@@ -178,6 +284,10 @@ async function openUserNotificationsModal() {
         const data = res.ok ? await res.json() : { items: [], unread_count: 0 };
         renderNotificationsModalBody(data.items || []);
         updateNotificationBadge(data.unread_count);
+        (data.items || []).forEach(function (n) {
+            if (n && n.id != null) _seenNotifIds.add(String(n.id));
+        });
+        _saveSeenNotifIds(_seenNotifIds);
     } catch (_) {
         renderNotificationsModalBody([]);
     }
@@ -189,10 +299,11 @@ function initUserNotifications() {
     if (_notifPollTimer) clearInterval(_notifPollTimer);
     _notifPollTimer = setInterval(function () {
         void refreshUserNotifications();
-    }, 60000);
+    }, _POLL_INTERVAL_MS);
     void refreshUserNotifications();
     window.refreshUserNotifications = refreshUserNotifications;
     window.openUserNotificationsModal = openUserNotificationsModal;
+    window.showNotificationToast = showNotificationToast;
 }
 
 if (document.readyState === 'loading') {
@@ -201,4 +312,4 @@ if (document.readyState === 'loading') {
     initUserNotifications();
 }
 
-export { refreshUserNotifications, openUserNotificationsModal, initUserNotifications };
+export { refreshUserNotifications, openUserNotificationsModal, initUserNotifications, showNotificationToast };

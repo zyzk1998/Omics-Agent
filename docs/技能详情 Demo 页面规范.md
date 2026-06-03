@@ -28,14 +28,29 @@
 | `inputs` | array | 是 | 输入项列表 |
 | `outputs` | array | 是 | 输出项列表 |
 | `parameters_table` | array | 是 | 工具参数字段表 |
-| `query_examples` | array[string] | 是 | ≥1 条可复制 Prompt |
+| `query_examples` | array[string] **或** array[object] | 是 | ≥1 条可复制 Prompt；**旗舰组学管线**使用三阶对象（见 §2.4） |
+| `workflow_highlights` | array[string] | 否 | 描述区下方能力标签（如 Harmony、MACS2） |
 | **`demo_visualization`** | **string** | **否** | **输出效果预览：图片 URL 或轻量 HTML 表格/流程图** |
 
 **`demo_visualization` 约定：**
 
 - 以 `http(s)://` 或 `/` 开头且扩展名为图片 → 渲染 `<img>`  
 - 含 HTML 标签（如 `<table>`、`<div>`）→ 渲染到右侧「输出效果预览」栏（仅信任的后端静态数据）  
-- 示例 HTML 常量见 `gibh_agent/db/skill_detail_demo_visualizations.py`
+- **组学旗舰管线**：使用 `skill-viz-pipeline-gallery` 包裹多段 `<section>`，每段 `<h4 class="skill-viz-pipeline-stage__title">` + `<img src="/assets/images/demos/pipelines/...">` 或真实 TSV 摘要表；图源由 `scripts/build_omics_pipeline_demo_assets.py` 从 `data/results/run_*` 同步。  
+- 示例 HTML 常量见 `gibh_agent/db/skill_detail_demo_visualizations.py` 与 `skill_detail_demo_visualizations_omics.py`
+
+### 2.4 组学旗舰管线 · 结构化 `query_examples`（`skill_pipeline_specs.py`）
+
+每条管线 **3 个对象**，字段：
+
+| 字段 | 说明 |
+|------|------|
+| `tier` | `zero_shot` / `dynamic_routing` / `post_analysis` |
+| `label` | 展示标题（**一键化标准执行** / 参数精调 / 深度挖掘；禁用非专业口语） |
+| `hint` | 灰色说明条 |
+| `prompt` | 一键复制正文 |
+
+广场 **name → tool_id** 见 `SKILL_NAME_TO_PIPELINE_TOOL_ID`（如 `转录组学标准全流程` → `pipeline_transcriptomics`）。
 
 ### 2.2 标准样例（含可视化）
 

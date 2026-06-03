@@ -123,6 +123,7 @@ class UserFeedback(Base):
     content = Column(Text, nullable=False)
     error_context = Column(Text, nullable=True)
     client_timestamp = Column(String(64), nullable=True)
+    status = Column(String(32), nullable=False, default="open")  # open | acknowledged | resolved
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 

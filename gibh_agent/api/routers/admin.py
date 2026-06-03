@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from gibh_agent.core.deps import get_current_admin_user
-from gibh_agent.core.user_notifications import create_user_notification
+from gibh_agent.core.user_notifications import create_user_notification, notify_all_admins
 from gibh_agent.db.connection import get_db_session
 from gibh_agent.db.models import Skill as SkillModel, User
 from gibh_agent.plugin_system.registry import DynamicSkillPlugin
@@ -129,6 +129,42 @@ def _apply_skill_review_status(
         raise HTTPException(status_code=500, detail="更新失败")
 
 
+def _notify_ugc_skill_review(
+    db: Session,
+    skill: SkillModel,
+    *,
+    approved: bool,
+) -> None:
+    author = (skill.author_id or "").strip()
+    if not author:
+        return
+    name = (skill.name or "未命名技能").strip()
+    try:
+        if approved:
+            create_user_notification(
+                db,
+                user_id=author,
+                ntype="ugc_skill_approved",
+                title="UGC 技能已通过审核",
+                content=f"🎉 您提交的技能「{name}」已通过审核，现已在技能广场展示。",
+                commit=False,
+            )
+        else:
+            create_user_notification(
+                db,
+                user_id=author,
+                ntype="ugc_skill_rejected",
+                title="UGC 技能未通过审核",
+                content=(
+                    f"很遗憾，您提交的技能「{name}」暂未通过审核。"
+                    "请对照技能扩展规范修订后重新提交。"
+                ),
+                commit=False,
+            )
+    except Exception as e:
+        logger.warning("写入 UGC 技能审核通知失败 skill_id=%s: %s", skill.id, e)
+
+
 @router.get("/admin/skills", response_model=List[dict])
 def list_pending_skills(
     current_user: User = Depends(get_current_admin_user),
@@ -208,9 +244,16 @@ def review_skill_by_action(
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db_session),
 ):
-    new_status = "approved" if body.action == "approve" else "rejected"
+    approved = body.action == "approve"
+    new_status = "approved" if approved else "rejected"
     skill = _apply_skill_review_status(db, skill_id, new_status, current_user.username)
-    return {"skill_id": skill.id, "status": skill.status, "message": "已更新"}
+    try:
+        _notify_ugc_skill_review(db, skill, approved=approved)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning("UGC 技能审核通知提交失败 skill_id=%s: %s", skill_id, e)
+    return {"skill_id": skill.id, "status": skill.status, "message": "已更新并通知用户"}
 
 
 def _transition_plugin_status(

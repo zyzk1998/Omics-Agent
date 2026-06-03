@@ -70,3 +70,47 @@ def count_unread_notifications(db: Session, user_id: str) -> int:
         .filter(UserNotification.user_id == user_id, UserNotification.is_read == 0)
         .count()
     )
+
+
+def list_admin_usernames(db: Session) -> List[str]:
+    """已审核通过的管理员 username 列表（用于待办通知）。"""
+    from gibh_agent.db.models import User
+
+    rows = db.query(User).filter(User.role == "admin").all()
+    out: List[str] = []
+    for u in rows:
+        raw = getattr(u, "approval_status", None)
+        st = (str(raw).strip().lower() if raw is not None else "")
+        if st not in ("", "approved"):
+            continue
+        un = (u.username or "").strip()
+        if un:
+            out.append(un)
+    return out
+
+
+def notify_all_admins(
+    db: Session,
+    *,
+    ntype: str,
+    title: str,
+    content: str,
+    commit: bool = False,
+) -> int:
+    """向所有管理员写入同一条待办通知；返回写入条数。"""
+    admins = list_admin_usernames(db)
+    if not admins:
+        logger.info("notify_all_admins: 无可用管理员，跳过 type=%s", ntype)
+        return 0
+    for un in admins:
+        create_user_notification(
+            db,
+            user_id=un,
+            ntype=ntype,
+            title=title,
+            content=content,
+            commit=False,
+        )
+    if commit:
+        db.commit()
+    return len(admins)

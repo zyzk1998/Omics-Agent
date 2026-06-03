@@ -275,7 +275,6 @@
                 margin: 0;
                 padding: 0 !important;
                 list-style: none;
-                /* 与 .sidebar-top 内 .btn-new-session 同宽：middle 右内边距 8px，top 为 16px */
                 width: calc(100% - 8px);
                 max-width: calc(100% - 8px);
                 box-sizing: border-box;
@@ -285,105 +284,110 @@
                 margin: 0;
                 width: 100%;
             }
-            #sidebar-pane .sidebar-active-skill-wrapper {
+            /* 使用中技能：尺寸与 .sidebar-session-item 对齐；底色仅 .active-selected 时启用（防高亮死锁） */
+            #sidebar-pane .sidebar-active-skill-wrapper.active-skill-entry {
                 cursor: pointer;
-                display: flex !important;
-                align-items: center !important;
-                justify-content: space-between !important;
-                gap: 4px !important;
-                box-sizing: border-box !important;
-                width: 100% !important;
-                max-width: 100% !important;
-                height: 28px !important;
-                min-height: 28px !important;
-                max-height: 28px !important;
-                margin: 2px 0 4px 0 !important;
-                /* 15px = 收藏夹块 -9 + 子项 margin 8 + padding 16，绿点与星号同列 */
-                padding: 0 4px 0 15px !important;
-                border-radius: 8px !important;
-                background-color: #f3f4f6 !important;
-                cursor: pointer;
-                overflow: hidden !important;
-                transition: background-color 0.15s ease;
+                position: relative;
+                box-sizing: border-box;
+                width: 100%;
+                min-height: 36px;
+                margin: 2px 0;
+                padding: 8px 12px 8px 52px;
+                border-radius: 8px;
+                font-size: 13px;
+                background-color: transparent;
+                color: inherit;
+                font-weight: normal;
+                gap: 6px;
             }
-            #sidebar-pane .sidebar-active-skill-wrapper:hover {
-                background-color: #e5e7eb !important;
+            #sidebar-pane .sidebar-active-skill-wrapper.active-skill-entry.active-selected {
+                background-color: var(--sidebar-active-l2-bg, rgba(13, 110, 253, 0.06));
+                color: var(--sidebar-active-l2-color, #0a58ca);
+                font-weight: 500;
             }
-            #sidebar-pane .sidebar-active-skill-text-container {
-                display: flex !important;
-                align-items: center !important;
-                min-width: 0 !important;
-                flex: 1 1 0 !important;
-                overflow: hidden !important;
-                padding-right: 2px;
+            #sidebar-pane .sidebar-active-skill-wrapper.active-skill-entry.active-selected:hover {
+                background-color: rgba(13, 110, 253, 0.1);
+            }
+            #sidebar-pane .sidebar-active-skill-wrapper.active-skill-entry:hover:not(.active-selected) {
+                background-color: rgba(0, 0, 0, 0.04);
             }
             #sidebar-pane .sidebar-active-skill-dot-wrap {
-                display: inline-flex !important;
-                align-items: center !important;
-                justify-content: center !important;
+                position: absolute;
+                left: 28px;
+                top: 50%;
+                transform: translateY(-50%);
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 16px;
+                min-width: 16px;
             }
             #sidebar-pane .sidebar-active-skill-dot-wrap .sidebar-active-skill-dot-icon {
-                font-size: 5px !important;
-                line-height: 1 !important;
-                width: auto !important;
-                min-width: 0 !important;
-                color: #22c55e !important;
+                font-size: 6px;
+                line-height: 1;
+                color: #22c55e;
             }
-            #sidebar-pane #sidebar-active-skill-name,
-            #sidebar-pane .sidebar-active-skill-name {
-                font-size: 12px !important;
-                font-weight: 400 !important;
-                line-height: 1.2 !important;
-                color: #4b5563 !important;
-                flex: 1 1 auto !important;
-                min-width: 0 !important;
-                max-width: 100% !important;
-                overflow: hidden !important;
-                text-overflow: ellipsis !important;
-                white-space: nowrap !important;
+            #sidebar-pane #sidebar-active-skill-name {
+                flex: 1;
+                min-width: 0;
+                font-size: 13px;
+                font-weight: 500;
+                line-height: 1.25;
+                color: inherit;
             }
             #sidebar-pane .sidebar-active-skill-wrapper button.btn-close-active-skill {
-                flex: 0 0 18px !important;
-                width: 18px !important;
-                height: 18px !important;
-                min-width: 18px !important;
-                max-width: 18px !important;
-                padding: 0 !important;
-                margin: 0 !important;
-                display: inline-flex !important;
-                align-items: center !important;
-                justify-content: center !important;
-                background: none !important;
-                background-color: transparent !important;
-                border: 0 !important;
-                border-width: 0 !important;
-                outline: none !important;
-                box-shadow: none !important;
-                -webkit-appearance: none !important;
-                appearance: none !important;
-                color: #9ca3af !important;
-                opacity: 0 !important;
-                visibility: hidden !important;
-                pointer-events: none !important;
-                transition: opacity 0.15s ease, visibility 0.15s ease, color 0.15s ease !important;
-                cursor: pointer !important;
+                flex: 0 0 24px;
+                width: 24px;
+                height: 24px;
+                min-width: 24px;
+                padding: 0;
+                margin: 0;
+                margin-left: auto;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                background: transparent;
+                border: 0;
+                outline: none;
+                box-shadow: none;
+                color: #9ca3af;
+                opacity: 0;
+                visibility: hidden;
+                pointer-events: none;
+                transition: opacity 0.15s ease, visibility 0.15s ease, color 0.15s ease;
+                cursor: pointer;
             }
             #sidebar-pane .sidebar-active-skill-wrapper:hover button.btn-close-active-skill {
-                opacity: 1 !important;
-                visibility: visible !important;
-                pointer-events: auto !important;
+                opacity: 1;
+                visibility: visible;
+                pointer-events: auto;
             }
             #sidebar-pane .sidebar-active-skill-wrapper button.btn-close-active-skill:hover {
-                color: #374151 !important;
-                background: none !important;
-                border: 0 !important;
+                color: #374151;
             }
-            #sidebar-pane .sidebar-active-skill-wrapper button.btn-close-active-skill:focus,
-            #sidebar-pane .sidebar-active-skill-wrapper button.btn-close-active-skill:focus-visible,
-            #sidebar-pane .sidebar-active-skill-wrapper button.btn-close-active-skill:active {
-                outline: none !important;
-                box-shadow: none !important;
-                border: 0 !important;
+            #sidebar-pane .sidebar-active-skill-wrapper .btn-close-active-skill-icon {
+                display: block;
+            }
+            @keyframes active-skill-breathe {
+                0%, 100% { opacity: 0.45; box-shadow: 0 0 4px rgba(59, 130, 246, 0.35); transform: translateY(-50%) scale(0.92); }
+                50% { opacity: 1; box-shadow: 0 0 10px rgba(59, 130, 246, 0.95); transform: translateY(-50%) scale(1); }
+            }
+            #sidebar-pane .sidebar-active-skill-wrapper.active-skill-running::before {
+                content: '';
+                position: absolute;
+                left: 16px;
+                top: 50%;
+                transform: translateY(-50%);
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background-color: #3b82f6;
+                box-shadow: 0 0 8px rgba(59, 130, 246, 0.75);
+                animation: active-skill-breathe 1.5s infinite ease-in-out;
+                pointer-events: none;
+            }
+            #sidebar-pane .sidebar-active-skill-wrapper.active-skill-running .sidebar-active-skill-dot-icon {
+                visibility: hidden;
             }
             #sidebar-pane .sidebar-active-skill-wrapper .btn-close-active-skill-icon {
                 display: block;
@@ -1510,9 +1514,46 @@
                 overflow: visible !important;
             }
             #chat-main-host,
+            #skill-live-host,
             #chat-pane,
-            #input-wrapper-bottom.flush-bottom-host {
+            #skill-live-pane,
+            #input-wrapper-bottom.flush-bottom-host,
+            #skill-input-wrapper-bottom.flush-bottom-host {
                 padding-bottom: 0 !important;
+            }
+            #skill-live-host {
+                flex: 1;
+                min-width: 0;
+                display: none;
+                flex-direction: column;
+            }
+            #skill-live-pane {
+                flex: 1;
+                min-height: 0;
+                display: flex;
+                flex-direction: column;
+            }
+            #skill-live-header {
+                height: 50px;
+                flex-shrink: 0;
+                border-bottom: 1px solid #eee;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 0 16px;
+                background: #fff;
+            }
+            #skill-live-pane .input-wrapper.input-bottom,
+            #skill-live-pane .input-wrapper.input-center {
+                position: relative;
+                left: auto;
+                top: auto;
+                transform: none;
+                width: 100%;
+                max-width: 100%;
+                margin: 0 !important;
+                padding: 0 16px max(8px, env(safe-area-inset-bottom, 0px));
+                bottom: auto;
             }
             #input-wrapper-bottom .input-wrapper {
                 position: relative;
@@ -2301,6 +2342,68 @@
                 height: auto;
                 border-radius: 6px;
             }
+            .skill-detail-viz__gallery-wrap {
+                max-height: min(72vh, 720px);
+                overflow-y: auto;
+            }
+            .skill-viz-pipeline-gallery__header {
+                margin-bottom: 12px;
+                padding-bottom: 10px;
+                border-bottom: 1px solid #e2e8f0;
+            }
+            .skill-viz-pipeline-gallery__title {
+                font-size: 13px;
+                font-weight: 700;
+                color: #0f172a;
+            }
+            .skill-viz-pipeline-gallery__prov {
+                margin-top: 4px;
+                font-size: 11px;
+                color: #64748b;
+                line-height: 1.4;
+            }
+            .skill-viz-pipeline-stage {
+                margin-bottom: 18px;
+            }
+            .skill-viz-pipeline-stage__title {
+                margin: 0 0 8px;
+                font-size: 12px;
+                font-weight: 600;
+                color: #1e40af;
+            }
+            .skill-viz-pipeline-stage__img {
+                display: block;
+                width: 100%;
+                height: auto;
+                border-radius: 6px;
+                border: 1px solid #e2e8f0;
+            }
+            .skill-viz-pipeline-table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 10px;
+                font-family: system-ui, -apple-system, sans-serif;
+            }
+            .skill-viz-pipeline-table thead tr {
+                background: #1e293b;
+                color: #f8fafc;
+            }
+            .skill-viz-pipeline-table th,
+            .skill-viz-pipeline-table td {
+                padding: 5px 6px;
+                text-align: left;
+                border-bottom: 1px solid #e2e8f0;
+            }
+            .skill-viz-pipeline-table code {
+                font-size: 10px;
+                color: #1d4ed8;
+            }
+            .skill-viz-pipeline-note {
+                margin: 0;
+                font-size: 11px;
+                color: #64748b;
+                line-height: 1.5;
+            }
             .skill-detail-drawer__banner {
                 background: #eff6ff;
                 border: 1px solid #bfdbfe;
@@ -2324,6 +2427,47 @@
                 font-size: 14px;
                 line-height: 1.65;
                 color: #374151;
+            }
+            .skill-detail-section__markdown {
+                margin: 0 0 12px;
+                font-size: 14px;
+                line-height: 1.65;
+                color: #374151;
+            }
+            .skill-detail-section__markdown .skill-vis-mermaid-wrap {
+                margin: 12px 0 16px;
+                overflow-x: auto;
+            }
+            .skill-detail-mermaid-wrap .skill-vis-mermaid-canvas {
+                min-height: 220px;
+            }
+            .skill-detail-drawer .skill-detail-mermaid-widget.fullscreen-capable-widget.widget-pan-zoom {
+                margin-bottom: 14px;
+                border: 1px solid #e2e8f0;
+                border-radius: 10px;
+                background: #f8fafc;
+                overflow: hidden;
+            }
+            .skill-detail-drawer .skill-detail-mermaid-widget .btn-fullscreen-toggle {
+                position: absolute;
+                top: 8px;
+                right: 8px;
+                z-index: 12;
+            }
+            .skill-detail-drawer .skill-detail-mermaid-widget .skill-vis-mermaid-wrap--rendered .skill-vis-mermaid-canvas,
+            .skill-detail-drawer .skill-detail-mermaid-widget .skill-vis-mermaid-wrap--rendered .skill-vis-mermaid-canvas svg {
+                cursor: zoom-in;
+            }
+            .skill-detail-drawer .skill-detail-mermaid-widget.is-fullscreen .skill-vis-mermaid-canvas {
+                cursor: grab;
+            }
+            .skill-detail-section__markdown h3,
+            .skill-detail-section__markdown h4,
+            .skill-detail-section__markdown h5 {
+                margin: 16px 0 10px;
+                font-size: 15px;
+                font-weight: 700;
+                color: #0f172a;
             }
             .skill-detail-list {
                 margin: 0;
@@ -2396,6 +2540,92 @@
                 white-space: pre-wrap;
                 word-break: break-word;
             }
+            .skill-detail-highlights {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                margin-top: 12px;
+            }
+            .skill-detail-highlights__chip {
+                font-size: 11px;
+                font-weight: 500;
+                padding: 4px 10px;
+                border-radius: 999px;
+                background: #eff6ff;
+                color: #1d4ed8;
+                border: 1px solid #bfdbfe;
+            }
+            .skill-detail-prompt-guide__list {
+                display: flex;
+                flex-direction: column;
+                gap: 14px;
+            }
+            .skill-detail-prompt-tier {
+                border: 1px solid #e5e7eb;
+                border-radius: 10px;
+                padding: 12px 14px;
+                background: #fff;
+            }
+            .skill-detail-prompt-tier--zero {
+                border-left: 4px solid #10b981;
+            }
+            .skill-detail-prompt-tier--dynamic {
+                border-left: 4px solid #3b82f6;
+            }
+            .skill-detail-prompt-tier--post {
+                border-left: 4px solid #a855f7;
+            }
+            .skill-detail-prompt-tier__head {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 10px;
+                margin-bottom: 6px;
+            }
+            .skill-detail-prompt-tier__label {
+                margin: 0;
+                font-size: 13px;
+                font-weight: 600;
+                color: #111827;
+                line-height: 1.4;
+            }
+            .skill-detail-prompt-tier__hint {
+                margin: 0 0 8px;
+                font-size: 12px;
+                color: #64748b;
+                line-height: 1.45;
+            }
+            .skill-detail-prompt-tier__copy {
+                flex-shrink: 0;
+                border: 1px solid #d1d5db;
+                background: #f9fafb;
+                color: #374151;
+                font-size: 11px;
+                font-weight: 500;
+                padding: 3px 10px;
+                border-radius: 6px;
+                cursor: pointer;
+            }
+            .skill-detail-prompt-tier__copy:hover {
+                border-color: #3b82f6;
+                color: #2563eb;
+            }
+            .skill-detail-prompt-tier__pre {
+                margin: 0;
+                max-height: 200px;
+                overflow: auto;
+                background: #0f172a;
+                color: #e2e8f0;
+                border-radius: 8px;
+                padding: 12px 14px;
+                font-size: 12px;
+                line-height: 1.55;
+            }
+            .skill-detail-prompt-tier__code {
+                font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                white-space: pre-wrap;
+                word-break: break-word;
+            }
             .skill-detail-drawer__empty,
             .skill-detail-drawer__loading {
                 font-size: 14px;
@@ -2449,46 +2679,76 @@
             .skills-square-pager .pager-num.current { background: #3b82f6; color: #ffffff; border-color: #3b82f6; }
             .skills-square-pager #skills-page-size { margin-left: 12px; border: 1px solid #e5e7eb; border-radius: 6px; padding: 4px 8px; outline: none; cursor: pointer; background: #fff; color: #374151; }
             .skills-square-empty { text-align: center; padding: 48px 20px; color: #94a3b8; font-size: 15px; }
-            /* 侧栏 · 用户消息铃铛 */
-            .sidebar-notifications-row {
-                display: flex;
-                justify-content: flex-end;
-                padding: 0 12px 6px;
-            }
-            .sidebar-notifications-bell {
-                position: relative;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                width: 36px;
-                height: 36px;
-                border: 1px solid #e5e7eb;
-                border-radius: 10px;
-                background: #fff;
-                color: #374151;
-                cursor: pointer;
-                transition: background 0.15s ease, border-color 0.15s ease;
-            }
-            .sidebar-notifications-bell:hover {
-                background: #f3f4f6;
-                border-color: #d1d5db;
-            }
-            .sidebar-notifications-badge {
-                position: absolute;
-                top: -4px;
-                right: -4px;
-                min-width: 16px;
-                height: 16px;
-                padding: 0 4px;
+            .user-menu-unread-badge {
+                margin-left: auto;
+                min-width: 18px;
+                height: 18px;
+                padding: 0 5px;
                 border-radius: 999px;
                 background: #ef4444;
                 color: #fff;
-                font-size: 10px;
+                font-size: 11px;
                 font-weight: 700;
-                line-height: 16px;
+                line-height: 18px;
+                text-align: center;
+                display: none;
                 align-items: center;
                 justify-content: center;
-                box-sizing: border-box;
+            }
+            #user-menu-notifications[data-has-unread="1"] {
+                font-weight: 600;
+            }
+            #user-menu-notifications {
+                align-items: center;
+                gap: 8px;
+            }
+            .omics-notif-toast {
+                position: fixed;
+                right: 20px;
+                bottom: 24px;
+                z-index: 10050;
+                width: min(360px, calc(100vw - 32px));
+                padding: 14px 36px 12px 14px;
+                border-radius: 10px;
+                background: #0f172a;
+                color: #f8fafc;
+                box-shadow: 0 10px 28px rgba(15, 23, 42, 0.35);
+                cursor: pointer;
+                transition: opacity 0.3s ease, transform 0.3s ease;
+            }
+            .omics-notif-toast--fade {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+            .omics-notif-toast__close {
+                position: absolute;
+                top: 6px;
+                right: 8px;
+                border: none;
+                background: transparent;
+                color: #94a3b8;
+                font-size: 18px;
+                line-height: 1;
+                cursor: pointer;
+                padding: 2px 6px;
+            }
+            .omics-notif-toast__title {
+                font-size: 14px;
+                font-weight: 700;
+                margin-bottom: 4px;
+                line-height: 1.35;
+            }
+            .omics-notif-toast__content {
+                font-size: 13px;
+                color: #cbd5e1;
+                line-height: 1.45;
+                white-space: pre-wrap;
+                word-break: break-word;
+            }
+            .omics-notif-toast__hint {
+                margin-top: 8px;
+                font-size: 11px;
+                color: #64748b;
             }
             .user-notifications-panel {
                 max-height: min(420px, 60vh);

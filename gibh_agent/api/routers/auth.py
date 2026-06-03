@@ -26,6 +26,7 @@ from gibh_agent.core.security import (
 )
 from gibh_agent.core.deps import get_current_user
 from gibh_agent.db.connection import get_db_session
+from gibh_agent.core.user_notifications import notify_all_admins
 from gibh_agent.db.models import User, Session as SessionModel, Asset, WorkflowTemplate
 
 logger = logging.getLogger(__name__)
@@ -120,6 +121,17 @@ def register(body: RegisterBody, db: Session = Depends(get_db_session)):
     db.refresh(user)
     logger.info("用户注册: %s approval=%s", body.username, user.approval_status)
     if (user.approval_status or "") == "pending":
+        try:
+            notify_all_admins(
+                db,
+                ntype="admin_registration_pending",
+                title="新用户注册待审核",
+                content=f"用户「{user.username}」已提交注册申请，请在管理员控制台「用户审核」中处理。",
+                commit=False,
+            )
+            db.commit()
+        except Exception as e:
+            logger.warning("通知管理员新注册失败 username=%s: %s", user.username, e)
         return {
             "username": user.username,
             "message": "注册已提交，请等待管理员审核",

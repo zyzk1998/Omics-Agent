@@ -71,11 +71,9 @@
                         <div class="sidebar-item sidebar-item-unified sidebar-nav-l1" id="btn-skills-square" title="技能广场"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span><span class="sidebar-item-text">技能广场</span></div>
                         <ul class="nav flex-column" id="sidebar-active-skill-container" style="display: none; padding-left: 0;">
                             <li class="nav-item position-relative">
-                                <div class="sidebar-active-skill-wrapper" role="status" aria-live="polite">
-                                    <div class="sidebar-active-skill-text-container">
-                                        <span class="sidebar-icon-wrap sidebar-active-skill-dot-wrap" aria-hidden="true"><i class="bi bi-circle-fill sidebar-active-skill-dot-icon"></i></span>
-                                        <span id="sidebar-active-skill-name" class="item-text text-truncate sidebar-active-skill-name"></span>
-                                    </div>
+                                <div class="sidebar-active-skill-wrapper sidebar-session-item history-item sub-nav-item active-skill-entry" id="sidebar-active-skill-wrapper" role="button" tabindex="0" title="返回技能会话" aria-label="返回技能会话">
+                                    <span class="sidebar-icon-wrap sidebar-active-skill-dot-wrap" aria-hidden="true"><i class="bi bi-circle-fill sidebar-active-skill-dot-icon"></i></span>
+                                    <span id="sidebar-active-skill-name" class="item-text text-truncate"></span>
                                     <button type="button" class="btn-close-active-skill" id="btn-clear-active-skill" title="移除当前技能" aria-label="移除当前技能">
                                         <svg class="btn-close-active-skill-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" fill="none"/></svg>
                                     </button>
@@ -111,13 +109,6 @@
                         <span class="sidebar-workspace-indicator__icon" aria-hidden="true">📂</span>
                         <span class="sidebar-workspace-indicator__text" id="sidebar-workspace-indicator-text">未挂载</span>
                     </button>
-                    <div class="sidebar-notifications-row" id="sidebar-notifications-row" style="display: none;">
-                        <button type="button" class="sidebar-notifications-bell" id="user-notifications-bell" title="消息通知" aria-label="消息通知" aria-expanded="false" aria-controls="user-notifications-panel">
-                            <i class="bi bi-bell" aria-hidden="true"></i>
-                            <span class="sidebar-notifications-badge" id="user-notifications-badge" style="display: none;" aria-hidden="true">0</span>
-                        </button>
-                    </div>
-                    <div id="user-notifications-panel" class="user-notifications-panel popover-menu" role="menu" aria-hidden="true" style="display: none;"></div>
                     <div class="sidebar-user" id="sidebar-user-area" title="点击登录/注册" role="button" aria-expanded="false" aria-haspopup="true" aria-controls="user-profile-menu" style="cursor:pointer;">
                         <i class="bi bi-person-circle sidebar-user-icon" style="font-size:1.5rem;color:#6b7280;"></i>
                         <div class="d-flex flex-column sidebar-user-text">
@@ -134,6 +125,7 @@
                 <div class="popover-item" id="menu-item-download-client" data-action="client-download" role="menuitem" tabindex="0"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg></span>下载客户端</div>
                 <div class="popover-item" data-action="doc-center" role="menuitem" tabindex="0"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></span>帮助与 API 文档</div>
                 <div class="popover-item" data-action="feedback-help"><span class="sidebar-icon-wrap" aria-hidden="true">💡</span>问题反馈</div>
+                <div class="popover-item" id="user-menu-notifications" data-action="notifications" role="menuitem" tabindex="0" style="display: none;"><span class="sidebar-icon-wrap"><i class="bi bi-bell" aria-hidden="true"></i></span>消息通知<span class="user-menu-unread-badge" id="user-menu-unread-badge" style="display: none;" aria-hidden="true">0</span></div>
                 <div class="popover-item" id="menu-item-update-app" data-action="app-update" style="display:none;" role="menuitem" tabindex="0"><span class="sidebar-icon-wrap"><i class="bi bi-cloud-arrow-down"></i></span>更新应用</div>
                 <div class="popover-item" id="user-menu-admin-console" data-action="admin-console" style="display: none;" title="管理员审核技能"><span class="sidebar-icon-wrap"><svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg></span>管理员控制台</div>
                 <div class="popover-item" data-action="im-channels" role="menuitem" tabindex="0"><span class="sidebar-icon-wrap"><i class="bi bi-chat-dots" aria-hidden="true"></i></span>💬 IM 频道接入</div>
@@ -321,7 +313,7 @@
         </div>
 
         <div class="chat-scroll-area" id="chatBox">
-            <div class="chat-content" id="chatContent"></div>
+            <div class="chat-content active-chat-content" id="chatContent"></div>
         </div>
         <div id="input-wrapper-bottom" class="flush-bottom-host">
             <div class="input-wrapper input-bottom" id="inputWrapper">
@@ -456,6 +448,26 @@
                 </div>
                 <div id="file-tree-container" class="file-tree-container"></div>
             </aside>
+            </div>
+
+            <!-- 双轨路由 · 容器 B：「正在使用的技能」专属活会话（永不因普通导航清空 / abort） -->
+            <div id="skill-live-host" class="chat-main-with-explorer skill-live-host" style="display: none;" aria-label="技能活会话">
+                <main id="skill-live-pane">
+                    <header id="skill-live-header" class="skill-live-header">
+                        <div class="header-left" style="display: flex; align-items: center; gap: 8px;">
+                            <h3 id="skill-live-title" style="margin:0; font-size: 16px; color: #1f2329;">技能会话</h3>
+                        </div>
+                        <div class="header-right">
+                            <button type="button" class="icon-btn" id="btn-expand-workspace-skill" title="展开工作台" aria-label="展开工作台">
+                                <svg class="header-icon-svg header-workspace-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="18" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg>
+                            </button>
+                        </div>
+                    </header>
+                    <div class="chat-scroll-area" id="skillLiveBox">
+                        <div class="chat-content" id="skillLiveContent"></div>
+                    </div>
+                    <div id="skill-input-wrapper-bottom" class="flush-bottom-host"></div>
+                </main>
             </div>
 
             <div class="resizer" id="resizer-right"></div>
@@ -1649,6 +1661,172 @@
             window.isVisitorDemoCompleted = false;
             window.isVisitorMode = true;
             let currentAbortController = null;
+            /** Immortal SSE：进行中的 fetch/SSE 句柄；导航显隐不得 abort，仅停止/新建/切至其他历史会话可杀 */
+            window._immortalTaskToken = null;
+            /** SSE 存活探针：与 _immortalTaskToken 同步维护，供控制台/Toast 诊断 */
+            window._activeEventSources = window._activeEventSources || [];
+            function probeSseAliveState() {
+                var tok = window._immortalTaskToken;
+                var immortalCtrls = (tok && tok.controllers) ? tok.controllers.length : 0;
+                var hasAbortCtrl = !!(typeof currentAbortController !== 'undefined' && currentAbortController);
+                var hasReconnect = !!window.__sessionStreamReconnectAbort;
+                var processing = !!(typeof isProcessing !== 'undefined' && isProcessing);
+                var registryLen = (window._activeEventSources && window._activeEventSources.length) || 0;
+                var alive = immortalCtrls > 0 || hasAbortCtrl || hasReconnect || processing || registryLen > 0;
+                return {
+                    alive: alive,
+                    immortalControllers: immortalCtrls,
+                    registryLen: registryLen,
+                    currentAbortController: hasAbortCtrl,
+                    reconnectAbort: hasReconnect,
+                    isProcessing: processing,
+                    sessionId: tok ? tok.sessionId : null
+                };
+            }
+            window.probeSseAliveState = probeSseAliveState;
+            /** 双轨路由：main=普通闲聊容器；skill_live=技能专属活会话容器 */
+            window._dualRouteActive = 'main';
+            window._sseRenderHost = 'main';
+            window._skillLiveSessionId = null;
+            function getActiveChatContentEl() {
+                if (window._sseRenderHost === 'skill') {
+                    var slc = document.getElementById('skillLiveContent');
+                    if (slc) return slc;
+                }
+                return document.getElementById('chatContent');
+            }
+            window.getActiveChatContentEl = getActiveChatContentEl;
+            function getActiveChatScrollEl() {
+                if (window._dualRouteActive === 'skill_live') {
+                    var slb = document.getElementById('skillLiveBox');
+                    if (slb) return slb;
+                }
+                return document.getElementById('chatBox');
+            }
+            window.getActiveChatScrollEl = getActiveChatScrollEl;
+            function isSkillLiveViewVisible() {
+                var liveHost = document.getElementById('skill-live-host');
+                if (!liveHost) return false;
+                try {
+                    var cs = window.getComputedStyle(liveHost);
+                    return cs.display !== 'none' && cs.visibility !== 'hidden';
+                } catch (_visErr) { return false; }
+            }
+            window.isSkillLiveViewVisible = isSkillLiveViewVisible;
+            function isMainChatViewVisible() {
+                var mainHost = document.getElementById('chat-main-host');
+                if (!mainHost) return false;
+                try {
+                    var cs = window.getComputedStyle(mainHost);
+                    return cs.display !== 'none' && cs.visibility !== 'hidden';
+                } catch (_visErr2) { return false; }
+            }
+            function activateSkillLiveRoute(opts) {
+                opts = opts || {};
+                window._dualRouteActive = 'skill_live';
+                window._sseRenderHost = 'skill';
+                var slc = document.getElementById('skillLiveContent');
+                var mc = document.getElementById('chatContent');
+                if (slc) slc.classList.add('active-chat-content');
+                if (mc) mc.classList.remove('active-chat-content');
+                if (opts.resetContent && slc) {
+                    while (slc.firstChild) slc.removeChild(slc.firstChild);
+                    window._skillLiveSessionId = null;
+                }
+            }
+            window.activateSkillLiveRoute = activateSkillLiveRoute;
+            function activateMainChatRoute() {
+                window._dualRouteActive = 'main';
+                window._sseRenderHost = 'main';
+                var slc = document.getElementById('skillLiveContent');
+                var mc = document.getElementById('chatContent');
+                if (mc) mc.classList.add('active-chat-content');
+                if (slc) slc.classList.remove('active-chat-content');
+            }
+            window.activateMainChatRoute = activateMainChatRoute;
+            function moveComposerInputToHost(hostKey) {
+                var iw = document.getElementById('inputWrapper');
+                if (!iw) return;
+                var slot = (hostKey === 'skill')
+                    ? document.getElementById('skill-input-wrapper-bottom')
+                    : document.getElementById('input-wrapper-bottom');
+                if (slot && !slot.contains(iw)) {
+                    slot.appendChild(iw);
+                    iw.classList.remove('input-center');
+                    iw.classList.add('input-bottom');
+                }
+            }
+            window.moveComposerInputToHost = moveComposerInputToHost;
+            function registerImmortalController(controller, sessionId, opts) {
+                opts = opts || {};
+                if (!controller) return;
+                var sid = String(sessionId != null ? sessionId : (typeof currentSessionId !== 'undefined' ? currentSessionId : '')).trim();
+                var host = opts.host || window._sseRenderHost || 'main';
+                if (!window._immortalTaskToken) {
+                    window._immortalTaskToken = { controllers: [], sessionId: sid, host: host };
+                }
+                if (sid) window._immortalTaskToken.sessionId = sid;
+                window._immortalTaskToken.host = host;
+                var list = window._immortalTaskToken.controllers;
+                if (list.indexOf(controller) < 0) list.push(controller);
+                if (!window._activeEventSources) window._activeEventSources = [];
+                window._activeEventSources.push({
+                    controller: controller,
+                    sessionId: sid,
+                    host: host,
+                    ts: Date.now()
+                });
+                if (host === 'skill' && sid) window._skillLiveSessionId = sid;
+            }
+            window.registerImmortalController = registerImmortalController;
+            function isImmortalController(controller) {
+                var tok = window._immortalTaskToken;
+                if (!tok || !controller) return false;
+                return tok.controllers.indexOf(controller) >= 0;
+            }
+            function clearImmortalTaskToken() {
+                window._immortalTaskToken = null;
+                window._activeEventSources = [];
+            }
+            function abortAllImmortalStreams(opts) {
+                opts = opts || {};
+                var preserveSkill = opts.preserveSkill !== false;
+                var tok = window._immortalTaskToken;
+                if (tok && tok.controllers) {
+                    if (preserveSkill && tok.host === 'skill') {
+                        return;
+                    }
+                    for (var _ii = 0; _ii < tok.controllers.length; _ii++) {
+                        try { tok.controllers[_ii].abort(); } catch (_abImm) {}
+                    }
+                }
+                if (!preserveSkill || !tok || tok.host !== 'skill') {
+                    clearImmortalTaskToken();
+                }
+                if (!preserveSkill || !tok || tok.host !== 'skill') {
+                    currentAbortController = null;
+                    window.__sessionStreamReconnectAbort = null;
+                }
+            }
+            function abortMainChatStreamsOnly() {
+                abortAllImmortalStreams({ preserveSkill: true });
+                if (currentAbortController && !isImmortalController(currentAbortController)) {
+                    try { currentAbortController.abort(); } catch (_abMain) {}
+                }
+                if (!window._immortalTaskToken || window._immortalTaskToken.host !== 'skill') {
+                    currentAbortController = null;
+                }
+                if (window.__sessionStreamReconnectAbort && (!window._immortalTaskToken || window._immortalTaskToken.host !== 'skill')) {
+                    try { window.__sessionStreamReconnectAbort.abort(); } catch (_abRc) {}
+                    window.__sessionStreamReconnectAbort = null;
+                }
+            }
+            window.abortMainChatStreamsOnly = abortMainChatStreamsOnly;
+            window.abortAllImmortalStreams = abortAllImmortalStreams;
+            function safeAbortStreamController(controller) {
+                if (!controller || isImmortalController(controller)) return;
+                try { controller.abort(); } catch (_sa) {}
+            }
             // Phase 5: 当前会话 ID（SSE 首包 session 事件写入，发消息时带出，新建会话时清空）
             let currentSessionId = null;
             /** 仅当次有效：从「已显示的对话」点侧栏「技能广场 / 数据资产」离开时写入；返回 / 进聊天 / 刷新后必为 null，不用 localStorage 控制返回条显隐 */
@@ -1679,25 +1857,6 @@
                 if (typeof currentSessionId !== 'undefined' && currentSessionId) {
                     setLastActiveSessionId(currentSessionId);
                 }
-            }
-            function syncVolatileReturnSessionFromChatBeforeLeavingToSkillsOrAssets() {
-                var cp = document.getElementById('chat-main-host') || document.getElementById('chat-pane');
-                var chatVis = false;
-                if (cp) {
-                    var d = (cp.style && cp.style.display) ? String(cp.style.display).trim() : '';
-                    if (d === 'none') chatVis = false;
-                    else if (d === 'flex' || d === '') {
-                        try {
-                            chatVis = window.getComputedStyle(cp).display !== 'none';
-                        } catch (_e) { chatVis = true; }
-                    } else chatVis = true;
-                }
-                if (chatVis && typeof currentSessionId !== 'undefined' && currentSessionId) {
-                    window._volatileActiveSessionIdToReturn = String(currentSessionId).trim();
-                } else {
-                    window._volatileActiveSessionIdToReturn = null;
-                }
-                if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
             }
             function refreshReturnToSessionButtons() {
                 var last = (typeof window._volatileActiveSessionIdToReturn !== 'undefined' && window._volatileActiveSessionIdToReturn)
@@ -2451,6 +2610,9 @@
                         case 'session':
                             if (d.session_id && typeof currentSessionId !== 'undefined') {
                                 currentSessionId = d.session_id;
+                                if (window._activeSkillPayload && typeof bindActiveSkillSessionId === 'function') {
+                                    bindActiveSkillSessionId(d.session_id);
+                                }
                                 if (typeof fetchSessions === 'function') fetchSessions();
                             }
                             return false;
@@ -2635,7 +2797,9 @@
             const chatContent = document.getElementById('chatContent');
             const chatScrollArea = document.getElementById('chatBox');
             function scrollToBottom() {
-                var scrollContainer = document.querySelector('.chat-scroll-area') || document.getElementById('chatBox');
+                var scrollContainer = (typeof getActiveChatScrollEl === 'function' ? getActiveChatScrollEl() : null)
+                    || document.querySelector('.chat-scroll-area')
+                    || document.getElementById('chatBox');
                 if (scrollContainer) scrollContainer.scrollTop = scrollContainer.scrollHeight;
             }
             const userInput = document.getElementById('userInput');
@@ -2855,6 +3019,8 @@
                     sub_category: '预测与建模',
                     description: 'Lipinski 五规则快筛与 PubChem/ChEMBL 结构相似性检索双模式；点击「使用」后在弹窗中选择路线。',
                     tags: ['药物筛选', 'Lipinski', '分子相似度', 'PySkills'],
+                    /** 详情说明书/demo 预览：挂接 Lipinski 演示结果，不依赖固化 prompt 流程 */
+                    tool_name: 'lipinski_druglikeness',
                     prompt_template: ''
                 },
                 {
@@ -3908,6 +4074,16 @@
                     merged.id = api.id;
                     if (api.saved != null) merged.saved = api.saved;
                     if (api.created_at) merged.created_at = api.created_at;
+                    if (api.detailed_spec && typeof api.detailed_spec === 'object') {
+                        merged.detailed_spec = api.detailed_spec;
+                    }
+                    if (api.tool_name) merged.tool_name = api.tool_name;
+                    if ((!merged.prompt_template || !String(merged.prompt_template).trim()) && api.prompt_template) {
+                        merged.prompt_template = api.prompt_template;
+                    }
+                    if ((!merged.description || !String(merged.description).trim()) && api.description) {
+                        merged.description = api.description;
+                    }
                     return merged;
                 });
             }
@@ -4014,17 +4190,20 @@
                 return pinnedCopy.concat(rest);
             }
             window._skillDetailedSpecsMap = window._skillDetailedSpecsMap || {};
+            window._skillDetailedSpecsNameMap = window._skillDetailedSpecsNameMap || {};
             window._skillDetailedSpecsFetchPromise = null;
             function fetchSkillDetailedSpecsOnce() {
                 if (window._skillDetailedSpecsFetchPromise) return window._skillDetailedSpecsFetchPromise;
                 window._skillDetailedSpecsFetchPromise = fetch('/api/skills/detailed-specs', { method: 'GET' })
-                    .then(function(r) { return r.ok ? r.json() : { specs: {} }; })
+                    .then(function(r) { return r.ok ? r.json() : { specs: {}, name_to_tool_id: {} }; })
                     .then(function(data) {
                         window._skillDetailedSpecsMap = (data && data.specs) || {};
+                        window._skillDetailedSpecsNameMap = (data && data.name_to_tool_id) || {};
                         return window._skillDetailedSpecsMap;
                     })
                     .catch(function() {
                         window._skillDetailedSpecsMap = {};
+                        window._skillDetailedSpecsNameMap = {};
                         return window._skillDetailedSpecsMap;
                     });
                 return window._skillDetailedSpecsFetchPromise;
@@ -4034,6 +4213,9 @@
                 if (skill.detailed_spec && typeof skill.detailed_spec === 'object') return skill.detailed_spec;
                 var tid = _extractSkillRouteFromPrompt(skill.prompt_template)
                     || String(skill.tool_name || skill.toolName || '').trim();
+                if (!tid && skill.name && window._skillDetailedSpecsNameMap) {
+                    tid = window._skillDetailedSpecsNameMap[String(skill.name).trim()] || '';
+                }
                 if (tid && window._skillDetailedSpecsMap && window._skillDetailedSpecsMap[tid]) {
                     return window._skillDetailedSpecsMap[tid];
                 }
@@ -4045,6 +4227,83 @@
             function escSkillDetailHtml(s) {
                 return String(s == null ? '' : s)
                     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            }
+            function normalizeSkillQueryExamples(examples) {
+                var list = examples || [];
+                if (!list.length) return [];
+                if (typeof list[0] === 'string') {
+                    return list.map(function(text, i) {
+                        return { tier: 'legacy', label: '调用示例 ' + (i + 1), hint: '', prompt: String(text) };
+                    });
+                }
+                return list.map(function(item) {
+                    if (!item || typeof item !== 'object') {
+                        return { tier: 'legacy', label: '调用示例', hint: '', prompt: String(item || '') };
+                    }
+                    return {
+                        tier: item.tier || 'custom',
+                        label: item.label || '调用示例',
+                        hint: item.hint || '',
+                        prompt: item.prompt || ''
+                    };
+                });
+            }
+            function copySkillDetailPromptText(text) {
+                var payload = text || '';
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(payload).then(function() {
+                        if (typeof showToast === 'function') showToast('已复制调用示例', 'success');
+                    }).catch(function() {
+                        if (typeof showToast === 'function') showToast('复制失败，请手动选择文本', 'warning');
+                    });
+                } else if (typeof showToast === 'function') {
+                    showToast('浏览器不支持自动复制', 'warning');
+                }
+            }
+            function renderSkillDetailPromptGuide(examples) {
+                var guides = normalizeSkillQueryExamples(examples);
+                if (!guides.length) return '';
+                var tierClass = {
+                    zero_shot: 'skill-detail-prompt-tier--zero',
+                    dynamic_routing: 'skill-detail-prompt-tier--dynamic',
+                    post_analysis: 'skill-detail-prompt-tier--post'
+                };
+                var cards = guides.map(function(g, idx) {
+                    var tc = tierClass[g.tier] || 'skill-detail-prompt-tier--custom';
+                    var hintHtml = g.hint
+                        ? '<p class="skill-detail-prompt-tier__hint">' + escSkillDetailHtml(g.hint) + '</p>'
+                        : '';
+                    return '<article class="skill-detail-prompt-tier ' + tc + '" data-tier-index="' + idx + '">'
+                        + '<div class="skill-detail-prompt-tier__head">'
+                        + '<h5 class="skill-detail-prompt-tier__label">' + escSkillDetailHtml(g.label) + '</h5>'
+                        + '<button type="button" class="skill-detail-prompt-tier__copy" data-tier-index="' + idx + '">复制</button>'
+                        + '</div>'
+                        + hintHtml
+                        + '<pre class="skill-detail-prompt-tier__pre"><code class="skill-detail-prompt-tier__code">'
+                        + escSkillDetailHtml(g.prompt) + '</code></pre>'
+                        + '</article>';
+                }).join('');
+                return '<section class="skill-detail-section skill-detail-prompt-guide">'
+                    + '<div class="skill-detail-demo__head">'
+                    + '<h4 class="skill-detail-section__title">对话调用示例 · Prompt 工程指南</h4>'
+                    + '<button type="button" class="skill-detail-demo__copy" id="skill-detail-demo-copy-all">复制首条</button>'
+                    + '</div>'
+                    + '<div class="skill-detail-prompt-guide__list">' + cards + '</div>'
+                    + '</section>';
+            }
+            function bindSkillDetailPromptGuideCopy(spec) {
+                var guides = normalizeSkillQueryExamples((spec && spec.query_examples) || []);
+                var copyAllBtn = document.getElementById('skill-detail-demo-copy-all');
+                if (copyAllBtn && guides.length) {
+                    copyAllBtn.onclick = function() { copySkillDetailPromptText(guides[0].prompt); };
+                }
+                var tierBtns = document.querySelectorAll('.skill-detail-prompt-tier__copy');
+                tierBtns.forEach(function(btn) {
+                    btn.onclick = function() {
+                        var idx = parseInt(btn.getAttribute('data-tier-index'), 10);
+                        if (!isNaN(idx) && guides[idx]) copySkillDetailPromptText(guides[idx].prompt);
+                    };
+                });
             }
             function renderSkillDetailVisualization(viz) {
                 var previewCol = document.getElementById('skill-detail-drawer-preview-col');
@@ -4062,7 +4321,15 @@
                     return;
                 }
                 if (raw.indexOf('<') !== -1) {
-                    previewInner.innerHTML = raw;
+                    if (raw.indexOf('skill-viz-pipeline-gallery') !== -1) {
+                        previewInner.innerHTML = '<div class="skill-detail-viz__gallery-wrap">' + raw + '</div>';
+                    } else {
+                        previewInner.innerHTML = raw;
+                    }
+                    return;
+                }
+                if (typeof safeMarkedParse === 'function' && (/^\s*[#*>|\-\d]/.test(raw) || raw.indexOf('|') !== -1 || raw.indexOf('**') !== -1)) {
+                    previewInner.innerHTML = '<div class="skill-detail-viz__markdown markdown-body">' + safeMarkedParse(raw) + '</div>';
                     return;
                 }
                 previewInner.innerHTML = '<img class="skill-detail-viz__img" src="' + escSkillDetailHtml(raw) + '" alt="输出效果预览" loading="lazy" />';
@@ -4086,6 +4353,64 @@
                 btn.setAttribute('title', saved ? '已收藏' : '添加到我的工具');
                 renderSkillBookmarkButtonContent(btn, saved);
             }
+            function renderSkillDetailMermaidHtml(mermaidCode) {
+                var payloadJson = JSON.stringify(String(mermaidCode || ''));
+                var header =
+                    '<div class="skill-vis-mermaid-header"><span class="skill-vis-mermaid-badge">工作流拓扑</span>' +
+                    '<span class="text-muted small">Mermaid 可视化 · 点击图表全屏</span></div>';
+                var inner =
+                    '<div class="skill-vis-mermaid-wrap skill-vis-mermaid-wrap--sci-fi skill-mm-block my-3 skill-detail-mermaid-wrap" data-skill-mermaid="1">' +
+                    '<div class="mermaid skill-vis-mermaid-canvas" data-mermaid-pending="1"></div>' +
+                    '<script type="application/json" class="skill-vis-mermaid-payload">' +
+                    payloadJson.replace(/<\/script/gi, '<\\/script') +
+                    '</scr' + 'ipt></div>';
+                if (typeof _skillVisWrapFullscreenWidget === 'function') {
+                    return _skillVisWrapFullscreenWidget(inner, 'skill-vis-mermaid-widget skill-detail-mermaid-widget', {
+                        panZoom: true,
+                        fixedHeader: header
+                    });
+                }
+                return header + inner;
+            }
+            function renderSkillDetailDescriptionHtml(text) {
+                var raw = String(text == null ? '' : text);
+                if (!raw) {
+                    return '<p class="skill-detail-section__text text-muted">暂无描述</p>';
+                }
+                var hasMd = /```\s*mermaid|^\s*#{1,6}\s/m.test(raw);
+                if (!hasMd) {
+                    return '<p class="skill-detail-section__text">' + escSkillDetailHtml(raw) + '</p>';
+                }
+                var parts = [];
+                var re = /```mermaid\s*\n([\s\S]*?)```/gi;
+                var lastIdx = 0;
+                var match;
+                while ((match = re.exec(raw)) !== null) {
+                    if (match.index > lastIdx) {
+                        var mdChunk = raw.slice(lastIdx, match.index);
+                        if (mdChunk.trim()) {
+                            parts.push(typeof safeMarkedParse === 'function'
+                                ? safeMarkedParse(mdChunk)
+                                : ('<p>' + escSkillDetailHtml(mdChunk) + '</p>'));
+                        }
+                    }
+                    if (typeof renderSkillDetailMermaidHtml === 'function') {
+                        parts.push(renderSkillDetailMermaidHtml(match[1].trim()));
+                    } else if (typeof _skillVisBuildMermaidHtml === 'function') {
+                        parts.push(_skillVisBuildMermaidHtml(match[1].trim(), escSkillDetailHtml));
+                    }
+                    lastIdx = re.lastIndex;
+                }
+                if (lastIdx < raw.length) {
+                    var tail = raw.slice(lastIdx);
+                    if (tail.trim()) {
+                        parts.push(typeof safeMarkedParse === 'function'
+                            ? safeMarkedParse(tail)
+                            : ('<p>' + escSkillDetailHtml(tail) + '</p>'));
+                    }
+                }
+                return '<div class="skill-detail-section__markdown markdown-body">' + parts.join('') + '</div>';
+            }
             function renderSkillDetailDrawerBody(skill, spec) {
                 var main = document.getElementById('skill-detail-drawer-main');
                 if (!main) return;
@@ -4097,8 +4422,15 @@
                 var hint = spec.usage_hint
                     ? '<div class="skill-detail-drawer__banner">' + escSkillDetailHtml(spec.usage_hint) + '</div>'
                     : '';
-                var overview = '<section class="skill-detail-section"><h4 class="skill-detail-section__title">描述</h4><p class="skill-detail-section__text">'
-                    + escSkillDetailHtml(spec.description_long || skill.description || '') + '</p></section>';
+                var highlights = (spec.workflow_highlights || []);
+                var highlightsHtml = highlights.length
+                    ? '<div class="skill-detail-highlights">' + highlights.map(function(h) {
+                        return '<span class="skill-detail-highlights__chip">' + escSkillDetailHtml(h) + '</span>';
+                    }).join('') + '</div>'
+                    : '';
+                var overview = '<section class="skill-detail-section"><h4 class="skill-detail-section__title">描述</h4>'
+                    + renderSkillDetailDescriptionHtml(spec.description_long || skill.description || '')
+                    + highlightsHtml + '</section>';
                 var inputs = (spec.inputs || []).map(function(row) {
                     return '<li><strong>' + escSkillDetailHtml(row.name) + '</strong>（' + escSkillDetailHtml(row.type) + '，'
                         + (row.required ? '必填' : '选填') + '）— ' + escSkillDetailHtml(row.description || '') + '</li>';
@@ -4119,35 +4451,48 @@
                     + '<div class="skill-detail-table-wrap"><table class="skill-detail-table"><thead><tr>'
                     + '<th>参数名</th><th>类型</th><th>必填</th><th>说明</th></tr></thead><tbody>'
                     + (paramRows || '<tr><td colspan="4" class="text-muted">无结构化参数</td></tr>') + '</tbody></table></div></section>';
-                var examples = (spec.query_examples || []);
-                var demoText = examples.length ? String(examples[0]) : (skill.prompt_template || '');
-                var demoBlock = '<section class="skill-detail-section"><div class="skill-detail-demo__head">'
-                    + '<h4 class="skill-detail-section__title">对话调用示例</h4>'
-                    + '<button type="button" class="skill-detail-demo__copy" id="skill-detail-demo-copy">一键复制</button></div>'
-                    + '<pre class="skill-detail-demo__pre"><code id="skill-detail-demo-code">'
-                    + escSkillDetailHtml(demoText) + '</code></pre></section>';
-                main.innerHTML = hint + overview + ioBlock + paramBlock + demoBlock;
+                var examples = spec.query_examples || [];
+                var guides = normalizeSkillQueryExamples(examples);
+                var promptGuideBlock = guides.length
+                    ? renderSkillDetailPromptGuide(examples)
+                    : '';
+                if (!promptGuideBlock) {
+                    var demoText = skill.prompt_template || '';
+                    promptGuideBlock = '<section class="skill-detail-section"><div class="skill-detail-demo__head">'
+                        + '<h4 class="skill-detail-section__title">对话调用示例</h4>'
+                        + '<button type="button" class="skill-detail-demo__copy" id="skill-detail-demo-copy">一键复制</button></div>'
+                        + '<pre class="skill-detail-demo__pre"><code id="skill-detail-demo-code">'
+                        + escSkillDetailHtml(demoText) + '</code></pre></section>';
+                }
+                main.innerHTML = hint + overview + ioBlock + paramBlock + promptGuideBlock;
                 renderSkillDetailVisualization(spec.demo_visualization || '');
-                var copyDemoBtn = document.getElementById('skill-detail-demo-copy');
-                var demoCodeEl = document.getElementById('skill-detail-demo-code');
-                if (copyDemoBtn && demoCodeEl) {
-                    copyDemoBtn.onclick = function() {
-                        var text = demoCodeEl.textContent || '';
-                        if (navigator.clipboard && navigator.clipboard.writeText) {
-                            navigator.clipboard.writeText(text).then(function() {
-                                if (typeof showToast === 'function') showToast('已复制调用示例', 'success');
-                            }).catch(function() {
-                                if (typeof showToast === 'function') showToast('复制失败，请手动选择文本', 'warning');
-                            });
-                        } else if (typeof showToast === 'function') {
-                            showToast('浏览器不支持自动复制', 'warning');
-                        }
-                    };
+                if (typeof hydrateSkillDetailDrawerMedia === 'function') {
+                    hydrateSkillDetailDrawerMedia(document.getElementById('skill-detail-drawer'));
+                } else if (typeof hydrateSkillMermaidBlocks === 'function') {
+                    hydrateSkillMermaidBlocks(main, { force: true });
+                    requestAnimationFrame(function () {
+                        hydrateSkillMermaidBlocks(main, { force: true, retry: true });
+                    });
+                }
+                if (guides.length) {
+                    bindSkillDetailPromptGuideCopy(spec);
+                } else {
+                    var copyDemoBtn = document.getElementById('skill-detail-demo-copy');
+                    var demoCodeEl = document.getElementById('skill-detail-demo-code');
+                    if (copyDemoBtn && demoCodeEl) {
+                        copyDemoBtn.onclick = function() {
+                            copySkillDetailPromptText(demoCodeEl.textContent || '');
+                        };
+                    }
                 }
             }
             function closeSkillDetailDrawer() {
                 var drawer = document.getElementById('skill-detail-drawer');
                 if (!drawer) return;
+                var activeFs = drawer.querySelector('.fullscreen-capable-widget.is-fullscreen');
+                if (activeFs && typeof _toggleFullscreenWidget === 'function') {
+                    _toggleFullscreenWidget(activeFs, activeFs.querySelector('.btn-fullscreen-toggle'));
+                }
                 drawer.classList.remove('skill-detail-drawer--open');
                 drawer.setAttribute('aria-hidden', 'true');
                 document.body.classList.remove('skill-detail-drawer-open');
@@ -6715,6 +7060,30 @@
                 };
             })();
 
+            /**
+             * 客户端已是最新（或无法检查版本）时：Toast 提示后硬刷新，拉取服务端最新 HTML/JS/CSS。
+             * Electron 优先走 preload hardReloadFrontend → main session.clearCache + reloadIgnoringCache。
+             */
+            window.syncFrontendWithHardReload = function syncFrontendWithHardReload(toastMessage) {
+                if (window.__omicsFrontendSyncScheduled) return;
+                window.__omicsFrontendSyncScheduled = true;
+                var msg = toastMessage || '客户端已是最新版本，正在同步最新前端配置…';
+                if (typeof showToast === 'function') showToast(msg, 'info');
+                window.setTimeout(function () {
+                    if (typeof window.hardReloadFrontend === 'function') {
+                        try {
+                            window.hardReloadFrontend();
+                            return;
+                        } catch (_pre) {}
+                    }
+                    try {
+                        window.location.reload(true);
+                    } catch (_rel) {
+                        window.location.reload();
+                    }
+                }, 800);
+            };
+
             /** 桌面客户端：订阅主进程 autoUpdater 广播，展示进度与重启安装 */
             window.initDesktopAutoUpdateUi = function () {
                 if (window.__desktopAutoUpdateBound) return;
@@ -6852,13 +7221,18 @@
                         if (t === 'checking-for-update') {
                             if (typeof showToast === 'function') showToast('正在检查更新…', 'info');
                         } else if (t === 'update-not-available') {
-                            if (payload && payload.devMode) {
-                                if (typeof showToast === 'function') showToast('开发模式下跳过线上更新检查（版本 ' + String(payload.version || '') + '）', 'info');
-                            } else if (typeof showToast === 'function') {
-                                showToast('已经是最新版本', 'success');
-                            }
                             if (H && window.__omicsModalUpdateBtnMode === 'checking') H.setModalPrimaryButton('idle');
+                            if (window.__omicsManualUpdateCheckActive) {
+                                window.__omicsManualUpdateCheckActive = false;
+                                var syncMsg = (payload && payload.devMode)
+                                    ? '开发模式：客户端版本 ' + String(payload.version || '') + '，正在同步最新前端配置…'
+                                    : '客户端已是最新版本，正在同步最新前端配置…';
+                                if (typeof window.syncFrontendWithHardReload === 'function') {
+                                    window.syncFrontendWithHardReload(syncMsg);
+                                }
+                            }
                         } else if (t === 'update-available') {
+                            window.__omicsManualUpdateCheckActive = false;
                             if (H) {
                                 H.persistPendingPostUpdate(payload.version, payload.releaseNotes);
                                 H.fillReleaseNotes(payload.releaseNotes);
@@ -6879,6 +7253,12 @@
                             var um = payload && payload.userMessage ? String(payload.userMessage) : '暂时无法检查更新';
                             if (typeof showToast === 'function') showToast(um, 'warning');
                             if (H) H.setModalPrimaryButton('idle');
+                            if (window.__omicsManualUpdateCheckActive) {
+                                window.__omicsManualUpdateCheckActive = false;
+                                if (typeof window.syncFrontendWithHardReload === 'function') {
+                                    window.syncFrontendWithHardReload('正在尝试同步最新界面…');
+                                }
+                            }
                         }
                     });
                 }
@@ -7201,9 +7581,10 @@
                 if (menuItem) menuItem.style.display = isElectron ? 'none' : 'flex';
             };
 
-            window.triggerUpdateCheck = function () {
+            window.triggerUpdateCheck = function handleCheckUpdateClick() {
                 var modeTr = window.__omicsModalUpdateBtnMode || 'idle';
                 if (modeTr === 'downloading' || modeTr === 'restart') return;
+                window.__omicsManualUpdateCheckActive = true;
                 window.__omicsModalUpdateBtnMode = 'checking';
                 var Ht = window.OmicsDesktopUpdateUiHelpers;
                 if (Ht) Ht.setModalPrimaryButton('checking');
@@ -7213,22 +7594,32 @@
                     } else if (window.electronAPI && typeof window.electronAPI.checkForUpdates === 'function') {
                         window.electronAPI.checkForUpdates();
                     } else {
-                        if (typeof showToast === 'function') showToast('当前环境不支持自动更新检查', 'warning');
                         window.__omicsModalUpdateBtnMode = 'idle';
                         if (Ht) Ht.setModalPrimaryButton('idle');
+                        if (typeof window.syncFrontendWithHardReload === 'function') {
+                            window.syncFrontendWithHardReload('正在同步最新界面…');
+                        } else if (typeof showToast === 'function') {
+                            showToast('当前环境不支持自动更新检查', 'warning');
+                        }
                         return;
                     }
                 } catch (e1) {
-                    if (typeof showToast === 'function') showToast('无法发起更新检查', 'warning');
+                    console.error('检查更新失败:', e1);
                     window.__omicsModalUpdateBtnMode = 'idle';
                     if (Ht) Ht.setModalPrimaryButton('idle');
+                    if (typeof window.syncFrontendWithHardReload === 'function') {
+                        window.syncFrontendWithHardReload('正在尝试同步最新界面…');
+                    } else if (typeof showToast === 'function') {
+                        showToast('无法发起更新检查', 'warning');
+                    }
                     return;
                 }
                 window.setTimeout(function () {
                     if (window.__omicsModalUpdateBtnMode !== 'checking') return;
                     window.__omicsModalUpdateBtnMode = 'idle';
+                    window.__omicsManualUpdateCheckActive = false;
                     if (window.OmicsDesktopUpdateUiHelpers) window.OmicsDesktopUpdateUiHelpers.setModalPrimaryButton('idle');
-                }, 3000);
+                }, 15000);
             };
 
             function toggleSkillBookmark(skillIdOrSkill, btnElement) {
@@ -7587,6 +7978,13 @@
                     inp.focus();
                 }
                 if (typeof highlightActiveSkillInSidebar === 'function') highlightActiveSkillInSidebar(skill);
+                if (typeof bindActiveSkillSessionId === 'function' && typeof currentSessionId !== 'undefined' && currentSessionId) {
+                    bindActiveSkillSessionId(currentSessionId);
+                }
+                if (window._sseRenderHost === 'skill' && skill && skill.name) {
+                    var skillTitleEl = document.getElementById('skill-live-title');
+                    if (skillTitleEl) skillTitleEl.textContent = String(skill.name).trim();
+                }
             }
             /**
              * @param {object} skill 技能对象
@@ -7632,8 +8030,11 @@
                             if (typeof highlightActiveSkillInSidebar === 'function') highlightActiveSkillInSidebar(skill);
                             return;
                         }
-                        if (typeof clearChatAndReset === 'function') clearChatAndReset();
+                        if (typeof clearMainChatOnly === 'function') clearMainChatOnly();
+                        else if (typeof clearChatAndReset === 'function') clearChatAndReset();
                         else if (typeof showChatView === 'function') showChatView();
+                        if (typeof activateSkillLiveRoute === 'function') activateSkillLiveRoute({ resetContent: true });
+                        if (typeof forceSwitchToLiveChat === 'function') forceSwitchToLiveChat();
                         injectDrug();
                         if (typeof highlightActiveSkillInSidebar === 'function') highlightActiveSkillInSidebar(skill);
                     });
@@ -7652,29 +8053,246 @@
                     applySkillPromptToChat(skill);
                     return;
                 }
-                if (typeof clearChatAndReset === 'function') clearChatAndReset();
+                if (typeof clearMainChatOnly === 'function') clearMainChatOnly();
+                else if (typeof clearChatAndReset === 'function') clearChatAndReset();
                 else if (typeof showChatView === 'function') showChatView();
+                if (typeof activateSkillLiveRoute === 'function') activateSkillLiveRoute({ resetContent: true });
+                if (typeof forceSwitchToLiveChat === 'function') forceSwitchToLiveChat();
                 applySkillPromptToChat(skill);
             }
 
-            function hideAllMainPanes() {
-                var panes = ['chat-main-host', 'skills-square-pane', 'history-pane', 'data-assets-pane', 'file-management-pane', 'hpc-ftp-view'];
-                panes.forEach(function(id) {
-                    var el = document.getElementById(id);
-                    if (el) el.style.display = 'none';
-                });
+            var OMIC_NON_CHAT_PANE_IDS = [
+                'skills-square-pane',
+                'history-pane',
+                'data-assets-pane',
+                'file-management-pane',
+                'hpc-ftp-view'
+            ];
+            function brutalHidePane(id) {
+                var el = document.getElementById(id);
+                if (!el) return;
+                el.style.setProperty('display', 'none', 'important');
             }
-            function showSkillsView() {
-                if (typeof fetchSkillDetailedSpecsOnce === 'function') fetchSkillDetailedSpecsOnce();
-                syncVolatileReturnSessionFromChatBeforeLeavingToSkillsOrAssets();
-                persistLastChatSessionBeforeLeaving();
-                hideAllMainPanes();
-                var skillsPane = document.getElementById('skills-square-pane');
+            function brutalShowPane(id, displayMode) {
+                var el = document.getElementById(id);
+                if (!el) return;
+                el.style.setProperty('display', displayMode || 'flex', 'important');
+                el.style.setProperty('visibility', 'visible', 'important');
+                el.style.setProperty('opacity', '1', 'important');
+            }
+            function brutalHideAllNonChatPanes() {
+                OMIC_NON_CHAT_PANE_IDS.forEach(function(id) { brutalHidePane(id); });
+            }
+            function _isChatHostVisibleForRender() {
+                if (typeof isSkillLiveViewVisible === 'function' && isSkillLiveViewVisible()) return true;
+                var chatHost = document.getElementById('chat-main-host');
+                if (!chatHost) return true;
+                try {
+                    var cs = window.getComputedStyle(chatHost);
+                    return cs.display !== 'none' && cs.visibility !== 'hidden';
+                } catch (_csErr) { return true; }
+            }
+            window._isChatHostVisibleForRender = _isChatHostVisibleForRender;
+            window.__flushDeferredVisWhileHidden = function() {
+                if (!_isChatHostVisibleForRender()) return;
+                var cc = (typeof getActiveChatContentEl === 'function' ? getActiveChatContentEl() : null)
+                    || document.getElementById('chatContent');
+                if (cc && typeof hydrateSkillMermaidBlocks === 'function') hydrateSkillMermaidBlocks(cc);
+            };
+            /**
+             * 双轨路由 · 技能活会话穿透：仅 DOM 显隐。禁止 abort、禁止 loadSessionAndRestore、禁止清 skillLiveContent。
+             */
+            window.forceSwitchToLiveChat = function(ev) {
+                if (ev) {
+                    if (ev.target && ev.target.closest && ev.target.closest('#btn-clear-active-skill')) return;
+                    if (ev.preventDefault) ev.preventDefault();
+                    if (ev.stopPropagation) ev.stopPropagation();
+                }
+                console.log('🔥 [双轨路由] 触发回到专属技能活会话!');
+                brutalHideAllNonChatPanes();
+                var mainHost = document.getElementById('chat-main-host');
+                if (mainHost) mainHost.style.setProperty('display', 'none', 'important');
+                var liveHost = document.getElementById('skill-live-host');
+                if (!liveHost) {
+                    console.error('[forceSwitchToLiveChat] 致命：DOM 中不存在 #skill-live-host');
+                    alert('致命错误：找不到技能活会话容器 #skill-live-host！');
+                    return;
+                }
+                liveHost.style.setProperty('display', 'flex', 'important');
+                liveHost.style.setProperty('visibility', 'visible', 'important');
+                liveHost.style.setProperty('opacity', '1', 'important');
+                liveHost.style.setProperty('z-index', '9999', 'important');
+                window._dualRouteActive = 'skill_live';
+                if (window._activeSkillPayload) {
+                    window._sseRenderHost = 'skill';
+                    var _slcVis = document.getElementById('skillLiveContent');
+                    var _mcVis = document.getElementById('chatContent');
+                    if (_slcVis) _slcVis.classList.add('active-chat-content');
+                    if (_mcVis) _mcVis.classList.remove('active-chat-content');
+                }
+                if (typeof moveComposerInputToHost === 'function') moveComposerInputToHost('skill');
                 var wsPane = document.getElementById('workspace-pane');
                 var rzR = document.getElementById('resizer-right');
-                if (skillsPane) skillsPane.style.display = 'flex';
-                if (wsPane) wsPane.style.display = 'none';
-                if (rzR) rzR.style.display = 'none';
+                if (wsPane) wsPane.style.setProperty('display', 'flex', 'important');
+                if (rzR) rzR.style.setProperty('display', 'block', 'important');
+                if (typeof window.__flushDeferredVisWhileHidden === 'function') {
+                    window.__flushDeferredVisWhileHidden();
+                }
+                if (typeof highlightActiveItemInSidebar === 'function') highlightActiveItemInSidebar('skill_live');
+                setTimeout(function() {
+                    var chatArea = document.getElementById('skillLiveBox') || liveHost.querySelector('.chat-scroll-area');
+                    if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
+                    if (typeof scrollToBottom === 'function') scrollToBottom();
+                }, 100);
+                if (typeof syncSidebarPrimaryNavActive === 'function') syncSidebarPrimaryNavActive();
+                if (typeof refreshActiveSkillRunningFromSession === 'function') refreshActiveSkillRunningFromSession();
+                try {
+                    var probe = typeof window.probeSseAliveState === 'function' ? window.probeSseAliveState() : null;
+                    var isSseAlive = probe ? probe.alive : !!(window._immortalTaskToken || (window._activeEventSources && window._activeEventSources.length > 0));
+                    console.log('👀 切回后后台流存活状态:', isSseAlive ? '✅ 存活' : '❌ 已断开', probe || '');
+                } catch (_probeErr) {
+                    console.warn('[forceSwitchToLiveChat] 存活探针异常', _probeErr);
+                }
+            };
+            /** 捕获阶段全局委托：绝对防拦截，不依赖 inline onclick / 元素级绑定 */
+            (function bindActiveSkillGlobalCaptureDelegate() {
+                if (window.__activeSkillClickDelegateBound) return;
+                window.__activeSkillClickDelegateBound = true;
+                document.addEventListener('click', function(e) {
+                    var target = e.target.closest && e.target.closest('.sidebar-active-skill-wrapper');
+                    if (!target) return;
+                    if (e.target.closest && (
+                        e.target.closest('.btn-close-active-skill') ||
+                        e.target.closest('#btn-clear-active-skill') ||
+                        e.target.id === 'btn-clear-active-skill'
+                    )) {
+                        return;
+                    }
+                    if (typeof isSkillLiveViewVisible === 'function' && isSkillLiveViewVisible()) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return;
+                    }
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('🔥 [全局点击拦截] 触发回到活会话!');
+                    if (typeof window.forceSwitchToLiveChat === 'function') {
+                        window.forceSwitchToLiveChat();
+                    } else {
+                        console.error('[全局点击拦截] forceSwitchToLiveChat 未定义');
+                    }
+                }, true);
+                document.addEventListener('keydown', function(e) {
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    var target = e.target.closest && e.target.closest('.sidebar-active-skill-wrapper');
+                    if (!target) return;
+                    if (e.target.closest && e.target.closest('#btn-clear-active-skill')) return;
+                    if (typeof isSkillLiveViewVisible === 'function' && isSkillLiveViewVisible()) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return;
+                    }
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('🔥 [全局键盘拦截] 触发回到活会话!');
+                    if (typeof window.forceSwitchToLiveChat === 'function') window.forceSwitchToLiveChat();
+                }, true);
+                console.log('[bindActiveSkillGlobalCaptureDelegate] 已挂载 document 捕获阶段委托');
+            })();
+            /**
+             * 主视图路由：物理显隐 only。普通 chat → #chat-main-host；技能活会话仅 forceSwitchToLiveChat。
+             */
+            function switchMainView(viewName, opts) {
+                opts = opts || {};
+                var view = (viewName || 'chat').trim().toLowerCase();
+                if (view === 'chat') {
+                    brutalHideAllNonChatPanes();
+                    var liveHostHide = document.getElementById('skill-live-host');
+                    if (liveHostHide) liveHostHide.style.setProperty('display', 'none', 'important');
+                    var chatHostShow = document.getElementById('chat-main-host');
+                    if (chatHostShow) {
+                        chatHostShow.style.setProperty('display', 'flex', 'important');
+                        chatHostShow.style.setProperty('visibility', 'visible', 'important');
+                        chatHostShow.style.setProperty('opacity', '1', 'important');
+                    }
+                    window._dualRouteActive = 'main';
+                    if (typeof activateMainChatRoute === 'function') activateMainChatRoute();
+                    if (typeof moveComposerInputToHost === 'function') moveComposerInputToHost('main');
+                    var wsPaneChat = document.getElementById('workspace-pane');
+                    var rzRChat = document.getElementById('resizer-right');
+                    if (wsPaneChat) wsPaneChat.style.setProperty('display', opts.showWorkspace !== false ? 'flex' : 'none', 'important');
+                    if (rzRChat) rzRChat.style.setProperty('display', opts.showRightResizer !== false ? 'block' : 'none', 'important');
+                    if (typeof highlightActiveItemInSidebar === 'function') highlightActiveItemInSidebar('main');
+                    if (opts.scrollChatBottom && typeof scrollChatToBottom === 'function') scrollChatToBottom();
+                    if (typeof syncSidebarPrimaryNavActive === 'function') syncSidebarPrimaryNavActive();
+                    return;
+                }
+                brutalHideAllNonChatPanes();
+                brutalHidePane('chat-main-host');
+                brutalHidePane('skill-live-host');
+                window._dualRouteActive = 'main';
+                if (typeof highlightActiveItemInSidebar === 'function') highlightActiveItemInSidebar(view);
+                var paneMap = {
+                    skills: 'skills-square-pane',
+                    history: 'history-pane',
+                    assets: 'data-assets-pane',
+                    files: 'file-management-pane',
+                    hpc: 'hpc-ftp-view'
+                };
+                var targetId = paneMap[view];
+                if (targetId) brutalShowPane(targetId, 'flex');
+                var wsPane = document.getElementById('workspace-pane');
+                var rzR = document.getElementById('resizer-right');
+                var showWs = !!opts.showWorkspace;
+                var showRz = !!opts.showRightResizer;
+                if (wsPane) wsPane.style.setProperty('display', showWs ? 'flex' : 'none', 'important');
+                if (rzR) rzR.style.setProperty('display', showRz ? 'block' : 'none', 'important');
+                if (typeof currentSessionId !== 'undefined' && currentSessionId) {
+                    window._volatileActiveSessionIdToReturn = String(currentSessionId).trim();
+                    if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
+                }
+                if (typeof syncSidebarPrimaryNavActive === 'function') syncSidebarPrimaryNavActive();
+                else if (typeof syncSidebarSkillsPlazaNavActive === 'function') syncSidebarSkillsPlazaNavActive();
+            }
+            window.switchMainView = switchMainView;
+            function scrollChatToBottom() {
+                function doScroll() {
+                    var chatArea = (typeof getActiveChatScrollEl === 'function' ? getActiveChatScrollEl() : null)
+                        || document.getElementById('chatBox')
+                        || document.querySelector('.chat-scroll-area');
+                    if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
+                    if (typeof scrollToBottom === 'function') scrollToBottom();
+                }
+                requestAnimationFrame(function() {
+                    requestAnimationFrame(doScroll);
+                });
+            }
+            window.scrollChatToBottom = scrollChatToBottom;
+            /** 历史列表点进其他会话时用；同会话活 DOM 在 skill-live 或 main 各自判断 */
+            function navigateToChatSession(sessionId, title, onLoaded) {
+                var sid = String(sessionId || '').trim();
+                var skillSid = (typeof resolveActiveSkillSessionId === 'function' ? resolveActiveSkillSessionId() : '') || window._skillLiveSessionId || '';
+                var slc = document.getElementById('skillLiveContent');
+                if (sid && skillSid && sid === skillSid && slc && slc.querySelector('.message-row')) {
+                    window.forceSwitchToLiveChat();
+                    if (typeof onLoaded === 'function') { try { onLoaded(); } catch (_navCb) {} }
+                    return true;
+                }
+                var cc = document.getElementById('chatContent');
+                var sameLiveDom = sid && typeof currentSessionId !== 'undefined' &&
+                    String(currentSessionId) === sid && cc && cc.querySelector('.message-row');
+                if (sameLiveDom) {
+                    if (typeof switchToChatView === 'function') switchToChatView();
+                    if (typeof onLoaded === 'function') { try { onLoaded(); } catch (_navCb2) {} }
+                    return true;
+                }
+                if (typeof loadSessionAndRestore === 'function') loadSessionAndRestore(sid, title, onLoaded);
+                return false;
+            }
+            window.navigateToChatSession = navigateToChatSession;
+            function showSkillsView() {
+                if (typeof fetchSkillDetailedSpecsOnce === 'function') fetchSkillDetailedSpecsOnce();
+                switchMainView('skills', { showWorkspace: false, showRightResizer: false });
                 // 进入技能广场时强制同步 UI 与数据状态，避免切换页面后分类高亮与展示数据不一致
                 var navMain = document.getElementById('skillsNavMain');
                 if (navMain) {
@@ -7689,15 +8307,7 @@
             }
             /** 打开技能广场并切换到指定大类 Tab（与 .skills-nav-tab data-main 一致） */
             function showSkillsSquareMainCategory(mainCat) {
-                syncVolatileReturnSessionFromChatBeforeLeavingToSkillsOrAssets();
-                persistLastChatSessionBeforeLeaving();
-                hideAllMainPanes();
-                var skillsPane = document.getElementById('skills-square-pane');
-                var wsPane = document.getElementById('workspace-pane');
-                var rzR = document.getElementById('resizer-right');
-                if (skillsPane) skillsPane.style.display = 'flex';
-                if (wsPane) wsPane.style.display = 'none';
-                if (rzR) rzR.style.display = 'none';
+                switchMainView('skills', { showWorkspace: false, showRightResizer: false });
                 var navMain = document.getElementById('skillsNavMain');
                 var dm = (mainCat != null && mainCat !== undefined) ? String(mainCat).trim() : '';
                 if (navMain) {
@@ -7776,50 +8386,27 @@
                 if (typeof clearChatAndReset === 'function') clearChatAndReset();
             }
             window.navigateAppHome = navigateAppHome;
-            function showChatView() {
-                window._volatileActiveSessionIdToReturn = null;
-                if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
-                hideAllMainPanes();
-                var chatHost = document.getElementById('chat-main-host');
-                var wsPane = document.getElementById('workspace-pane');
-                var rzR = document.getElementById('resizer-right');
-                if (chatHost) chatHost.style.display = 'flex';
-                if (wsPane) wsPane.style.display = 'flex';
-                if (rzR) rzR.style.display = 'block';
-                if (typeof syncSidebarSkillsPlazaNavActive === 'function') syncSidebarSkillsPlazaNavActive();
+            function showChatView(opts) {
+                opts = opts || {};
+                if (!opts.preserveVolatileReturn) {
+                    window._volatileActiveSessionIdToReturn = null;
+                    if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
+                }
+                switchMainView('chat', {
+                    showWorkspace: true,
+                    showRightResizer: true,
+                    scrollChatBottom: !!opts.scrollChatBottom,
+                });
             }
-            function switchToChatView() {
-                window._volatileActiveSessionIdToReturn = null;
-                if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
-                hideAllMainPanes();
-                var chatHost = document.getElementById('chat-main-host');
-                var wsPane = document.getElementById('workspace-pane');
-                var rzR = document.getElementById('resizer-right');
-                if (chatHost) chatHost.style.display = 'flex';
-                if (wsPane) wsPane.style.display = 'flex';
-                if (rzR) rzR.style.display = 'block';
-                if (typeof syncSidebarSkillsPlazaNavActive === 'function') syncSidebarSkillsPlazaNavActive();
+            function switchToChatView(opts) {
+                showChatView(opts);
             }
             function switchToHistoryView() {
-                persistLastChatSessionBeforeLeaving();
-                hideAllMainPanes();
-                var historyPane = document.getElementById('history-pane');
-                var wsPane = document.getElementById('workspace-pane');
-                var rzR = document.getElementById('resizer-right');
-                if (historyPane) historyPane.style.display = 'flex';
-                if (wsPane) wsPane.style.display = 'none';
-                if (rzR) rzR.style.display = 'none';
+                switchMainView('history', { showWorkspace: false, showRightResizer: false });
                 if (typeof syncSidebarPrimaryNavActive === 'function') syncSidebarPrimaryNavActive();
             }
             function switchToFileManagementView() {
-                persistLastChatSessionBeforeLeaving();
-                hideAllMainPanes();
-                var fileMgmtPane = document.getElementById('file-management-pane');
-                var wsPane = document.getElementById('workspace-pane');
-                var rzR = document.getElementById('resizer-right');
-                if (fileMgmtPane) fileMgmtPane.style.display = 'flex';
-                if (wsPane) wsPane.style.display = 'none';
-                if (rzR) rzR.style.display = 'none';
+                switchMainView('files', { showWorkspace: false, showRightResizer: false });
                 if (typeof renderFileManagementTable === 'function') renderFileManagementTable();
             }
             async function switchToHpcFtpView() {
@@ -7833,15 +8420,7 @@
             }
             window.switchToHpcFtpView = switchToHpcFtpView;
             function switchToDataAssetsView() {
-                syncVolatileReturnSessionFromChatBeforeLeavingToSkillsOrAssets();
-                persistLastChatSessionBeforeLeaving();
-                hideAllMainPanes();
-                var daPane = document.getElementById('data-assets-pane');
-                var wsPane = document.getElementById('workspace-pane');
-                var rzR = document.getElementById('resizer-right');
-                if (daPane) daPane.style.display = 'flex';
-                if (wsPane) wsPane.style.display = 'none';
-                if (rzR) rzR.style.display = 'none';
+                switchMainView('assets', { showWorkspace: false, showRightResizer: false });
                 if (typeof renderFileManagementTable === 'function') renderFileManagementTable();
                 if (typeof syncSidebarPrimaryNavActive === 'function') syncSidebarPrimaryNavActive();
             }
@@ -8902,6 +9481,25 @@
                 root.querySelectorAll('.fullscreen-capable-widget.widget-pan-zoom').forEach(_hydratePanZoomWidget);
             }
             window.hydratePanZoomWidgets = hydratePanZoomWidgets;
+            function hydrateSkillDetailDrawerMedia(scope) {
+                var root = scope || document.getElementById('skill-detail-drawer');
+                if (!root) return;
+                if (typeof hydrateSkillMermaidBlocks === 'function') {
+                    hydrateSkillMermaidBlocks(root, { force: true });
+                }
+                if (typeof hydratePanZoomWidgets === 'function') {
+                    hydratePanZoomWidgets(root);
+                }
+                requestAnimationFrame(function () {
+                    if (typeof hydrateSkillMermaidBlocks === 'function') {
+                        hydrateSkillMermaidBlocks(root, { force: true, retry: true });
+                    }
+                    if (typeof hydratePanZoomWidgets === 'function') {
+                        hydratePanZoomWidgets(root);
+                    }
+                });
+            }
+            window.hydrateSkillDetailDrawerMedia = hydrateSkillDetailDrawerMedia;
             function _toggleFullscreenWidget(widget, btn) {
                 if (!widget) return;
                 var entering = !widget.classList.contains('is-fullscreen');
@@ -8943,6 +9541,25 @@
                         ev.stopPropagation();
                         _toggleFullscreenWidget(widgetFs, fsBtn);
                         return;
+                    }
+                    var skillMermaidClick = ev.target && ev.target.closest ? ev.target.closest(
+                        '#skill-detail-drawer .skill-detail-mermaid-widget .skill-vis-mermaid-wrap--rendered .skill-vis-mermaid-canvas, ' +
+                        '#skill-detail-drawer .skill-detail-mermaid-widget .skill-vis-mermaid-wrap--rendered .skill-vis-mermaid-canvas *'
+                    ) : null;
+                    if (skillMermaidClick) {
+                        if (ev.target.closest('.btn-fullscreen-toggle, .zoom-toolbar, .zoom-toolbar button, a')) {
+                            return;
+                        }
+                        var widgetMedia = skillMermaidClick.closest('.fullscreen-capable-widget');
+                        if (widgetMedia && !widgetMedia.classList.contains('is-fullscreen')) {
+                            var fsBtnMedia = widgetMedia.querySelector('.btn-fullscreen-toggle');
+                            if (fsBtnMedia) {
+                                ev.preventDefault();
+                                ev.stopPropagation();
+                                _toggleFullscreenWidget(widgetMedia, fsBtnMedia);
+                                return;
+                            }
+                        }
                     }
                     var zoomIn = ev.target && ev.target.closest ? ev.target.closest('.btn-zoom-in') : null;
                     var zoomOut = ev.target && ev.target.closest ? ev.target.closest('.btn-zoom-out') : null;
@@ -9325,12 +9942,19 @@
                     fixedHeader: header
                 });
             }
-            function hydrateSkillMermaidBlocks(scope) {
+            function hydrateSkillMermaidBlocks(scope, opts) {
+                opts = opts || {};
                 var root = scope || document;
                 if (!root || !root.querySelectorAll || typeof mermaid === 'undefined') return;
                 _skillVisApplyMermaidSciFiTheme();
                 root.querySelectorAll('[data-skill-mermaid="1"]').forEach(function (wrap) {
-                    if (wrap.getAttribute('data-mermaid-hydrated') === '1') return;
+                    if (wrap.getAttribute('data-mermaid-hydrated') === '1' && !opts.retry) return;
+                    var inSkillDrawer = !!(wrap.closest && wrap.closest('#skill-detail-drawer'));
+                    if (!opts.force && !inSkillDrawer) {
+                        if (typeof window._isChatHostVisibleForRender === 'function' && !window._isChatHostVisibleForRender()) {
+                            return;
+                        }
+                    }
                     var canvas = wrap.querySelector('.skill-vis-mermaid-canvas[data-mermaid-pending="1"]');
                     var payloadEl = wrap.querySelector('.skill-vis-mermaid-payload');
                     if (!canvas || !payloadEl) return;
@@ -9354,7 +9978,11 @@
                         if (typeof mermaid.run === 'function') {
                             var p = mermaid.run({ nodes: nodes });
                             if (p && typeof p.then === 'function') {
-                                p.then(done).catch(function (e) { console.warn('[hydrateSkillMermaidBlocks]', e); });
+                                p.then(done).catch(function (e) {
+                                    console.warn('[hydrateSkillMermaidBlocks]', e);
+                                    wrap.removeAttribute('data-mermaid-hydrated');
+                                    canvas.setAttribute('data-mermaid-pending', '1');
+                                });
                             } else {
                                 done();
                             }
@@ -10061,13 +10689,14 @@
             }
             window.resetComposerLifecycle = resetComposerLifecycle;
 
-            function clearChatAndReset() {
-                if (typeof switchToChatView === 'function') switchToChatView();
+            function clearMainChatOnly() {
+                if (typeof switchToChatView === 'function') switchToChatView({ preserveVolatileReturn: true });
                 var _sidBeforeReset = (typeof currentSessionId !== 'undefined' ? currentSessionId : null);
                 if (typeof resetComposerLifecycle === 'function') {
                     resetComposerLifecycle({ flushSessionId: _sidBeforeReset });
                 }
-                if (currentAbortController) {
+                if (typeof abortMainChatStreamsOnly === 'function') abortMainChatStreamsOnly();
+                else if (currentAbortController && typeof isImmortalController === 'function' && !isImmortalController(currentAbortController)) {
                     currentAbortController.abort();
                     currentAbortController = null;
                 }
@@ -10077,8 +10706,58 @@
                 if (userInputEl) { userInputEl.disabled = false; userInputEl.style.cursor = 'text'; }
                 if (sendBtnEl) { sendBtnEl.disabled = false; sendBtnEl.classList.remove('active'); }
                 if (stopBtnEl) { stopBtnEl.classList.remove('show'); }
-                document.querySelectorAll('.thinking-container').forEach(function(el) { el.remove(); });
-                document.querySelectorAll('.spinner-border').forEach(function(el) { if (el.closest('.message-content') || el.closest('.message-row')) el.remove(); });
+                document.querySelectorAll('#chatContent .thinking-container').forEach(function(el) { el.remove(); });
+                document.querySelectorAll('#chatContent .spinner-border').forEach(function(el) { if (el.closest('.message-content') || el.closest('.message-row')) el.remove(); });
+                toggleLoadingState(false);
+                var mainChatContent = document.getElementById('chatContent');
+                var wrapper = document.getElementById('empty-state-wrapper');
+                var iw = document.getElementById('inputWrapper');
+                var bottomSlotReset = document.getElementById('input-wrapper-bottom');
+                var titleEl = document.getElementById('chat-conversation-title');
+                if (mainChatContent) {
+                    while (mainChatContent.children.length > 0) mainChatContent.removeChild(mainChatContent.lastChild);
+                }
+                window.currentMessageZones = null;
+                window.workflowCache = {};
+                if (wrapper) {
+                    wrapper.classList.remove('hidden');
+                    var heroSec = document.getElementById('chat-hero-section');
+                    if (heroSec) heroSec.classList.remove('hero-fade-out');
+                }
+                if (iw && bottomSlotReset && !bottomSlotReset.contains(iw) && typeof moveComposerInputToHost === 'function') {
+                    moveComposerInputToHost('main');
+                } else if (iw && bottomSlotReset && !bottomSlotReset.contains(iw)) {
+                    bottomSlotReset.appendChild(iw);
+                }
+                if (iw) { iw.classList.remove('input-center'); iw.classList.add('input-bottom'); }
+                if (titleEl) titleEl.textContent = '新会话';
+                chatHistory = [];
+                currentSessionId = null;
+                if (typeof activateMainChatRoute === 'function') activateMainChatRoute();
+            }
+            window.clearMainChatOnly = clearMainChatOnly;
+
+            function clearChatAndReset() {
+                if (typeof switchToChatView === 'function') switchToChatView();
+                var _sidBeforeReset = (typeof currentSessionId !== 'undefined' ? currentSessionId : null);
+                if (typeof resetComposerLifecycle === 'function') {
+                    resetComposerLifecycle({ flushSessionId: _sidBeforeReset });
+                }
+                if (typeof abortMainChatStreamsOnly === 'function') abortMainChatStreamsOnly();
+                else if (currentAbortController) {
+                    if (typeof isImmortalController !== 'function' || !isImmortalController(currentAbortController)) {
+                        currentAbortController.abort();
+                    }
+                    currentAbortController = null;
+                }
+                var userInputEl = document.getElementById('userInput');
+                var sendBtnEl = document.getElementById('sendBtn');
+                var stopBtnEl = document.getElementById('stopBtn');
+                if (userInputEl) { userInputEl.disabled = false; userInputEl.style.cursor = 'text'; }
+                if (sendBtnEl) { sendBtnEl.disabled = false; sendBtnEl.classList.remove('active'); }
+                if (stopBtnEl) { stopBtnEl.classList.remove('show'); }
+                document.querySelectorAll('#chatContent .thinking-container').forEach(function(el) { el.remove(); });
+                document.querySelectorAll('#chatContent .spinner-border').forEach(function(el) { if (el.closest('.message-content') || el.closest('.message-row')) el.remove(); });
                 toggleLoadingState(false);
                 var chatContent = document.getElementById('chatContent');
                 var wrapper = document.getElementById('empty-state-wrapper');
@@ -10138,7 +10817,8 @@
                 if (typeof window.syncImmersiveDemoEntryVisibility === 'function') window.syncImmersiveDemoEntryVisibility();
                 setActiveSessionInSidebar(null);
                 if (typeof highlightActiveSession === 'function') highlightActiveSession(null);
-                if (typeof highlightActiveSkillInSidebar === 'function') highlightActiveSkillInSidebar(null);
+                if (typeof activateMainChatRoute === 'function') activateMainChatRoute();
+                if (typeof highlightActiveItemInSidebar === 'function') highlightActiveItemInSidebar('main');
             }
             var SIDEBAR_L2_ACTIVE_SELECTORS = '#sidebar-sessions-list .history-item, #sidebar-sessions-list .sidebar-session-item, #full-history-list .history-item, #full-history-list .sidebar-session-item, #sidebar-assets-list .sidebar-asset-item, #sidebar-favorite-list .favorite-item, #sidebar-favorite-list .sidebar-favorite-item';
             var SIDEBAR_L2_ITEM_SELECTOR = '.history-item, .sub-nav-item:not(.asset-category), .favorite-item, .sidebar-favorite-item, .sidebar-session-item, .sidebar-asset-item';
@@ -10251,14 +10931,99 @@
                 window._pendingSkillIdFromSquare = null;
                 window._pendingSkillTargetDomain = null;
                 window._activeSkillPayload = null;
+                if (typeof setActiveSkillRunningState === 'function') setActiveSkillRunningState(false);
             }
             window.clearActiveSkillFromSidebar = clearActiveSkillFromSidebar;
-            function reinjectActiveSkillPromptFromSidebar() {
+            function bindActiveSkillSessionId(sessionId) {
+                var sid = (sessionId != null && String(sessionId).trim()) ? String(sessionId).trim() : '';
+                if (window._activeSkillPayload && typeof window._activeSkillPayload === 'object') {
+                    if (sid) window._activeSkillPayload.session_id = sid;
+                }
+                if (window._activeSkillFromSquare) {
+                    if (sid) window._activeSkillFromSquare.session_id = sid;
+                }
+                var wrap = document.getElementById('sidebar-active-skill-wrapper');
+                if (wrap) {
+                    if (sid) wrap.setAttribute('data-session-id', sid);
+                    else wrap.removeAttribute('data-session-id');
+                }
+            }
+            window.bindActiveSkillSessionId = bindActiveSkillSessionId;
+            function resolveActiveSkillSessionId() {
                 var skill = window._activeSkillPayload;
-                if (!skill) return;
-                if (typeof switchToChatView === 'function') switchToChatView();
-                else if (typeof showChatView === 'function') showChatView();
-                if (typeof applySkillPromptToChat === 'function') applySkillPromptToChat(skill);
+                if (skill && typeof currentSessionId !== 'undefined' && currentSessionId) {
+                    return String(currentSessionId).trim();
+                }
+                if (skill && skill.session_id) return String(skill.session_id).trim();
+                var wrap = document.getElementById('sidebar-active-skill-wrapper');
+                if (wrap && wrap.getAttribute('data-session-id')) return String(wrap.getAttribute('data-session-id')).trim();
+                if (typeof window._volatileActiveSessionIdToReturn !== 'undefined' && window._volatileActiveSessionIdToReturn) {
+                    return String(window._volatileActiveSessionIdToReturn).trim();
+                }
+                if (typeof getLastActiveSessionId === 'function') {
+                    var last = getLastActiveSessionId();
+                    if (last) return String(last).trim();
+                }
+                if (typeof currentSessionId !== 'undefined' && currentSessionId) return String(currentSessionId).trim();
+                return '';
+            }
+            function setActiveSkillRunningState(isRunning) {
+                var wrap = document.getElementById('sidebar-active-skill-wrapper');
+                if (!wrap) return;
+                if (isRunning) wrap.classList.add('active-skill-running');
+                else wrap.classList.remove('active-skill-running');
+            }
+            window.setActiveSkillRunningState = setActiveSkillRunningState;
+            function refreshActiveSkillRunningFromSession(sessionId) {
+                if (!window._activeSkillPayload) {
+                    setActiveSkillRunningState(false);
+                    return;
+                }
+                var sid = (sessionId || resolveActiveSkillSessionId() || window._skillLiveSessionId || '').trim();
+                if (!sid) {
+                    setActiveSkillRunningState(false);
+                    return;
+                }
+                var running = false;
+                if (typeof isProcessing !== 'undefined' && isProcessing) {
+                    if (window._skillLiveSessionId && String(window._skillLiveSessionId) === sid) running = true;
+                    else if (typeof currentSessionId !== 'undefined' && String(currentSessionId) === sid) running = true;
+                } else if (window.cachedFullSessionsList && typeof getSessionDisplayStatus === 'function') {
+                    for (var i = 0; i < window.cachedFullSessionsList.length; i++) {
+                        var s = window.cachedFullSessionsList[i];
+                        if (s && s.id === sid) {
+                            running = getSessionDisplayStatus(s) === 'running';
+                            break;
+                        }
+                    }
+                }
+                setActiveSkillRunningState(running);
+            }
+            window.refreshActiveSkillRunningFromSession = refreshActiveSkillRunningFromSession;
+            /**
+             * 侧栏「正在使用的技能」选中底色：仅当技能活会话视图可见且确有活跃技能时启用 .active-selected。
+             * 呼吸灯 .active-skill-running 由 setActiveSkillRunningState 独立维护，切页不剥夺。
+             */
+            function highlightActiveItemInSidebar(routeKey) {
+                var wrap = document.getElementById('sidebar-active-skill-wrapper');
+                if (!wrap) return;
+                var hasSkill = !!window._activeSkillPayload;
+                var onSkillLiveView = (routeKey === 'skill_live') || (typeof isSkillLiveViewVisible === 'function' && isSkillLiveViewVisible());
+                var shouldSelect = hasSkill && onSkillLiveView;
+                wrap.classList.toggle('active-selected', shouldSelect);
+            }
+            window.highlightActiveItemInSidebar = highlightActiveItemInSidebar;
+            function switchToActiveSkillSession() {
+                if (!isLoggedIn()) {
+                    openAuthModal();
+                    if (typeof showToast === 'function') showToast('请登录后返回技能会话', 'warning');
+                    return;
+                }
+                window.forceSwitchToLiveChat();
+            }
+            window.switchToActiveSkillSession = switchToActiveSkillSession;
+            function reinjectActiveSkillPromptFromSidebar() {
+                switchToActiveSkillSession();
             }
             window.reinjectActiveSkillPromptFromSidebar = reinjectActiveSkillPromptFromSidebar;
             /** 技能广场「使用」后与侧栏联动：#sidebar-active-skill-container 与收藏夹子行同缩进；skill 为空时隐藏 */
@@ -10283,6 +11048,12 @@
                 }
                 window._activeSkillPayload = skill;
                 window._activeSkillFromSquare = { id: skill.id != null ? skill.id : null, name: skillName };
+                if (typeof bindActiveSkillSessionId === 'function') {
+                    var _bindSid = (skill.session_id != null && String(skill.session_id).trim())
+                        ? String(skill.session_id).trim()
+                        : ((typeof currentSessionId !== 'undefined' && currentSessionId) ? String(currentSessionId).trim() : '');
+                    if (_bindSid) bindActiveSkillSessionId(_bindSid);
+                }
                 btn.classList.add('sidebar-skill-in-use');
                 btn.setAttribute('data-active-skill-name', skillName);
                 btn.title = '技能广场';
@@ -10291,6 +11062,10 @@
                     nameEl.textContent = skillName;
                     nameEl.title = skillName;
                 }
+                var skillTitleEl = document.getElementById('skill-live-title');
+                if (skillTitleEl) skillTitleEl.textContent = skillName;
+                if (typeof refreshActiveSkillRunningFromSession === 'function') refreshActiveSkillRunningFromSession();
+                if (typeof highlightActiveItemInSidebar === 'function') highlightActiveItemInSidebar(window._dualRouteActive);
             }
             window.highlightActiveSkillInSidebar = highlightActiveSkillInSidebar;
             function setSidebarPrimaryNavActive(key) {
@@ -10323,14 +11098,21 @@
                 if (btnSkills) btnSkills.classList.remove('active', 'sidebar-skills-plaza-active');
                 if (skillsPane && skillsPane.style.display === 'flex') {
                     if (btnSkills) btnSkills.classList.add('active', 'sidebar-skills-plaza-active');
+                    if (typeof highlightActiveItemInSidebar === 'function') highlightActiveItemInSidebar('skills');
                     return;
                 }
                 if (historyPane && historyPane.style.display === 'flex') {
                     ensureSidebarDetailsExpanded('sidebar-section-history', 'sidebar-nav-history');
+                    if (typeof highlightActiveItemInSidebar === 'function') highlightActiveItemInSidebar('history');
                     return;
                 }
                 if (daPane && daPane.style.display === 'flex') {
                     ensureSidebarDetailsExpanded('sidebar-section-assets', 'sidebar-nav-assets');
+                    if (typeof highlightActiveItemInSidebar === 'function') highlightActiveItemInSidebar('assets');
+                    return;
+                }
+                if (typeof highlightActiveItemInSidebar === 'function') {
+                    highlightActiveItemInSidebar(typeof isSkillLiveViewVisible === 'function' && isSkillLiveViewVisible() ? 'skill_live' : 'main');
                 }
             }
             function syncSidebarSkillsPlazaNavActive() {
@@ -11046,6 +11828,7 @@
                 area.title = isLoggedIn() ? '点击退出登录' : '点击登录 / 注册';
                 if (typeof showAdminConsoleIfNeeded === 'function') showAdminConsoleIfNeeded();
                 if (typeof window.syncImmersiveDemoEntryVisibility === 'function') window.syncImmersiveDemoEntryVisibility();
+                if (typeof window.refreshUserNotifications === 'function') window.refreshUserNotifications();
             }
             function authShellFocusInput(elOrId) {
                 var el = typeof elOrId === 'string' ? document.getElementById(elOrId) : elOrId;
@@ -11444,6 +12227,7 @@
                         if (!el) return;
                         renderHistoryList(window.cachedFullSessionsList, el, { limit: 5, itemMode: 'sidebar' });
                         if (typeof setActiveSessionInSidebar === 'function') setActiveSessionInSidebar(currentSessionId);
+                        if (typeof refreshActiveSkillRunningFromSession === 'function') refreshActiveSkillRunningFromSession();
                         var btnAll = document.getElementById('btn-view-all-history');
                         if (btnAll) btnAll.remove();
                         var viewAllBtn = document.createElement('div');
@@ -12073,10 +12857,12 @@
                 if (!sid || sid !== (typeof currentSessionId !== 'undefined' ? currentSessionId : null)) return;
                 if (window.__sessionStreamReconnectAbort) {
                     try { window.__sessionStreamReconnectAbort.abort(); } catch (_ab) {}
+                    window.__sessionStreamReconnectAbort = null;
                 }
                 attachLiveStreamAnchorToLastAiRow();
                 var ac = new AbortController();
                 window.__sessionStreamReconnectAbort = ac;
+                if (typeof registerImmortalController === 'function') registerImmortalController(ac, sid);
                 var handler = (typeof window.handleServerEvent === 'function') ? window.handleServerEvent : null;
                 if (!handler) return;
                 try {
@@ -12112,11 +12898,27 @@
             window.dispatchSseEventBuffer = dispatchSseEventBuffer;
             // Task2: 真·时光机：仅恢复历史，绝不触发 sendMessage
             function loadSessionAndRestore(sessionId, title, onLoaded) {
+                var sid = String(sessionId || '').trim();
+                var skillSid = (typeof resolveActiveSkillSessionId === 'function' ? resolveActiveSkillSessionId() : '') || window._skillLiveSessionId || '';
+                var slcEarly = document.getElementById('skillLiveContent');
+                if (sid && skillSid && sid === skillSid && slcEarly && slcEarly.querySelector('.message-row')) {
+                    window.forceSwitchToLiveChat();
+                    if (typeof onLoaded === 'function') { try { onLoaded(); } catch (_liveEarly) {} }
+                    return;
+                }
+                var ccEarly = document.getElementById('chatContent');
+                if (sid && typeof currentSessionId !== 'undefined' && String(currentSessionId) === sid &&
+                    ccEarly && ccEarly.querySelector('.message-row')) {
+                    if (typeof switchToChatView === 'function') switchToChatView();
+                    if (typeof onLoaded === 'function') { try { onLoaded(); } catch (_liveEarly2) {} }
+                    return;
+                }
                 var _prevSessionForDraft = (typeof currentSessionId !== 'undefined' ? currentSessionId : null);
                 if (_prevSessionForDraft && _prevSessionForDraft !== sessionId && typeof window.flushComposerDraftAutoSave === 'function') {
                     window.flushComposerDraftAutoSave(_prevSessionForDraft);
                 }
                 if (typeof switchToChatView === 'function') switchToChatView();
+                if (typeof activateMainChatRoute === 'function') activateMainChatRoute();
                 currentSessionId = sessionId;
                 var chatContent = document.getElementById('chatContent');
                 var workspaceContent = document.getElementById('active-workspace-content');
@@ -12126,10 +12928,13 @@
                 var wp = document.getElementById('workspace-pane');
                 var titleEl = document.getElementById('chat-conversation-title');
 
-                if (currentAbortController) { currentAbortController.abort(); currentAbortController = null; }
-                if (window.__sessionStreamReconnectAbort) {
-                    try { window.__sessionStreamReconnectAbort.abort(); } catch (_rs) {}
-                    window.__sessionStreamReconnectAbort = null;
+                if (typeof abortMainChatStreamsOnly === 'function') abortMainChatStreamsOnly();
+                else {
+                    if (currentAbortController) { currentAbortController.abort(); currentAbortController = null; }
+                    if (window.__sessionStreamReconnectAbort) {
+                        try { window.__sessionStreamReconnectAbort.abort(); } catch (_rs) {}
+                        window.__sessionStreamReconnectAbort = null;
+                    }
                 }
                 toggleLoadingState(false);
                 if (chatContent) { while (chatContent.firstChild) chatContent.removeChild(chatContent.firstChild); }
@@ -13165,13 +13970,6 @@
                         if (typeof clearActiveSkillFromSidebar === 'function') clearActiveSkillFromSidebar();
                     });
                 }
-                var activeSkillWrapper = document.querySelector('.sidebar-active-skill-wrapper');
-                if (activeSkillWrapper) {
-                    activeSkillWrapper.addEventListener('click', function(e) {
-                        if (e.target.closest('#btn-clear-active-skill')) return;
-                        if (typeof reinjectActiveSkillPromptFromSidebar === 'function') reinjectActiveSkillPromptFromSidebar();
-                    });
-                }
                 (function bindReturnToLastChatButtons() {
                     function goLastSession() {
                         if (!isLoggedIn()) {
@@ -13179,16 +13977,7 @@
                             showToast('请登录后返回会话', 'warning');
                             return;
                         }
-                        var sid = (typeof window._volatileActiveSessionIdToReturn !== 'undefined' && window._volatileActiveSessionIdToReturn)
-                            ? String(window._volatileActiveSessionIdToReturn).trim() : '';
-                        window._volatileActiveSessionIdToReturn = null;
-                        if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
-                        if (!sid) {
-                            if (typeof showChatView === 'function') showChatView();
-                            if (typeof showToast === 'function') showToast('暂无待返回的会话，已打开对话页', 'info');
-                            return;
-                        }
-                        if (typeof loadSessionAndRestore === 'function') loadSessionAndRestore(sid, '');
+                        window.forceSwitchToLiveChat();
                     }
                     document.querySelectorAll('.btn-return-chat').forEach(function (b) {
                         if (b) b.onclick = function (e) { e.preventDefault(); goLastSession(); };
@@ -13348,6 +14137,10 @@
                                 if (typeof window.openFeedbackModal === 'function') window.openFeedbackModal();
                                 else if (typeof window.showToast === 'function') showToast('反馈模块未加载', 'warning');
                             }
+                            if (action === 'notifications') {
+                                if (typeof window.openUserNotificationsModal === 'function') window.openUserNotificationsModal();
+                                else if (typeof window.showToast === 'function') showToast('通知模块未加载', 'warning');
+                            }
                             if (action === 'admin-console') {
                                 if (!isLoggedIn()) {
                                     openAuthModal();
@@ -13424,6 +14217,7 @@
                         fetchSessions();
                         fetchAssets();
                         if (typeof fetchFavoriteWorkflows === 'function') fetchFavoriteWorkflows();
+                        if (typeof window.refreshUserNotifications === 'function') window.refreshUserNotifications();
                     }).catch(function(err) {
                         if (submitBtn) submitBtn.disabled = false;
                         if (!errEl) return;
@@ -13961,6 +14755,9 @@
                     if (!isLoading && userInput) {
                         try { userInput.focus(); } catch (_f) {}
                     }
+                    if (typeof refreshActiveSkillRunningFromSession === 'function') {
+                        refreshActiveSkillRunningFromSession();
+                    }
                 } catch (e) {
                     console.error('[toggleLoadingState] UI 更新异常（已尽力保持 isProcessing 一致）:', e);
                     try { isProcessing = isLoading; } catch (_e2) {}
@@ -13968,11 +14765,17 @@
             }
 
             function stopGeneration() {
-                if (currentAbortController) {
+                if (window._immortalTaskToken && window._immortalTaskToken.host === 'skill') {
+                    if (typeof abortAllImmortalStreams === 'function') abortAllImmortalStreams({ preserveSkill: false });
+                } else if (typeof abortMainChatStreamsOnly === 'function') abortMainChatStreamsOnly();
+                else if (currentAbortController) {
                     currentAbortController.abort();
                     currentAbortController = null;
-                    toggleLoadingState(false);
-                    const lastBubble = chatContent.lastElementChild.querySelector('.bubble');
+                }
+                toggleLoadingState(false);
+                var _stopRoot = (typeof getActiveChatContentEl === 'function' ? getActiveChatContentEl() : null) || chatContent;
+                if (_stopRoot && _stopRoot.lastElementChild) {
+                    const lastBubble = _stopRoot.lastElementChild.querySelector('.bubble');
                     if (lastBubble) lastBubble.innerHTML += ' <span style="color:#dc2626; font-size:12px;">(已停止)</span>';
                 }
             }
@@ -15415,6 +16218,9 @@
                 }, 100);
 
                 currentAbortController = new AbortController();
+                if (typeof registerImmortalController === 'function') {
+                    registerImmortalController(currentAbortController, currentSessionId, { host: window._sseRenderHost || 'main' });
+                }
 
                 // uploaded_files 去重（按 path/file_path 规范化），与资产总线多文件一致
                 if (filesToSend && filesToSend.length > 0) {
@@ -16336,6 +17142,12 @@
                             if (eventType === 'session' && data && data.session_id) {
                                 currentSessionId = data.session_id;
                                 console.log('✅ [SSE] 收到新会话 ID:', currentSessionId);
+                                if (window._sseRenderHost === 'skill') {
+                                    window._skillLiveSessionId = String(data.session_id);
+                                }
+                                if (window._activeSkillPayload && typeof bindActiveSkillSessionId === 'function') {
+                                    bindActiveSkillSessionId(data.session_id);
+                                }
                                 if (typeof fetchSessions === 'function') fetchSessions();
                                 return false;
                             }
@@ -16365,6 +17177,14 @@
                                         break;
                                     }
                                     updateProcessLog(contentStr, data.state || 'running');
+                                    if (window._activeSkillPayload && typeof refreshActiveSkillRunningFromSession === 'function') {
+                                        var _stNorm = String(data.state != null ? data.state : 'running').toLowerCase();
+                                        if (_stNorm === 'running' || _stNorm === 'active' || _stNorm === 'start' || _stNorm === 'analyzing' || _stNorm === 'thinking' || _stNorm === 'loading') {
+                                            setActiveSkillRunningState(true);
+                                        } else if (_stNorm === 'done' || _stNorm === 'completed' || _stNorm === 'success' || _stNorm === 'error' || _stNorm === 'failed') {
+                                            refreshActiveSkillRunningFromSession();
+                                        }
+                                    }
                                     if (data.show_waiting_bubble) {
                                         showWaitingBubble(data.waiting_message || contentStr || '正在处理，请稍候...');
                                     }
@@ -16663,6 +17483,7 @@
 
                                 case 'done':
                                     sseStreamTerminalEventReceived = true;
+                                    if (typeof refreshActiveSkillRunningFromSession === 'function') refreshActiveSkillRunningFromSession();
                                     if (data && data.mode === 'intent_clarification') {
                                         removeClarificationGhostProcessLog();
                                         try {
@@ -18843,6 +19664,7 @@
                         if (_stopF) _stopF.style.display = 'none';
                     } catch (_sfe) {}
                     currentAbortController = null;
+                    clearImmortalTaskToken();
                 }
             }
 
@@ -18899,7 +19721,8 @@
                     ? `<div class="reasoning-zone reasoning-container" data-protected="true"></div><div class="process-log-zone log-container"></div><div class="text-zone text-container text-content-zone markdown-body bubble">${isHtml ? bubbleContent : ''}</div><div class="cards-zone workflow-container"></div>`
                     : bubbleContent;
                 row.innerHTML = `${role === 'ai' ? avatarHtml : ''}<div class="message-container">${fileCardsHtml}<div class="bubble">${aiBubbleInner}</div>${role === 'user' ? userActionsHtml : ''}${role === 'ai' ? footerHtml : ''}</div>`;
-                chatContent.appendChild(row);
+                var _targetContent = (typeof getActiveChatContentEl === 'function' ? getActiveChatContentEl() : null) || chatContent;
+                if (_targetContent) _targetContent.appendChild(row);
                 if (typeof window.hydrateToolAssetPreviews === 'function') window.hydrateToolAssetPreviews(row);
                 if (role === 'user') {
                     var wrapper = document.getElementById('empty-state-wrapper');

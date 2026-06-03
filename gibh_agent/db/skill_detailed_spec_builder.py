@@ -53,6 +53,8 @@ _PROMPT_SOFT_TOOL_IDS = frozenset(
         "multi_omics_storyline",
         "ethics_consent_checklist",
         "stats_method_advisor",
+        "admet_property_screening",
+        "diffdock_pose_preview",
     }
 )
 

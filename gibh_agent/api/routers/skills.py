@@ -28,6 +28,7 @@ from gibh_agent.core.deps import (
     get_optional_owner_id,
 )
 from gibh_agent.db.connection import get_db_session
+from gibh_agent.core.user_notifications import create_user_notification, notify_all_admins
 from gibh_agent.db.models import User, Skill as SkillModel, UserSavedSkill
 
 logger = logging.getLogger(__name__)
@@ -46,9 +47,16 @@ MAX_PROMPT = 50000
 @router.get("/skills/detailed-specs")
 def get_skill_detailed_specs():
     """Phase 1+ 技能详情说明书索引（tool_id → detailed_spec），供广场 Modal 与离线 Featured 兜底。"""
-    from gibh_agent.db.skill_detailed_specs import SKILL_DETAILED_SPECS_BY_TOOL_ID
+    from gibh_agent.db.skill_detailed_specs import (
+        SKILL_DETAILED_SPECS_BY_TOOL_ID,
+        build_skill_name_to_tool_id_map,
+    )
 
-    return {"specs": SKILL_DETAILED_SPECS_BY_TOOL_ID, "version": 1}
+    return {
+        "specs": SKILL_DETAILED_SPECS_BY_TOOL_ID,
+        "name_to_tool_id": build_skill_name_to_tool_id_map(),
+        "version": 3,
+    }
 
 
 @router.get("/skills/omics-fast-lane-prompts")
@@ -213,6 +221,21 @@ def create_skill(
             status=initial_status,
         )
         db.add(skill)
+        db.flush()
+        if initial_status == "pending":
+            try:
+                notify_all_admins(
+                    db,
+                    ntype="admin_skill_submitted",
+                    title="新 UGC 技能待审核",
+                    content=(
+                        f"用户「{current_user.username}」提交了技能「{name}」，"
+                        f"请在管理员控制台「技能审核」中处理。（ID={skill.id}）"
+                    ),
+                    commit=False,
+                )
+            except Exception as ne:
+                logger.warning("通知管理员 UGC 技能提交失败 id=%s: %s", skill.id, ne)
         db.commit()
         db.refresh(skill)
         logger.info(

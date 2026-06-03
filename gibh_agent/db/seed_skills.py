@@ -217,7 +217,22 @@ GAATAGGAACAGCTCCGGTCTACAGCTCCCAGCGTGAGCGACGCAGAAGACGGTGATTTCTGCATTTCCATCTGAGGTAC
     {"name": "OligoFormer", "sub_category": "预测与建模", "description": "可以自动设计并推荐高效靶向特定 mRNA 的 siRNA 分子。"},
     {"name": "MSA search", "sub_category": "数据分析", "description": "通过将查询序列与蛋白质序列数据库进行比对，生成多序列比对（MSA）。"},
     {"name": "ESMFold", "sub_category": "预测与建模", "description": "根据蛋白质的氨基酸序列预测其三维结构，预测速度快，适合快速分析蛋白质。"},
-    {"name": "DiffDock", "sub_category": "预测与建模", "description": "预测分子与蛋白质相互作用的 3D 结构。"},
+    {"name": "DiffDock", "sub_category": "预测与建模", "description": "预测分子与蛋白质相互作用的 3D 结构。",
+        "prompt_template": """[Skill_Route: diffdock_pose_preview]
+您好。我将对 **EGFR 激酶域（PDB: 1M17）** 与候选小分子配体执行 **DiffDock 盲对接**，输出 Top-N 结合构象、结合能排序及关键残基相互作用摘要。
+
+**参数说明**
+- **protein_pdb**：受体蛋白结构（PDB ID 或上传路径）。
+- **ligand_smiles**：配体 SMILES 或 SDF 路径。
+- **num_poses**：返回构象数（默认 5）。
+
+**演示输入**
+- protein_pdb: `1M17`
+- ligand_smiles: `CC(=O)Nc1ccc(O)cc1`
+- num_poses: 5
+
+（助手侧：整理为工具 JSON；对接完成后在工作台展示 3D 复合物与氢键表。）
+"""},
     {"name": "ProtGPT2", "sub_category": "预测与建模", "description": "能够理解蛋白质语言，可用于从头设计和构建蛋白质。"},
     {
         "name": "RNAFold",
@@ -308,7 +323,24 @@ GGGGAUAGGUUCAACCUCCUU
 （助手侧：将用户正文中的 gRNA 与靶序列填入 `guides_text`、`target_sequence`；cell_line 默认 HEK293；禁止编造不存在的 file_path。）
 """,
     },
-    {"name": "ADMET性质预测工具", "sub_category": "预测与建模", "description": "预测一组化合物的 ADMET 药代动力学属性，包括溶解性、吸收、代谢、毒性等。"},
+    {"name": "ADMET性质预测工具", "sub_category": "预测与建模", "description": "预测一组化合物的 ADMET 药代动力学属性，包括溶解性、吸收、代谢、毒性等。",
+        "prompt_template": """[Skill_Route: admet_property_screening]
+您好。请对下列候选小分子进行 **ADMET 成药性筛查**（吸收、分布、代谢、排泄、毒性），并给出结构化汇总表与风险注释。
+
+**输入**
+- 在消息中提供 **一行 SMILES**，或上传 `.smi` / `.txt` 文件（首行为分子线型式）。
+
+**演示分子（阿司匹林）**
+`CC(=O)Oc1ccccc1C(=O)O`
+
+**期望输出**
+- BBB 穿透、hERG、CYP 抑制、LogP、口服生物利用度等字段的预测值与定性结论；
+- Markdown 表格 + 右侧工作台可视化摘要。
+
+```json
+{"smiles_text": "CC(=O)Oc1ccccc1C(=O)O", "report_format": "markdown_table"}
+```
+"""},
     {"name": "LigandMPNN", "sub_category": "预测与建模", "description": "深度学习驱动的蛋白质序列设计模型，能够显式考虑小分子、核酸等非蛋白质环境的作用。"},
 ]
 

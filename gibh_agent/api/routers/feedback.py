@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from gibh_agent.core.deps import get_current_admin_user, get_current_owner_id
-from gibh_agent.core.user_notifications import create_user_notification
+from gibh_agent.core.user_notifications import create_user_notification, notify_all_admins
 from gibh_agent.db.connection import get_db_session
 from gibh_agent.db.models import User, UserFeedback
 
@@ -62,6 +62,22 @@ def submit_feedback(
         status="open",
     )
     db.add(row)
+    db.flush()
+    preview = (body.content or "").strip()[:120]
+    if len((body.content or "").strip()) > 120:
+        preview += "…"
+    try:
+        notify_all_admins(
+            db,
+            ntype="admin_feedback_new",
+            title="新用户反馈",
+            content=(
+                f"来自「{owner_id}」的{row.feedback_type}反馈（ID={row.id}）：{preview or '(无正文)'}"
+            ),
+            commit=False,
+        )
+    except Exception as e:
+        logger.warning("通知管理员新反馈失败 id=%s: %s", row.id, e)
     db.commit()
     db.refresh(row)
     logger.info("用户反馈已入库: id=%s owner=%s type=%s", row.id, owner_id, row.feedback_type)

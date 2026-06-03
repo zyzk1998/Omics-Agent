@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from gibh_agent.core.deps import get_current_user
 from gibh_agent.core.skills_assets_layout import get_skills_review_staging_dir
+from gibh_agent.core.user_notifications import notify_all_admins
 from gibh_agent.db.connection import get_db_session
 from gibh_agent.db.models import User
 
@@ -206,6 +207,24 @@ async def upload_plugin(
             author_id=current_user.username,
             status="pending",
         )
+        display = (row.display_name or row.name or "未命名技能").strip()
+        is_admin = (current_user.role or "").strip().lower() == "admin"
+        if not is_admin:
+            try:
+                notify_all_admins(
+                    db,
+                    ntype="admin_plugin_submitted",
+                    title="新安装技能待审核",
+                    content=(
+                        f"用户「{current_user.username}」提交了技能「{display}」"
+                        f"（{dt}），请在管理员控制台「技能审核」中处理。（plugin_id={row.id}）"
+                    ),
+                    commit=False,
+                )
+            except Exception as ne:
+                logger.warning("通知管理员 plugin 提交失败 id=%s: %s", row.id, ne)
+        db.commit()
+        db.refresh(row)
     except ValueError as ve:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(ve)) from ve
