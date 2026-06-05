@@ -1757,6 +1757,47 @@
                 }
             }
             window.moveComposerInputToHost = moveComposerInputToHost;
+            /** 确保底部 CLI 输入区可见（仅 DOM 显隐/挂载，不触碰 SSE 与历史渲染） */
+            function ensureComposerInputVisible() {
+                var onSkillLive = (typeof isSkillLiveViewVisible === 'function' && isSkillLiveViewVisible());
+                var hostKey = onSkillLive ? 'skill' : 'main';
+                if (hostKey === 'main') {
+                    var chatHost = document.getElementById('chat-main-host');
+                    if (chatHost) {
+                        chatHost.style.setProperty('display', 'flex', 'important');
+                        chatHost.style.setProperty('visibility', 'visible', 'important');
+                        chatHost.style.setProperty('opacity', '1', 'important');
+                    }
+                }
+                if (typeof moveComposerInputToHost === 'function') moveComposerInputToHost(hostKey);
+                var slot = document.getElementById(hostKey === 'skill' ? 'skill-input-wrapper-bottom' : 'input-wrapper-bottom');
+                var iw = document.getElementById('inputWrapper');
+                if (slot) {
+                    slot.style.setProperty('display', 'flex', 'important');
+                    slot.style.setProperty('visibility', 'visible', 'important');
+                }
+                if (iw) {
+                    iw.style.setProperty('display', 'flex', 'important');
+                    iw.style.setProperty('visibility', 'visible', 'important');
+                }
+            }
+            window.ensureComposerInputVisible = ensureComposerInputVisible;
+            /** 退出空状态：先迁移输入框再隐藏 hero，避免 #empty-state-wrapper.hidden 株连 inputWrapper */
+            function dismissEmptyStateForChat() {
+                var wrapper = document.getElementById('empty-state-wrapper');
+                var heroSec = document.getElementById('chat-hero-section');
+                var iw = document.getElementById('inputWrapper');
+                var bottomSlot = document.getElementById('input-wrapper-bottom');
+                if (iw && bottomSlot && !bottomSlot.contains(iw)) {
+                    bottomSlot.appendChild(iw);
+                    iw.classList.remove('input-center');
+                    iw.classList.add('input-bottom');
+                }
+                if (heroSec) heroSec.classList.add('hero-fade-out');
+                if (wrapper) wrapper.classList.add('hidden');
+                if (typeof ensureComposerInputVisible === 'function') ensureComposerInputVisible();
+            }
+            window.dismissEmptyStateForChat = dismissEmptyStateForChat;
             function registerImmortalController(controller, sessionId, opts) {
                 opts = opts || {};
                 if (!controller) return;
@@ -5513,6 +5554,156 @@
             }
             window.toggleWorkspaceSnapshot = toggleWorkspaceSnapshot;
             window.renderAnalysisArtifactCard = renderAnalysisArtifactCard;
+
+            /** 规划阶段 · 从 SSE diagnosis/workflow/result/state_snapshot 多路径提取诊断正文 */
+            function extractPlanningDiagnosisContent(data) {
+                if (!data || typeof data !== 'object') return null;
+                function pick(v) {
+                    if (v == null) return null;
+                    if (typeof v === 'string' && !String(v).trim()) return null;
+                    return v;
+                }
+                var direct = pick(data.diagnosis_report);
+                if (direct != null) return direct;
+                if (data.report_data && data.report_data.diagnosis != null) return data.report_data.diagnosis;
+                if (data.report && typeof data.report === 'object') {
+                    var fromRep = pick(data.report.diagnosis_report) || pick(data.report.diagnosis);
+                    if (fromRep != null) return fromRep;
+                    if (data.report.report_data && data.report.report_data.diagnosis != null) {
+                        return data.report.report_data.diagnosis;
+                    }
+                }
+                var wf = data.workflow_config || data.workflow_data;
+                if (!wf && data.workflow && typeof data.workflow === 'object' && !Array.isArray(data.workflow.steps)) {
+                    wf = data.workflow;
+                }
+                if (wf && typeof wf === 'object') {
+                    var fromWf = pick(wf.diagnosis_report);
+                    if (fromWf != null) return fromWf;
+                }
+                if (data.execution_snapshot && data.execution_snapshot.data_diagnosis_html) {
+                    return data.execution_snapshot.data_diagnosis_html;
+                }
+                if (data.message != null && (data.status === 'data_ready' || data.recommendation || data.n_samples != null)) {
+                    return data.message;
+                }
+                return null;
+            }
+            function syncPlanningDiagnosisFromWorkflowData(workflowData, anchorEl) {
+                if (!workflowData || typeof applyPlanningDiagnosisWorkbench !== 'function') return null;
+                var diagContent = extractPlanningDiagnosisContent(workflowData);
+                if (diagContent == null) return null;
+                var wfName = workflowData.workflow_name ||
+                    (workflowData.workflow_config && (workflowData.workflow_config.workflow_name || workflowData.workflow_config.name)) ||
+                    (workflowData.workflow_data && workflowData.workflow_data.workflow_name) ||
+                    '数据诊断报告';
+                return applyPlanningDiagnosisWorkbench(workflowData, {
+                    diagnosisContent: diagContent,
+                    anchorEl: anchorEl,
+                    title: wfName
+                });
+            }
+            function resolvePlanningArtifactAnchor(preferredZone) {
+                if (preferredZone) return preferredZone;
+                var zones = window.currentMessageZones;
+                if (zones && zones.cardZone) return zones.cardZone;
+                var row = document.querySelector('.active-chat-content .message-row.ai:last-of-type');
+                if (row) {
+                    return row.querySelector('.cards-zone') || row.querySelector('.process-log-zone') || row.querySelector('.bubble');
+                }
+                return null;
+            }
+            function ensurePlanningDiagnosisSnapshotRegistry(data, diagnosisContent) {
+                var raw = diagnosisContent != null ? diagnosisContent : extractPlanningDiagnosisContent(data);
+                if (raw == null) return null;
+                if (typeof raw === 'string' && !raw.trim()) return null;
+                if (!window.__planningLiveSnapshotId) {
+                    var sid = (typeof currentSessionId !== 'undefined' && currentSessionId) ? String(currentSessionId) : 'draft';
+                    window.__planningLiveSnapshotId = 'planning-' + sid + '-' + Date.now();
+                }
+                var snapId = window.__planningLiveSnapshotId;
+                var _dx = (typeof extractDiagnosisSectionInput === 'function')
+                    ? extractDiagnosisSectionInput(raw, data || {})
+                    : { body: raw, mergedFull: data || {} };
+                var htmlForSlot = _dx.body;
+                if (typeof buildDiagnosisReportBodyHtml === 'function' && _dx.body != null) {
+                    try { htmlForSlot = buildDiagnosisReportBodyHtml(_dx.body, _dx.mergedFull || data || {}); } catch (_bd) { htmlForSlot = _dx.body; }
+                }
+                var wfName = (data && (data.workflow_name || (data.workflow && (data.workflow.workflow_name || data.workflow.name)))) || '数据诊断报告';
+                var mirror = resolveExecutionSnapshotMirror({
+                    diagnosis_report: _dx.body,
+                    execution_snapshot: {
+                        data_diagnosis_html: htmlForSlot,
+                        workflow_name: wfName
+                    }
+                }, null);
+                mirror.snapshot_id = snapId;
+                window.__omicsSnapshotRegistry = window.__omicsSnapshotRegistry || {};
+                window.__omicsSnapshotRegistry[snapId] = mirror;
+                return snapId;
+            }
+            /** 规划期 · 右栏诊断 + 中栏「查看工作台」卡片（SSE 实时，不等待 done/execution_snapshot） */
+            function applyPlanningDiagnosisWorkbench(data, opts) {
+                opts = opts || {};
+                var diagContent = opts.diagnosisContent != null ? opts.diagnosisContent : extractPlanningDiagnosisContent(data);
+                if (diagContent == null) return null;
+                var renderFn = window.globalRenderDiagnosisReportSection;
+                if (typeof renderFn === 'function') {
+                    renderFn('diagnosis', diagContent, data || {});
+                }
+                var snapId = ensurePlanningDiagnosisSnapshotRegistry(data, diagContent);
+                if (!snapId) return null;
+                window.__omicsActiveSnapshotId = snapId;
+                var anchor = resolvePlanningArtifactAnchor(opts.anchorEl);
+                var title = opts.title || (data && (data.workflow_name || (data.workflow && data.workflow.workflow_name))) || '数据诊断报告';
+                if (anchor && typeof renderAnalysisArtifactCard === 'function') {
+                    renderAnalysisArtifactCard(anchor, snapId, title);
+                }
+                if (typeof syncAnalysisArtifactCardActiveStates === 'function') syncAnalysisArtifactCardActiveStates();
+                return snapId;
+            }
+            function globalRenderDiagnosisReportSection(section, content, fullData) {
+                if (section !== 'diagnosis' && section !== 'summary') return;
+                if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
+                if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
+                if (typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
+                var workspaceRoot = document.getElementById('active-workspace-content');
+                if (!workspaceRoot) {
+                    console.error('[globalRenderDiagnosisReportSection] 工作台根节点不存在');
+                    return;
+                }
+                var slots = (typeof ensureOmicsReportThreeSlots === 'function') ? ensureOmicsReportThreeSlots(workspaceRoot) : null;
+                if (!slots) return;
+                if (section === 'diagnosis') {
+                    var _dxLive = (typeof extractDiagnosisSectionInput === 'function')
+                        ? extractDiagnosisSectionInput(content, fullData)
+                        : { body: content, mergedFull: fullData || {} };
+                    var diagPayload = _dxLive.mergedFull || fullData || {};
+                    if (typeof renderDiagnosisIntoSlot === 'function') {
+                        renderDiagnosisIntoSlot(slots.diag, _dxLive.body, diagPayload);
+                    }
+                    var integrityVerified = (content && content.integrity_status === 'verified') ||
+                        (fullData && (fullData.integrity_status === 'verified' || (fullData.report_data && fullData.report_data.integrity_status === 'verified')));
+                    if (integrityVerified && slots.diag) {
+                        slots.diag.insertAdjacentHTML('afterbegin', '<p class="mb-2 small text-success"><i class="bi bi-shield-check"></i> 数据完整性校验通过</p>');
+                    }
+                } else {
+                    var rawMessage = (typeof normalizeReportMarkdownInput === 'function')
+                        ? normalizeReportMarkdownInput(content)
+                        : (typeof content === 'string' ? content : (content && content.message) ? content.message : JSON.stringify(content, null, 2));
+                    if (typeof rawMessage === 'string') {
+                        rawMessage = rawMessage.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+                    }
+                    if (typeof renderExpertReportIntoSlot === 'function') renderExpertReportIntoSlot(slots.expert, rawMessage);
+                }
+                if (typeof window.syncWorkspacePanelWidthFromContent === 'function' && slots.shell) {
+                    window.syncWorkspacePanelWidthFromContent(slots.shell);
+                }
+            }
+            window.globalRenderDiagnosisReportSection = globalRenderDiagnosisReportSection;
+            window.applyPlanningDiagnosisWorkbench = applyPlanningDiagnosisWorkbench;
+            window.extractPlanningDiagnosisContent = extractPlanningDiagnosisContent;
+            window.syncPlanningDiagnosisFromWorkflowData = syncPlanningDiagnosisFromWorkflowData;
             window.ingestExecutionSnapshotsFromContent = ingestExecutionSnapshotsFromContent;
             window.rebuildSnapshotRegistryFromMessages = rebuildSnapshotRegistryFromMessages;
 
@@ -8099,6 +8290,64 @@
                     || document.getElementById('chatContent');
                 if (cc && typeof hydrateSkillMermaidBlocks === 'function') hydrateSkillMermaidBlocks(cc);
             };
+            /** 双轨路由 · 右侧工作台槽位隔离：切历史/活会话时 save/restore，避免状态粘连 */
+            window.__workspaceSlotCache = window.__workspaceSlotCache || { skill_live: null, main: null };
+            function getActiveWorkspaceSlotKey() {
+                if (typeof isSkillLiveViewVisible === 'function' && isSkillLiveViewVisible()) return 'skill_live';
+                return 'main';
+            }
+            function captureWorkspaceSlot(slotKey) {
+                if (!slotKey) return;
+                var root = document.getElementById('active-workspace-content');
+                var wp = document.getElementById('workspace-pane');
+                var ph = document.getElementById('workspace-placeholder');
+                var titleEl = document.getElementById('workspace-task-title');
+                var html = root ? root.innerHTML : '';
+                var hasContent = !!(html && String(html).trim());
+                if (!hasContent && !(window.__skillWorkspaceReportEntries && window.__skillWorkspaceReportEntries.length)) {
+                    window.__workspaceSlotCache[slotKey] = null;
+                    return;
+                }
+                window.__workspaceSlotCache[slotKey] = {
+                    html: html,
+                    skillEntries: (window.__skillWorkspaceReportEntries || []).slice(),
+                    omicsFrozen: window.__omicsFrozenExecutionSnapshot || null,
+                    omicsRegistry: window.__omicsSnapshotRegistry ? JSON.parse(JSON.stringify(window.__omicsSnapshotRegistry)) : {},
+                    omicsActive: window.__omicsActiveSnapshotId || null,
+                    expanded: !!(wp && wp.classList.contains('workspace-active')),
+                    placeholderVisible: ph ? (ph.style.display !== 'none') : true,
+                    title: titleEl ? (titleEl.textContent || '分析报告') : '分析报告'
+                };
+            }
+            function restoreWorkspaceSlot(slotKey) {
+                var cached = window.__workspaceSlotCache[slotKey];
+                var root = document.getElementById('active-workspace-content');
+                var ph = document.getElementById('workspace-placeholder');
+                if (!cached) {
+                    if (root) root.innerHTML = '';
+                    window.__skillWorkspaceReportEntries = [];
+                    window.__omicsFrozenExecutionSnapshot = null;
+                    window.__omicsSnapshotRegistry = {};
+                    window.__omicsActiveSnapshotId = null;
+                    if (ph) ph.style.display = '';
+                    if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(false);
+                    return;
+                }
+                if (root) root.innerHTML = cached.html || '';
+                window.__skillWorkspaceReportEntries = cached.skillEntries ? cached.skillEntries.slice() : [];
+                window.__omicsFrozenExecutionSnapshot = cached.omicsFrozen || null;
+                window.__omicsSnapshotRegistry = cached.omicsRegistry || {};
+                window.__omicsActiveSnapshotId = cached.omicsActive || null;
+                if (ph) ph.style.display = cached.placeholderVisible ? '' : 'none';
+                if (typeof setWorkspaceTitle === 'function' && cached.title) setWorkspaceTitle(cached.title);
+                if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(!!cached.expanded);
+                if (root && typeof hydrateSkillWorkspacePanels === 'function') {
+                    try { hydrateSkillWorkspacePanels(root); } catch (_hwErr) { console.warn('[restoreWorkspaceSlot] hydrate', _hwErr); }
+                }
+                if (typeof syncAnalysisArtifactCardActiveStates === 'function') syncAnalysisArtifactCardActiveStates();
+            }
+            window.captureWorkspaceSlot = captureWorkspaceSlot;
+            window.restoreWorkspaceSlot = restoreWorkspaceSlot;
             /**
              * 双轨路由 · 技能活会话穿透：仅 DOM 显隐。禁止 abort、禁止 loadSessionAndRestore、禁止清 skillLiveContent。
              */
@@ -8109,6 +8358,7 @@
                     if (ev.stopPropagation) ev.stopPropagation();
                 }
                 console.log('🔥 [双轨路由] 触发回到专属技能活会话!');
+                if (typeof captureWorkspaceSlot === 'function') captureWorkspaceSlot('main');
                 brutalHideAllNonChatPanes();
                 var mainHost = document.getElementById('chat-main-host');
                 if (mainHost) mainHost.style.setProperty('display', 'none', 'important');
@@ -8131,6 +8381,7 @@
                     if (_mcVis) _mcVis.classList.remove('active-chat-content');
                 }
                 if (typeof moveComposerInputToHost === 'function') moveComposerInputToHost('skill');
+                if (typeof restoreWorkspaceSlot === 'function') restoreWorkspaceSlot('skill_live');
                 var wsPane = document.getElementById('workspace-pane');
                 var rzR = document.getElementById('resizer-right');
                 if (wsPane) wsPane.style.setProperty('display', 'flex', 'important');
@@ -8138,6 +8389,7 @@
                 if (typeof window.__flushDeferredVisWhileHidden === 'function') {
                     window.__flushDeferredVisWhileHidden();
                 }
+                if (typeof setActiveSessionInSidebar === 'function') setActiveSessionInSidebar(null);
                 if (typeof highlightActiveItemInSidebar === 'function') highlightActiveItemInSidebar('skill_live');
                 setTimeout(function() {
                     var chatArea = document.getElementById('skillLiveBox') || liveHost.querySelector('.chat-scroll-area');
@@ -8331,12 +8583,16 @@
             }
             window.showSkillsSquareMainCategory = showSkillsSquareMainCategory;
             function syncWorkspaceExpandButtonUI() {
-                var btn = document.getElementById('btn-expand-workspace');
                 var wp = document.getElementById('workspace-pane');
-                if (!btn || !wp) return;
+                if (!wp) return;
                 var active = wp.classList.contains('workspace-active');
-                btn.setAttribute('title', active ? '\u6536\u8d77\u5de5\u4f5c\u53f0' : '\u5c55\u5f00\u5de5\u4f5c\u53f0');
-                btn.setAttribute('aria-label', active ? '\u6536\u8d77\u5de5\u4f5c\u53f0' : '\u5c55\u5f00\u5de5\u4f5c\u53f0');
+                var title = active ? '\u6536\u8d77\u5de5\u4f5c\u53f0' : '\u5c55\u5f00\u5de5\u4f5c\u53f0';
+                ['btn-expand-workspace', 'btn-expand-workspace-skill'].forEach(function(id) {
+                    var btn = document.getElementById(id);
+                    if (!btn) return;
+                    btn.setAttribute('title', title);
+                    btn.setAttribute('aria-label', title);
+                });
             }
             window.syncWorkspaceExpandButtonUI = syncWorkspaceExpandButtonUI;
             /** 收起/手动展开前调用：清除拖拽写入的 width/flexBasis，避免「幽灵白板」占位 */
@@ -8370,6 +8626,9 @@
                         if (typeof setRightSidebarVisible === 'function') setRightSidebarVisible(false);
                     }
                     if (typeof clearWorkspacePaneInlineLayout === 'function') clearWorkspacePaneInlineLayout(wp);
+                    wp.style.setProperty('display', 'flex', 'important');
+                    var rzR = document.getElementById('resizer-right');
+                    if (rzR) rzR.style.setProperty('display', 'block', 'important');
                     wp.classList.add('workspace-active');
                 } else {
                     if (typeof clearWorkspacePaneInlineLayout === 'function') clearWorkspacePaneInlineLayout(wp);
@@ -8379,6 +8638,25 @@
                 if (typeof syncAnalysisArtifactCardActiveStates === 'function') syncAnalysisArtifactCardActiveStates();
                 if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
             }
+            function bindWorkspaceExpandButtons() {
+                function toggleWorkspaceFromHeader() {
+                    var wp = document.getElementById('workspace-pane');
+                    if (!wp) return;
+                    var open = !wp.classList.contains('workspace-active');
+                    if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(open);
+                }
+                var btnExpand = document.getElementById('btn-expand-workspace');
+                if (btnExpand && !btnExpand.dataset.workspaceToggleBound) {
+                    btnExpand.dataset.workspaceToggleBound = '1';
+                    btnExpand.onclick = toggleWorkspaceFromHeader;
+                }
+                var btnExpandSkill = document.getElementById('btn-expand-workspace-skill');
+                if (btnExpandSkill && !btnExpandSkill.dataset.workspaceToggleBound) {
+                    btnExpandSkill.dataset.workspaceToggleBound = '1';
+                    btnExpandSkill.onclick = toggleWorkspaceFromHeader;
+                }
+            }
+            window.bindWorkspaceExpandButtons = bindWorkspaceExpandButtons;
             window.setWorkspacePaneExpanded = setWorkspacePaneExpanded;
             /** 回到应用主界面（聊天首页）；桌面托盘单击与侧栏 Logo 共用 */
             function navigateAppHome() {
@@ -10915,6 +11193,70 @@
                     el.classList.add('active', 'active-session');
                 });
             }
+            function findSessionMetaById(sessionId) {
+                var sid = String(sessionId || '').trim();
+                if (!sid || !window.cachedFullSessionsList) return null;
+                for (var i = 0; i < window.cachedFullSessionsList.length; i++) {
+                    if (window.cachedFullSessionsList[i].id === sid) return window.cachedFullSessionsList[i];
+                }
+                return null;
+            }
+            function isSessionInSidebarTopFive(sessionId) {
+                var listEl = document.getElementById('sidebar-sessions-list');
+                if (!listEl) return false;
+                var sid = String(sessionId || '').trim();
+                var items = listEl.querySelectorAll('.sidebar-session-item:not(.sidebar-pinned-deep-history)');
+                var seen = 0;
+                for (var i = 0; i < items.length; i++) {
+                    if (String(items[i].dataset.sessionId || '') === sid) return true;
+                    seen++;
+                    if (seen >= 5) break;
+                }
+                return false;
+            }
+            /** 「查看全部」深层历史：若不在前五，在侧栏列表底部动态插入并高亮 */
+            function pinSidebarDeepHistorySession(sessionId, titleHint) {
+                var sid = String(sessionId || '').trim();
+                if (!sid) return;
+                window.__pinnedSidebarSessionId = sid;
+                if (typeof ensureSidebarDetailsExpanded === 'function') {
+                    ensureSidebarDetailsExpanded('sidebar-section-history', 'sidebar-nav-history');
+                }
+                if (isSessionInSidebarTopFive(sid)) {
+                    if (typeof setActiveSessionInSidebar === 'function') setActiveSessionInSidebar(sid);
+                    return;
+                }
+                var listEl = document.getElementById('sidebar-sessions-list');
+                if (!listEl) {
+                    if (typeof setActiveSessionInSidebar === 'function') setActiveSessionInSidebar(sid);
+                    return;
+                }
+                var oldPin = listEl.querySelector('.sidebar-pinned-deep-history');
+                if (oldPin) oldPin.remove();
+                var meta = findSessionMetaById(sid) || { id: sid, title: titleHint || sid };
+                var item = buildSidebarHistorySessionItem(meta, listEl);
+                item.classList.add('sidebar-pinned-deep-history');
+                var btnAll = document.getElementById('btn-view-all-history');
+                if (btnAll) listEl.insertBefore(item, btnAll);
+                else listEl.appendChild(item);
+                if (typeof setActiveSessionInSidebar === 'function') setActiveSessionInSidebar(sid);
+            }
+            function reapplySidebarPinnedHistory() {
+                if (!window.__pinnedSidebarSessionId) return;
+                var sid = String(window.__pinnedSidebarSessionId).trim();
+                if (!sid) return;
+                if (isSessionInSidebarTopFive(sid)) {
+                    var pin = document.querySelector('#sidebar-sessions-list .sidebar-pinned-deep-history');
+                    if (pin) pin.remove();
+                    if (typeof currentSessionId !== 'undefined' && String(currentSessionId) === sid && typeof setActiveSessionInSidebar === 'function') {
+                        setActiveSessionInSidebar(sid);
+                    }
+                    return;
+                }
+                pinSidebarDeepHistorySession(sid);
+            }
+            window.pinSidebarDeepHistorySession = pinSidebarDeepHistorySession;
+            window.reapplySidebarPinnedHistory = reapplySidebarPinnedHistory;
             function highlightActiveSession(sessionId) {
                 setActiveSessionInSidebar(sessionId);
             }
@@ -11314,6 +11656,9 @@
                         const existingId = existingFormId || existingDataFormId;
                         if (existingId) {
                             console.warn("⚠️ [renderWorkflowCard] 工作流卡片已存在，跳过渲染");
+                            if (typeof syncPlanningDiagnosisFromWorkflowData === 'function') {
+                                syncPlanningDiagnosisFromWorkflowData(workflowData, cardZoneRef);
+                            }
                             return existingId;
                         }
                         return null;
@@ -11330,6 +11675,9 @@
                         const existingId = existingFormId || existingDataFormId;
                         if (existingId) {
                             console.log("✅ [renderWorkflowCard] 重用现有卡片，返回现有ID:", existingId);
+                            if (typeof syncPlanningDiagnosisFromWorkflowData === 'function') {
+                                syncPlanningDiagnosisFromWorkflowData(workflowData, cardZoneRef);
+                            }
                             return existingId;
                         }
                         return null;
@@ -11744,6 +12092,9 @@
 
             // 🔥 PHASE 1 FIX: Return the formId so caller can use it
             console.log(`✅ [renderWorkflowCard] 交互式工作流卡片已渲染到 cardZone, formId: ${formId}`);
+            if (typeof syncPlanningDiagnosisFromWorkflowData === 'function') {
+                syncPlanningDiagnosisFromWorkflowData(workflowData, cardZoneRef);
+            }
             return formId;  // Return the newly generated formId
 
             };
@@ -12100,6 +12451,9 @@
                     if (ev.target.closest && (ev.target.closest('.item-more-btn') || ev.target.closest('.popover-menu'))) return;
                     ev.preventDefault();
                     ev.stopPropagation();
+                    window.__pinnedSidebarSessionId = null;
+                    var _oldPin = document.querySelector('#sidebar-sessions-list .sidebar-pinned-deep-history');
+                    if (_oldPin) _oldPin.remove();
                     if (typeof setSidebarSecondaryNavActive === 'function') setSidebarSecondaryNavActive(item);
                     loadSessionAndRestore(s.id, s.title);
                 };
@@ -12157,6 +12511,7 @@
                     ev.preventDefault();
                     ev.stopPropagation();
                     if (typeof setSidebarSecondaryNavActive === 'function') setSidebarSecondaryNavActive(item);
+                    if (typeof pinSidebarDeepHistorySession === 'function') pinSidebarDeepHistorySession(s.id, s.title);
                     loadSessionAndRestore(s.id, s.title);
                 };
                 return item;
@@ -12226,6 +12581,7 @@
                         var el = document.getElementById('sidebar-sessions-list');
                         if (!el) return;
                         renderHistoryList(window.cachedFullSessionsList, el, { limit: 5, itemMode: 'sidebar' });
+                        if (typeof reapplySidebarPinnedHistory === 'function') reapplySidebarPinnedHistory();
                         if (typeof setActiveSessionInSidebar === 'function') setActiveSessionInSidebar(currentSessionId);
                         if (typeof refreshActiveSkillRunningFromSession === 'function') refreshActiveSkillRunningFromSession();
                         var btnAll = document.getElementById('btn-view-all-history');
@@ -12917,6 +13273,9 @@
                 if (_prevSessionForDraft && _prevSessionForDraft !== sessionId && typeof window.flushComposerDraftAutoSave === 'function') {
                     window.flushComposerDraftAutoSave(_prevSessionForDraft);
                 }
+                if (typeof captureWorkspaceSlot === 'function') {
+                    captureWorkspaceSlot(getActiveWorkspaceSlotKey());
+                }
                 if (typeof switchToChatView === 'function') switchToChatView();
                 if (typeof activateMainChatRoute === 'function') activateMainChatRoute();
                 currentSessionId = sessionId;
@@ -12955,7 +13314,8 @@
                 }
                 if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
                 chatHistory = [];
-                setActiveSessionInSidebar(sessionId);
+                if (typeof pinSidebarDeepHistorySession === 'function') pinSidebarDeepHistorySession(sessionId, title);
+                else if (typeof setActiveSessionInSidebar === 'function') setActiveSessionInSidebar(sessionId);
 
                 fetch('/api/sessions/' + encodeURIComponent(sessionId) + '/messages', { method: 'GET', headers: getAuthHeaders() })
                     .then(function(r) {
@@ -13015,6 +13375,7 @@
                         }
                         if (wp && (document.querySelector('#active-workspace-content .report-section, #active-workspace-content .process-steps') != null) && typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
                         if (typeof highlightActiveSession === 'function') highlightActiveSession(sessionId);
+                        if (typeof captureWorkspaceSlot === 'function') captureWorkspaceSlot('main');
                         var _sessMeta = null;
                         if (window.cachedFullSessionsList) {
                             for (var _smi = 0; _smi < window.cachedFullSessionsList.length; _smi++) {
@@ -13929,13 +14290,7 @@
                 };
                 var btnNew = document.getElementById('btnNewSession');
                 if (btnNew) btnNew.onclick = function() { showChatView(); clearChatAndReset(); };
-                var btnExpand = document.getElementById('btn-expand-workspace');
-                if (btnExpand) btnExpand.onclick = function() {
-                    var wp = document.getElementById('workspace-pane');
-                    if (!wp) return;
-                    var open = !wp.classList.contains('workspace-active');
-                    if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(open);
-                };
+                if (typeof bindWorkspaceExpandButtons === 'function') bindWorkspaceExpandButtons();
                 var btnPrint = document.getElementById('btn-workspace-print');
                 if (btnPrint) {
                     btnPrint.onclick = function () {
@@ -15966,6 +16321,9 @@
 
             async function sendMessage(selectedTool = null, originalQuery = null, toolParams = null, workflowData = null, useHistoryFiles = false, filesOverride = null, hiddenPayload = null) {
                 if (isProcessing) return;
+                /* 任何 await 之前退出空状态并锁定 CLI 可见，避免上传等待期输入框被株连隐藏 */
+                if (typeof dismissEmptyStateForChat === 'function') dismissEmptyStateForChat();
+                else if (typeof ensureComposerInputVisible === 'function') ensureComposerInputVisible();
                 var _demoGuestOk = false;
                 if (window._immersiveDemoActive) {
                     if (window.DEMO_STATE === 'ARMED') _demoGuestOk = true;
@@ -16012,8 +16370,10 @@
                 
                 if (workflowData && (workflowData.execution_id || workflowData.executionId)) {
                     window.__pendingWorkflowExecutionId = String(workflowData.execution_id || workflowData.executionId);
+                    window.__planningLiveSnapshotId = null;
                 } else if (!workflowData) {
                     window.__pendingWorkflowExecutionId = null;
+                    window.__planningLiveSnapshotId = null;
                 }
 
                 // 🔥 CRITICAL: 初始化状态和时间戳（在所有分支中都需要）
@@ -17236,18 +17596,26 @@
                                     }
                                     break;
                                     
-                                case 'diagnosis':
-                                    // 数据诊断仅写入「数据诊断报告」区，与结题/专家 Markdown 严格分离
-                                    if (data.diagnosis_report != null) {
-                                        renderReportSection('diagnosis', data.diagnosis_report, data);
+                                case 'diagnosis': {
+                                    // 规划期：实时写入右栏诊断区 + 挂载「查看工作台」卡片（不等待 done / execution_snapshot）
+                                    var _planDx = (typeof extractPlanningDiagnosisContent === 'function')
+                                        ? extractPlanningDiagnosisContent(data)
+                                        : (data.diagnosis_report != null ? data.diagnosis_report : null);
+                                    if (_planDx != null && typeof applyPlanningDiagnosisWorkbench === 'function') {
+                                        applyPlanningDiagnosisWorkbench(data, { diagnosisContent: _planDx, title: '数据诊断报告' });
+                                    } else if (data.diagnosis_report != null) {
+                                        var _rrsDx = window.__workspace_renderReportSection || window.globalRenderDiagnosisReportSection;
+                                        if (typeof _rrsDx === 'function') _rrsDx('diagnosis', data.diagnosis_report, data);
                                     } else if (data.report_data && data.report_data.diagnosis != null) {
-                                        renderReportSection('diagnosis', data.report_data.diagnosis, data);
+                                        var _rrsDx2 = window.__workspace_renderReportSection || window.globalRenderDiagnosisReportSection;
+                                        if (typeof _rrsDx2 === 'function') _rrsDx2('diagnosis', data.report_data.diagnosis, data);
                                     }
-                                    const diagnosisSuggestions = (data.report_data && data.report_data.suggestions) || data.suggestions;
+                                    var diagnosisSuggestions = (data.report_data && data.report_data.suggestions) || data.suggestions;
                                     if (Array.isArray(diagnosisSuggestions) && diagnosisSuggestions.length > 0) {
                                         renderSuggestions(diagnosisSuggestions);
                                     }
                                     break;
+                                }
                                     
                                 case 'step_result':
                                     // 🔥 步骤级异常透传：失败步骤的 traceback 在控制台高亮打印
@@ -17293,6 +17661,11 @@
                                     }
                                     // 仅规划不执行时也立刻刷新左侧数据资产（后端已按组学更新 modality）
                                     if (typeof fetchAssets === 'function') fetchAssets();
+                                    // 兜底：诊断随 workflow/result/state_snapshot 携带，或未单独发 diagnosis SSE
+                                    if (typeof syncPlanningDiagnosisFromWorkflowData === 'function') {
+                                        var _cardZonePlan = window.currentMessageZones && window.currentMessageZones.cardZone;
+                                        syncPlanningDiagnosisFromWorkflowData(data, _cardZonePlan);
+                                    }
                                     break;
                                     
                                 case 'result':
@@ -17326,7 +17699,17 @@
                                         if (data.steps_details && data.steps_details.length > 0) {
                                             renderExecutionSteps(data.steps_details);
                                         }
-                                        if (data.diagnosis_report != null) {
+                                        var _planResultDx = (typeof extractPlanningDiagnosisContent === 'function')
+                                            ? extractPlanningDiagnosisContent(data)
+                                            : null;
+                                        if (_planResultDx != null && typeof applyPlanningDiagnosisWorkbench === 'function') {
+                                            var _resCardZone = window.currentMessageZones && window.currentMessageZones.cardZone;
+                                            applyPlanningDiagnosisWorkbench(data, {
+                                                diagnosisContent: _planResultDx,
+                                                anchorEl: _resCardZone,
+                                                title: '数据诊断报告'
+                                            });
+                                        } else if (data.diagnosis_report != null) {
                                             renderReportSection('diagnosis', data.diagnosis_report, data);
                                         }
                                         if (data.workflow_config && !data._workflow_already_rendered) {
@@ -17548,6 +17931,20 @@
                                         if (!currentRow)
                                             currentRow = document.querySelector('#chatContent .message-row.ai:last-of-type');
                                         if (currentRow) currentRow.dataset.snapshot = snapshotStr;
+                                        var _ssPlanDx = (typeof extractPlanningDiagnosisContent === 'function')
+                                            ? extractPlanningDiagnosisContent(data)
+                                            : null;
+                                        if (_ssPlanDx == null && data && data.report) {
+                                            _ssPlanDx = extractPlanningDiagnosisContent(data.report);
+                                        }
+                                        if (_ssPlanDx != null && typeof applyPlanningDiagnosisWorkbench === 'function') {
+                                            var _ssCardZone = window.currentMessageZones && window.currentMessageZones.cardZone;
+                                            applyPlanningDiagnosisWorkbench(data, {
+                                                diagnosisContent: _ssPlanDx,
+                                                anchorEl: _ssCardZone,
+                                                title: '数据诊断报告'
+                                            });
+                                        }
                                     } catch (e) { console.warn('[state_snapshot] 写入 dataset 失败:', e); }
                                     break;
                                     
@@ -18971,6 +19368,16 @@
                                 if (_artLogZone && typeof renderAnalysisArtifactCard === 'function') {
                                     renderAnalysisArtifactCard(_artLogZone, _artifactSnapId, _artTitle);
                                 }
+                            } else if (window.__planningLiveSnapshotId && typeof renderAnalysisArtifactCard === 'function') {
+                                var _planSnapId = window.__planningLiveSnapshotId;
+                                var _planAnchor = (window.currentMessageZones && window.currentMessageZones.cardZone)
+                                    || (window.currentMessageZones && window.currentMessageZones.logZone)
+                                    || (_doneRow ? (_doneRow.querySelector('.cards-zone') || _doneRow.querySelector('.process-log-zone')) : null);
+                                if (_planAnchor) {
+                                    renderAnalysisArtifactCard(_planAnchor, _planSnapId, '数据诊断报告');
+                                }
+                                window.__omicsActiveSnapshotId = _planSnapId;
+                                if (typeof syncAnalysisArtifactCardActiveStates === 'function') syncAnalysisArtifactCardActiveStates();
                             }
                             window.__pendingWorkflowExecutionId = null;
                             var _auditSlotDone = document.getElementById('omics-audit-trail-slot');
@@ -19725,19 +20132,8 @@
                 if (_targetContent) _targetContent.appendChild(row);
                 if (typeof window.hydrateToolAssetPreviews === 'function') window.hydrateToolAssetPreviews(row);
                 if (role === 'user') {
-                    var wrapper = document.getElementById('empty-state-wrapper');
-                    var heroSec = document.getElementById('chat-hero-section');
-                    var iw = document.getElementById('inputWrapper');
-                    var bottomSlot = document.getElementById('input-wrapper-bottom');
-                    if (heroSec) heroSec.classList.add('hero-fade-out');
-                    setTimeout(function() {
-                        if (wrapper) wrapper.classList.add('hidden');
-                        if (iw && bottomSlot && !bottomSlot.contains(iw)) {
-                            bottomSlot.appendChild(iw);
-                            iw.classList.remove('input-center');
-                            iw.classList.add('input-bottom');
-                        }
-                    }, 400);
+                    if (typeof dismissEmptyStateForChat === 'function') dismissEmptyStateForChat();
+                    else if (typeof ensureComposerInputVisible === 'function') ensureComposerInputVisible();
                     var titleEl = document.getElementById('chat-conversation-title');
                     if (titleEl && titleEl.textContent === '新会话') {
                         var raw = typeof content === 'string' ? content.replace(/<[^>]+>/g, '').trim() : '';
@@ -20807,17 +21203,17 @@
                 var inputWrapper = document.getElementById('inputWrapper');
                 var bottomSlot = document.getElementById('input-wrapper-bottom');
                 if (emptyWrapper && !emptyWrapper.classList.contains('hidden')) {
-                    var heroSecWf = document.getElementById('chat-hero-section');
-                    if (heroSecWf) heroSecWf.classList.add('hero-fade-out');
-                    var _w = emptyWrapper; var _i = inputWrapper; var _s = bottomSlot;
-                    setTimeout(function() {
-                        _w.classList.add('hidden');
-                        if (_i && _s && _i.parentNode !== _s) {
-                            _s.appendChild(_i);
-                            _i.classList.remove('input-center');
-                            _i.classList.add('input-bottom');
+                    if (typeof dismissEmptyStateForChat === 'function') dismissEmptyStateForChat();
+                    else {
+                        var heroSecWf = document.getElementById('chat-hero-section');
+                        if (heroSecWf) heroSecWf.classList.add('hero-fade-out');
+                        emptyWrapper.classList.add('hidden');
+                        if (inputWrapper && bottomSlot && inputWrapper.parentNode !== bottomSlot) {
+                            bottomSlot.appendChild(inputWrapper);
+                            inputWrapper.classList.remove('input-center');
+                            inputWrapper.classList.add('input-bottom');
                         }
-                    }, 400);
+                    }
                 }
                 if (!chatContent) return;
                 var aiRow = document.createElement('div');

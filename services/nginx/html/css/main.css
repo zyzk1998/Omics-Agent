@@ -432,6 +432,27 @@
             #sidebar-pane .history-item.active,
             #sidebar-pane .sidebar-session-item.active,
             #sidebar-pane .sidebar-session-item.active-session,
+            #sidebar-pane .full-history-item.active-session {
+                background-color: var(--sidebar-active-l2-bg, rgba(13, 110, 253, 0.12)) !important;
+                color: var(--sidebar-active-l2-color, #0a58ca) !important;
+                font-weight: 600;
+            }
+            #sidebar-pane .sidebar-session-item.sidebar-pinned-deep-history {
+                border-left: 3px solid var(--sidebar-active-l2-color, #0a58ca);
+                padding-left: 49px;
+            }
+            #sidebar-pane .sidebar-session-item.sidebar-pinned-deep-history::after {
+                content: '当前';
+                flex-shrink: 0;
+                margin-left: 4px;
+                font-size: 10px;
+                font-weight: 600;
+                color: var(--sidebar-active-l2-color, #0a58ca);
+                opacity: 0.85;
+            }
+            #sidebar-pane .sidebar-session-item.sidebar-pinned-deep-history.active-session::after {
+                opacity: 1;
+            }
             #sidebar-pane .sidebar-asset-item.active,
             #sidebar-pane .sub-nav-item.active:not(.asset-category),
             #sidebar-pane .favorite-item.active,
@@ -1506,12 +1527,20 @@
                 flex-shrink: 0;
                 padding: 0;
                 width: 100%;
-                display: flex;
+                display: flex !important;
+                visibility: visible !important;
                 justify-content: stretch;
                 margin-bottom: 8px;
                 align-self: stretch;
                 min-height: 120px !important;
                 overflow: visible !important;
+                position: relative;
+                z-index: 1000 !important;
+            }
+            #skill-input-wrapper-bottom.flush-bottom-host {
+                display: flex !important;
+                visibility: visible !important;
+                z-index: 1000 !important;
             }
             #chat-main-host,
             #skill-live-host,
@@ -4368,6 +4397,10 @@
                 right: 0;
                 pointer-events: auto;
                 transition: box-shadow 0.25s ease;
+                display: flex !important;
+                visibility: visible !important;
+                position: relative;
+                z-index: 1000 !important;
             }
             #inputWrapper.input-center,
             #inputWrapper.input-bottom {

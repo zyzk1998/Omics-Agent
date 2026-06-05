@@ -2795,6 +2795,8 @@ class AgentOrchestrator:
                 })
                 await asyncio.sleep(0.01)
             
+                path_a_diagnosis_message = None  # Path A 诊断正文：供 workflow/result 双写，不依赖 self.agent.context 子 agent 隔离
+            
                 # 🔥 Multi-file: ALWAYS prefer inspecting common_parent_directory (so SpatialVisiumHandler
                 # sees spatial/ + matrix; single-file stays as first file path).
                 # Step 1: normalize_session_directory runs BEFORE inspect_file so .tar.gz is already
@@ -3057,6 +3059,13 @@ class AgentOrchestrator:
                                     # 从agent的context中获取参数推荐
                                     if hasattr(agent_instance, 'context') and "parameter_recommendation" in agent_instance.context:
                                         recommendation_data = agent_instance.context.get("parameter_recommendation")
+                                    # 同步子 agent 诊断到 orchestrator 主 context，供 workflow 事件读取
+                                    if hasattr(agent_instance, 'context') and agent_instance.context.get("diagnosis_report"):
+                                        if not hasattr(self.agent, 'context') or self.agent.context is None:
+                                            self.agent.context = {}
+                                        self.agent.context["diagnosis_report"] = agent_instance.context["diagnosis_report"]
+                                        if agent_instance.context.get("parameter_recommendation"):
+                                            self.agent.context["parameter_recommendation"] = agent_instance.context["parameter_recommendation"]
                                 
                                     logger.info(f"✅ [Orchestrator] 诊断报告生成成功，长度: {len(diagnosis_message) if diagnosis_message else 0}")
                                 else:
@@ -3092,6 +3101,14 @@ class AgentOrchestrator:
                                 diagnosis_message = diagnosis_message.replace(_strip, "")
                             if not diagnosis_message.strip().startswith("#"):
                                 diagnosis_message = f"### 数据报告\n\n{diagnosis_message.strip()}"
+                    
+                        path_a_diagnosis_message = diagnosis_message
+                        if diagnosis_message:
+                            if not hasattr(self.agent, 'context') or self.agent.context is None:
+                                self.agent.context = {}
+                            self.agent.context["diagnosis_report"] = diagnosis_message
+                            if recommendation_data:
+                                self.agent.context["parameter_recommendation"] = recommendation_data
                     
                         payload = {
                             "message": diagnosis_message,
@@ -3146,6 +3163,18 @@ class AgentOrchestrator:
                             "path_warning": err_msg,
                             "message": "文件预检未完全通过，已软放行并继续规划。",
                         }
+                        _lw_diag = self._generate_lightweight_diagnosis(file_metadata, domain_name)
+                        if _lw_diag:
+                            path_a_diagnosis_message = _lw_diag
+                            if not hasattr(self.agent, 'context') or self.agent.context is None:
+                                self.agent.context = {}
+                            self.agent.context["diagnosis_report"] = _lw_diag
+                            yield self._emit_sse(state_snapshot, "diagnosis", {
+                                "message": _lw_diag,
+                                "diagnosis_report": _lw_diag,
+                                "status": "degraded",
+                            })
+                            await asyncio.sleep(0.01)
                 except Exception as e:
                     logger.error(f"⚠️ [Orchestrator] Path A: 文件检查异常（软放行）: {e}", exc_info=True)
                     yield self._emit_sse(state_snapshot, "status", {
@@ -3380,11 +3409,12 @@ class AgentOrchestrator:
                             logger.info(f"✅ [Orchestrator] 添加参数推荐到工作流事件: {len(recommendation.get('params', {}))} 个参数")
                 
                     # 添加诊断报告（如果存在）
-                    if hasattr(self.agent, 'context') and "diagnosis_report" in self.agent.context:
-                        diagnosis_report = self.agent.context.get("diagnosis_report")
-                        if diagnosis_report:
-                            workflow_event_data["diagnosis_report"] = diagnosis_report
-                            logger.info(f"✅ [Orchestrator] 添加诊断报告到工作流事件")
+                    _diag_for_wf = path_a_diagnosis_message
+                    if not _diag_for_wf and hasattr(self.agent, 'context') and self.agent.context:
+                        _diag_for_wf = self.agent.context.get("diagnosis_report")
+                    if _diag_for_wf:
+                        workflow_event_data["diagnosis_report"] = _diag_for_wf
+                        logger.info(f"✅ [Orchestrator] 添加诊断报告到工作流事件")
                 
                     # 🔥 Task 4: 规划完成后按 workflow_type 更新未分类资产的 modality（宽泛匹配：按文件名，兼容 10x 三件套等）
                     # 优先用当前请求的 files 构建 file_names，确保本轮参与规划的所有文件（含 10x barcodes/features/matrix）都被归到对应组学

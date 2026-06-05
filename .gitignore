@@ -31,6 +31,9 @@ wheels/
 *.swo
 *~
 
+# Label Studio HITL（docker-compose.labelstudio.yml 数据卷，勿入库）
+ls_data/
+
 # 数据文件
 *.h5ad
 *.fastq
