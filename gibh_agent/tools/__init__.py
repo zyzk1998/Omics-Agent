@@ -107,6 +107,7 @@ for _mod in [
     "chem_rdkit_batch2_tools",
     "crispr_cas9_tool",
     "bioml_batch3_tools",
+    "hitl_tools",
 ]:
     try:
         importlib.import_module(f".{_mod}", package=__name__)

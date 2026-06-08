@@ -1612,6 +1612,27 @@ Use Simplified Chinese for all content."""
                     failure_info += f"- **{failed_step.get('name', 'Unknown')}**: {err_text}\n"
                 failure_info += "\n**IMPORTANT**: Some steps failed, but you should still summarize the successful steps. Explain what was accomplished and note the failures."
 
+            hitl_expert_block = ""
+            if summary_context:
+                ann_summary = summary_context.get("hitl_annotations_summary")
+                if ann_summary or summary_context.get("hitl_resume"):
+                    ann_json = summary_context.get("hitl_annotations_json") or ""
+                    hitl_expert_block = f"""
+
+【Label Studio 专家标注 · 最终复核结果】
+以下为用户/专家在 HITL（Human-in-the-loop）环节完成的标注结论。
+你必须在《专家分析报告（最终版）》中：
+1. 单独设立「专家复核要点」章节，整合标注结论；
+2. 明确区分「算法初稿」与「专家定稿」差异；
+3. 给出可执行的后续实验或分析建议。
+
+标注摘要：
+{ann_summary or '（见下方 JSON）'}
+
+标注原始 JSON（截断）：
+{ann_json[:8000] if ann_json else '（无）'}
+"""
+            
             # 🔥 User-Facing Error Translation: 从 summary_context 的 failed_steps（完整 step_detail）提取执行日志供 LLM 翻译为人话
             execution_log_text = ""
             execution_log_instruction_block = ""
@@ -2017,6 +2038,7 @@ Use Simplified Chinese for all content."""
 {key_findings_json}
 {execution_results_text}
 {failure_info}
+{hitl_expert_block}
 {execution_log_instruction_block}
 
 **CRITICAL INSTRUCTION:**
@@ -2320,6 +2342,7 @@ Use Simplified Chinese for all content."""
 {key_findings_json}
 {execution_results_text}
 {failure_info}
+{hitl_expert_block}
 {execution_log_instruction_block}
 
 **CRITICAL INSTRUCTION:**

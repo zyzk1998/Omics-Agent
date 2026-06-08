@@ -46,6 +46,7 @@ from gibh_agent.core.file_handlers.structure_normalizer import normalize_session
 from gibh_agent.core.file_handlers.universal_normalizer import normalize_session_directory as universal_unpack
 from gibh_agent.core.file_handlers.modality_sniffer import detect_dominant_modality, paths_for_response
 from gibh_agent.core.utils import sanitize_for_json
+from gibh_agent.core.omics_io_registry import is_upload_allowed_filename, upload_rejection_hint
 from gibh_agent.core.workspace_context import (
     get_workspace_context,
 )
@@ -222,6 +223,43 @@ try:
     logger.info("✅ MCP 配置路由: GET /api/config/mcp/status, POST /api/config/mcp")
 except Exception as e:
     logger.warning("⚠️ MCP 配置路由注册失败: %s", e)
+
+try:
+    from gibh_agent.api.routers.user_settings_api import router as user_settings_router
+
+    app.include_router(user_settings_router)
+    logger.info(
+        "✅ 用户数据库挂载配置路由: GET/PUT /api/settings/database, "
+        "POST /api/settings/database/test-connection"
+    )
+except Exception as e:
+    logger.warning("⚠️ 用户设置路由注册失败: %s", e)
+
+try:
+    from gibh_agent.api.routers.ingestion_api import router as ingestion_router
+
+    app.include_router(ingestion_router)
+    logger.info("✅ 数据入库路由: POST /api/ingestion/trigger")
+except Exception as e:
+    logger.warning("⚠️ 数据入库路由注册失败: %s", e)
+
+try:
+    from gibh_agent.api.routers.hitl_api import router as hitl_api_router
+
+    app.include_router(hitl_api_router)
+    logger.info(
+        "✅ HITL 路由: POST /api/hitl/webhook, POST /api/sessions/{id}/resume_from_hitl"
+    )
+except Exception as e:
+    logger.warning("⚠️ HITL 路由注册失败: %s", e)
+
+try:
+    from gibh_agent.api.label_studio_proxy import router as label_studio_proxy_router
+
+    app.include_router(label_studio_proxy_router)
+    logger.info("✅ Label Studio 同源反代: /label-studio/* → LABEL_STUDIO_URL")
+except Exception as e:
+    logger.warning("⚠️ Label Studio 反代注册失败: %s", e)
 
 # Phase 4: 身份解析与 DB 依赖（upload/chat 持久化）
 from gibh_agent.core.deps import get_current_owner_id, get_current_admin_user
@@ -808,12 +846,12 @@ def admin_storage_cleanup(
 
 # 安全配置
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 200 * 1024 * 1024))  # 默认 200MB
-# .h5 = 10x Visium / scRNA Feature Barcode Matrix (industry standard); .h5ad = AnnData
-ALLOWED_EXTENSIONS = {'.h5', '.h5ad', '.mtx', '.tsv', '.csv', '.txt', '.gz', '.tar', '.zip'}
 ALLOWED_MIME_TYPES = {
     'text/csv', 'text/tab-separated-values', 'text/plain',
     'application/gzip', 'application/x-gzip',
-    'application/zip', 'application/x-tar'
+    'application/zip', 'application/x-tar',
+    'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp',
+    'image/tiff', 'image/svg+xml', 'image/x-icon', 'image/heic', 'image/heif', 'image/avif',
 }
 
 def sanitize_filename(filename: str) -> str:
@@ -2364,13 +2402,9 @@ async def upload_file(
             original_filename = file.filename
             safe_filename = sanitize_filename(original_filename)
             
-            # 🔒 安全：验证文件扩展名
-            file_ext = Path(safe_filename).suffix.lower()
-            if file_ext and file_ext not in ALLOWED_EXTENSIONS:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"不允许的文件类型: {file_ext}。允许的类型: {', '.join(ALLOWED_EXTENSIONS)}"
-                )
+            # 🔒 安全：验证文件扩展名（组学 + 影像 + 全量图片 + 语料）
+            if not is_upload_allowed_filename(safe_filename):
+                raise HTTPException(status_code=400, detail=upload_rejection_hint(safe_filename))
             
             # 更新文件名为安全版本
             file.filename = safe_filename
@@ -3036,6 +3070,7 @@ async def chat_endpoint(
                     SESSION_COMPLETED,
                     SESSION_FAILED,
                     SESSION_RUNNING,
+                    SESSION_WAITING_FOR_HITL,
                     set_session_status,
                 )
                 from gibh_agent.core.session_stream_hub import get_session_stream_hub
@@ -3047,6 +3082,7 @@ async def chat_endpoint(
                 _stream_hub = get_session_stream_hub()
                 _sid = (req.session_id or "").strip()
                 _run_failed = False
+                _hitl_waiting = False
                 # Phase 4: 第一个事件下发 session_id，供前端持久化
                 _session_ev = f"event: session\ndata: {json.dumps({'session_id': req.session_id}, ensure_ascii=False)}\n\n"
                 if _sid:
@@ -3320,6 +3356,16 @@ async def chat_endpoint(
                                                 "report": None,
                                             }
                                         break
+                            if isinstance(event, str) and "event: done" in event:
+                                for line in event.split("\n"):
+                                    if line.startswith("data:"):
+                                        try:
+                                            _done_payload = json.loads(line[5:].strip())
+                                            if (_done_payload or {}).get("status") == "waiting_for_hitl":
+                                                _hitl_waiting = True
+                                        except Exception:
+                                            pass
+                                        break
                             if _sid and isinstance(event, str):
                                 await _stream_hub.publish(_sid, event)
                             yield event
@@ -3336,7 +3382,9 @@ async def chat_endpoint(
                         set_session_status(
                             db,
                             _sid,
-                            SESSION_FAILED if _run_failed else SESSION_COMPLETED,
+                            SESSION_WAITING_FOR_HITL
+                            if _hitl_waiting
+                            else (SESSION_FAILED if _run_failed else SESSION_COMPLETED),
                             owner_id=owner_id,
                         )
                     # Phase 4: 流结束后写 agent 消息（有状态切片入库，废弃 content.events）

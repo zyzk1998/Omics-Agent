@@ -14,6 +14,7 @@
         <!-- 代码高亮样式 -->
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
         <link rel="stylesheet" href="/css/style.css">
+        <link rel="stylesheet" href="/css/hitl_phase2.css">
         
         <script>
             // #region agent log (已禁用调试请求)
@@ -498,6 +499,16 @@
                     <div id="workspace-placeholder">在此处查看任务执行详情与分析报告</div>
                     <div id="active-workspace-content"></div>
                 </div>
+                <div id="workspace-ingestion-action-bar" class="workspace-ingestion-action-bar" aria-hidden="true">
+                    <div class="workspace-ingestion-action-bar__inner">
+                        <p id="workspace-ingestion-hint" class="workspace-ingestion-action-bar__hint">加载数据库配置…</p>
+                        <div class="workspace-ingestion-action-bar__btn-row">
+                            <span id="workspace-ingestion-spinner" class="workspace-ingestion-spinner" aria-hidden="true" hidden></span>
+                            <button type="button" id="workspace-ingestion-primary-btn" class="workspace-ingestion-action-bar__btn">💾 一键入库</button>
+                        </div>
+                        <p id="workspace-ingestion-error" class="workspace-ingestion-error" hidden></p>
+                    </div>
+                </div>
             </aside>
         </div>
         </div>
@@ -616,6 +627,45 @@
                             </div>
                         </div>
                     </div>
+                    <div class="settings-db-mount-section" id="settings-db-mount-section">
+                        <p class="settings-subtitle">挂载数据库（三轨合一入库）</p>
+                        <div class="settings-row">
+                            <label class="settings-label" for="db-mount-type">挂载类型</label>
+                            <select id="db-mount-type" class="settings-control">
+                                <option value="local_volume">本地卷 Local Volume</option>
+                                <option value="hpc_slurm">HPC / Slurm</option>
+                                <option value="api_url">API / URL</option>
+                            </select>
+                        </div>
+                        <div class="settings-db-field-group is-active" data-mount="local_volume">
+                            <label class="settings-label" for="db-local-path">本地路径</label>
+                            <input type="text" id="db-local-path" class="settings-control" placeholder="/data/omics_output" />
+                        </div>
+                        <div class="settings-db-field-group" data-mount="hpc_slurm">
+                            <label class="settings-label" for="db-hpc-host">HPC 主机</label>
+                            <input type="text" id="db-hpc-host" class="settings-control" placeholder="127.0.0.1" />
+                            <label class="settings-label" for="db-hpc-port">端口</label>
+                            <input type="number" id="db-hpc-port" class="settings-control" value="22" min="1" max="65535" />
+                            <label class="settings-label" for="db-hpc-user">用户名</label>
+                            <input type="text" id="db-hpc-user" class="settings-control" placeholder="可选" />
+                            <label class="settings-label" for="db-hpc-base">远端根路径</label>
+                            <input type="text" id="db-hpc-base" class="settings-control" placeholder="/scratch/project" />
+                        </div>
+                        <div class="settings-db-field-group" data-mount="api_url">
+                            <label class="settings-label" for="db-api-endpoint">API Endpoint</label>
+                            <input type="url" id="db-api-endpoint" class="settings-control" placeholder="https://example.com/api/ingest" />
+                            <label class="settings-label" for="db-api-token">Token</label>
+                            <input type="password" id="db-api-token" class="settings-control" placeholder="Bearer Token" autocomplete="off" />
+                        </div>
+                        <div class="settings-row">
+                            <label class="settings-label" for="db-auto-ingestion">自动入库</label>
+                            <input type="checkbox" id="db-auto-ingestion" />
+                        </div>
+                        <div class="settings-db-actions">
+                            <button type="button" id="db-settings-test" class="settings-btn settings-btn-cancel">🔗 测试关联</button>
+                            <button type="button" id="db-settings-save" class="settings-btn settings-btn-confirm">保存挂载配置</button>
+                        </div>
+                    </div>
                     <div class="settings-row">
                         <label class="settings-label">本地数据</label>
                         <button type="button" id="btn-clear-cache" class="danger-btn">清除本地缓存</button>
@@ -624,6 +674,23 @@
                 <div class="settings-footer">
                     <button type="button" id="settings-btn-cancel" class="settings-btn settings-btn-cancel">取消</button>
                     <button type="button" id="settings-btn-confirm" class="settings-btn settings-btn-confirm">确定</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Label Studio 专家标注全屏内嵌 -->
+        <div id="hitl-ls-modal" class="hitl-ls-modal-overlay" aria-hidden="true" role="dialog" aria-labelledby="hitl-ls-modal-title">
+            <div class="hitl-ls-modal__header">
+                <h3 id="hitl-ls-modal-title" class="hitl-ls-modal__title">Label Studio 专家标注面板</h3>
+                <button type="button" id="hitl-ls-modal-close" class="hitl-ls-modal__close" aria-label="关闭">&times;</button>
+            </div>
+            <iframe id="hitl-ls-iframe" class="hitl-ls-modal__iframe" title="Label Studio 标注界面"></iframe>
+            <div class="hitl-ls-modal__footer">
+                <p class="hitl-ls-modal__hint">在 Label Studio 中完成标注并点击 Submit 后，请确认下方按钮继续生成《专家分析报告（最终版）》。</p>
+                <div class="hitl-ls-modal__footer-actions">
+                    <button type="button" id="hitl-ls-modal-done-btn" class="hitl-ls-modal__done-btn">
+                        <i class="bi bi-check-circle"></i> 我已完成标注，继续生成报告
+                    </button>
                 </div>
             </div>
         </div>
@@ -906,7 +973,7 @@
         </style>
 
         <style>
-            .auth-modal-overlay { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; }
+            .auth-modal-overlay { position: fixed; inset: 0; z-index: 10200; display: flex; align-items: center; justify-content: center; }
             .auth-modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.45); backdrop-filter: blur(6px); }
             #auth-modal.auth-modal-overlay { align-items: stretch; justify-content: flex-end; }
             #auth-modal .auth-modal-backdrop { cursor: pointer; }
@@ -1546,22 +1613,31 @@
                 var orig = window.fetch;
                 window.fetch = function(url, opts) {
                     return orig.apply(this, arguments).then(function(r) {
-                        if (r.status === 401 && (typeof url === 'string' && url.indexOf('/api/') !== -1)) {
+                        var urlStr = typeof url === 'string' ? url : (url && url.url ? String(url.url) : '');
+                        if (r.status === 401 && urlStr.indexOf('/api/') !== -1) {
+                            if (urlStr.indexOf('/api/auth/login') !== -1 || urlStr.indexOf('/api/auth/register') !== -1) {
+                                return r;
+                            }
                             var hadToken = false;
                             try { hadToken = !!localStorage.getItem('access_token'); } catch (e2) { hadToken = false; }
+                            if (typeof window.teardownAuthBlockingOverlays === 'function') {
+                                window.teardownAuthBlockingOverlays();
+                            }
                             if (hadToken) {
                                 try {
                                     localStorage.removeItem('access_token');
                                     localStorage.removeItem('username');
                                 } catch (e) {}
                                 if (typeof updateSidebarUser === 'function') updateSidebarUser();
-                                alert('登录已过期，请重新登录');
+                                if (typeof openAuthModal === 'function') openAuthModal();
+                                else alert('登录已过期，请重新登录');
                             }
                         }
                         return r;
                     });
                 };
             })();
+            window.getAuthHeaders = getAuthHeaders;
             function parseJsonOrReject(r) {
                 return r.text().then(function(text) {
                     if (r.ok) { try { return JSON.parse(text); } catch (e) { return Promise.reject({ detail: '响应格式错误' }); } }
@@ -3291,6 +3367,32 @@
                     prompt_template: '帮我执行单细胞时空动力学分析。我希望基于最优传输理论（Optimal Transport），探索细胞在时间序列上的发育与分化轨迹。请执行包含数据校验、时序标准化、轨迹推断、动态可视化、驱动基因挖掘及通路富集分析的全流程，并最终生成专家解读报告。'
                 },
                 {
+                    id: 'skill_corpus_data_processing',
+                    name: '科学语料数据加工',
+                    main_category: '特色科研流程',
+                    sub_category: '语料加工',
+                    tool_name: 'skill_corpus_data_processing',
+                    is_implemented: true,
+                    is_new_skill: true,
+                    description: '【核心能力】原始图像/文本经 Label Studio 专家复核，一键导出 SFT 微调语料（instruction/input/output）。支持未注释 UMAP、病理切片等科研素材。',
+                    tags: ['语料加工', 'Label Studio', 'SFT', 'HITL'],
+                    prompt_template: [
+                        '[Skill_Route: skill_corpus_data_processing]',
+                        '请上传需要进行打标加工的图像或数据文件（点击下方附件图标）。无需输入复杂指令，发送后系统将自动为您拉起 Label Studio 标注工作台。',
+                        '',
+                        '**推荐测试样例**：上传 test_corpus_umap.png（未注释单细胞 UMAP 聚类图），在 LS 中框选 T-Cell / B-Cell 区域后唤醒导出 JSON。',
+                        '',
+                        '**支持格式**',
+                        '- 图像：.png / .jpg / .jpeg / .webp / .tif',
+                        '- 文本：.txt / .md',
+                        '- 任务清单：.json（Label Studio 任务数组）',
+                        '',
+                        '```json',
+                        '{"image_path": "/uploads/test_corpus_umap.png", "project_title": "科学语料标注 · UMAP 演示"}',
+                        '```'
+                    ].join('\n')
+                },
+                {
                     id: 'ppt_outline',
                     name: '科研汇报 PPT 大纲生成',
                     main_category: '其他技能',
@@ -3791,6 +3893,82 @@
                 }
             ]);
 
+            /** 科学语料数据加工 · 技能详情抽屉 demo_visualization（原图 → SFT JSON 买家秀） */
+            (function attachCorpusSkillDetailedSpec() {
+                var corpusImg = '/assets/images/demos/corpus/test_corpus_umap.png';
+                var demoViz = [
+                    '<div class="skill-viz-corpus-flow" style="font-family:system-ui,-apple-system,sans-serif;">',
+                    '<div style="font-size:13px;font-weight:600;color:#334155;margin-bottom:12px;">原图 → 专家标注 → SFT 语料库</div>',
+                    '<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:start;">',
+                    '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;">',
+                    '<div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:8px;">📥 输入 · 未注释 UMAP</div>',
+                    '<img src="' + corpusImg + '" alt="未注释单细胞 UMAP 聚类图" style="width:100%;border-radius:6px;display:block;" loading="lazy" />',
+                    '<div style="font-size:10px;color:#94a3b8;margin-top:6px;">test_corpus_umap.png · 4 个未命名 Cluster</div>',
+                    '</div>',
+                    '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding-top:48px;color:#6366f1;font-size:22px;">→</div>',
+                    '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:10px;">',
+                    '<div style="font-size:11px;font-weight:600;color:#166534;margin-bottom:8px;">📤 输出 · SFT JSON 语料</div>',
+                    '<pre style="margin:0;font-size:9.5px;line-height:1.45;background:#fff;border:1px solid #d1fae5;border-radius:6px;padding:8px;overflow:auto;max-height:220px;color:#14532d;"><code>[',
+                    '  {',
+                    '    "instruction": "请识别并标注该单细胞 UMAP 聚类图中的核心细胞类群。",',
+                    '    "input": "/uploads/test_corpus_umap.png",',
+                    '    "output": "检测到 4 个主要类群：左上区域 (x≈120, y≈80) 为 T-Cell；右下区域为 B-Cell；中部偏左为 Macrophage；右上为 Unknown 过渡态。"',
+                    '  }',
+                    ']</code></pre>',
+                    '<div style="font-size:10px;color:#16a34a;margin-top:6px;">唤醒后导出 /results/corpus_hitl/sft_corpus_*.json</div>',
+                    '</div></div>',
+                    '<div style="margin-top:12px;padding:10px 12px;background:#eff6ff;border-left:3px solid #3b82f6;border-radius:0 8px 8px 0;font-size:11px;color:#1e40af;">',
+                    '<strong>🛠️ 处理链路</strong>：上传图像 → 程序化拉起 Label Studio → 专家框选区域 → LLM 清洗为 instruction / input / output',
+                    '</div></div>'
+                ].join('');
+                var spec = {
+                    tool_id: 'skill_corpus_data_processing',
+                    description_long: [
+                        '【🔬 核心能力】',
+                        '将杂乱的原始科研图像/文本，通过专家可视化复核，一键转化为可直接用于训练大模型的标准微调语料。',
+                        '',
+                        '【✨ 效果预览】',
+                        '📥 输入：一张未注释的单细胞聚类图 (.png) 或病理切片。',
+                        '🛠️ 处理：自动拉起 Label Studio 工作台，专家在图上框选 T-Cell、B-Cell 等区域。',
+                        '📤 输出：标准 SFT JSON 数组（instruction / input / output），可直接接入微调流水线。'
+                    ].join('\n'),
+                    usage_hint: '请上传需要进行打标加工的图像或数据文件（点击下方附件图标）。无需输入复杂指令，发送后系统将自动为您拉起 Label Studio 标注工作台。',
+                    demo_visualization: demoViz,
+                    inputs: [
+                        { name: 'image_path', type: 'image', required: false, description: '待标注科研图像（.png/.jpg 等）' },
+                        { name: 'file_path', type: 'file', required: false, description: '文本语料或 LS 任务 JSON' }
+                    ],
+                    outputs: [
+                        { name: 'sft_corpus_json', type: 'JSON', description: 'SFT 语料数组 instruction/input/output' },
+                        { name: 'hitl_workspace', type: 'Label Studio', description: '内嵌专家标注工作台' }
+                    ],
+                    parameters_table: [
+                        { name: 'image_path', type: 'path', required: false, description: '单张待标注图像路径' },
+                        { name: 'file_path', type: 'path', required: false, description: '文本或任务 JSON 路径' },
+                        { name: 'project_title', type: 'string', required: false, description: 'LS 项目名称' }
+                    ],
+                    query_examples: [
+                        {
+                            tier: 'zero_shot',
+                            label: '一键打标（推荐）',
+                            hint: '上传 test_corpus_umap.png 后直接发送，无需额外指令。',
+                            prompt: '[Skill_Route: skill_corpus_data_processing]\n请上传需要进行打标加工的图像或数据文件（点击下方附件图标）。无需输入复杂指令，发送后系统将自动为您拉起 Label Studio 标注工作台。'
+                        }
+                    ],
+                    workflow_highlights: ['Label Studio', '硬 HITL', 'SFT 导出', '语料清洗']
+                };
+                var list = window.__FEATURED_RESEARCH_SKILLS || [];
+                for (var i = 0; i < list.length; i++) {
+                    if (list[i] && list[i].id === 'skill_corpus_data_processing') {
+                        list[i].detailed_spec = spec;
+                        break;
+                    }
+                }
+                window._skillDetailedSpecsMap = window._skillDetailedSpecsMap || {};
+                window._skillDetailedSpecsMap['skill_corpus_data_processing'] = spec;
+                window._skillDetailedSpecsNameMap = window._skillDetailedSpecsNameMap || {};
+                window._skillDetailedSpecsNameMap['科学语料数据加工'] = 'skill_corpus_data_processing';
+            })();
 
             /** 「其他技能」Prompt 软技能 · 科研简约线条图标（按 skill id / 中文名匹配） */
             (function () {
@@ -3812,6 +3990,7 @@
                     single_cell_checklist: '<rect x="5" y="4" width="14" height="16" rx="2"/><path d="M8 8h2l1.5 3L13 8h2"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/>',
                     journal_cover_letter: '<rect x="4" y="5" width="16" height="14" rx="2"/><line x1="7" y1="9" x2="17" y2="9"/><line x1="7" y1="13" x2="15" y2="13"/><line x1="7" y1="17" x2="12" y2="17"/>',
                     review_rebuttal_outline: '<line x1="8" y1="6" x2="8" y2="18"/><line x1="12" y1="8" x2="18" y2="8"/><line x1="12" y1="12" x2="18" y2="12"/><line x1="12" y1="16" x2="18" y2="16"/>',
+                    skill_corpus_data_processing: '<path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/><rect x="3" y="14" width="18" height="6" rx="1"/><line x1="7" y1="17" x2="13" y2="17"/><line x1="15" y1="17" x2="17" y2="17"/>'
 
                 };
                 /** 阵列一 Batch2 · 与老技能一致的彩色 emoji 图标（浅蓝底圆角块，非灰色线条） */
@@ -3886,7 +4065,8 @@
                     '药物标识符交叉检索': 'drug_id_crossref',
                     '代谢物名称检索': 'refmet_metabolite_search',
                     'OpenTargets_按ChEMBL ID获取父分子和子分子': 'opentargets_chembl_hierarchy',
-                    'FDA药品标签字段检索': 'fda_drug_label_search'
+                    'FDA药品标签字段检索': 'fda_drug_label_search',
+                    '科学语料数据加工': 'skill_corpus_data_processing'
                 };
                 function _skillPlazaIconKey(skill) {
                     if (!skill) return '';
@@ -3913,6 +4093,7 @@
             /* 技能收藏状态 100% 来自后端 GET /api/skills 的 saved 字段与 UserSavedSkill 表，不使用 localStorage。*/
             /** 阵列一 Batch2 + 阵列二 Batch2 · 上新技能（橱窗置顶 + 卡片角标「新」） */
             window.__PLAZA_NEW_SKILL_IDS = {
+                skill_corpus_data_processing: true,
                 acmg_variant_interpretation: true,
                 pipeline_selection_memo: true,
                 omics_metadata_review: true,
@@ -3942,6 +4123,7 @@
                 fda_drug_label_search: true
             };
             window.__PLAZA_NEW_SKILL_NAMES = {
+                '科学语料数据加工': true,
                 '变异临床意义解读草案（ACMG 风格）': true,
                 '生物信息 Pipeline 选型备忘录': true,
                 '组学样本 Metadata 规范审查': true,
@@ -4530,7 +4712,8 @@
             function closeSkillDetailDrawer() {
                 var drawer = document.getElementById('skill-detail-drawer');
                 if (!drawer) return;
-                var activeFs = drawer.querySelector('.fullscreen-capable-widget.is-fullscreen');
+                var activeFs = document.querySelector('.skill-detail-mermaid-widget.is-fullscreen') ||
+                    (drawer.querySelector('.fullscreen-capable-widget.is-fullscreen'));
                 if (activeFs && typeof _toggleFullscreenWidget === 'function') {
                     _toggleFullscreenWidget(activeFs, activeFs.querySelector('.btn-fullscreen-toggle'));
                 }
@@ -4592,7 +4775,12 @@
                 var backBtn = document.getElementById('skill-detail-drawer-back');
                 var useBtn = document.getElementById('skill-detail-drawer-use');
                 var bookmarkBtn = document.getElementById('skill-detail-drawer-bookmark');
-                if (backdrop) backdrop.addEventListener('click', closeSkillDetailDrawer);
+                if (backdrop) {
+                    backdrop.addEventListener('click', function() {
+                        if (typeof _exitActiveFullscreenWidget === 'function' && _exitActiveFullscreenWidget()) return;
+                        closeSkillDetailDrawer();
+                    });
+                }
                 if (backBtn) backBtn.addEventListener('click', closeSkillDetailDrawer);
                 if (useBtn) useBtn.addEventListener('click', useSkillFromDetailDrawer);
                 if (bookmarkBtn) {
@@ -4606,6 +4794,7 @@
                 }
                 document.addEventListener('keydown', function(ev) {
                     if (ev.key === 'Escape') {
+                        if (document.querySelector('.fullscreen-capable-widget.is-fullscreen')) return;
                         var d = document.getElementById('skill-detail-drawer');
                         if (d && d.classList.contains('skill-detail-drawer--open')) closeSkillDetailDrawer();
                     }
@@ -4638,7 +4827,7 @@
                         } else {
                             window._lastSkillsItems = items;
                             if (emptyEl) emptyEl.style.display = 'none';
-                            var skillCardIcons = { '转录组学': '🧬', '空间组学': '🗺️', '代谢组学': '🧪', '医学影像组学': '🩻', '基因组学': '🧬', '表观遗传组学': '📊', '蛋白质组学': '🔗', '轨迹推断': '📈', '其他技能': '⚡', '用户上传': '📦', '电化学': '🔋', '药物筛选': '💊', '分子计算': '⚗️', '数据分析': '📊', '预测与建模': '🔬', '临床应用': '🏥', '信息检索': '🔍', '数据处理': '📁', '数据可视化': '📈', '文本处理': '📝' };
+                            var skillCardIcons = { '转录组学': '🧬', '空间组学': '🗺️', '代谢组学': '🧪', '医学影像组学': '🩻', '基因组学': '🧬', '表观遗传组学': '📊', '蛋白质组学': '🔗', '轨迹推断': '📈', '语料加工': '🏷️', '动力学分析': '📈', '其他技能': '⚡', '用户上传': '📦', '电化学': '🔋', '药物筛选': '💊', '分子计算': '⚗️', '数据分析': '📊', '预测与建模': '🔬', '临床应用': '🏥', '信息检索': '🔍', '数据处理': '📁', '数据可视化': '📈', '文本处理': '📝' };
                             grid.innerHTML = items.map(function(s) {
                                 try {
                                     var name = (s.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -5377,23 +5566,38 @@
             window.renderOmicsAuditTrailBar = renderOmicsAuditTrailBar;
             window.maybeInsertChatTimeDivider = maybeInsertChatTimeDivider;
             window.generatePipelineAuditId = generatePipelineAuditId;
-            function renderExpertReportIntoSlot(slotEl, markdown) {
+            function renderExpertReportIntoSlot(slotEl, markdown, options) {
                 if (!slotEl) return;
+                options = options || {};
                 var raw = markdown != null ? String(markdown).trim() : '';
                 if (!raw) {
                     slotEl.innerHTML = '';
                     slotEl.style.display = 'none';
                     return;
                 }
+                var isFinal = options.hitl_final === true
+                    || options.report_version === 'final'
+                    || /最终版/.test(raw)
+                    || (window.__omicsFrozenExecutionSnapshot && window.__omicsFrozenExecutionSnapshot.hitl_final === true);
+                var isDraft = !isFinal;
+                window.__expertReportVersion = isFinal ? 'final' : 'draft';
                 var expertRaw = (typeof normalizeReportMarkdownInput === 'function') ? normalizeReportMarkdownInput(raw) : raw;
                 var expertHtml = (typeof safeMarkedParse === 'function') ? safeMarkedParse(expertRaw) : expertRaw;
-                slotEl.innerHTML = '<div class="card border-0 shadow-sm omics-expert-report-card">' +
-                    '<div class="card-header bg-primary text-white">' +
-                    '<h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> 专家分析报告</h5></div>' +
+                var cardClass = 'omics-expert-report-card' + (isFinal ? ' omics-expert-report-card--final' : ' omics-expert-report-card--draft');
+                var headerClass = isFinal ? 'card-header omics-expert-report-header--final text-white' : 'card-header bg-primary text-white omics-expert-report-header--draft';
+                var titleHtml = isFinal
+                    ? '<span class="omics-expert-report-badge omics-expert-report-badge--final" aria-hidden="true"><i class="bi bi-circle-fill"></i></span> 专家分析报告 (最终版)'
+                    : '专家分析报告 (初稿)';
+                slotEl.innerHTML = '<div class="card border-0 shadow-sm ' + cardClass + '" data-report-version="' + (isFinal ? 'final' : 'draft') + '">' +
+                    '<div class="' + headerClass + '">' +
+                    '<h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> ' + titleHtml + '</h5></div>' +
                     '<div class="card-body expert-report-md-body report-expert-body">' + expertHtml + '</div></div>';
                 slotEl.style.display = '';
                 slotEl.classList.remove('d-none', 'hidden');
                 slotEl.setAttribute('aria-hidden', 'false');
+                if (isFinal && typeof window.disableHitlActionCards === 'function') {
+                    window.disableHitlActionCards('专家报告（最终版）已生成，标注入口已关闭');
+                }
                 var auditSlot = document.getElementById('omics-audit-trail-slot');
                 if (auditSlot && window.__omicsFrozenExecutionSnapshot) {
                     renderAuditTrailBar(auditSlot, { execution_snapshot: window.__omicsFrozenExecutionSnapshot }, {
@@ -5477,6 +5681,8 @@
                 });
             }
 
+            var WORKSPACE_TOGGLE_BTN_LABEL = '<i class="bi bi-layout-sidebar-inset-reverse"></i> 查看工作台';
+
             function syncAnalysisArtifactCardActiveStates() {
                 document.querySelectorAll('.analysis-artifact-card[data-snapshot-id]').forEach(function(card) {
                     var sid = card.getAttribute('data-snapshot-id');
@@ -5485,34 +5691,83 @@
                     var wp = document.getElementById('workspace-pane');
                     var expanded = wp && wp.classList.contains('workspace-active');
                     if (btn) {
+                        btn.innerHTML = WORKSPACE_TOGGLE_BTN_LABEL;
                         if (active && expanded) {
-                            btn.innerHTML = '<i class="bi bi-layout-sidebar-inset"></i> 折叠工作台';
                             btn.classList.remove('btn-outline-primary');
                             btn.classList.add('btn-primary');
+                            btn.setAttribute('aria-pressed', 'true');
                         } else {
-                            btn.innerHTML = '<i class="bi bi-layout-sidebar-inset-reverse"></i> 查看工作台';
                             btn.classList.remove('btn-primary');
                             btn.classList.add('btn-outline-primary');
+                            btn.setAttribute('aria-pressed', 'false');
                         }
                     }
                 });
             }
 
+            function ensureHitlArtifactRow(anchorEl) {
+                if (!anchorEl) return null;
+                var row = anchorEl.querySelector(':scope > .hitl-artifact-row');
+                if (!row) {
+                    row = document.createElement('div');
+                    row.className = 'hitl-artifact-row';
+                    var left = document.createElement('div');
+                    left.className = 'hitl-artifact-row__left';
+                    var right = document.createElement('div');
+                    right.className = 'hitl-artifact-row__right';
+                    row.appendChild(left);
+                    row.appendChild(right);
+                    anchorEl.appendChild(row);
+                }
+                return {
+                    row: row,
+                    left: row.querySelector('.hitl-artifact-row__left'),
+                    right: row.querySelector('.hitl-artifact-row__right')
+                };
+            }
+            window.ensureHitlArtifactRow = ensureHitlArtifactRow;
+
             function renderAnalysisArtifactCard(anchorEl, snapshotId, titleLabel) {
                 if (!anchorEl || !snapshotId) return null;
-                var existing = anchorEl.querySelector('.analysis-artifact-card[data-snapshot-id="' + snapshotId + '"]');
-                if (existing) return existing;
+                var slots = ensureHitlArtifactRow(anchorEl);
+                var mountEl = (slots && slots.left) ? slots.left : anchorEl;
                 var title = (titleLabel && String(titleLabel).trim()) ? String(titleLabel).trim() : '本次分析完成';
+                var esc = typeof escapeHtml === 'function' ? escapeHtml : function (s) { return String(s || ''); };
+                var existingAny = mountEl.querySelector('.analysis-artifact-card') || anchorEl.querySelector('.analysis-artifact-card');
+                if (existingAny) {
+                    if (existingAny.parentElement !== mountEl) {
+                        mountEl.appendChild(existingAny);
+                    }
+                    existingAny.setAttribute('data-snapshot-id', snapshotId);
+                    var metaH6 = existingAny.querySelector('.analysis-artifact-card__meta h6');
+                    if (metaH6) {
+                        metaH6.innerHTML = '<i class="bi bi-bar-chart-fill me-2"></i>' + esc(title);
+                    }
+                    var toggleBtn = existingAny.querySelector('.analysis-artifact-toggle-btn');
+                    if (toggleBtn) {
+                        toggleBtn.setAttribute('data-snapshot-id', snapshotId);
+                        toggleBtn.onclick = function (ev) {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            if (typeof toggleWorkspaceSnapshot === 'function') toggleWorkspaceSnapshot(snapshotId);
+                        };
+                    }
+                    document.querySelectorAll('.hitl-manual-annotate-btn').forEach(function (btn) { btn.remove(); });
+                    if (typeof syncAnalysisArtifactCardActiveStates === 'function') syncAnalysisArtifactCardActiveStates();
+                    if (typeof window.syncHitlEntryCard === 'function') window.syncHitlEntryCard();
+                    return existingAny;
+                }
                 var card = document.createElement('div');
                 card.className = 'analysis-artifact-card card shadow-sm mt-2 border-primary';
                 card.setAttribute('data-snapshot-id', snapshotId);
-                card.style.maxWidth = '400px';
                 card.innerHTML =
-                    '<div class="card-body p-3 d-flex justify-content-between align-items-center">' +
-                    '<div><h6 class="mb-1 text-primary"><i class="bi bi-bar-chart-fill me-2"></i>' + (typeof escapeHtml === 'function' ? escapeHtml(title) : title) + '</h6>' +
+                    '<div class="card-body p-3 d-flex justify-content-between align-items-center gap-2">' +
+                    '<div class="analysis-artifact-card__meta"><h6 class="mb-1 text-primary"><i class="bi bi-bar-chart-fill me-2"></i>' + esc(title) + '</h6>' +
                     '<small class="text-muted">点击按钮查看或折叠右侧完整报告</small></div>' +
+                    '<div class="analysis-artifact-card__actions d-flex gap-2 flex-shrink-0 align-items-center">' +
                     '<button type="button" class="btn btn-sm btn-outline-primary analysis-artifact-toggle-btn" data-snapshot-id="' + snapshotId + '">' +
-                    '<i class="bi bi-layout-sidebar-inset-reverse"></i> 查看工作台</button></div>';
+                    '<i class="bi bi-layout-sidebar-inset-reverse"></i> 查看工作台</button>' +
+                    '</div></div>';
                 var btn = card.querySelector('.analysis-artifact-toggle-btn');
                 if (btn) {
                     btn.addEventListener('click', function(ev) {
@@ -5521,8 +5776,9 @@
                         if (typeof toggleWorkspaceSnapshot === 'function') toggleWorkspaceSnapshot(snapshotId);
                     });
                 }
-                anchorEl.appendChild(card);
+                mountEl.appendChild(card);
                 if (typeof syncAnalysisArtifactCardActiveStates === 'function') syncAnalysisArtifactCardActiveStates();
+                if (typeof window.syncHitlEntryCard === 'function') window.syncHitlEntryCard();
                 return card;
             }
 
@@ -5549,6 +5805,15 @@
                     loadHistorySessionTimeMachine(payload);
                 } else if (typeof setWorkspacePaneExpanded === 'function') {
                     setWorkspacePaneExpanded(true);
+                }
+                if (wp && wp.classList.contains('workspace-active')) {
+                    try {
+                        wp.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    } catch (_scrollErr) { /* ignore */ }
+                    var wsContent = document.getElementById('active-workspace-content');
+                    if (wsContent) {
+                        try { wsContent.scrollTop = 0; } catch (_stErr) { /* ignore */ }
+                    }
                 }
                 if (typeof syncAnalysisArtifactCardActiveStates === 'function') syncAnalysisArtifactCardActiveStates();
             }
@@ -5593,21 +5858,20 @@
                 if (!workflowData || typeof applyPlanningDiagnosisWorkbench !== 'function') return null;
                 var diagContent = extractPlanningDiagnosisContent(workflowData);
                 if (diagContent == null) return null;
-                var wfName = workflowData.workflow_name ||
-                    (workflowData.workflow_config && (workflowData.workflow_config.workflow_name || workflowData.workflow_config.name)) ||
-                    (workflowData.workflow_data && workflowData.workflow_data.workflow_name) ||
-                    '数据诊断报告';
                 return applyPlanningDiagnosisWorkbench(workflowData, {
                     diagnosisContent: diagContent,
                     anchorEl: anchorEl,
-                    title: wfName
+                    title: '数据诊断报告'
                 });
             }
             function resolvePlanningArtifactAnchor(preferredZone) {
                 if (preferredZone) return preferredZone;
                 var zones = window.currentMessageZones;
                 if (zones && zones.cardZone) return zones.cardZone;
-                var row = document.querySelector('.active-chat-content .message-row.ai:last-of-type');
+                var root = typeof getActiveChatContentEl === 'function' ? getActiveChatContentEl() : null;
+                if (!root) root = document.getElementById('skillLiveContent') || document.getElementById('chatContent');
+                var row = root ? root.querySelector('.message-row.ai:last-of-type') : null;
+                if (!row) row = document.querySelector('.active-chat-content .message-row.ai:last-of-type');
                 if (row) {
                     return row.querySelector('.cards-zone') || row.querySelector('.process-log-zone') || row.querySelector('.bubble');
                 }
@@ -5647,6 +5911,12 @@
                 opts = opts || {};
                 var diagContent = opts.diagnosisContent != null ? opts.diagnosisContent : extractPlanningDiagnosisContent(data);
                 if (diagContent == null) return null;
+                if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
+                var wpDiag = document.getElementById('workspace-pane');
+                if (wpDiag) {
+                    wpDiag.style.setProperty('display', 'flex', 'important');
+                    wpDiag.classList.add('workspace-active');
+                }
                 var renderFn = window.globalRenderDiagnosisReportSection;
                 if (typeof renderFn === 'function') {
                     renderFn('diagnosis', diagContent, data || {});
@@ -5737,6 +6007,8 @@
                     message_created_at: messageCreatedAt || null,
                     report_generated_at: ex.report_generated_at || snap.report_generated_at || null,
                     pipeline_audit_id: ex.pipeline_audit_id || snap.pipeline_audit_id || null,
+                    hitl_final: !!(ex.hitl_final || snap.hitl_resumed),
+                    hitl_resumed: !!snap.hitl_resumed,
                     input_draft_text: (ex.input_draft_text != null ? String(ex.input_draft_text) : (snap.input_draft_text != null ? String(snap.input_draft_text) : '')),
                     input_draft_attachments: Array.isArray(ex.input_draft_attachments) ? ex.input_draft_attachments : (Array.isArray(snap.input_draft_attachments) ? snap.input_draft_attachments : [])
                 };
@@ -6154,7 +6426,12 @@
                         sessionCreatedAt: sessionCreatedAt
                     });
                 }
-                renderExpertReportIntoSlot(slots.expert, payload.expert_report_markdown);
+                renderExpertReportIntoSlot(slots.expert, payload.expert_report_markdown, {
+                    hitl_final: !!(payload.execution_snapshot && payload.execution_snapshot.hitl_final)
+                        || payload.hitl_final === true
+                        || payload.hitl_resumed === true
+                        || /最终版/.test(String(payload.expert_report_markdown || ''))
+                });
                 renderDiagnosisIntoSlot(slots.diag, payload.data_diagnosis_html, payload);
                 if (slots.exec) {
                     slots.exec.innerHTML = '';
@@ -9642,6 +9919,10 @@
                 return '<button type="button" class="btn-fullscreen-toggle" title="全屏预览" aria-label="全屏预览">' +
                     '<i class="bi bi-arrows-fullscreen"></i></button>';
             }
+            function _skillVisFullscreenCloseBtnHtml() {
+                return '<button type="button" class="btn-widget-fullscreen-close" title="返回" aria-label="返回关闭全屏">' +
+                    '<i class="bi bi-arrow-left" aria-hidden="true"></i><span>返回</span></button>';
+            }
             function _skillVisZoomToolbarHtml() {
                 return '<div class="zoom-toolbar" role="toolbar" aria-label="缩放控制">' +
                     '<button type="button" class="btn-zoom-out" title="缩小" aria-label="缩小"><i class="bi bi-zoom-out"></i></button>' +
@@ -9667,6 +9948,7 @@
                 var toolbar = panZoom ? _skillVisZoomToolbarHtml() : '';
                 extraClass = extraClass || '';
                 return '<div class="fullscreen-capable-widget' + panZoomClass + (extraClass ? ' ' + extraClass : '') + '">' +
+                    _skillVisFullscreenCloseBtnHtml() +
                     _skillVisFullscreenToggleBtnHtml() + toolbar +
                     '<div class="' + contentClass + '">' + inner + '</div></div>';
             }
@@ -9778,11 +10060,38 @@
                 });
             }
             window.hydrateSkillDetailDrawerMedia = hydrateSkillDetailDrawerMedia;
+            function _portalFullscreenWidgetToBody(widget, entering) {
+                if (!widget) return;
+                if (entering) {
+                    if (widget.__fsPortalRestore) return;
+                    var inDrawer = !!(widget.closest && widget.closest('#skill-detail-drawer'));
+                    if (!inDrawer) return;
+                    widget.__fsPortalRestore = { parent: widget.parentNode, next: widget.nextSibling };
+                    document.body.appendChild(widget);
+                    widget.setAttribute('data-fs-portaled', '1');
+                    return;
+                }
+                if (!widget.__fsPortalRestore) return;
+                var r = widget.__fsPortalRestore;
+                widget.__fsPortalRestore = null;
+                widget.removeAttribute('data-fs-portaled');
+                if (r.parent) {
+                    if (r.next && r.next.parentNode === r.parent) r.parent.insertBefore(widget, r.next);
+                    else r.parent.appendChild(widget);
+                }
+            }
+            function _exitActiveFullscreenWidget() {
+                var active = document.querySelector('.fullscreen-capable-widget.is-fullscreen');
+                if (!active) return false;
+                _toggleFullscreenWidget(active, active.querySelector('.btn-fullscreen-toggle'));
+                return true;
+            }
             function _toggleFullscreenWidget(widget, btn) {
                 if (!widget) return;
                 var entering = !widget.classList.contains('is-fullscreen');
                 widget.classList.toggle('is-fullscreen', entering);
                 document.body.classList.toggle('widget-fullscreen-active', entering);
+                _portalFullscreenWidgetToBody(widget, entering);
                 if (btn) {
                     var icon = btn.querySelector('i');
                     if (icon) {
@@ -9807,10 +10116,20 @@
                     }, 80);
                 }
             }
+            window._exitActiveFullscreenWidget = _exitActiveFullscreenWidget;
             function _initGlobalFullscreenToggle() {
                 if (window.__globalFullscreenBound) return;
                 window.__globalFullscreenBound = true;
                 document.addEventListener('click', function (ev) {
+                    var closeBtn = ev.target && ev.target.closest ? ev.target.closest('.btn-widget-fullscreen-close') : null;
+                    if (closeBtn) {
+                        var widgetClose = closeBtn.closest('.fullscreen-capable-widget');
+                        if (!widgetClose) return;
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        _toggleFullscreenWidget(widgetClose, widgetClose.querySelector('.btn-fullscreen-toggle'));
+                        return;
+                    }
                     var fsBtn = ev.target && ev.target.closest ? ev.target.closest('.btn-fullscreen-toggle') : null;
                     if (fsBtn) {
                         var widgetFs = fsBtn.closest('.fullscreen-capable-widget');
@@ -9819,6 +10138,17 @@
                         ev.stopPropagation();
                         _toggleFullscreenWidget(widgetFs, fsBtn);
                         return;
+                    }
+                    var activeFsWidget = document.querySelector('.fullscreen-capable-widget.is-fullscreen');
+                    if (activeFsWidget && activeFsWidget.contains(ev.target)) {
+                        if (ev.target.closest('.widget-content, .btn-fullscreen-toggle, .btn-widget-fullscreen-close, .zoom-toolbar, .zoom-toolbar button, a')) {
+                            /* 图表/控件区域内点击不关闭 */
+                        } else {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            _toggleFullscreenWidget(activeFsWidget, activeFsWidget.querySelector('.btn-fullscreen-toggle'));
+                            return;
+                        }
                     }
                     var skillMermaidClick = ev.target && ev.target.closest ? ev.target.closest(
                         '#skill-detail-drawer .skill-detail-mermaid-widget .skill-vis-mermaid-wrap--rendered .skill-vis-mermaid-canvas, ' +
@@ -11778,27 +12108,20 @@
                 `;
             }
 
-            // 🔥 TASK 2 & 3 FIX: 如果有推荐或诊断报告，先显示它们
+            // 参数推荐可留在工作流卡片；数据诊断全文仅由 applyPlanningDiagnosisWorkbench → 右侧工作台渲染
             const recommendation = workflowData.recommendation || null;
-            const diagnosisReport = workflowData.diagnosis_report || null;
+            const hasPlanningDiagnosis = !!(workflowData.diagnosis_report);
 
-            if (diagnosisReport || recommendation) {
+            if (hasPlanningDiagnosis) {
+                formHtml += `<p class="text-muted small mb-2"><i class="bi bi-layout-sidebar-inset-reverse"></i> 数据诊断报告已写入右侧「分析报告」工作台，请展开右栏查看。</p>`;
+            }
+
+            if (recommendation && recommendation.params && Object.keys(recommendation.params).length > 0) {
                 formHtml += `<div class="alert alert-info mb-3" style="background-color: #f0f7ff; border-left: 4px solid #4d6bfe; padding: 15px; border-radius: 4px;">
                     <h6 style="margin-top: 0; color: #1976D2; margin-bottom: 10px;">
-                        <i class="bi bi-clipboard-check"></i> 数据诊断与参数推荐报告
-                    </h6>`;
-
-                if (diagnosisReport) {
-                    var _cardDiagBody = (typeof buildDiagnosisReportBodyHtml === 'function')
-                        ? buildDiagnosisReportBodyHtml(diagnosisReport, workflowData)
-                        : safeMarkedParse(diagnosisReport);
-                    formHtml += `<div style="font-size: 14px; line-height: 1.6; color: #333; margin-bottom: 10px;">
-                        ${_cardDiagBody}
-                    </div>`;
-                }
-
-                if (recommendation && recommendation.params && Object.keys(recommendation.params).length > 0) {
-                    formHtml += `<div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
+                        <i class="bi bi-sliders"></i> 参数推荐
+                    </h6>
+                    <div style="margin-top: 0; padding-top: 0;">
                         <button id="toggle-params-btn-${formId}" class="btn btn-sm btn-primary" 
                                 onclick="toggleParameterRecommendations('${formId}', true)">
                             使用推荐参数
@@ -11838,10 +12161,8 @@
                                 }).join('')}
                             </tbody>
                         </table>
-                    </div>`;
-                }
-
-                formHtml += `</div>`;
+                    </div>
+                </div>`;
             }
 
             // 🔥 STED-EC 预览强交互：仅 STED-EC 在 template 模式下仍可勾选步骤、填写参数；其他技能保持禁用
@@ -12293,6 +12614,9 @@
                 authShellSetStep('gate');
             }
             function openAuthModal() {
+                if (typeof window.teardownAuthBlockingOverlays === 'function') {
+                    window.teardownAuthBlockingOverlays();
+                }
                 var el = document.getElementById('auth-modal');
                 if (el) { el.style.display = 'flex'; el.setAttribute('aria-hidden', 'false'); }
                 var errEl = document.getElementById('auth-modal-error');
@@ -12367,12 +12691,23 @@
                 });
             }
             function appendSessionStatusIndicator(parentEl, displayStatus) {
-                if (!parentEl || displayStatus !== 'running') return;
-                var runInd = document.createElement('span');
-                runInd.className = 'session-running-indicator spinner-grow spinner-grow-sm text-primary ms-2';
-                runInd.setAttribute('role', 'status');
-                runInd.setAttribute('aria-label', '后台运行中');
-                parentEl.appendChild(runInd);
+                if (!parentEl || !displayStatus) return;
+                if (displayStatus === 'running') {
+                    var runInd = document.createElement('span');
+                    runInd.className = 'session-running-indicator spinner-grow spinner-grow-sm text-primary ms-2';
+                    runInd.setAttribute('role', 'status');
+                    runInd.setAttribute('aria-label', '后台运行中');
+                    parentEl.appendChild(runInd);
+                    return;
+                }
+                if (displayStatus === 'waiting_for_hitl') {
+                    var hitlInd = document.createElement('span');
+                    hitlInd.className = 'session-hitl-indicator ms-2';
+                    hitlInd.setAttribute('title', '等待专家标注');
+                    hitlInd.textContent = '⏸ HITL';
+                    hitlInd.style.cssText = 'font-size:11px;color:#b45309;font-weight:600;';
+                    parentEl.appendChild(hitlInd);
+                }
             }
             window.isSessionStaleRunning = isSessionStaleRunning;
             window.getSessionDisplayStatus = getSessionDisplayStatus;
@@ -13151,7 +13486,10 @@
             }
             window.__sessionStreamReconnectAbort = null;
             function attachLiveStreamAnchorToLastAiRow() {
-                var row = document.querySelector('#chatContent .message-row.ai:last-of-type');
+                var root = typeof getActiveChatContentEl === 'function' ? getActiveChatContentEl() : null;
+                if (!root) root = document.getElementById('skillLiveContent') || document.getElementById('chatContent');
+                if (!root) return;
+                var row = root.querySelector('.message-row.ai:last-of-type');
                 if (!row) return;
                 var messageContent = row.querySelector('.message-content') || row;
                 var reasoningZone = row.querySelector('.reasoning-zone') || row.querySelector('.reasoning-container');
@@ -13171,7 +13509,7 @@
                     messageContent.appendChild(logZone);
                 }
                 var textZone = row.querySelector('.text-zone');
-                var cardZone = row.querySelector('.card-zone');
+                var cardZone = row.querySelector('.cards-zone') || row.querySelector('.workflow-container');
                 window.currentMessageZones = {
                     reasoningZone: reasoningZone,
                     logZone: logZone,
@@ -13398,6 +13736,18 @@
                         _hydrateDraft.then(function(sessionStatus) {
                             if (!_staleRunning && sessionStatus === 'running' && sessionId === currentSessionId && typeof reconnectLiveStream === 'function') {
                                 reconnectLiveStream(sessionId);
+                            }
+                            if (sessionStatus === 'waiting_for_hitl' && sessionId === currentSessionId) {
+                                var lastAgentSnap = null;
+                                for (var _hi = messages.length - 1; _hi >= 0; _hi--) {
+                                    if (messages[_hi].role === 'agent' && messages[_hi].content) {
+                                        lastAgentSnap = mergeAgentContentToSnapshot(messages[_hi].content);
+                                        break;
+                                    }
+                                }
+                                if (lastAgentSnap && typeof window.restoreHitlFromSnapshot === 'function') {
+                                    window.restoreHitlFromSnapshot(lastAgentSnap, sessionStatus);
+                                }
                             }
                         }).finally(function() {
                             if (typeof onLoaded === 'function') {
@@ -13762,6 +14112,10 @@
                 fillFromRoot('skill_last_tool');
                 fillFromRoot('execution_snapshot');
                 fillFromRoot('execution_snapshots');
+                fillFromRoot('hitl');
+                fillFromRoot('hitl_pending');
+                if (content.hitl && typeof content.hitl === 'object') snap.hitl = content.hitl;
+                if (content.hitl_pending != null) snap.hitl_pending = content.hitl_pending;
                 if (content.execution_snapshots && typeof content.execution_snapshots === 'object') {
                     snap.execution_snapshots = content.execution_snapshots;
                 }
@@ -13917,6 +14271,10 @@
 
                 if (prevZones !== undefined) window.currentMessageZones = prevZones;
                 else delete window.currentMessageZones;
+
+                if ((snap.hitl_pending || snap.hitl) && typeof window.restoreHitlFromSnapshot === 'function') {
+                    window.restoreHitlFromSnapshot(snap, null);
+                }
             }
             function createRestoreAIMessageRowAndReplay(state_snapshot) {
                 createRestoreAIMessageRowWithSnapshot(state_snapshot, null);
@@ -15826,12 +16184,26 @@
                 img.src = abs || src;
                 lightbox.style.display = 'flex';
             }
-            // 打印/导出时图片需用绝对 URL，否则打印预览中会加载失败
+            // 打印/导出时图片需用绝对 URL；媒体资源始终走当前页同源 /results/，禁止 https://*:8028 毒药 URL
+            function sanitizeMediaPathToRelative(url) {
+                if (!url || typeof url !== 'string') return url || '';
+                var u = url.trim();
+                if (u.indexOf('http://') !== 0 && u.indexOf('https://') !== 0) return u;
+                try {
+                    var parsed = new URL(u);
+                    if (parsed.pathname && (parsed.pathname.indexOf('/results/') === 0 || parsed.pathname.indexOf('/uploads/') === 0)) {
+                        return parsed.pathname + (parsed.search || '');
+                    }
+                } catch (_e) { /* keep */ }
+                return u;
+            }
             function getAbsoluteMediaUrl(path) {
                 if (!path || typeof path !== 'string') return path || '';
-                if (path.indexOf('http://') === 0 || path.indexOf('https://') === 0) return path;
+                var p = sanitizeMediaPathToRelative(path);
+                if (p.indexOf('http://') === 0 || p.indexOf('https://') === 0) return p;
+                p = p.indexOf('/') === 0 ? p : '/' + p.replace(/^\/+/, '');
+                // 相对路径：由当前页 origin 加载（nginx :8018 / :80），绝不拼接 api-server :8028
                 var origin = window.location.origin || '';
-                var p = path.indexOf('/') === 0 ? path : '/' + path.replace(/^\/+/, '');
                 return origin ? (origin + p) : p;
             }
             function closeLightbox() {
@@ -17597,12 +17969,26 @@
                                     break;
                                     
                                 case 'diagnosis': {
+                                    if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
+                                    var wpDx = document.getElementById('workspace-pane');
+                                    if (wpDx) {
+                                        wpDx.style.setProperty('display', 'flex', 'important');
+                                        wpDx.classList.add('workspace-active');
+                                    }
                                     // 规划期：实时写入右栏诊断区 + 挂载「查看工作台」卡片（不等待 done / execution_snapshot）
                                     var _planDx = (typeof extractPlanningDiagnosisContent === 'function')
                                         ? extractPlanningDiagnosisContent(data)
                                         : (data.diagnosis_report != null ? data.diagnosis_report : null);
                                     if (_planDx != null && typeof applyPlanningDiagnosisWorkbench === 'function') {
-                                        applyPlanningDiagnosisWorkbench(data, { diagnosisContent: _planDx, title: '数据诊断报告' });
+                                        var _dxAnchor = window.currentMessageZones && window.currentMessageZones.cardZone;
+                                        applyPlanningDiagnosisWorkbench(data, {
+                                            diagnosisContent: _planDx,
+                                            anchorEl: _dxAnchor,
+                                            title: '数据诊断报告'
+                                        });
+                                    } else if (data.report_data && data.report_data.report != null && data.report_data.hitl_final) {
+                                        var _rrsFinal = window.__workspace_renderReportSection || window.globalRenderDiagnosisReportSection;
+                                        if (typeof _rrsFinal === 'function') _rrsFinal('summary', data.report_data.report, data);
                                     } else if (data.diagnosis_report != null) {
                                         var _rrsDx = window.__workspace_renderReportSection || window.globalRenderDiagnosisReportSection;
                                         if (typeof _rrsDx === 'function') _rrsDx('diagnosis', data.diagnosis_report, data);
@@ -17665,10 +18051,28 @@
                                     if (typeof syncPlanningDiagnosisFromWorkflowData === 'function') {
                                         var _cardZonePlan = window.currentMessageZones && window.currentMessageZones.cardZone;
                                         syncPlanningDiagnosisFromWorkflowData(data, _cardZonePlan);
+                                    } else if (typeof applyPlanningDiagnosisWorkbench === 'function') {
+                                        var _wfPlanDx = (typeof extractPlanningDiagnosisContent === 'function')
+                                            ? extractPlanningDiagnosisContent(data) : null;
+                                        if (_wfPlanDx != null) {
+                                            applyPlanningDiagnosisWorkbench(data, {
+                                                diagnosisContent: _wfPlanDx,
+                                                anchorEl: window.currentMessageZones && window.currentMessageZones.cardZone,
+                                                title: '数据诊断报告'
+                                            });
+                                        }
                                     }
                                     break;
                                     
                                 case 'result':
+                                    if (data.report_data && (data.report_data.report != null || data.report_data.diagnosis != null)) {
+                                        if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
+                                    }
+                                    // 规划期兜底：result 与 workflow 同构 payload 时也要联动诊断工作台
+                                    if (typeof syncPlanningDiagnosisFromWorkflowData === 'function') {
+                                        var _resCardZoneDx = window.currentMessageZones && window.currentMessageZones.cardZone;
+                                        syncPlanningDiagnosisFromWorkflowData(data, _resCardZoneDx);
+                                    }
                                     // 数据驱动：steps_details → #report-execution；diagnosis → #report-summary；diagnosis_report → #report-diagnosis
                                     // 🔥 步骤级异常透传：失败步骤的 traceback 在控制台高亮打印
                                     var resultSteps = (data.report_data && data.report_data.steps_details) ? data.report_data.steps_details : (data.steps_details || []);
@@ -17688,6 +18092,9 @@
                                     if (data.report_data) {
                                         if (data.report_data.steps_details && data.report_data.steps_details.length > 0) {
                                             renderExecutionSteps(data.report_data.steps_details);
+                                            if (typeof window.scanAndRenderHitlFromSteps === 'function') {
+                                                window.scanAndRenderHitlFromSteps(data.report_data.steps_details);
+                                            }
                                         }
                                         if (data.report_data.diagnosis != null) {
                                             renderReportSection('diagnosis', data.report_data.diagnosis, data);
@@ -17929,7 +18336,16 @@
                                         if (!currentRow && window.currentMessageZones && window.currentMessageZones.textZone)
                                             currentRow = window.currentMessageZones.textZone.closest('.message-row.ai');
                                         if (!currentRow)
-                                            currentRow = document.querySelector('#chatContent .message-row.ai:last-of-type');
+                                            currentRow = (typeof getActiveChatContentEl === 'function' ? getActiveChatContentEl() : null);
+                                        if (!currentRow) currentRow = document.getElementById('skillLiveContent') || document.getElementById('chatContent');
+                                        if (currentRow && currentRow.querySelector) {
+                                            var _lastAi = currentRow.querySelector('.message-row.ai:last-of-type') || currentRow.closest('.message-row.ai');
+                                            if (_lastAi) currentRow = _lastAi;
+                                        }
+                                        if (!currentRow || !currentRow.classList || !currentRow.classList.contains('message-row')) {
+                                            currentRow = document.querySelector('#skillLiveContent .message-row.ai:last-of-type')
+                                                || document.querySelector('#chatContent .message-row.ai:last-of-type');
+                                        }
                                         if (currentRow) currentRow.dataset.snapshot = snapshotStr;
                                         var _ssPlanDx = (typeof extractPlanningDiagnosisContent === 'function')
                                             ? extractPlanningDiagnosisContent(data)
@@ -17944,6 +18360,11 @@
                                                 anchorEl: _ssCardZone,
                                                 title: '数据诊断报告'
                                             });
+                                        }
+                                        if (data && data.hitl && typeof window.renderHitlActionCard === 'function') {
+                                            window.renderHitlActionCard(data.hitl);
+                                        } else if (data && data.hitl_pending && data.hitl && typeof window.restoreHitlFromSnapshot === 'function') {
+                                            window.restoreHitlFromSnapshot(data, data.status || 'waiting_for_hitl');
                                         }
                                     } catch (e) { console.warn('[state_snapshot] 写入 dataset 失败:', e); }
                                     break;
@@ -19344,7 +19765,11 @@
                             try {
                                 _doneRow = (window.currentMessageZones && window.currentMessageZones.logZone)
                                     ? window.currentMessageZones.logZone.closest('.message-row.ai')
-                                    : document.querySelector('#chatContent .message-row.ai:last-of-type');
+                                    : (function () {
+                                        var root = typeof getActiveChatContentEl === 'function' ? getActiveChatContentEl() : null;
+                                        if (!root) root = document.getElementById('skillLiveContent') || document.getElementById('chatContent');
+                                        return root ? root.querySelector('.message-row.ai:last-of-type') : null;
+                                    })();
                                 if (_doneRow && _doneRow.dataset.snapshot) {
                                     _doneFullSnap = JSON.parse(_doneRow.dataset.snapshot);
                                     if (_doneFullSnap && _doneFullSnap.execution_snapshot) _snapExDone = _doneFullSnap.execution_snapshot;
@@ -19356,28 +19781,40 @@
                                 ingestExecutionSnapshotsFromContent(data, null);
                             }
                             var _artifactSnapId = resolveSnapshotIdFromPayload(_doneFullSnap || {}, data, 'task');
+                            var _artLogZone = (window.currentMessageZones && window.currentMessageZones.logZone)
+                                ? window.currentMessageZones.logZone
+                                : (_doneRow ? _doneRow.querySelector('.process-log-zone') : null);
+                            var _planAnchor = (window.currentMessageZones && window.currentMessageZones.cardZone)
+                                || (_doneRow ? (_doneRow.querySelector('.cards-zone') || _doneRow.querySelector('.workflow-container')) : null);
+                            var _artifactAnchor = _artLogZone || _planAnchor
+                                || (_doneRow ? (_doneRow.querySelector('.process-log-zone') || _doneRow.querySelector('.cards-zone')) : null);
+                            if (_doneRow && _doneRow.querySelector('.analysis-artifact-card')) {
+                                var _existingCard = _doneRow.querySelector('.analysis-artifact-card');
+                                if (_existingCard && _existingCard.parentElement) {
+                                    _artifactAnchor = _existingCard.parentElement;
+                                }
+                            }
                             if (_snapExDone || (_doneFullSnap && (_doneFullSnap.execution_snapshot || _doneFullSnap.execution_snapshots))) {
                                 var _artPayload = resolveExecutionSnapshotMirror(_doneFullSnap || { execution_snapshot: _snapExDone }, null);
                                 _artPayload.snapshot_id = _artifactSnapId;
                                 window.__omicsSnapshotRegistry = window.__omicsSnapshotRegistry || {};
                                 window.__omicsSnapshotRegistry[_artifactSnapId] = _artPayload;
-                                var _artLogZone = (window.currentMessageZones && window.currentMessageZones.logZone)
-                                    ? window.currentMessageZones.logZone
-                                    : (_doneRow ? _doneRow.querySelector('.process-log-zone') : null);
                                 var _artTitle = _artPayload.workflow_name || '本次分析完成';
-                                if (_artLogZone && typeof renderAnalysisArtifactCard === 'function') {
-                                    renderAnalysisArtifactCard(_artLogZone, _artifactSnapId, _artTitle);
+                                if (_artifactAnchor && typeof renderAnalysisArtifactCard === 'function') {
+                                    renderAnalysisArtifactCard(_artifactAnchor, _artifactSnapId, _artTitle);
                                 }
                             } else if (window.__planningLiveSnapshotId && typeof renderAnalysisArtifactCard === 'function') {
                                 var _planSnapId = window.__planningLiveSnapshotId;
-                                var _planAnchor = (window.currentMessageZones && window.currentMessageZones.cardZone)
-                                    || (window.currentMessageZones && window.currentMessageZones.logZone)
-                                    || (_doneRow ? (_doneRow.querySelector('.cards-zone') || _doneRow.querySelector('.process-log-zone')) : null);
-                                if (_planAnchor) {
-                                    renderAnalysisArtifactCard(_planAnchor, _planSnapId, '数据诊断报告');
+                                if (_artifactAnchor) {
+                                    renderAnalysisArtifactCard(_artifactAnchor, _planSnapId, '数据诊断报告');
                                 }
                                 window.__omicsActiveSnapshotId = _planSnapId;
                                 if (typeof syncAnalysisArtifactCardActiveStates === 'function') syncAnalysisArtifactCardActiveStates();
+                            }
+                            if (_doneFullSnap && typeof window.restoreHitlFromSnapshot === 'function') {
+                                window.restoreHitlFromSnapshot(_doneFullSnap, (data && data.status) || '');
+                            } else if (window.__lastStateSnapshotHitl && typeof window.renderHitlActionCard === 'function') {
+                                window.renderHitlActionCard(window.__lastStateSnapshotHitl);
                             }
                             window.__pendingWorkflowExecutionId = null;
                             var _auditSlotDone = document.getElementById('omics-audit-trail-slot');
@@ -21754,24 +22191,18 @@
                     `;
                 }
                 
-                // 🔧 修复：渲染诊断报告（如果有，优先显示）
                 if (diagnosisReport) {
-                    // 🔥 TASK 5: 检查是否有参数推荐
-                    const hasRecommendations = recommendation && recommendation.params && Object.keys(recommendation.params).length > 0;
-                    const useRecommendedParams = false; // 默认使用默认参数
-                    const _formDiagBody = (typeof buildDiagnosisReportBodyHtml === 'function')
-                        ? buildDiagnosisReportBodyHtml(diagnosisReport, data)
-                        : safeMarkedParse(diagnosisReport);
-                    
-                    formHtml += `<div class="alert alert-success mb-3" style="background-color: #f0f7ff; border-left: 4px solid #4d6bfe; padding: 15px; border-radius: 4px;">
+                    formHtml += `<p class="text-muted small mb-2"><i class="bi bi-layout-sidebar-inset-reverse"></i> 数据诊断报告已写入右侧「分析报告」工作台。</p>`;
+                }
+
+                const hasRecommendations = recommendation && recommendation.params && Object.keys(recommendation.params).length > 0;
+                if (hasRecommendations) {
+                    const useRecommendedParams = false;
+                    formHtml += `<div class="alert alert-info mb-3" style="background-color: #f0f7ff; border-left: 4px solid #4d6bfe; padding: 15px; border-radius: 4px;">
                         <h6 style="margin-top: 0; color: #1976D2; margin-bottom: 10px;">
-                            <i class="bi bi-clipboard-check"></i> ${isTemplateMode ? '方案已生成' : '数据诊断与参数推荐报告'}
+                            <i class="bi bi-sliders"></i> 参数推荐
                         </h6>
-                        <div style="font-size: 14px; line-height: 1.6; color: #333;">
-                            ${_formDiagBody}
-                        </div>
-                        ${hasRecommendations ? `
-                            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
+                            <div style="margin-top: 0; padding-top: 0;">
                                 <button id="toggle-params-btn-${formId}" class="btn btn-sm ${useRecommendedParams ? 'btn-secondary' : 'btn-primary'}" 
                                         onclick="toggleParameterRecommendations('${formId}', ${!useRecommendedParams})">
                                     ${useRecommendedParams ? '切换回默认参数' : '使用推荐参数'}
@@ -21812,7 +22243,6 @@
                                     </tbody>
                                 </table>
                             </div>
-                        ` : ''}
                     </div>`;
                 }
                 
@@ -22649,6 +23079,11 @@
             };
         </script>
         <script src="/js/components/settings_modal.js" defer></script>
+        <script src="/js/auth_headers.js" defer></script>
+        <script src="/js/components/database_settings.js" defer></script>
+        <script src="/js/components/hitl_ui.js" defer></script>
+        <script src="/js/components/expert_report_edit.js" defer></script>
+        <script src="/js/components/workspace_action_bar.js" defer></script>
         <script src="/js/components/im_channels_modal.js" defer></script>
         <script src="/js/feedback_ui.js"></script>
         <script type="module" src="/js/components/admin_console.js"></script>

@@ -20,7 +20,7 @@ from typing import AsyncIterator, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -68,6 +68,11 @@ class WorkflowTemplateRenameBody(BaseModel):
 class CheckFilesBody(BaseModel):
     """POST /api/utils/check_files 请求体：文件事前探照"""
     paths: List[str] = []
+
+
+class ExpertReportUpdateBody(BaseModel):
+    """PUT /api/sessions/{session_id}/expert_report 请求体"""
+    markdown: str = Field(..., description="专家分析报告 Markdown 全文")
 
 
 class ClientTraceBody(BaseModel):
@@ -629,4 +634,57 @@ def rename_workflow_template(
     except Exception as e:
         db.rollback()
         logger.exception("重命名工作流收藏失败: %s", e)
+        raise HTTPException(status_code=500, detail="更新失败")
+
+
+@router.put("/api/sessions/{session_id}/expert_report")
+def update_session_expert_report(
+    session_id: str,
+    body: ExpertReportUpdateBody,
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    """更新会话最新 Agent 消息中的专家分析报告 Markdown（state_snapshot + execution_snapshot 双写）。"""
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session.owner_id != owner_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权修改该会话")
+
+    md = (body.markdown or "").strip()
+    if not md:
+        raise HTTPException(status_code=400, detail="markdown 不能为空")
+
+    msg = (
+        db.query(MessageModel)
+        .filter(MessageModel.session_id == session_id, MessageModel.role == "agent")
+        .order_by(MessageModel.created_at.desc(), MessageModel.id.desc())
+        .first()
+    )
+    if not msg:
+        raise HTTPException(status_code=404, detail="该会话尚无 Agent 消息可更新")
+
+    try:
+        from gibh_agent.core.execution_snapshot import update_expert_report_in_state
+
+        content = msg.content if isinstance(msg.content, dict) else {}
+        snap = content.get("state_snapshot") if isinstance(content.get("state_snapshot"), dict) else {}
+        if not snap:
+            snap = content if isinstance(content, dict) else {}
+        update_expert_report_in_state(snap, md)
+        content["state_snapshot"] = snap
+        if isinstance(content.get("execution_snapshot"), dict):
+            content["execution_snapshot"]["expert_report_markdown"] = md
+        ex_col = content.get("execution_snapshots")
+        if isinstance(ex_col, dict) and isinstance(ex_col.get("snapshots"), dict):
+            active = ex_col.get("active_snapshot_id")
+            if active and isinstance(ex_col["snapshots"].get(active), dict):
+                ex_col["snapshots"][active]["expert_report_markdown"] = md
+        msg.content = content
+        flag_modified(msg, "content")
+        db.commit()
+        return {"status": "success", "message": "专家报告已更新", "session_id": session_id}
+    except Exception as exc:
+        db.rollback()
+        logger.exception("更新专家报告失败 session=%s: %s", session_id, exc)
         raise HTTPException(status_code=500, detail="更新失败")

@@ -1,0 +1,606 @@
+/* Phase 2 HITL · 专家干预 / LS 内嵌 / 工作台底栏 — 增量样式（不覆盖 Flexbox 主布局） */
+
+.hitl-action-card {
+    margin: 12px 0 16px;
+    padding: 16px;
+    border-radius: 12px;
+    border: 1px solid #fbbf24;
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    box-shadow: 0 4px 14px rgba(245, 158, 11, 0.12);
+}
+.hitl-action-card__title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #92400e;
+    margin: 0 0 8px;
+}
+.hitl-action-card__desc {
+    font-size: 13px;
+    color: #78350f;
+    margin: 0 0 14px;
+    line-height: 1.5;
+}
+.hitl-action-card__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.hitl-action-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+}
+.hitl-action-btn--primary {
+    background: #4d6bfe;
+    color: #fff;
+    border-color: #4d6bfe;
+}
+.hitl-action-btn--secondary {
+    background: #fff;
+    color: #374151;
+    border-color: #d1d5db;
+}
+
+#hitl-ls-modal.hitl-ls-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10060;
+    background: rgba(15, 23, 42, 0.72);
+    display: none;
+    flex-direction: column;
+    padding: 0;
+}
+#hitl-ls-modal.hitl-ls-modal-overlay.is-open {
+    display: flex;
+}
+.hitl-ls-modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: #1e293b;
+    color: #f8fafc;
+    flex-shrink: 0;
+}
+.hitl-ls-modal__title {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0;
+}
+.hitl-ls-modal__close {
+    background: transparent;
+    border: none;
+    color: #f8fafc;
+    font-size: 24px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px 8px;
+}
+.hitl-ls-modal__iframe {
+    flex: 1 1 auto;
+    width: 100%;
+    border: none;
+    min-height: 0;
+    background: #fff;
+}
+.hitl-ls-modal__footer {
+    flex-shrink: 0;
+    padding: 12px 20px 16px;
+    background: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+}
+.hitl-ls-modal__hint {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: #475569;
+    line-height: 1.5;
+}
+.hitl-ls-modal__footer-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+.hitl-ls-modal__done-btn {
+    padding: 10px 18px;
+    border-radius: 8px;
+    border: none;
+    background: #16a34a;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.hitl-ls-modal__done-btn:hover:not(:disabled) {
+    background: #15803d;
+}
+.hitl-ls-modal__done-btn:disabled {
+    opacity: 0.7;
+    cursor: wait;
+}
+.hitl-ls-modal__done-btn--pulse {
+    animation: hitl-done-pulse 1.2s ease-in-out infinite;
+    box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.35);
+}
+@keyframes hitl-done-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.02); }
+}
+
+.expert-report-edit-btn {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    z-index: 2;
+    padding: 4px 10px;
+    font-size: 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.45);
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    cursor: pointer;
+}
+.omics-expert-report-card .card-header {
+    position: relative;
+}
+.expert-report-edit-textarea {
+    width: 100%;
+    min-height: 280px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    padding: 12px;
+    border: 2px solid #4d6bfe;
+    border-radius: 8px;
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+.workspace-ingestion-action-bar {
+    flex-shrink: 0;
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 10px 16px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, #fff 100%);
+    border-top: 1px solid #e5e7eb;
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.06);
+    z-index: 5;
+    display: none;
+}
+#workspace-pane.workspace-active .workspace-ingestion-action-bar.is-visible {
+    display: block;
+}
+.workspace-ingestion-action-bar__inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.workspace-ingestion-action-bar__btn-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.workspace-ingestion-spinner {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #cbd5e1;
+    border-top-color: #059669;
+    border-radius: 50%;
+    animation: workspace-ingestion-spin 0.75s linear infinite;
+    flex-shrink: 0;
+}
+@keyframes workspace-ingestion-spin {
+    to { transform: rotate(360deg); }
+}
+.workspace-ingestion-error {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: 12px;
+    color: #dc2626;
+    line-height: 1.4;
+}
+.workspace-ingestion-action-bar__btn--loading {
+    background: #64748b !important;
+    cursor: wait;
+}
+.workspace-ingestion-action-bar__btn--success {
+    background: #16a34a !important;
+}
+.workspace-ingestion-action-bar__btn--success:hover {
+    background: #15803d !important;
+}
+.workspace-ingestion-action-bar__btn--error {
+    background: #dc2626 !important;
+}
+.workspace-ingestion-action-bar__btn--error:hover {
+    background: #b91c1c !important;
+}
+.workspace-ingestion-action-bar__btn:disabled {
+    opacity: 0.85;
+    cursor: not-allowed;
+}
+
+.ingestion-result-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10070;
+    background: rgba(15, 23, 42, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+.ingestion-result-modal {
+    background: #fff;
+    border-radius: 12px;
+    padding: 20px 24px;
+    max-width: 520px;
+    width: 100%;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+    position: relative;
+}
+.ingestion-result-modal__close {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    border: none;
+    background: transparent;
+    font-size: 22px;
+    cursor: pointer;
+    color: #64748b;
+}
+.ingestion-result-modal__dest code {
+    word-break: break-all;
+    font-size: 12px;
+}
+.ingestion-result-modal__files {
+    max-height: 180px;
+    overflow-y: auto;
+    font-size: 12px;
+    margin: 0 0 16px;
+    padding-left: 20px;
+}
+.ingestion-result-modal__ok {
+    width: 100%;
+}
+
+.hitl-action-card--disabled {
+    position: relative;
+    pointer-events: none;
+    opacity: 0.72;
+}
+.hitl-action-card__overlay {
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    background: rgba(255, 251, 235, 0.88);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 16px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #92400e;
+    z-index: 2;
+}
+
+.omics-expert-report-card--final .omics-expert-report-header--final {
+    background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
+}
+.omics-expert-report-card--draft .omics-expert-report-header--draft {
+    background: #4d6bfe !important;
+}
+.omics-expert-report-badge--final {
+    margin-right: 4px;
+    color: #86efac;
+    font-size: 0.65em;
+    vertical-align: middle;
+}
+.omics-expert-report-card--final {
+    box-shadow: 0 4px 18px rgba(5, 150, 105, 0.18);
+}
+
+.hitl-action-card--dock {
+    margin-top: 10px;
+    max-width: 100%;
+}
+.hitl-action-card--dock .hitl-action-card__actions {
+    justify-content: flex-end;
+}
+
+.expert-report-edit-btn {
+    float: right;
+    margin-top: -2px;
+    padding: 4px 10px;
+    font-size: 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.35);
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+    cursor: pointer;
+}
+.expert-report-edit-btn:hover {
+    background: rgba(255,255,255,0.22);
+}
+
+.expert-report-edit-textarea {
+    width: 100%;
+    min-height: 400px;
+    padding: 12px 14px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.65;
+    resize: vertical;
+    background: #fff;
+    color: #0f172a;
+    box-sizing: border-box;
+}
+.expert-report-edit-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.analysis-artifact-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+/* 工作台卡 + LS 专家复核卡 · 双卡 flex 行（左工作台 / 右 LS） */
+.hitl-artifact-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: stretch;
+    gap: 16px;
+    width: 100%;
+    max-width: 100%;
+    margin-top: 8px;
+    box-sizing: border-box;
+}
+.hitl-artifact-row__left {
+    flex: 1 1 280px;
+    min-width: 0;
+    max-width: 420px;
+}
+.hitl-artifact-row__right {
+    flex: 1 1 280px;
+    min-width: 0;
+    max-width: 420px;
+    margin-left: auto;
+    display: flex;
+    justify-content: flex-end;
+}
+.hitl-artifact-row__left .analysis-artifact-card,
+.hitl-artifact-row__right .hitl-entry-card {
+    width: 100%;
+    max-width: 100%;
+    margin-top: 0.5rem;
+}
+
+/* 独立 LS 专家复核入口卡片 */
+.hitl-entry-card {
+    border: 1px solid #fbbf24;
+    background: linear-gradient(135deg, #fffbeb 0%, #fff 55%, #fef3c7 100%);
+    box-shadow: 0 4px 14px rgba(245, 158, 11, 0.1);
+}
+.hitl-entry-card__title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #92400e;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.hitl-entry-card__desc {
+    font-size: 12px;
+    line-height: 1.55;
+    margin-bottom: 0;
+}
+.hitl-entry-card__error {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid #f87171;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 12px;
+    line-height: 1.5;
+}
+.hitl-entry-card__error-detail {
+    display: inline-block;
+    margin-top: 4px;
+    word-break: break-word;
+}
+.hitl-entry-card__actions .btn-warning {
+    color: #78350f;
+    border-color: #f59e0b;
+    background: #fef3c7;
+    font-weight: 500;
+}
+.hitl-entry-card--skipped {
+    opacity: 0.72;
+    pointer-events: none;
+}
+.hitl-entry-card--disabled {
+    border-color: #fca5a5;
+}
+.hitl-entry-card--disabled .hitl-entry-open-btn {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+.hitl-entry-card--busy {
+    opacity: 0.85;
+    pointer-events: none;
+}
+body.hitl-ls-modal-open {
+    overflow: hidden;
+}
+
+/* 兼容旧版嵌入按钮（历史消息） */
+.hitl-manual-annotate-btn {
+    white-space: nowrap;
+}
+.analysis-artifact-card__actions {
+    flex-shrink: 0;
+}
+
+/* 兼容旧版独立 dock */
+.hitl-ls-entry-dock {
+    display: none;
+    justify-content: flex-end;
+    align-items: center;
+    margin-top: 8px;
+    padding-top: 2px;
+    width: 100%;
+    box-sizing: border-box;
+}
+.hitl-ls-entry-dock .hitl-manual-annotate-btn {
+    font-size: 13px;
+}
+
+/* 专家报告沉浸式编辑 overlay（z-index 低于登录框 10200；关闭时 pointer-events:none） */
+.expert-report-fullscreen-editor {
+    position: fixed;
+    inset: 0;
+    z-index: 10080;
+    background: rgba(15, 23, 42, 0.78);
+    display: none;
+    align-items: stretch;
+    justify-content: center;
+    padding: 0;
+}
+.expert-report-fullscreen-editor.is-open {
+    display: flex;
+}
+.expert-report-fullscreen-editor:not(.is-open) {
+    pointer-events: none;
+}
+body.expert-report-fullscreen-active {
+    overflow: hidden;
+}
+.expert-report-fullscreen-editor__panel {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 960px;
+    margin: 0 auto;
+    background: #fff;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.28);
+    min-height: 0;
+    flex: 1;
+    max-height: 100vh;
+}
+.expert-report-fullscreen-editor__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    background: #4d6bfe;
+    color: #fff;
+    flex-shrink: 0;
+}
+.expert-report-fullscreen-editor__title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+.expert-report-fullscreen-editor__close {
+    padding: 6px 12px;
+    font-size: 13px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.45);
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    cursor: pointer;
+}
+.expert-report-fullscreen-editor__close:hover {
+    background: rgba(255, 255, 255, 0.22);
+}
+.expert-report-fullscreen-editor__textarea {
+    flex: 1;
+    min-height: 280px;
+    width: 100%;
+    padding: 16px 20px;
+    border: none;
+    border-bottom: 1px solid #e5e7eb;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 14px;
+    line-height: 1.65;
+    resize: none;
+    box-sizing: border-box;
+    color: #0f172a;
+    background: #fff;
+}
+.expert-report-fullscreen-editor__actions {
+    display: flex;
+    gap: 10px;
+    padding: 14px 20px;
+    flex-shrink: 0;
+    background: #f8fafc;
+    border-top: 1px solid #e5e7eb;
+}
+
+.workspace-ingestion-action-bar__hint {
+    font-size: 12px;
+    color: #64748b;
+    margin: 0;
+    flex: 1;
+    min-width: 120px;
+}
+.workspace-ingestion-action-bar__btn {
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    background: #059669;
+    color: #fff;
+    white-space: nowrap;
+}
+.workspace-ingestion-action-bar__btn:hover {
+    background: #047857;
+}
+
+.settings-db-mount-section {
+    margin-top: 8px;
+    padding-top: 16px;
+    border-top: 1px solid var(--input-border, #e5e7eb);
+}
+.settings-db-mount-section .settings-subtitle {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 0 0 12px;
+    color: var(--text-color);
+}
+.settings-db-field-group {
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+.settings-db-field-group.is-active {
+    display: flex;
+}
+.settings-db-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}

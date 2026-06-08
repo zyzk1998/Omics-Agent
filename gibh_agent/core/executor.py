@@ -268,7 +268,19 @@ class WorkflowExecutor:
         p = raw_path.strip()
         if not p:
             return p
-        if p.startswith("/results/") or p.startswith("/uploads/") or p.startswith("http://") or p.startswith("https://"):
+        # 绝对 URL → 相对 /results/|/uploads/（禁止 https://192.168.x.x:8028 等毒药 URL 进入 SSE）
+        if p.startswith("http://") or p.startswith("https://"):
+            from urllib.parse import urlparse
+
+            parsed = urlparse(p)
+            path_part = (parsed.path or "").strip()
+            if path_part.startswith("/results/") or path_part.startswith("/uploads/"):
+                return path_part
+            if path_part.startswith("/app/results/"):
+                return "/results/" + path_part[len("/app/results/") :].lstrip("/")
+            if path_part.startswith("/app/uploads/"):
+                return "/uploads/" + path_part[len("/app/uploads/") :].lstrip("/")
+        if p.startswith("/results/") or p.startswith("/uploads/"):
             return p
         results_prefix = str(self.results_dir).rstrip("/")
         if p.startswith(results_prefix + "/") or p == results_prefix:
@@ -2352,7 +2364,130 @@ class WorkflowExecutor:
         except Exception as e:
             logger.error(f"❌ [Executor] 检测分组列失败: {e}", exc_info=True)
             return None
-    
+
+    def _collect_scrna_hitl_image_path(
+        self,
+        step_detail: Dict[str, Any],
+        steps_details: List[Dict[str, Any]],
+    ) -> str:
+        """从细胞注释步或上游 UMAP/聚类步收集可供 LS 导入的图片 URL/路径。"""
+        plot = str(step_detail.get("plot") or "").strip()
+        if plot:
+            return plot
+        sr = step_detail.get("step_result") if isinstance(step_detail.get("step_result"), dict) else {}
+        data = sr.get("data") if isinstance(sr.get("data"), dict) else {}
+        for key in ("plot_path", "output_plot_path", "umap_path", "image_path"):
+            cand = data.get(key)
+            if cand:
+                return str(cand)
+        images = data.get("images")
+        if isinstance(images, list) and images:
+            first = images[0]
+            if isinstance(first, dict):
+                return str(first.get("path") or first.get("url") or "")
+            return str(first)
+        for sd in reversed(steps_details):
+            p = str(sd.get("plot") or "").strip()
+            if p and any(k in p.lower() for k in ("umap", "cluster", "annot", "cell")):
+                return p
+        for sd in reversed(steps_details):
+            p = str(sd.get("plot") or "").strip()
+            if p:
+                return p
+        return ""
+
+    def _provision_scrna_hitl_after_cell_annotation(
+        self,
+        *,
+        step_id: str,
+        tool_id: str,
+        step_detail: Dict[str, Any],
+        steps_details: List[Dict[str, Any]],
+        workflow_data: Dict[str, Any],
+        workflow_name: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        转录组标准流程 · rna_cell_annotation 成功后程序化调用 Trigger_Expert_Annotation。
+        不依赖 LLM 工具调用；返回 hitl_required 载荷供编排器软 HITL（初稿报告 + LS 复核）。
+        """
+        tid = str(tool_id or step_id or "").lower()
+        if "cell_annotation" not in tid and tid != "rna_cell_annotation":
+            return None
+        if str(step_detail.get("status") or "").lower() not in ("success", "done", "completed"):
+            return None
+
+        from gibh_agent.tools.hitl_tools import (
+            Trigger_Expert_Annotation,
+            normalize_hitl_payload_for_frontend,
+            resolve_ls_import_image_url,
+        )
+
+        image_raw = self._collect_scrna_hitl_image_path(step_detail, steps_details)
+        if image_raw:
+            image_raw = str(self._to_results_url(image_raw))
+        image_url = resolve_ls_import_image_url(image_raw) if image_raw else ""
+        sid = str(
+            workflow_data.get("_session_id")
+            or workflow_data.get("session_id")
+            or "session"
+        ).strip()[:12]
+
+        if not image_url:
+            msg = (
+                "细胞类型注释已完成，但未找到可导入 Label Studio 的 UMAP/聚类图，"
+                f"或内网 URL 映射失败（原始路径: {image_raw or '空'}）。"
+            )
+            logger.warning("[Executor] 软 HITL：%s", msg)
+            return normalize_hitl_payload_for_frontend(
+                {
+                    "status": "hitl_required",
+                    "scenario_type": "scrna_cell_type_annotation",
+                    "message": msg,
+                    "error_detail": msg,
+                    "ls_unavailable": True,
+                }
+            )
+
+        try:
+            result = Trigger_Expert_Annotation(
+                scenario_type="scrna_cell_type_annotation",
+                project_title=f"{workflow_name} · 细胞类型专家复核 ({sid})",
+                image_path=image_url,
+            )
+        except Exception as exc:
+            logger.warning("[Executor] 程序化 HITL 创建 LS 项目异常: %s", exc)
+            msg = f"细胞类型注释已完成；Label Studio 建项失败：{exc}"
+            return normalize_hitl_payload_for_frontend(
+                {
+                    "status": "hitl_required",
+                    "scenario_type": "scrna_cell_type_annotation",
+                    "message": msg,
+                    "error_detail": msg,
+                    "ls_unavailable": True,
+                }
+            )
+
+        if not isinstance(result, dict):
+            return None
+        if result.get("status") == "hitl_required":
+            logger.info(
+                "[Executor] 程序化 HITL 已创建 LS 项目 id=%s url=%s",
+                result.get("ls_project_id"),
+                result.get("ls_project_url"),
+            )
+            return normalize_hitl_payload_for_frontend(result)
+        err = result.get("message") or "Label Studio 项目创建失败"
+        logger.warning("[Executor] 程序化 HITL 未创建 LS 项目: %s", err)
+        return normalize_hitl_payload_for_frontend(
+            {
+                "status": "hitl_required",
+                "scenario_type": "scrna_cell_type_annotation",
+                "message": err,
+                "error_detail": err,
+                "ls_unavailable": True,
+            }
+        )
+
     def execute_workflow(
         self,
         workflow_data: Dict[str, Any],
@@ -2376,7 +2511,9 @@ class WorkflowExecutor:
         """
         workflow_name = workflow_data.get("workflow_name", "Unknown Workflow")
         steps = workflow_data.get("steps", [])
-        
+        self._soft_hitl_payload: Optional[Dict[str, Any]] = None
+        self._scrna_hitl_provisioned = False
+
         logger.info("=" * 80)
         logger.info(f"🚀 开始执行工作流: {workflow_name}")
         logger.info(f"📋 步骤数: {len(steps)}")
@@ -2949,7 +3086,37 @@ class WorkflowExecutor:
             step_detail = sanitize_for_json(step_detail)
             steps_details.append(step_detail)
             steps_results.append(step_detail["step_result"])
+
+            # 🎯 软 HITL：rna_cell_annotation 成功后程序化创建 LS 项目（不 break，继续后续步骤）
+            if (
+                step_result.get("status") == "success"
+                and not self._scrna_hitl_provisioned
+            ):
+                _hitl_soft = self._provision_scrna_hitl_after_cell_annotation(
+                    step_id=step_id,
+                    tool_id=str(step.get("tool_id") or ""),
+                    step_detail=step_detail,
+                    steps_details=steps_details,
+                    workflow_data=workflow_data,
+                    workflow_name=workflow_name,
+                )
+                if _hitl_soft:
+                    self._soft_hitl_payload = _hitl_soft
+                    self._scrna_hitl_provisioned = True
             
+            # Human-in-the-loop：Label Studio 专家标注挂起，中止后续步骤
+            if step_result.get("status") == "hitl_required":
+                hitl_payload = result_data if isinstance(result_data, dict) else {}
+                if hitl_payload.get("status") != "hitl_required":
+                    hitl_payload = step_result.get("result") if isinstance(step_result.get("result"), dict) else {}
+                logger.info(
+                    "🎯 [Executor] HITL 挂起: step=%s scenario=%s project_id=%s",
+                    step_id,
+                    hitl_payload.get("scenario_type"),
+                    hitl_payload.get("ls_project_id"),
+                )
+                break
+
             # 🔥 CRITICAL REGRESSION FIX: If async job started, stop execution
             if step_result.get("status") == "async_job_started":
                 logger.info(f"🚀 [Executor] 检测到异步作业已启动: {step_id}, job_id: {step_result.get('job_id', 'N/A')}")
@@ -2984,11 +3151,15 @@ class WorkflowExecutor:
                 )
         
         # 确定最终状态：success 与 skipped 均视为非失败（skipped 为依赖未满足时的优雅跳过）
+        hitl_pending = any(detail.get("status") == "hitl_required" for detail in steps_details)
         all_ok = all(
             detail.get("status") in ("success", "skipped")
             for detail in steps_details
         )
-        workflow_status = "success" if all_ok else "error"
+        if hitl_pending:
+            workflow_status = "hitl_required"
+        else:
+            workflow_status = "success" if all_ok else "error"
         
         # 提取最终图片（最后一个成功步骤的图片）
         final_plot = None
@@ -3014,9 +3185,33 @@ class WorkflowExecutor:
                 f"- **工具**: `{cb.get('failed_tool_id')}`\n"
                 f"- **原因**: {cb.get('user_message') or cb.get('message')}\n"
             )
+
+        if hitl_pending:
+            _hitl_step = next(
+                (d for d in reversed(steps_details) if d.get("status") == "hitl_required"),
+                None,
+            )
+            _hitl_payload: Dict[str, Any] = {}
+            if _hitl_step:
+                _sr = _hitl_step.get("step_result") or {}
+                _hitl_payload = _sr.get("data") if isinstance(_sr.get("data"), dict) else {}
+            report_data["hitl"] = _hitl_payload
+            report_data["hitl_step_id"] = (_hitl_step or {}).get("step_id")
         
         if final_plot:
             report_data["final_plot"] = final_plot
+
+        soft_hitl = getattr(self, "_soft_hitl_payload", None)
+        if isinstance(soft_hitl, dict) and soft_hitl.get("status") == "hitl_required":
+            from gibh_agent.tools.hitl_tools import normalize_hitl_payload_for_frontend
+
+            report_data["hitl"] = normalize_hitl_payload_for_frontend(soft_hitl)
+            report_data["hitl_soft"] = True
+            report_data["status"] = "success"
+            logger.info(
+                "[Executor] 软 HITL 载荷已写入 report_data project_id=%s",
+                report_data["hitl"].get("project_id"),
+            )
         
         logger.info("=" * 80)
         logger.info(f"✅ 工作流执行完成: {workflow_name} (状态: {workflow_status})")

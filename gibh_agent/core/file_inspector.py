@@ -1819,10 +1819,19 @@ class FileInspector:
         normalized = normalize_duplicate_tail_filename((file_path or "").strip())
         format_warning = get_inspector_format_warning(normalized)
 
+        # 构建会话上下文路径（须在 preemptive heal 之前，避免 UnboundLocalError）
+        context_paths: List[str] = []
+        for entry in uploaded_files or []:
+            if isinstance(entry, dict):
+                for k in ("path", "file_path", "group_dir"):
+                    v = entry.get(k)
+                    if v:
+                        context_paths.append(str(v))
+
         # 第一道门：preemptive 资产映射 + basename 自愈（早于格式/存在性校验）
         from gibh_agent.core.asset_locator import bridge_data_asset_to_physical_path
 
-        _pre_ctx = context_paths or []
+        _pre_ctx = context_paths
         _pre_entries = uploaded_files or []
         if normalized:
             _pre_resolved, _pre_warns = bridge_data_asset_to_physical_path(
@@ -1850,14 +1859,6 @@ class FileInspector:
         fmt_err = validate_inspector_file_format(normalized)
         if fmt_err:
             return fmt_err
-
-        context_paths: List[str] = []
-        for entry in uploaded_files or []:
-            if isinstance(entry, dict):
-                for k in ("path", "file_path", "group_dir"):
-                    v = entry.get(k)
-                    if v:
-                        context_paths.append(str(v))
 
         searched_paths: List[str] = []
         try:

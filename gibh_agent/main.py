@@ -20,6 +20,7 @@ from .agents.proteomics_agent import ProteomicsAgent
 from .agents.specialists.spatial_agent import SpatialAgent
 from .agents.specialists.radiomics_agent import RadiomicsAgent
 from .agents.specialists.imaging_agent import ImagingAgent
+from .agents.corpus_processing_agent import CorpusProcessingAgent
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +184,11 @@ class GIBHAgent:
         agents["imaging_agent"] = ImagingAgent(
             llm_client=self.llm_clients.get("logic"),
             prompt_manager=self.prompt_manager
+        )
+
+        agents["corpus_processing_agent"] = CorpusProcessingAgent(
+            llm_client=self.llm_clients.get("logic"),
+            prompt_manager=self.prompt_manager,
         )
         
         return agents

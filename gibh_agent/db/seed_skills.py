@@ -21,6 +21,10 @@ from gibh_agent.db.prompt_soft_skill_templates import (
 )
 from gibh_agent.db.omics_skill_prompt_templates import OMICS_FAST_LANE_PROMPTS
 from gibh_agent.db.models import Skill as SkillModel
+from gibh_agent.db.corpus_skill_prompt_templates import (
+    CORPUS_SKILL_PROMPT_TEMPLATE,
+    CORPUS_SKILL_SEED,
+)
 from gibh_agent.db.panshi_skill_meta import apply_panshi_official_descriptions
 
 OMICS_FAST_LANE_SKILLS = [
@@ -827,6 +831,14 @@ for _soft_row in PROMPT_SOFT_SKILL_SEEDS:
     _soft_item["prompt_template"] = PROMPT_SOFT_SKILL_TEMPLATES[_soft_row["name"]]
     PROMPT_SOFT_SKILLS.append(_soft_item)
 
+# 特色科研流程 · 科学语料数据加工（HITL + SFT 导出）
+RESEARCH_FLOW_SKILLS: list = [
+    {
+        **CORPUS_SKILL_SEED,
+        "prompt_template": CORPUS_SKILL_PROMPT_TEMPLATE,
+    },
+]
+
 
 def run_seed_core_skills(db: Session) -> int:
     """向当前 Session 插入编排快车道 + 核心组学技能（不 commit）。返回插入条数。"""
@@ -863,6 +875,7 @@ def get_all_system_skills_list() -> list:
         + CHEMISTRY_SKILLS
         + LAUNCH_CORE_SKILLS
         + PROMPT_SOFT_SKILLS
+        + RESEARCH_FLOW_SKILLS
     )
     return apply_panshi_official_descriptions(merged)
 

@@ -329,6 +329,67 @@
     color: #4338ca;
 }
 
+.btn-widget-fullscreen-close {
+    display: none;
+    position: absolute;
+    top: 1.25rem;
+    left: 1.25rem;
+    z-index: 100002;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.45rem 0.85rem;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.72);
+    color: #f8fafc;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+
+.btn-widget-fullscreen-close:hover {
+    background: rgba(30, 41, 59, 0.92);
+    border-color: rgba(255, 255, 255, 0.38);
+}
+
+.fullscreen-capable-widget.is-fullscreen > .btn-widget-fullscreen-close {
+    display: inline-flex;
+}
+
+.fullscreen-capable-widget.is-fullscreen[data-fs-portaled="1"] {
+    z-index: 100060 !important;
+}
+
+.fullscreen-capable-widget.is-fullscreen.skill-detail-mermaid-widget > .widget-content {
+    max-width: min(92vw, 1280px);
+    max-height: 88vh;
+    width: auto;
+    height: auto;
+    flex: 0 1 auto;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.38);
+    background: #f8fafc;
+}
+
+.fullscreen-capable-widget.is-fullscreen.skill-detail-mermaid-widget::after {
+    content: '点击空白处返回';
+    position: absolute;
+    bottom: 1.25rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100001;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.55);
+    color: rgba(248, 250, 252, 0.92);
+    font-size: 0.75rem;
+    pointer-events: none;
+}
+
 .fullscreen-capable-widget.is-fullscreen {
     position: fixed !important;
     top: 0 !important;
@@ -353,6 +414,7 @@
     height: 2.5rem;
     font-size: 1.125rem;
     background: rgba(255, 255, 255, 0.95);
+    z-index: 100002;
 }
 
 .fullscreen-capable-widget.is-fullscreen > .widget-content {

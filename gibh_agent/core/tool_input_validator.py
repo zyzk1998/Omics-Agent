@@ -548,6 +548,11 @@ def validate_and_normalize_inputs(
         error_dict 非 None 时调用方应直接返回该结构，勿再调用底层工具。
     """
     ctx = context if context is not None else get_tool_input_context()
+    from gibh_agent.core.omics_io_registry import PATH_VALIDATION_EXEMPT_TOOLS
+
+    if tool_id in PATH_VALIDATION_EXEMPT_TOOLS:
+        return params, None
+
     if tool_func is None:
         from gibh_agent.core.tool_registry import registry
 

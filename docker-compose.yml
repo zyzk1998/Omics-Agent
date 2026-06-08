@@ -118,6 +118,15 @@ services:
       - HPC_MCP_TRANSPORT=${HPC_MCP_TRANSPORT:-streamableHttp}
       # Task 产线减负（QueryRewriter 旁路 + 关键词意图命中则跳过意图 LLM）；见 docs/TASK_PRODUCTION_LINE_SLIMMING_ANALYSIS.md
       - GIBH_LITE_TASK_MODE=${GIBH_LITE_TASK_MODE:-0}
+      # HITL / Label Studio（容器内 127.0.0.1 不是宿主机 LS；经 host.docker.internal 访问）
+      - LABEL_STUDIO_URL=${LABEL_STUDIO_URL:-http://host.docker.internal:8082}
+      - LABEL_STUDIO_PUBLIC_URL=${LABEL_STUDIO_PUBLIC_URL:-}
+      - LABEL_STUDIO_SAME_ORIGIN_PROXY=${LABEL_STUDIO_SAME_ORIGIN_PROXY:-1}
+      - LABEL_STUDIO_API_KEY=${LABEL_STUDIO_API_KEY:-}
+      - LABEL_STUDIO_USERNAME=${LABEL_STUDIO_USERNAME:-system_admin@omics.local}
+      - LABEL_STUDIO_PASSWORD=${LABEL_STUDIO_PASSWORD:-AutoBootstrap_O1m2i3c4s!}
+      - OMICS_AGENT_WEB_URL=${OMICS_AGENT_WEB_URL:-http://host.docker.internal:8018}
+      - LS_IMAGE_FETCH_BASE_URL=${LS_IMAGE_FETCH_BASE_URL:-http://nginx}
     volumes:
       - .:/app
       # Skill Factory：宿主机 codegen 技能热挂载（reload_skills / 重启 API 即生效，无需 rebuild 镜像）
@@ -140,6 +149,8 @@ services:
         condition: service_started
     networks:
       - gibh-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # 🔧 修复：使用 entrypoint 脚本修复权限
     entrypoint: ["/entrypoint.sh"]
     # timeout：长流程（时空动力学/Cell Ranger 等）可能超过 300s；过短会导致 worker 被强杀 → SSE 分块不完整(ERR_INCOMPLETE_CHUNKED_ENCODING)
@@ -276,6 +287,8 @@ services:
       - ./data/results:/app/results:ro
     depends_on:
       - api-server
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - gibh-network
 

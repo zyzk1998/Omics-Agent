@@ -1086,6 +1086,22 @@ class AgentOrchestrator:
                     yield _sse_chunk
                     await asyncio.sleep(0.01)
                 return
+            if tool_name_sk == "skill_corpus_data_processing":
+                async for _sse_chunk in self._stream_corpus_processing_skill(
+                    state_snapshot,
+                    llm_client,
+                    model_name,
+                    kwargs.get("session_id"),
+                    db,
+                    owner_id,
+                    _query_str,
+                    unique_paths,
+                ):
+                    yield _sse_chunk
+                    await asyncio.sleep(0.01)
+                state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                yield self._format_sse("state_snapshot", state_snapshot)
+                return
             from gibh_agent.agents.skill_agent import SkillAgent
 
             def _skill_format_sse(event_type: str, data: Dict[str, Any]) -> str:
@@ -1402,6 +1418,9 @@ class AgentOrchestrator:
                         session_key=_deep_key,
                         workspace_context=kwargs.get("workspace_context"),
                         local_tool_response=kwargs.get("local_tool_response"),
+                        session_id=kwargs.get("session_id"),
+                        owner_id=owner_id,
+                        db=db,
                     ):
                         yield sse_chunk
                 else:
@@ -1720,6 +1739,9 @@ class AgentOrchestrator:
                             _wf_cfg["_db"] = db
                         if owner_id:
                             _wf_cfg["owner_id"] = owner_id
+                        _sid_wf = (kwargs.get("session_id") or "").strip()
+                        if _sid_wf:
+                            _wf_cfg["_session_id"] = _sid_wf
                         return executor.execute_workflow(
                             _wf_cfg,
                             file_paths,
@@ -1821,6 +1843,86 @@ class AgentOrchestrator:
                     state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
                     yield self._format_sse("state_snapshot", state_snapshot)
                     return  # STOP HERE - Do not continue to next steps
+
+                # 🎯 HITL：硬挂起（非软 HITL）— 中止 LLM 续推与专家报告生成
+                _results_dict = results if isinstance(results, dict) else {}
+                if _results_dict.get("hitl_soft"):
+                    hitl_payload = None
+                else:
+                    hitl_payload = self._extract_hitl_payload(_results_dict)
+                if hitl_payload:
+                    _session_id = (kwargs.get("session_id") or "").strip()
+                    if db and _session_id:
+                        from gibh_agent.core.session_runtime import (
+                            SESSION_WAITING_FOR_HITL,
+                            set_session_status,
+                        )
+
+                        set_session_status(
+                            db, _session_id, SESSION_WAITING_FOR_HITL, owner_id=owner_id
+                        )
+                    steps_details = results.get("steps_details", []) if isinstance(results, dict) else []
+                    if steps_details:
+                        yield self._emit_sse(
+                            state_snapshot,
+                            "status",
+                            {"content": "正在渲染执行结果...", "state": "rendering"},
+                        )
+                        await asyncio.sleep(0.01)
+                        yield self._emit_sse(
+                            state_snapshot,
+                            "step_result",
+                            {
+                                "report_data": {
+                                    "steps_details": steps_details,
+                                    "workflow_name": workflow_config.get("workflow_name", "工作流"),
+                                }
+                            },
+                        )
+                        await asyncio.sleep(0.01)
+                    _hitl_event = {
+                        "ls_url": hitl_payload.get("ls_project_url") or hitl_payload.get("ls_url") or "",
+                        "project_id": hitl_payload.get("ls_project_id"),
+                        "scenario_type": hitl_payload.get("scenario_type", ""),
+                        "message": hitl_payload.get("message", "等待专家标注复核"),
+                        "step_id": results.get("hitl_step_id") if isinstance(results, dict) else None,
+                    }
+                    state_snapshot["hitl_pending"] = True
+                    state_snapshot["hitl"] = _hitl_event
+                    if _session_id:
+                        from gibh_agent.core.hitl_session_registry import register_hitl_session
+
+                        register_hitl_session(
+                            _session_id,
+                            {
+                                "project_id": _hitl_event.get("project_id"),
+                                "ls_url": _hitl_event.get("ls_url"),
+                                "scenario_type": _hitl_event.get("scenario_type"),
+                                "workflow_name": workflow_config.get("workflow_name"),
+                                "output_dir": results.get("output_dir") if isinstance(results, dict) else None,
+                                "hitl_step_id": _hitl_event.get("step_id"),
+                            },
+                        )
+                    yield self._emit_sse(state_snapshot, "hitl_action", _hitl_event)
+                    await asyncio.sleep(0.01)
+                    yield self._emit_sse(
+                        state_snapshot,
+                        "status",
+                        {
+                            "content": "⏸ 流程已挂起，等待专家在 Label Studio 中完成标注",
+                            "state": "waiting",
+                        },
+                    )
+                    await asyncio.sleep(0.01)
+                    yield self._emit_sse(state_snapshot, "done", {"status": "waiting_for_hitl"})
+                    state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
+                    yield self._format_sse("state_snapshot", state_snapshot)
+                    logger.info(
+                        "[Orchestrator] HITL 挂起 session=%s project_id=%s",
+                        _session_id,
+                        _hitl_event.get("project_id"),
+                    )
+                    return  # 跳出 stream_process，不再生成专家报告
                 
                 # 4. Generate Summary (if agent available and no async job)
                 # 🔥 CRITICAL FIX: ALWAYS generate summary, regardless of workflow status
@@ -2173,8 +2275,7 @@ class AgentOrchestrator:
                     yield self._emit_sse(state_snapshot,"step_result", step_result_response)
                     await asyncio.sleep(0.01)
                 
-                # 🔥 TASK 3: THEN Yield Diagnosis Report LAST (diagnosis event)
-                # This ensures the Expert Report appears after the execution results
+                # 专家报告经 result 事件下发（diagnosis 事件专用于规划期数据诊断，避免覆盖）
                 if summary:
                     yield self._emit_sse(state_snapshot,"status", {
                         "content": (
@@ -2185,27 +2286,7 @@ class AgentOrchestrator:
                         "state": "generating_report"
                     })
                     await asyncio.sleep(0.01)
-                    
-                    # 专家结题 Markdown 写入 report_data.report，严禁写入 diagnosis（避免与数据诊断张冠李戴）
-                    diagnosis_response = {
-                        "report_data": {
-                            "report": summary,
-                            "workflow_name": workflow_config.get("workflow_name", "工作流")
-                        }
-                    }
-                    # 🔥 DRY: Include report suggestions so frontend can render chips
-                    if target_agent and getattr(target_agent, "context", None):
-                        sug = target_agent.context.get("report_suggestions")
-                        if sug:
-                            diagnosis_response["report_data"]["suggestions"] = sug
-                    # 🔥 PHASE 2: Add evaluation to diagnosis response
-                    if evaluation:
-                        diagnosis_response["report_data"]["evaluation"] = evaluation
-                    
-                    yield self._emit_sse(state_snapshot,"diagnosis", diagnosis_response)
-                    await asyncio.sleep(0.01)
-                
-                # 🔥 TASK 3: Also yield combined result event for backward compatibility
+
                 final_response = {
                     "report_data": {
                         "steps_details": steps_details,
@@ -2213,12 +2294,55 @@ class AgentOrchestrator:
                         "workflow_name": workflow_config.get("workflow_name", "工作流")
                     }
                 }
-                
-                # 🔥 PHASE 2: Add evaluation to response
+                if target_agent and getattr(target_agent, "context", None):
+                    sug = target_agent.context.get("report_suggestions")
+                    if sug:
+                        final_response["report_data"]["suggestions"] = sug
                 if evaluation:
                     final_response["report_data"]["evaluation"] = evaluation
-                
+
                 yield self._emit_sse(state_snapshot,"result", final_response)
+                _post_hitl = None
+                if isinstance(results, dict) and results.get("hitl_soft") and isinstance(results.get("hitl"), dict):
+                    _post_hitl = self._format_hitl_action_event(results["hitl"])
+                if not _post_hitl:
+                    _post_hitl = self._try_provision_post_execution_hitl(
+                        steps_details,
+                        workflow_config,
+                        kwargs.get("session_id"),
+                        db,
+                        owner_id,
+                    )
+                if _post_hitl:
+                    state_snapshot["hitl_pending"] = True
+                    state_snapshot["hitl"] = _post_hitl
+                    _sid_hitl = (kwargs.get("session_id") or "").strip()
+                    if _sid_hitl:
+                        from gibh_agent.core.hitl_session_registry import register_hitl_session
+                        from gibh_agent.core.session_runtime import (
+                            SESSION_WAITING_FOR_HITL,
+                            set_session_status,
+                        )
+
+                        register_hitl_session(
+                            _sid_hitl,
+                            {
+                                "project_id": _post_hitl.get("project_id"),
+                                "ls_url": _post_hitl.get("ls_url") or _post_hitl.get("ls_project_url"),
+                                "scenario_type": _post_hitl.get("scenario_type"),
+                                "workflow_name": workflow_config.get("workflow_name"),
+                                "output_dir": results.get("output_dir") if isinstance(results, dict) else None,
+                            },
+                        )
+                        if db:
+                            set_session_status(
+                                db,
+                                _sid_hitl,
+                                SESSION_WAITING_FOR_HITL,
+                                owner_id=owner_id,
+                            )
+                    yield self._emit_sse(state_snapshot, "hitl_action", _post_hitl)
+                    await asyncio.sleep(0.01)
                 yield self._emit_sse(state_snapshot,"status", {
                     "content": "执行完成",
                     "state": "completed"
@@ -2796,6 +2920,7 @@ class AgentOrchestrator:
                 await asyncio.sleep(0.01)
             
                 path_a_diagnosis_message = None  # Path A 诊断正文：供 workflow/result 双写，不依赖 self.agent.context 子 agent 隔离
+                path_a_diagnosis_emitted = False  # 是否已向 SSE 下发 diagnosis 事件（workflow/result 双写前兜底）
             
                 # 🔥 Multi-file: ALWAYS prefer inspecting common_parent_directory (so SpatialVisiumHandler
                 # sees spatial/ + matrix; single-file stays as first file path).
@@ -3071,15 +3196,15 @@ class AgentOrchestrator:
                                 else:
                                     logger.warning(f"⚠️ [Orchestrator] 无法获取agent实例或诊断方法，使用轻量级诊断")
                                     # 回退到轻量级诊断
-                                    diagnosis_message = self._generate_lightweight_diagnosis(file_metadata, domain_name)
+                                    diagnosis_message = self._generate_lightweight_diagnosis(file_metadata, domain_name, files=files)
                             except Exception as diag_err:
                                 logger.error(f"❌ [Orchestrator] 诊断报告生成失败: {diag_err}", exc_info=True)
                                 # 回退到轻量级诊断
-                                diagnosis_message = self._generate_lightweight_diagnosis(file_metadata, domain_name)
+                                diagnosis_message = self._generate_lightweight_diagnosis(file_metadata, domain_name, files=files)
                     
                         # 如果诊断报告为空，使用轻量级诊断
                         if not diagnosis_message:
-                            diagnosis_message = self._generate_lightweight_diagnosis(file_metadata, domain_name)
+                            diagnosis_message = self._generate_lightweight_diagnosis(file_metadata, domain_name, files=files)
                     
                         # Extract statistics for SSE event
                         n_samples = file_metadata.get("n_samples") or file_metadata.get("n_obs") or file_metadata.get("shape", {}).get("rows", 0)
@@ -3126,8 +3251,10 @@ class AgentOrchestrator:
                             sug = agent_instance.context.get("diagnosis_suggestions")
                             if sug:
                                 payload["suggestions"] = sug
-                        yield self._emit_sse(state_snapshot,"diagnosis", payload)
-                        await asyncio.sleep(0.01)
+                        if str(diagnosis_message or "").strip():
+                            yield self._emit_sse(state_snapshot,"diagnosis", payload)
+                            path_a_diagnosis_emitted = True
+                            await asyncio.sleep(0.01)
                         # 🔥 会话级文件快照：供下一轮「仅文字」请求继承路径，对齐 SOPPlanner / 诊断
                         try:
                             _snap = self.conversation_state.get(session_id, {})
@@ -3163,7 +3290,7 @@ class AgentOrchestrator:
                             "path_warning": err_msg,
                             "message": "文件预检未完全通过，已软放行并继续规划。",
                         }
-                        _lw_diag = self._generate_lightweight_diagnosis(file_metadata, domain_name)
+                        _lw_diag = self._generate_lightweight_diagnosis(file_metadata, domain_name, files=files)
                         if _lw_diag:
                             path_a_diagnosis_message = _lw_diag
                             if not hasattr(self.agent, 'context') or self.agent.context is None:
@@ -3174,6 +3301,7 @@ class AgentOrchestrator:
                                 "diagnosis_report": _lw_diag,
                                 "status": "degraded",
                             })
+                            path_a_diagnosis_emitted = True
                             await asyncio.sleep(0.01)
                 except Exception as e:
                     logger.error(f"⚠️ [Orchestrator] Path A: 文件检查异常（软放行）: {e}", exc_info=True)
@@ -3189,6 +3317,45 @@ class AgentOrchestrator:
                         "file_path": path_for_inspect,
                         "path_warning": str(e),
                     }
+                    _exc_diag = self._ensure_path_a_diagnosis_message(
+                        None, file_metadata, domain_name, files
+                    )
+                    if _exc_diag and not path_a_diagnosis_emitted:
+                        path_a_diagnosis_message = _exc_diag
+                        if not hasattr(self.agent, "context") or self.agent.context is None:
+                            self.agent.context = {}
+                        self.agent.context["diagnosis_report"] = _exc_diag
+                        yield self._emit_sse(
+                            state_snapshot,
+                            "diagnosis",
+                            {
+                                "message": _exc_diag,
+                                "diagnosis_report": _exc_diag,
+                                "status": "degraded",
+                            },
+                        )
+                        path_a_diagnosis_emitted = True
+                        await asyncio.sleep(0.01)
+
+                # 规划前兜底：体检/LLM 诊断均未产出 SSE 时，强制轻量诊断 + diagnosis 事件
+                path_a_diagnosis_message = self._ensure_path_a_diagnosis_message(
+                    path_a_diagnosis_message, file_metadata, domain_name, files
+                )
+                if path_a_diagnosis_message and not path_a_diagnosis_emitted:
+                    if not hasattr(self.agent, "context") or self.agent.context is None:
+                        self.agent.context = {}
+                    self.agent.context["diagnosis_report"] = path_a_diagnosis_message
+                    yield self._emit_sse(
+                        state_snapshot,
+                        "diagnosis",
+                        {
+                            "message": path_a_diagnosis_message,
+                            "diagnosis_report": path_a_diagnosis_message,
+                            "status": (file_metadata or {}).get("status") or "data_ready",
+                        },
+                    )
+                    path_a_diagnosis_emitted = True
+                    await asyncio.sleep(0.01)
             
                 # A2. Plan (With Metadata) - CRITICAL: Explicitly tell planner this is NOT a template
                 yield self._emit_sse(state_snapshot,"status", {
@@ -3551,7 +3718,12 @@ class AgentOrchestrator:
         
         return "\n".join(summary_parts)
     
-    def _generate_lightweight_diagnosis(self, file_metadata: Dict[str, Any], domain_name: str) -> str:
+    def _generate_lightweight_diagnosis(
+        self,
+        file_metadata: Dict[str, Any],
+        domain_name: str,
+        files: Optional[List[Any]] = None,
+    ) -> str:
         """
         生成轻量级诊断报告（回退方案）
 
@@ -3563,6 +3735,32 @@ class AgentOrchestrator:
             诊断报告字符串
         """
         file_type = file_metadata.get('file_type', '未知')
+
+        # 10x 三件套软放行：单文件 matrix.mtx 体检失败时，若同批上传含 barcodes/features 仍给出可读诊断
+        if files and domain_name in ("RNA", "STED_EC", "SPATIOTEMPORAL_DYNAMICS"):
+            names = []
+            for f in files:
+                if isinstance(f, dict):
+                    names.append(os.path.basename(str(f.get("name") or f.get("file_name") or f.get("path") or "")))
+                elif f:
+                    names.append(os.path.basename(str(f)))
+            names_l = [n.lower() for n in names if n]
+            has_matrix = any("matrix.mtx" in n for n in names_l)
+            has_bc = any("barcodes" in n for n in names_l)
+            has_ft = any("features" in n or "genes" in n for n in names_l)
+            if has_matrix and has_bc and has_ft:
+                common_dir = file_metadata.get("file_path") or ""
+                _warn = self._sanitize_diagnosis_warning(
+                    file_metadata.get("path_warning") or file_metadata.get("message")
+                )
+                return f"""### 🔍 数据报告
+
+- **数据格式**: 10x Genomics 标准三件套（matrix.mtx + barcodes.tsv + features.tsv）
+- **文件清单**: {', '.join(names[:6])}
+- **体检说明**: {_warn or '已识别为 10x 表达矩阵目录，软放行并继续规划。'}
+- **数据质量**: 文件齐全，可进入 Cell Ranger / Scanpy 标准流程。
+
+**下一步**: 已为您规划 **转录组** 分析工作流，请确认执行。"""
 
         if domain_name == "Radiomics":
             shape = file_metadata.get("shape", {})
@@ -3706,6 +3904,179 @@ class AgentOrchestrator:
 
 **下一步**: 已为您规划分析流程，请确认执行。"""
     
+    @staticmethod
+    def _sanitize_diagnosis_warning(message: Optional[str]) -> str:
+        """过滤体检说明中的 Python 异常/traceback，避免泄露到用户可见诊断区。"""
+        if not message:
+            return ""
+        text = str(message).strip()
+        if not text:
+            return ""
+        _bad_markers = (
+            "referenced before assignment",
+            "Traceback (most recent call last)",
+            "UnboundLocalError",
+            "NameError:",
+            "local variable",
+        )
+        if any(m in text for m in _bad_markers):
+            return "文件体检已完成，系统已识别数据格式并继续规划。"
+        return text
+
+    def _normalize_path_a_diagnosis_text(self, diagnosis_message: Optional[str]) -> str:
+        """统一规划期诊断 Markdown 标题，移除重复副标题。"""
+        if not diagnosis_message or not str(diagnosis_message).strip():
+            return ""
+        text = str(diagnosis_message)
+        for _strip in (
+            "### 📊 数据体检报告",
+            "### 🔍 数据体检报告",
+            "### 📊 数据诊断报告",
+            "### 🔍 数据诊断报告",
+            "## 📊 数据体检报告",
+            "## 🔍 数据体检报告",
+            "## 📊 数据诊断报告",
+            "### 📊 数据报告",
+            "## 📊 数据报告",
+            "### 数据报告",
+        ):
+            text = text.replace(_strip, "")
+        text = text.strip()
+        if text and not text.startswith("#"):
+            text = f"### 🔍 数据报告\n\n{text}"
+        elif text.startswith("### 数据报告"):
+            text = text.replace("### 数据报告", "### 🔍 数据报告", 1)
+        return text
+
+    def _ensure_path_a_diagnosis_message(
+        self,
+        current_message: Optional[str],
+        file_metadata: Optional[Dict[str, Any]],
+        domain_name: str,
+        files: Optional[List[Any]] = None,
+    ) -> str:
+        """Path A 诊断正文兜底：LLM/缓存失败时仍返回可渲染的轻量报告。"""
+        if current_message and str(current_message).strip():
+            return self._normalize_path_a_diagnosis_text(current_message)
+        meta = file_metadata if isinstance(file_metadata, dict) else {}
+        diag = self._generate_lightweight_diagnosis(meta, domain_name, files=files)
+        if not diag or not str(diag).strip():
+            names: List[str] = []
+            for f in files or []:
+                if isinstance(f, dict):
+                    names.append(str(f.get("name") or f.get("file_name") or f.get("path") or ""))
+                elif f:
+                    names.append(str(f))
+            names = [n for n in names if n]
+            label = domain_name or "组学"
+            diag = (
+                f"### 数据报告\n\n"
+                f"已接收 **{len(names) or 1}** 个数据文件，系统已完成 **{label}** 工作流规划。\n\n"
+                f"**文件**: {', '.join(names[:5]) if names else '（见附件）'}\n\n"
+                f"**下一步**: 请确认下方工作流步骤并执行分析。"
+            )
+        return self._normalize_path_a_diagnosis_text(diag)
+
+    def _try_provision_post_execution_hitl(
+        self,
+        steps_details: List[Dict[str, Any]],
+        workflow_config: Dict[str, Any],
+        session_id: Optional[str],
+        db: Any,
+        owner_id: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        执行完成后为单细胞注释等场景自动创建 Label Studio 复核项目（软 HITL，不阻断已完成初稿报告）。
+        """
+        if not steps_details:
+            return None
+        anno_step: Optional[Dict[str, Any]] = None
+        for sd in reversed(steps_details):
+            if not isinstance(sd, dict):
+                continue
+            tid = str(sd.get("tool_id") or sd.get("step_id") or sd.get("name") or "").lower()
+            st = str(sd.get("status") or "").lower()
+            if ("cell_annotation" in tid or tid == "rna_cell_annotation") and st in (
+                "success",
+                "done",
+                "completed",
+            ):
+                anno_step = sd
+                break
+        if not anno_step:
+            return None
+
+        image_path = str(anno_step.get("plot") or "").strip()
+        sr = anno_step.get("step_result") or {}
+        data = sr.get("data") if isinstance(sr.get("data"), dict) else {}
+        if not image_path and isinstance(data.get("images"), list) and data["images"]:
+            image_path = str(data["images"][0] or "").strip()
+        if not image_path:
+            for sd in reversed(steps_details):
+                if not isinstance(sd, dict):
+                    continue
+                p = str(sd.get("plot") or "").strip()
+                if p and any(k in p.lower() for k in ("umap", "cluster", "annotation")):
+                    image_path = p
+                    break
+        from gibh_agent.tools.hitl_tools import Trigger_Expert_Annotation, resolve_ls_import_image_url
+
+        wf_name = (workflow_config or {}).get("workflow_name") or "单细胞分析"
+        sid = (session_id or "").strip() or "session"
+        scenario = "scrna_cell_type_annotation"
+
+        def _soft_hitl(message: str, *, ls_unavailable: bool = False, **extra: Any) -> Dict[str, Any]:
+            payload: Dict[str, Any] = {
+                "status": "hitl_required",
+                "ls_url": "",
+                "ls_project_url": "",
+                "scenario_type": scenario,
+                "message": message,
+            }
+            if ls_unavailable:
+                payload["ls_unavailable"] = True
+            payload.update(extra)
+            return payload
+
+        if not image_path:
+            logger.info("[Orchestrator] 执行后 HITL：未找到 UMAP/注释图，仍下发软 HITL 入口")
+            return _soft_hitl(
+                "细胞类型注释已完成，但未找到可导入 Label Studio 的 UMAP/聚类图。",
+                ls_unavailable=True,
+            )
+
+        ls_image = resolve_ls_import_image_url(image_path)
+        try:
+            result = Trigger_Expert_Annotation(
+                scenario_type=scenario,
+                project_title=f"{wf_name} · 细胞类型专家复核 ({sid[:8]})",
+                image_path=ls_image or image_path,
+            )
+        except Exception as exc:
+            logger.warning("[Orchestrator] 执行后 HITL 创建 LS 项目失败: %s", exc)
+            return _soft_hitl(
+                f"细胞类型注释已完成；Label Studio 暂不可用（{exc}）。请检查 LABEL_STUDIO_URL 与 API Key。",
+                ls_unavailable=True,
+            )
+        if isinstance(result, dict) and result.get("status") == "hitl_required":
+            return {
+                "ls_url": result.get("ls_project_url") or result.get("ls_url") or "",
+                "ls_project_url": result.get("ls_project_url") or result.get("ls_url") or "",
+                "project_id": result.get("ls_project_id"),
+                "scenario_type": result.get("scenario_type", scenario),
+                "message": result.get(
+                    "message",
+                    "细胞类型注释已完成，可在 Label Studio 中进行专家复核标注。",
+                ),
+                "status": "hitl_required",
+            }
+        err_msg = (result or {}).get("message") if isinstance(result, dict) else str(result)
+        logger.info("[Orchestrator] 执行后 HITL LS 未创建: %s", err_msg)
+        return _soft_hitl(
+            err_msg or "细胞类型注释已完成；Label Studio 项目创建失败，仍可稍后重试标注。",
+            ls_unavailable=True,
+        )
+
     def _format_sse(self, event_type: str, data: Dict[str, Any]) -> str:
         """
         格式化 SSE 事件
@@ -3987,6 +4358,47 @@ class AgentOrchestrator:
         )
         yield self._format_sse("state_snapshot", state_snapshot)
 
+    async def _stream_corpus_processing_skill(
+        self,
+        state_snapshot: Dict[str, Any],
+        llm_client: Any,
+        model_name: str,
+        session_id: Optional[str],
+        db: Any,
+        owner_id: str,
+        user_query: str,
+        file_paths: List[str],
+    ) -> AsyncIterator[str]:
+        """Skill_Route: skill_corpus_data_processing — 硬 HITL 挂起，唤醒后由 CorpusProcessingAgent 导出 SFT JSON。"""
+        corpus_agent = None
+        if self.agent and getattr(self.agent, "agents", None):
+            corpus_agent = self.agent.agents.get("corpus_processing_agent")
+        if corpus_agent is None:
+            from gibh_agent.agents.corpus_processing_agent import CorpusProcessingAgent
+            from gibh_agent.core.prompt_manager import create_default_prompt_manager
+
+            corpus_agent = CorpusProcessingAgent(
+                llm_client=llm_client,
+                prompt_manager=create_default_prompt_manager(),
+            )
+        if llm_client is not None:
+            corpus_agent.llm_client = llm_client
+
+        def _emit(event_type: str, data: Dict[str, Any]) -> str:
+            return self._emit_sse(state_snapshot, event_type, data)
+
+        async for chunk in corpus_agent.stream_skill_flow(
+            state_snapshot=state_snapshot,
+            emit_sse=_emit,
+            file_paths=file_paths,
+            user_query=user_query,
+            session_id=str(session_id or ""),
+            db=db,
+            owner_id=owner_id,
+            model_name=model_name,
+        ):
+            yield chunk
+
     @staticmethod
     def _sanitize_snapshot_text(text: str) -> str:
         """清洗 state_snapshot 文本：剔除各类思考标签、追问块与占位符污染（含跨行）。"""
@@ -4252,6 +4664,9 @@ class AgentOrchestrator:
         session_key: str,
         workspace_context: Optional[Dict[str, Any]] = None,
         local_tool_response: Optional[Dict[str, Any]] = None,
+        session_id: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        db: Any = None,
     ) -> AsyncIterator[str]:
         """DeepReAct：多轮工具 + HITL 挂起；messages 由 _DEEP_REACT_SESSIONS 按 session_key 续传。"""
         import copy as _copy
@@ -4456,6 +4871,35 @@ class AgentOrchestrator:
             state_snapshot["deep_react_pending"] = True
             state_snapshot["deep_react_session_key"] = session_key
             yield self._emit_sse(state_snapshot, "done", {"status": "human_input_required"})
+            state_snapshot["_chat_tail_handled"] = True
+            return
+
+        if _res == "hitl_required":
+            _session_id = (session_id or "").strip()
+            if db and _session_id:
+                from gibh_agent.core.session_runtime import (
+                    SESSION_WAITING_FOR_HITL,
+                    set_session_status,
+                )
+
+                set_session_status(
+                    db, _session_id, SESSION_WAITING_FOR_HITL, owner_id=owner_id
+                )
+            state_snapshot["hitl_pending"] = True
+            _hitl_snap = state_snapshot.get("hitl") if isinstance(state_snapshot.get("hitl"), dict) else {}
+            if _hitl_snap:
+                yield self._emit_sse(state_snapshot, "hitl_action", _hitl_snap)
+                await asyncio.sleep(0.01)
+            yield self._emit_sse(
+                state_snapshot,
+                "status",
+                {
+                    "content": "⏸ Deep ReAct 已挂起，等待 Label Studio 专家标注",
+                    "state": "waiting",
+                },
+            )
+            await asyncio.sleep(0.01)
+            yield self._emit_sse(state_snapshot, "done", {"status": "waiting_for_hitl"})
             state_snapshot["_chat_tail_handled"] = True
             return
 
@@ -4802,6 +5246,56 @@ class AgentOrchestrator:
             yield self._emit_sse(state_snapshot, event_type, data)
             await asyncio.sleep(0.01)
 
+    @staticmethod
+    def _format_hitl_action_event(hitl: Dict[str, Any]) -> Dict[str, Any]:
+        """将 executor / Trigger_Expert_Annotation 载荷格式化为 SSE hitl_action 事件。"""
+        from gibh_agent.tools.hitl_tools import normalize_hitl_payload_for_frontend
+
+        normalized = normalize_hitl_payload_for_frontend(hitl if isinstance(hitl, dict) else {})
+        if not normalized or normalized.get("status") != "hitl_required":
+            return {}
+        return {
+            "status": "hitl_required",
+            "ls_url": normalized.get("ls_url") or normalized.get("ls_project_url") or "",
+            "ls_project_url": normalized.get("ls_project_url") or normalized.get("ls_url") or "",
+            "project_id": normalized.get("project_id") or normalized.get("ls_project_id"),
+            "ls_project_id": normalized.get("ls_project_id") or normalized.get("project_id"),
+            "scenario_type": normalized.get("scenario_type", "scrna_cell_type_annotation"),
+            "message": normalized.get(
+                "message",
+                "细胞类型注释已完成，请在 Label Studio 中进行专家复核标注。",
+            ),
+            "error_detail": normalized.get("error_detail") or normalized.get("message") or "",
+            "ls_unavailable": bool(normalized.get("ls_unavailable")),
+        }
+
+    @staticmethod
+    def _extract_hitl_payload(results: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """从工作流执行结果中提取 HITL 挂起载荷（hitl_required）。"""
+        if not isinstance(results, dict):
+            return None
+        if results.get("status") == "hitl_required":
+            hitl = results.get("hitl")
+            if isinstance(hitl, dict) and hitl.get("status") == "hitl_required":
+                return hitl
+        hitl = results.get("hitl")
+        if isinstance(hitl, dict) and (
+            hitl.get("status") == "hitl_required"
+            or hitl.get("ls_project_url")
+            or hitl.get("ls_url")
+            or hitl.get("ls_project_id")
+            or hitl.get("ls_unavailable")
+        ):
+            return hitl
+        for step_detail in results.get("steps_details") or []:
+            if step_detail.get("status") != "hitl_required":
+                continue
+            sr = step_detail.get("step_result") or {}
+            data = sr.get("data") if isinstance(sr.get("data"), dict) else {}
+            if data.get("status") == "hitl_required":
+                return data
+        return None
+
     def _emit_sse(
         self,
         state_snapshot: Dict[str, Any],
@@ -4835,6 +5329,9 @@ class AgentOrchestrator:
                 from gibh_agent.core.execution_snapshot import update_expert_report_in_state
 
                 update_expert_report_in_state(state_snapshot, md.strip())
+        elif event_type == "hitl_action" and isinstance(data, dict):
+            state_snapshot["hitl_pending"] = True
+            state_snapshot["hitl"] = dict(data)
         elif event_type == "status" and data:
             # 🔥 约束二：process_log 与前端 state 一致（running/completed/error/start 等），保证图标/动画一致
             # 技能快车道 [AgenticLog] 细粒度事件不入库：否则快照每条 token 一行，历史还原会出现数千条 JSON
@@ -4848,6 +5345,14 @@ class AgentOrchestrator:
                 })
         elif event_type in ("workflow", "plan") and data:
             state_snapshot["workflow"] = data
+            _wf_diag = data.get("diagnosis_report")
+            if isinstance(_wf_diag, str) and _wf_diag.strip():
+                report = state_snapshot.get("report") or {}
+                report["diagnosis_report"] = _wf_diag
+                state_snapshot["report"] = report
+                from gibh_agent.core.execution_snapshot import update_diagnosis_in_state
+
+                update_diagnosis_in_state(state_snapshot, _wf_diag)
             _eid = data.get("execution_id") or data.get("executionId")
             if _eid and str(_eid).strip():
                 state_snapshot["_current_execution_id"] = str(_eid).strip()
@@ -4916,7 +5421,11 @@ class AgentOrchestrator:
 
                 update_diagnosis_in_state(state_snapshot, diagnosis_val)
         elif event_type in ("result", "done") and data:
-            if data.get("diagnosis") is not None or data.get("report_data") is not None:
+            if (
+                data.get("diagnosis") is not None
+                or data.get("diagnosis_report") is not None
+                or data.get("report_data") is not None
+            ):
                 report = state_snapshot.get("report") or {}
                 report_data = report.get("report_data") or {}
                 report_data.update(data.get("report_data") or {})
@@ -4925,6 +5434,11 @@ class AgentOrchestrator:
                     if k != "report_data":
                         report[k] = v
                 state_snapshot["report"] = report
+                _diag_rep = data.get("diagnosis_report")
+                if isinstance(_diag_rep, str) and _diag_rep.strip():
+                    from gibh_agent.core.execution_snapshot import update_diagnosis_in_state
+
+                    update_diagnosis_in_state(state_snapshot, _diag_rep)
                 _expert = report_data.get("report") or report.get("report")
                 if isinstance(_expert, str) and _expert.strip():
                     from gibh_agent.core.execution_snapshot import update_expert_report_in_state

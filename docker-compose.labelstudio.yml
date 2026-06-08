@@ -1,0 +1,49 @@
+# Label Studio — GIBH HITL 人工审核（与主栈 docker-compose.yml 叠加启动）
+#
+# 启动（须与主栈同 project，以共享 gibh-network）：
+#   cd /home/ubuntu/GIBH-AGENT-V2
+#   docker compose -f docker-compose.yml -f docker-compose.labelstudio.yml -f docker-compose.override.yml up -d label-studio api-server nginx
+# 注意：显式 -f 时不会自动加载 override；内网 IP / CSRF 请写在 docker-compose.override.yml（已 gitignore）
+#
+# 浏览器推荐经同源反代打开：http://127.0.0.1:8018/label-studio/ 或直连 :8028/label-studio/
+# 独立调试端口：http://127.0.0.1:8082
+# 数据持久化：./ls_data
+#
+# 零配置：api-server 会通过 LABEL_STUDIO_USERNAME/PASSWORD 自动登录并抓取 Token，无需手填 API Key。
+# 可选覆盖：LABEL_STUDIO_API_KEY（显式 Token，跳过 bootstrap）
+# 内网部署：在 docker-compose.override.yml 设置 LABEL_STUDIO_HOST / LABEL_STUDIO_CSRF_TRUSTED_ORIGINS
+#   为浏览器实际访问的 http://<host>:<port>/label-studio（无尾斜杠的 origin 列表，逗号分隔）
+
+services:
+  label-studio:
+    image: heartexlabs/label-studio:latest
+    container_name: gibh_label_studio
+    restart: unless-stopped
+    ports:
+      - "8082:8080"
+    volumes:
+      - ./ls_data:/label-studio/data:rw
+    environment:
+      - TZ=Asia/Shanghai
+      - LABEL_STUDIO_USERNAME=${LABEL_STUDIO_USERNAME:-system_admin@omics.local}
+      - LABEL_STUDIO_PASSWORD=${LABEL_STUDIO_PASSWORD:-AutoBootstrap_O1m2i3c4s!}
+      - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true
+      - LABEL_STUDIO_HOST=${LABEL_STUDIO_HOST:-http://127.0.0.1:8018/label-studio}
+      - CSRF_TRUSTED_ORIGINS=${LABEL_STUDIO_CSRF_TRUSTED_ORIGINS:-http://127.0.0.1:8018,http://127.0.0.1:8028,http://localhost:8018,http://localhost:8028}
+      - USE_X_FORWARDED_HOST=true
+      - USE_X_FORWARDED_PORT=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - gibh-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  api-server:
+    environment:
+      - LABEL_STUDIO_URL=http://label-studio:8080
+      - LABEL_STUDIO_SAME_ORIGIN_PROXY=1

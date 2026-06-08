@@ -579,6 +579,14 @@ from gibh_agent.db.skill_research_flow_specs import (  # noqa: E402
 
 SKILL_DETAILED_SPECS_BY_TOOL_ID.update(RESEARCH_FLOW_SPECS_BY_TOOL_ID)
 
+# 特色科研流程 · 科学语料数据加工（HITL + SFT 导出）
+from gibh_agent.db.skill_corpus_detailed_specs import (  # noqa: E402
+    CORPUS_SPECS_BY_TOOL_ID,
+    SKILL_NAME_TO_CORPUS_TOOL_ID,
+)
+
+SKILL_DETAILED_SPECS_BY_TOOL_ID.update(CORPUS_SPECS_BY_TOOL_ID)
+
 
 def build_skill_name_to_tool_id_map() -> Dict[str, str]:
     """广场卡片 name → tool_id（含 [Skill_Route] 与无 Route 占位项），供前端兜底解析。"""
@@ -587,6 +595,7 @@ def build_skill_name_to_tool_id_map() -> Dict[str, str]:
     out: Dict[str, str] = dict(SKILL_NAME_TO_UNROUTED_TOOL_ID)
     out.update(SKILL_NAME_TO_PIPELINE_TOOL_ID)
     out.update(SKILL_NAME_TO_RESEARCH_FLOW_TOOL_ID)
+    out.update(SKILL_NAME_TO_CORPUS_TOOL_ID)
     for skill in get_all_system_skills_list():
         name = (skill.get("name") or "").strip()
         if not name:
@@ -635,17 +644,19 @@ def enrich_skill_plaza_item(item: Dict[str, Any], db_detailed_spec: Any = None) 
     route_tid = extract_tool_id_from_prompt(pt)
     pipeline_tid = SKILL_NAME_TO_PIPELINE_TOOL_ID.get(name, "")
     research_tid = SKILL_NAME_TO_RESEARCH_FLOW_TOOL_ID.get(name, "")
+    corpus_tid = SKILL_NAME_TO_CORPUS_TOOL_ID.get(name, "")
     unrouted_tid = SKILL_NAME_TO_UNROUTED_TOOL_ID.get(name, "")
     if hint and not _SKILL_ROUTE_RE.search(str(hint)):
         tool_id = (
             route_tid
             or pipeline_tid
             or research_tid
+            or corpus_tid
             or unrouted_tid
             or (hint if hint in SKILL_DETAILED_SPECS_BY_TOOL_ID else "")
         )
     else:
-        tool_id = route_tid or pipeline_tid or research_tid or unrouted_tid or (
+        tool_id = route_tid or pipeline_tid or research_tid or corpus_tid or unrouted_tid or (
             hint if hint in SKILL_DETAILED_SPECS_BY_TOOL_ID else ""
         )
     if tool_id:

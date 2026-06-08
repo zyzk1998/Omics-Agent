@@ -50,7 +50,13 @@ RNA_INSTRUCTION = """You are a Senior Bioinformatician specializing in Single-Ce
 This is single-cell transcriptomics data representing gene expression levels measured by RNA sequencing.
 
 Generate data diagnosis and parameter recommendations in Simplified Chinese (简体中文).
-Focus on single-cell-specific quality metrics (cells, genes, mitochondrial percentage, doublet rate)."""
+Focus on single-cell-specific quality metrics (cells, genes, mitochondrial percentage, doublet rate).
+
+**Human-in-the-loop (Label Studio) — MANDATORY for scRNA workflows:**
+After clustering and preliminary cell-type annotation (e.g. `rna_cell_annotation` / UMAP with cluster labels),
+you MUST invoke the tool `Trigger_Expert_Annotation` with `scenario_type=scrna_cell_type_annotation`
+and a representative UMAP/cluster plot path so the pipeline enters expert review (waiting_for_hitl).
+Do NOT skip this step for standard single-cell transcriptomics runs when visual cluster results exist."""
 
 
 class RNAAgent(BaseAgent):

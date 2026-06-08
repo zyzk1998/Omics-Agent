@@ -414,6 +414,22 @@ class DeepReActRunner:
 
                 try:
                     result = await execute_tool(tool_fn, args)
+                    if isinstance(result, dict) and result.get("status") == "hitl_required":
+                        await emit_callback(
+                            "hitl_action",
+                            {
+                                "ls_url": result.get("ls_project_url") or "",
+                                "project_id": result.get("ls_project_id"),
+                                "scenario_type": result.get("scenario_type", ""),
+                                "message": result.get("message", "等待专家标注复核"),
+                                "task_count": result.get("task_count"),
+                            },
+                        )
+                        await emit_callback(
+                            "process_log",
+                            {"message": "⏸ 已挂起：等待 Label Studio 专家标注"},
+                        )
+                        return "hitl_required"
                     payload = json.dumps(result, ensure_ascii=False, default=str)
                     await emit_callback(
                         "process_log",

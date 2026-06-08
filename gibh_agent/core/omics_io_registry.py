@@ -75,8 +75,19 @@ OMICS_SIMPLE_EXTENSIONS: frozenset[str] = frozenset(
         ".png",
         ".jpg",
         ".jpeg",
+        ".jpe",
+        ".jfif",
+        ".gif",
         ".bmp",
         ".webp",
+        ".svg",
+        ".ico",
+        ".heic",
+        ".heif",
+        ".avif",
+        ".ppm",
+        ".pgm",
+        ".pbm",
         # 代谢 / 蛋白
         ".mzml",
         ".mzxml",
@@ -100,6 +111,7 @@ OMICS_SIMPLE_EXTENSIONS: frozenset[str] = frozenset(
         ".pdf",
         ".json",
         ".txt",
+        ".md",
     }
 )
 
@@ -114,6 +126,13 @@ ELASTIC_SKIP_TOOL_MARKERS: Tuple[str, ...] = (
     "nifti_preview",
     "clustering_comparison",
     "model_comparison",
+)
+
+# HITL 工具：image_path 可为 http(s) URL，不做容器内路径存在性校验
+PATH_VALIDATION_EXEMPT_TOOLS: frozenset[str] = frozenset(
+    {
+        "Trigger_Expert_Annotation",
+    }
 )
 
 
@@ -138,6 +157,21 @@ def is_known_omics_extension(path_str: str) -> bool:
     if not suf:
         return False
     return suf in OMICS_COMPOUND_EXTENSIONS or suf in OMICS_SIMPLE_EXTENSIONS
+
+
+def is_upload_allowed_filename(filename: str) -> bool:
+    """HTTP 上传白名单（server.py）：组学数据 + 全量常见图片 + 语料 json/txt/md。"""
+    return is_known_omics_extension(filename)
+
+
+def upload_rejection_hint(filename: str) -> str:
+    """上传被拒时返回给前端的简短说明。"""
+    suf = get_path_suffix(filename) or Path(str(filename or "")).suffix.lower() or "(无后缀)"
+    return (
+        f"不允许的文件类型: {suf}。"
+        "支持：组学矩阵/测序（h5ad、mtx、fastq.gz 等）、医学影像（nii、dcm、tif）、"
+        "图片（png、jpg、jpeg、gif、webp、bmp、svg、tif 等）及语料 json/txt/md。"
+    )
 
 
 def path_looks_like_data_file(path_str: str) -> bool:

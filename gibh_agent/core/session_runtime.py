@@ -17,8 +17,11 @@ SESSION_IDLE = "idle"
 SESSION_RUNNING = "running"
 SESSION_COMPLETED = "completed"
 SESSION_FAILED = "failed"
+SESSION_WAITING_FOR_HITL = "waiting_for_hitl"
 
-_VALID = frozenset({SESSION_IDLE, SESSION_RUNNING, SESSION_COMPLETED, SESSION_FAILED})
+_VALID = frozenset(
+    {SESSION_IDLE, SESSION_RUNNING, SESSION_COMPLETED, SESSION_FAILED, SESSION_WAITING_FOR_HITL}
+)
 
 
 def normalize_session_status(raw: Optional[str], *, default: str = SESSION_IDLE) -> str:
