@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""三轨合一数据入库 API（打包 + 物理路由推送）。"""
+"""三轨合一数据入库 API（语料守门人 + 打包 + 物理路由推送）。"""
 from __future__ import annotations
 
 import logging
@@ -9,12 +9,19 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as OrmSession
 
+from gibh_agent.core.corpus_gatekeeper import ensure_corpus_ready_for_ingestion
 from gibh_agent.core.data_packager import build_artifacts_archive
+from gibh_agent.core.ingestion_deploy import deploy_artifacts_to_mount
+from gibh_agent.core.ingestion_mount_discovery import (
+    discover_ingestion_mount_paths,
+    get_default_ingestion_mount_path,
+    validate_ingestion_mount_path,
+)
 from gibh_agent.core.ingestion_router import IngestionRouterError, deliver_archive
 from gibh_agent.core.deps import get_current_owner_id
 from gibh_agent.core.hitl_resume import _extract_steps_details, _load_latest_agent_snapshot
 from gibh_agent.core.hitl_session_registry import get_hitl_session
-from gibh_agent.core.user_database_settings_store import get_database_mount_config
+from gibh_agent.core.user_database_settings_store import get_database_mount_config, save_database_mount_config
 from gibh_agent.db.connection import get_db_session
 from gibh_agent.utils.ls_client import LabelStudioClient, LabelStudioClientError
 
@@ -26,6 +33,14 @@ router = APIRouter(prefix="/api/ingestion", tags=["Ingestion"])
 class IngestionTriggerBody(BaseModel):
     session_id: Optional[str] = Field(default=None, description="关联会话 ID")
     skip_hitl: bool = Field(default=False, description="跳过 Label Studio 专家标注直接入库")
+    mount_path: Optional[str] = Field(
+        default=None,
+        description="容器内挂载绝对路径（前端 localStorage 记忆；优先于设置面板）",
+    )
+    persist_mount_path: bool = Field(
+        default=False,
+        description="是否将 mount_path 写入用户数据库挂载配置",
+    )
 
 
 def _resolve_expert_report(snap: Dict[str, Any]) -> str:
@@ -38,16 +53,38 @@ def _resolve_expert_report(snap: Dict[str, Any]) -> str:
     return str(rd.get("report") or rep.get("report") or "").strip()
 
 
-@router.post("/trigger")
-def trigger_ingestion(
-    body: IngestionTriggerBody,
-    owner_id: str = Depends(get_current_owner_id),
-    db: OrmSession = Depends(get_db_session),
-) -> Dict[str, Any]:
+def _resolve_ingestion_mount_config(
+    owner_id: str,
+    *,
+    mount_path_override: Optional[str] = None,
+    persist: bool = False,
+) -> tuple[Dict[str, Any], Optional[str]]:
     """
-    一键入库：先经 Data Packager 打归档包，再经 IngestionRouter 推送到用户配置目标。
+    合并用户设置、前端传入路径与系统探测默认路径。
+    返回 (cfg, error_message)。
     """
     cfg = get_database_mount_config(owner_id)
+    validated: Optional[str] = None
+
+    if mount_path_override:
+        validated = validate_ingestion_mount_path(mount_path_override)
+        if not validated:
+            return cfg, f"挂载路径不可用（须为容器内存在且可写的目录）: {mount_path_override}"
+        cfg = dict(cfg)
+        cfg["mount_type"] = "local_volume"
+        cfg["local_volume"] = {"mount_path": validated}
+        if persist:
+            try:
+                save_database_mount_config(owner_id, cfg)
+            except ValueError as exc:
+                logger.warning("[Ingestion] persist mount_path failed: %s", exc)
+    elif not ((cfg.get("local_volume") or {}).get("mount_path")):
+        default_path = get_default_ingestion_mount_path()
+        if default_path:
+            cfg = dict(cfg)
+            cfg["mount_type"] = "local_volume"
+            cfg["local_volume"] = {"mount_path": default_path}
+
     mount_type = cfg.get("mount_type") or "local_volume"
     has_config = False
     if mount_type == "local_volume":
@@ -58,11 +95,54 @@ def trigger_ingestion(
         has_config = bool((cfg.get("api_url") or {}).get("endpoint"))
 
     if not has_config:
+        return cfg, "尚未配置业务数据库挂载，且未能自动探测到可用容器路径。"
+    return cfg, None
+
+
+@router.get("/discover-mount")
+async def discover_mount(
+    owner_id: str = Depends(get_current_owner_id),
+) -> Dict[str, Any]:
+    """
+    探测 Docker 容器内可写挂载目录，供前端首次一键入库确认弹窗预填。
+    """
+    paths = discover_ingestion_mount_paths()
+    default_path = paths[0]["path"] if paths else None
+    return {
+        "status": "success",
+        "default_path": default_path,
+        "paths": paths,
+        "hint": "此为容器内路径，对应宿主机 docker-compose 挂载卷；请勿填写 Windows 盘符如 D:\\project",
+        "owner_id_prefix": owner_id[:8] if owner_id else "",
+    }
+
+
+@router.post("/trigger")
+async def trigger_ingestion(
+    body: IngestionTriggerBody,
+    owner_id: str = Depends(get_current_owner_id),
+    db: OrmSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """
+    一键入库：Corpus Gatekeeper 盘点/代偿生成语料 → Data Packager 打归档包 → 物理落盘到挂载卷。
+    """
+    cfg, cfg_err = _resolve_ingestion_mount_config(
+        owner_id,
+        mount_path_override=body.mount_path,
+        persist=body.persist_mount_path,
+    )
+    if cfg_err:
+        discovered = discover_ingestion_mount_paths()
         return {
             "status": "error",
-            "message": "尚未配置业务数据库挂载，请先在设置中完成关联。",
-            "needs_settings": True,
+            "message": cfg_err,
+            "needs_settings": not body.mount_path and not discovered,
+            "needs_mount_confirm": bool(discovered) and not body.mount_path,
+            "discovered_paths": discovered,
+            "default_path": discovered[0]["path"] if discovered else None,
         }
+
+    mount_type = cfg.get("mount_type") or "local_volume"
 
     sid = str(body.session_id or "").strip()
     expert_md = ""
@@ -70,6 +150,8 @@ def trigger_ingestion(
     hitl_annotations = None
     hitl_meta: Dict[str, Any] = {}
     output_dir = None
+    snap: Dict[str, Any] = {}
+    corpus_bundle: Dict[str, Any] = {}
 
     if sid:
         _msg, snap = _load_latest_agent_snapshot(db, sid, owner_id)
@@ -87,6 +169,27 @@ def trigger_ingestion(
                 except LabelStudioClientError as exc:
                     logger.warning("[Ingestion] LS export skipped: %s", exc)
 
+    if sid and snap:
+        from server import agent
+
+        corpus_bundle = await ensure_corpus_ready_for_ingestion(
+            session_id=sid,
+            snap=snap,
+            agent_root=agent,
+            expert_report_md=expert_md,
+            steps_details=steps_details,
+            hitl_annotations=hitl_annotations,
+            hitl_meta=hitl_meta,
+            output_dir=output_dir,
+            skip_hitl=body.skip_hitl,
+        )
+        if corpus_bundle.get("status") != "success":
+            logger.warning(
+                "[Ingestion] corpus gatekeeper partial session=%s: %s",
+                sid,
+                corpus_bundle.get("message"),
+            )
+
     pack = build_artifacts_archive(
         session_id=sid or f"anonymous-{owner_id[:8]}",
         owner_id=owner_id,
@@ -96,6 +199,8 @@ def trigger_ingestion(
         hitl_meta=hitl_meta,
         output_dir=output_dir,
         skip_hitl=body.skip_hitl,
+        corpus_archive_dir=corpus_bundle.get("archive_dir"),
+        corpus_modality=corpus_bundle.get("modality"),
     )
 
     archive_path = pack.get("archive_path")
@@ -107,35 +212,49 @@ def trigger_ingestion(
         }
 
     try:
-        delivery = deliver_archive(
-            str(archive_path),
-            cfg,
-            session_id=sid,
-            owner_id=owner_id,
-        )
-    except IngestionRouterError as exc:
+        if mount_type == "local_volume":
+            mount_path = str((cfg.get("local_volume") or {}).get("mount_path") or "")
+            delivery = deploy_artifacts_to_mount(
+                archive_path=str(archive_path),
+                mount_path=mount_path,
+                session_id=sid,
+                owner_id=owner_id,
+                bundle_dir=pack.get("bundle_dir"),
+            )
+        else:
+            delivery = deliver_archive(
+                str(archive_path),
+                cfg,
+                session_id=sid,
+                owner_id=owner_id,
+            )
+    except (IngestionRouterError, ValueError) as exc:
+        err_msg = getattr(exc, "message", None) or str(exc)
+        err_details = getattr(exc, "details", None)
         logger.warning(
             "[Ingestion] deliver failed owner=%s session=%s mount=%s: %s",
             owner_id,
             sid,
-            exc.mount_type,
-            exc.message,
+            mount_type,
+            err_msg,
         )
         return {
             "status": "error",
-            "message": exc.message,
+            "message": err_msg,
             "mount_type": mount_type,
             "archive_path": archive_path,
             "manifest": pack.get("manifest"),
-            "error_details": exc.details,
+            "corpus": corpus_bundle,
+            "error_details": err_details,
         }
 
     logger.info(
-        "[Ingestion] delivered owner=%s session=%s dest=%s skip_hitl=%s",
+        "[Ingestion] delivered owner=%s session=%s dest=%s skip_hitl=%s modality=%s",
         owner_id,
         sid,
         delivery.get("destination"),
         body.skip_hitl,
+        corpus_bundle.get("modality"),
     )
     return {
         "status": "success",
@@ -146,5 +265,6 @@ def trigger_ingestion(
         "skip_hitl": body.skip_hitl,
         "archive_path": archive_path,
         "manifest": pack.get("manifest"),
+        "corpus": corpus_bundle,
         "delivery": delivery,
     }

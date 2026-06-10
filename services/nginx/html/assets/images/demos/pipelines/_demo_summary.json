@@ -1,0 +1,99 @@
+{
+  "metabolomics_top_vip": [
+    {
+      "metabolite": "Quinolinate",
+      "vip": "68.559021164834",
+      "p_value": "0.00011851079240552602",
+      "log2fc": "44.42323404255319"
+    },
+    {
+      "metabolite": "N,N-Dimethylglycine",
+      "vip": "66.10990909451651",
+      "p_value": "0.0001554345778845938",
+      "log2fc": "20.893120567375888"
+    },
+    {
+      "metabolite": "Valine",
+      "vip": "65.24326261861698",
+      "p_value": "0.00013942378774496906",
+      "log2fc": "25.449886524822695"
+    },
+    {
+      "metabolite": "Leucine",
+      "vip": "62.72685235123251",
+      "p_value": "0.00026950455533127424",
+      "log2fc": "17.705035460992903"
+    },
+    {
+      "metabolite": "Dimethylamine",
+      "vip": "60.550581040557205",
+      "p_value": "0.00044600694490717473",
+      "log2fc": "244.89730496453913"
+    },
+    {
+      "metabolite": "Pyroglutamate",
+      "vip": "60.12867668408447",
+      "p_value": "0.00048453630587394194",
+      "log2fc": "151.03434042553198"
+    },
+    {
+      "metabolite": "Creatinine",
+      "vip": "59.831190028320364",
+      "p_value": "0.0005129808329911913",
+      "log2fc": "5102.965546099291"
+    },
+    {
+      "metabolite": "myo-Inositol",
+      "vip": "57.9350387663884",
+      "p_value": "0.0022150346561477462",
+      "log2fc": "119.19632624113476"
+    }
+  ],
+  "radiomics_features_head": [
+    {
+      "feature": "original_firstorder_10Percentile",
+      "value": "632.0"
+    },
+    {
+      "feature": "original_firstorder_90Percentile",
+      "value": "1044.4"
+    },
+    {
+      "feature": "original_firstorder_Energy",
+      "value": "2918821481.0"
+    },
+    {
+      "feature": "original_firstorder_Entropy",
+      "value": "4.601935553903786"
+    },
+    {
+      "feature": "original_firstorder_InterquartileRange",
+      "value": "253.0"
+    },
+    {
+      "feature": "original_firstorder_Kurtosis",
+      "value": "2.1807729393860265"
+    }
+  ],
+  "proteomics_qc": {
+    "tool_id": "proteomics_raw_qc_conversion",
+    "qc_metrics": {
+      "file_size_mb": 5.466794,
+      "spectrum_count": 767,
+      "chromatogram_count": 0,
+      "input_path": "/app/test_data/proteomics/BSA1_F1.mzML"
+    }
+  },
+  "epigenomics_qc": {
+    "tool_id": "epigenomics_raw_qc_trimming",
+    "qc_metrics": {
+      "n_reads": 100000,
+      "total_bases": 7600000,
+      "gc_fraction": 0.437264,
+      "gc_percent": 43.7264,
+      "mean_read_length": 76.0,
+      "input_path": "/app/test_data/epigenomics/SRR1822153_1.fastq.gz",
+      "compression": "gzip"
+    }
+  }
+}

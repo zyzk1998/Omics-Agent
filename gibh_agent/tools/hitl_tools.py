@@ -6,10 +6,13 @@ Human-in-the-loop (HITL) 工具：Label Studio 专家标注白名单网关。
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import mimetypes
 import os
 from pathlib import Path
+import re
 from typing import Any, Dict, List, Optional, Union
 
 from gibh_agent.core.tool_registry import registry
@@ -241,6 +244,191 @@ def _sanitize_internal_http_base(base: str) -> str:
     return b
 
 
+def get_image_base64_data_uri(file_path: str) -> str:
+    """将本地图像文件编码为 Data URI，供 Label Studio import_task 内嵌渲染（绕过 CSP / 内网 DNS）。"""
+    path = Path(str(file_path or "").strip()).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(f"找不到待标注图片: {file_path}")
+    mime_type, _ = mimetypes.guess_type(str(path))
+    mime_type = mime_type or "image/png"
+    encoded = base64.b64encode(path.read_bytes()).decode("utf-8")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _results_dir() -> Path:
+    return Path(os.getenv("RESULTS_DIR", "/app/results")).expanduser().resolve()
+
+
+def _uploads_dir() -> Path:
+    return Path(os.getenv("UPLOAD_DIR", "/app/uploads")).expanduser().resolve()
+
+
+def _static_assets_dir() -> Path:
+    """Nginx 静态资源根（含技能广场演示图）。"""
+    explicit = os.getenv("NGINX_HTML_ROOT", "").strip()
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    return Path(__file__).resolve().parents[2] / "services" / "nginx" / "html"
+
+
+def _find_uploaded_image_by_basename(basename: str) -> Optional[Path]:
+    """在 uploads 卷内按文件名查找（用户会话路径常为 /uploads/{owner}/{ts}/file.png）。"""
+    name = str(basename or "").strip()
+    if not name:
+        return None
+    uploads = _uploads_dir()
+    if not uploads.is_dir():
+        return None
+    try:
+        for candidate in uploads.rglob(name):
+            if candidate.is_file():
+                return candidate.resolve()
+    except OSError:
+        return None
+    return None
+
+
+def resolve_local_image_file(path: str) -> Optional[Path]:
+    """将 /uploads/、/results/、物理路径或内网 HTTP URL 解析为容器内可读图像文件。"""
+    raw = str(path or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("data:"):
+        return None
+
+    if raw.startswith("http://") or raw.startswith("https://"):
+        rel = normalize_frontend_media_path(raw)
+        if not (rel.startswith("/results/") or rel.startswith("/uploads/")):
+            return None
+        raw = rel
+
+    rel = normalize_frontend_media_path(raw)
+    if rel.startswith("/results/"):
+        candidate = _results_dir() / rel[len("/results/") :].lstrip("/")
+        return candidate if candidate.is_file() else None
+    if rel.startswith("/assets/"):
+        candidate = _static_assets_dir() / rel.lstrip("/")
+        return candidate if candidate.is_file() else None
+    if rel.startswith("/uploads/"):
+        candidate = _uploads_dir() / rel[len("/uploads/") :].lstrip("/")
+        if candidate.is_file():
+            return candidate
+        basename = Path(rel).name
+        demo = _static_assets_dir() / "images" / "demos" / "corpus" / basename
+        if demo.is_file():
+            return demo.resolve()
+        return _find_uploaded_image_by_basename(basename)
+
+    p = Path(raw).expanduser()
+    if p.is_file():
+        return p.resolve()
+    if p.is_absolute():
+        return p if p.is_file() else None
+
+    for base in (_uploads_dir(), _results_dir(), Path.cwd()):
+        candidate = (base / raw).resolve()
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def resolve_ls_import_image_payload(path: str) -> str:
+    """
+    Label Studio import_task 图像字段：本地文件 → Base64 Data URI；
+    已是 data: URI 原样返回；无法解析本地文件时返回空串。
+    """
+    raw = str(path or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("data:"):
+        return raw
+
+    local_file = resolve_local_image_file(raw)
+    if local_file is not None:
+        data_uri = get_image_base64_data_uri(str(local_file))
+        logger.info(
+            "HITL LS 图片 Base64 内嵌: %s → data:%s;base64,<len=%s>",
+            str(path)[:120],
+            data_uri[5 : data_uri.find(";")],
+            len(data_uri),
+        )
+        return data_uri
+
+    if raw.startswith("http://") or raw.startswith("https://"):
+        rel = normalize_frontend_media_path(raw)
+        if rel.startswith("/results/") or rel.startswith("/uploads/"):
+            logger.warning(
+                "resolve_ls_import_image_payload: 内网/本系统 URL 无本地文件，拒绝 HTTP 透传 %s",
+                str(path)[:200],
+            )
+            return ""
+        logger.info("HITL LS 外部图片 URL 透传(非本系统路径): %s", raw[:200])
+        return raw
+
+    logger.warning("resolve_ls_import_image_payload: 未能解析本地图片 %s", str(path)[:200])
+    return ""
+
+
+def _is_internal_ls_image_ref(value: str) -> bool:
+    raw = str(value or "").strip()
+    if not raw or raw.startswith("data:"):
+        return False
+    if raw.startswith("/uploads/") or raw.startswith("/results/") or raw.startswith("/assets/"):
+        return True
+    if raw.startswith("http://") or raw.startswith("https://"):
+        rel = normalize_frontend_media_path(raw)
+        return rel.startswith("/uploads/") or rel.startswith("/results/") or rel.startswith("/assets/")
+    return False
+
+
+def _embed_task_image_fields_as_base64(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """将任务 data.image 中的路径 / 内网 URL 转为 Base64 Data URI。"""
+    out: List[Dict[str, Any]] = []
+    for task in tasks:
+        item = dict(task)
+        data = item.get("data")
+        if isinstance(data, dict) and data.get("image"):
+            raw_img = str(data["image"])
+            embedded = resolve_ls_import_image_payload(raw_img)
+            data = dict(data)
+            if embedded:
+                data["image"] = embedded
+            elif _is_internal_ls_image_ref(raw_img):
+                data["image"] = ""
+            item["data"] = data
+        elif isinstance(item, dict) and item.get("image") and "data" not in item:
+            raw_img = str(item["image"])
+            embedded = resolve_ls_import_image_payload(raw_img)
+            item = dict(item)
+            if embedded:
+                item["image"] = embedded
+            elif _is_internal_ls_image_ref(raw_img):
+                item["image"] = ""
+        out.append(item)
+    return out
+
+
+def _validate_tasks_have_embedded_images(tasks: List[Dict[str, Any]]) -> Optional[str]:
+    """导入 LS 前校验：凡含 image 字段的任务须已为 data: URI 或留空（纯文本语料）。"""
+    for idx, task in enumerate(tasks):
+        if not isinstance(task, dict):
+            continue
+        data = task.get("data") if isinstance(task.get("data"), dict) else task
+        if not isinstance(data, dict):
+            continue
+        img = str(data.get("image") or "").strip()
+        if not img:
+            continue
+        if img.startswith("data:"):
+            continue
+        if _is_internal_ls_image_ref(img) or "nginx" in img:
+            return (
+                f"任务 #{idx + 1} 图像未能内嵌为 Base64（拒绝 http://nginx 等浏览器不可达 URL）: "
+                f"{img[:120]}"
+            )
+    return None
+
+
 def _resolve_ls_image_fetch_base() -> str:
     """
     Label Studio 服务端拉取任务图片时使用的 HTTP 基址（内网专用）。
@@ -265,58 +453,55 @@ def _resolve_ls_image_fetch_base() -> str:
 
 def resolve_ls_import_image_url(path: str) -> str:
     """
-    仅供 Label Studio import_task 使用：内网可达的绝对 HTTP URL。
-    本系统 /results/ 路径 → http://nginx/results/...；外部公网 URL 原样透传。
+    Label Studio import_task 图像字段（向后兼容函数名）。
+    本地 /uploads/、/results/ 及可解析物理路径 → Base64 Data URI。
     """
-    raw = str(path or "").strip()
-    if not raw:
-        return ""
-    if raw.startswith("http://") or raw.startswith("https://"):
-        rel = normalize_frontend_media_path(raw)
-        if rel.startswith("/results/") or rel.startswith("/uploads/"):
-            base = _resolve_ls_image_fetch_base()
-            url = base + rel
-            logger.info("HITL LS 内网图片 URL(由绝对 URL 规范化): %s → %s", raw[:120], url[:220])
-            return url
-        logger.info("HITL LS 外部图片 URL 透传: %s", raw[:200])
-        return raw
-
-    rel = normalize_frontend_media_path(raw)
-
-    if rel.startswith("/results/") or rel.startswith("/uploads/"):
-        base = _resolve_ls_image_fetch_base()
-        url = base + rel
-        logger.info("HITL LS 内网图片 URL: %s → %s", str(path)[:120], url[:220])
-        return url
-
-    p = Path(str(path or rel)).expanduser()
-    if p.is_file():
-        try:
-            rdir = Path(os.getenv("RESULTS_DIR", "/app/results")).expanduser().resolve()
-            rel_path = p.resolve().relative_to(rdir)
-            base = _resolve_ls_image_fetch_base()
-            url = f"{base}/results/{rel_path.as_posix()}"
-            logger.info("HITL LS 内网图片 URL(物理路径): %s → %s", str(path)[:120], url[:220])
-            return url
-        except ValueError:
-            pass
-        try:
-            udir = Path(os.getenv("UPLOAD_DIR", "/app/uploads")).expanduser().resolve()
-            rel_path = p.resolve().relative_to(udir)
-            base = _resolve_ls_image_fetch_base()
-            url = f"{base}/uploads/{rel_path.as_posix()}"
-            logger.info("HITL LS 内网图片 URL(上传路径): %s → %s", str(path)[:120], url[:220])
-            return url
-        except ValueError:
-            pass
-
-    logger.warning("resolve_ls_import_image_url: 未能映射 %s", str(path)[:200])
-    return ""
+    return resolve_ls_import_image_payload(path)
 
 
 def resolve_ls_accessible_image_url(path: str) -> str:
-    """向后兼容别名：等同 resolve_ls_import_image_url（仅 LS 导入，非前端）。"""
-    return resolve_ls_import_image_url(path)
+    """向后兼容别名：等同 resolve_ls_import_image_payload（LS 导入专用）。"""
+    return resolve_ls_import_image_payload(path)
+
+
+def parse_image_path_inputs(image_path: Union[str, List[str], None]) -> List[str]:
+    """
+    将 image_path 解析为有序路径列表。
+    支持：List[str]、JSON 数组字符串、逗号/换行分隔的多路径字符串、单路径、完整 data: URI。
+    注意：禁止按分号切分（会破坏 data:image/png;base64,...）。
+    """
+    if image_path is None:
+        return []
+    if isinstance(image_path, list):
+        out: List[str] = []
+        for item in image_path:
+            out.extend(parse_image_path_inputs(item))
+        return [p for p in out if p]
+    raw = str(image_path).strip()
+    if not raw:
+        return []
+    if raw.startswith("data:"):
+        return [raw]
+    if raw.startswith("[") and raw.endswith("]"):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return parse_image_path_inputs(parsed)
+        except json.JSONDecodeError:
+            pass
+    parts = re.split(r"[,\n]+", raw)
+    return [p.strip() for p in parts if p and p.strip()]
+
+
+def resolve_image_paths_to_base64_payloads(image_paths: List[str]) -> tuple[List[str], Optional[str]]:
+    """批量将路径解析为 Base64 Data URI；失败时返回 (已解析列表, 错误信息)。"""
+    resolved: List[str] = []
+    for path in image_paths:
+        payload = resolve_ls_import_image_payload(path)
+        if not payload:
+            return resolved, f"无法读取待标注图片并编码为 Base64: {path}"
+        resolved.append(payload)
+    return resolved, None
 
 
 @registry.register(
@@ -336,7 +521,7 @@ def Trigger_Expert_Annotation(
     scenario_type: str,
     project_title: str,
     file_path: str = "",
-    image_path: str = "",
+    image_path: Union[str, List[str]] = "",
     label_config: str = "",
     tasks_json: str = "",
 ) -> Dict[str, Any]:
@@ -363,7 +548,7 @@ def Trigger_Expert_Annotation(
         scenario_type: 白名单场景标识（如 scrna_cell_type_annotation）。
         project_title: Label Studio 项目名称。
         file_path: 可选，指向 JSON 任务列表文件（每项含 data 或扁平字段）。
-        image_path: 可选，单张待标注图像的本地路径或 URL。
+        image_path: 可选，单张或多张待标注图像路径（List[str]、逗号分隔字符串或 JSON 数组字符串）。
         label_config: 可选，Label Studio 标注界面 XML 配置。
         tasks_json: 可选，内联 JSON 字符串（任务数组），与 file_path 二选一。
 
@@ -387,20 +572,23 @@ def Trigger_Expert_Annotation(
     if not title:
         return {"status": "error", "message": "project_title 不能为空"}
 
-    resolved_image = resolve_ls_import_image_url(image_path) if image_path else ""
-    if image_path and not resolved_image:
-        return {
-            "status": "error",
-            "message": f"无法将图片路径映射为 Label Studio 内网 HTTP URL: {image_path}",
-        }
-    tasks = _normalize_tasks_for_scenario(
-        scenario,
-        _resolve_tasks(
-            file_path=file_path,
-            image_path=resolved_image or image_path,
-            tasks_json=tasks_json,
-        ),
+    raw_image_paths = parse_image_path_inputs(image_path)
+    resolved_images, resolve_err = resolve_image_paths_to_base64_payloads(raw_image_paths)
+    if resolve_err:
+        return {"status": "error", "message": resolve_err}
+    tasks = _embed_task_image_fields_as_base64(
+        _normalize_tasks_for_scenario(
+            scenario,
+            _resolve_tasks(
+                file_path=file_path,
+                image_paths=resolved_images,
+                tasks_json=tasks_json,
+            ),
+        )
     )
+    embed_err = _validate_tasks_have_embedded_images(tasks)
+    if embed_err:
+        return {"status": "error", "message": embed_err}
     if not tasks:
         return {
             "status": "error",
@@ -427,11 +615,16 @@ def Trigger_Expert_Annotation(
             or import_result.get("import")
             or len(tasks)
         )
+        sample = (tasks[0].get("data") or tasks[0]) if tasks else None
+        if isinstance(sample, dict) and isinstance(sample.get("image"), str):
+            img_val = sample["image"]
+            if img_val.startswith("data:") and len(img_val) > 80:
+                sample = {**sample, "image": img_val[:48] + f"...<base64 len={len(img_val)}>"}
         logger.info(
             "Trigger_Expert_Annotation 建项成功 project_id=%s tasks=%s image_sample=%s",
             project_id,
             task_count,
-            (tasks[0].get("data") or tasks[0]) if tasks else None,
+            sample,
         )
         ls_url = resolve_ls_browser_project_url(project_id)
     except LabelStudioClientError as exc:
@@ -453,10 +646,10 @@ def Trigger_Expert_Annotation(
 def _resolve_tasks(
     *,
     file_path: str,
-    image_path: str,
+    image_paths: Optional[List[str]] = None,
     tasks_json: str,
 ) -> List[Dict[str, Any]]:
-    """从 file_path / image_path / tasks_json 解析任务列表。"""
+    """从 file_path / image_paths / tasks_json 解析任务列表（多图 → 多 Task）。"""
     if tasks_json and str(tasks_json).strip():
         try:
             parsed = json.loads(tasks_json)
@@ -480,9 +673,9 @@ def _resolve_tasks(
             return [raw]
         raise ValueError("file_path 内 JSON 须为对象或数组")
 
-    img = str(image_path or "").strip()
-    if img:
-        return [{"data": {"image": img}}]
+    paths = [str(p).strip() for p in (image_paths or []) if str(p).strip()]
+    if paths:
+        return [{"data": {"image": img}} for img in paths]
 
     return []
 

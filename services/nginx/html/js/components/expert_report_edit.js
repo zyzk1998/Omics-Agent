@@ -110,7 +110,8 @@
         btn.className = 'expert-report-edit-btn';
         btn.innerHTML = icon('pencil') + ' 修改';
         btn.setAttribute('aria-label', '修改专家报告');
-        btn.addEventListener('click', function () {
+        btn.addEventListener('click', function (ev) {
+            ev.stopPropagation();
             var body = cardEl.querySelector('.expert-report-md-body') || cardEl.querySelector('.report-expert-body');
             var md = markdown || (body ? body.innerText : '');
             enterEditMode(cardEl, md);
@@ -152,7 +153,9 @@
         window.renderExpertReportIntoSlot = function (slotEl, markdown, options) {
             orig(slotEl, markdown, options);
             if (!slotEl || !markdown) return;
-            var card = slotEl.querySelector('.omics-expert-report-card');
+            var card = slotEl.querySelector('.omics-expert-report-card--final')
+                || slotEl.querySelector('.omics-expert-report-card[data-report-version="final"]')
+                || slotEl.querySelector('.omics-expert-report-card');
             if (card) injectEditButton(card, markdown);
         };
         window.renderExpertReportIntoSlot.__editWrapped = true;

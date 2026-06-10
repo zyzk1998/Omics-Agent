@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as OrmSession
 
 from gibh_agent.core.deps import get_current_owner_id
-from gibh_agent.core.hitl_session_registry import resolve_session_by_project
+from gibh_agent.core.hitl_session_registry import get_hitl_session, resolve_session_by_project
 from gibh_agent.core.session_runtime import (
     SESSION_COMPLETED,
     SESSION_RUNNING,
@@ -35,6 +35,34 @@ class ResumeFromHitlBody(BaseModel):
     skip: bool = Field(default=False, description="用户主动跳过专家复核（仅关闭入口，不生成最终版）")
 
 
+def _resolve_hitl_project_id(session_id: str, snap: Dict[str, Any]) -> Optional[int]:
+    """从快照或 HITL 注册表解析 Label Studio project_id（供重新标注唤醒）。"""
+    hitl = snap.get("hitl") if isinstance(snap.get("hitl"), dict) else {}
+    for key in ("project_id", "ls_project_id"):
+        val = hitl.get(key)
+        if val is not None:
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                pass
+    reg = get_hitl_session(session_id) or {}
+    pid = reg.get("project_id")
+    if pid is not None:
+        try:
+            return int(pid)
+        except (TypeError, ValueError):
+            pass
+    ex = snap.get("execution_snapshot") if isinstance(snap.get("execution_snapshot"), dict) else {}
+    if ex.get("hitl_final") or ex.get("hitl_annotations") or snap.get("hitl_resumed"):
+        reg_pid = reg.get("project_id")
+        if reg_pid is not None:
+            try:
+                return int(reg_pid)
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
 def _snapshot_allows_soft_hitl_resume(db: OrmSession, session_id: str, owner_id: str) -> bool:
     """软 HITL：初稿报告已生成但 hitl_pending 仍为真时允许 resume。"""
     from gibh_agent.core.hitl_resume import _load_latest_agent_snapshot
@@ -44,7 +72,34 @@ def _snapshot_allows_soft_hitl_resume(db: OrmSession, session_id: str, owner_id:
         return False
     if snap.get("hitl_resumed"):
         return False
+    if snap.get("hitl_skipped"):
+        return False
     return bool(snap.get("hitl_pending") or snap.get("hitl"))
+
+
+def _snapshot_allows_reannotation_resume(
+    db: OrmSession,
+    session_id: str,
+    owner_id: str,
+) -> bool:
+    """已完成 HITL 的会话允许二次唤醒（重新标注 → 覆盖最终版报告）。"""
+    from gibh_agent.core.hitl_resume import _load_latest_agent_snapshot
+
+    _msg, snap = _load_latest_agent_snapshot(db, session_id, owner_id)
+    if not snap:
+        return False
+    if snap.get("hitl_skipped"):
+        return False
+    ex = snap.get("execution_snapshot") if isinstance(snap.get("execution_snapshot"), dict) else {}
+    had_hitl = bool(
+        snap.get("hitl_resumed")
+        or snap.get("hitl_final")
+        or ex.get("hitl_final")
+        or ex.get("hitl_annotations")
+    )
+    if not had_hitl:
+        return False
+    return _resolve_hitl_project_id(session_id, snap) is not None
 
 
 def _session_allows_hitl_resume(
@@ -56,7 +111,10 @@ def _session_allows_hitl_resume(
     if st == SESSION_WAITING_FOR_HITL:
         return True
     if st in (SESSION_COMPLETED, SESSION_RUNNING):
-        return _snapshot_allows_soft_hitl_resume(db, session.id, owner_id)
+        if _snapshot_allows_soft_hitl_resume(db, session.id, owner_id):
+            return True
+        if _snapshot_allows_reannotation_resume(db, session.id, owner_id):
+            return True
     return False
 
 
@@ -233,13 +291,7 @@ async def resume_from_hitl(
             detail=f"会话状态为 {st}，且快照无 hitl_pending，无法唤醒（可能已完成 HITL 或未进入复核）",
         )
 
-    if body.skip:
-        from gibh_agent.core.session_runtime import SESSION_COMPLETED, set_session_status
-
-        set_session_status(db, sid, SESSION_COMPLETED, owner_id=owner_id)
-        return {"status": "skipped", "message": "已跳过专家复核"}
-
-    from gibh_agent.core.hitl_resume import stream_resume_from_hitl
+    from gibh_agent.core.hitl_resume import stream_resume_from_hitl, stream_skip_from_hitl
     from server import agent
     from gibh_agent.core.orchestrator import AgentOrchestrator
 
@@ -247,6 +299,16 @@ async def resume_from_hitl(
     orchestrator = AgentOrchestrator(agent, upload_dir=upload_dir)
 
     async def _gen():
+        if body.skip:
+            async for chunk in stream_skip_from_hitl(
+                orchestrator=orchestrator,
+                session_id=sid,
+                owner_id=owner_id,
+                db=db,
+                trigger=body.trigger or "skip",
+            ):
+                yield chunk
+            return
         async for chunk in stream_resume_from_hitl(
             orchestrator=orchestrator,
             session_id=sid,

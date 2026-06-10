@@ -200,7 +200,23 @@ nginx 额外配置：`proxy_redirect ~^/(.*)$ /label-studio/$1;`（配合 Locati
 - `/user/login/` → `/label-studio/user/login/`
 - `next=/projects/8/data/` → `next=/label-studio/projects/8/data/`
 
-### 5.4 Session 桥接（免二次登录）
+### 5.4 图像 Base64 内嵌（规避 CSP / 内网 DNS）
+
+**根因**：`import_task` 若传 `http://nginx/uploads/...`，浏览器 iframe 无法解析 Docker 主机名，且 LS CSP `img-src` 拦截外部 HTTP。
+
+**方案**（`hitl_tools.py`）：
+
+- `resolve_local_image_file()`：将 `/uploads/`、`/results/`、`http://nginx/...` 解析为容器内物理路径
+- `get_image_base64_data_uri()`：读文件 → `data:image/png;base64,...`
+- `Trigger_Expert_Annotation` 导入前经 `_embed_task_image_fields_as_base64()` 写入 payload
+
+```python
+{"data": {"image": "data:image/png;base64,iVBORw0KGgo...", "text": "..."}}
+```
+
+浏览器渲染 `src="data:..."` 为同源内联数据，**无网络请求**，根除 `ERR_NAME_NOT_RESOLVED` 与 CSP 拦截。
+
+### 5.5 Session 桥接（免二次登录）
 
 | API | 说明 |
 | --- | --- |
@@ -435,7 +451,9 @@ PYTHONPATH=. python3 -m pytest \
 | 建项 **400 缺 text 键** | 仅图像未补齐语料字段 | 确认 `hitl_tools._normalize_tasks_for_scenario` 已部署 |
 | PNG 上传被拒 | 上传白名单过窄 | `omics_io_registry.is_upload_allowed_filename` |
 | resume 409 | 无 `hitl_pending` / 已 resume | 新开会话重跑 |
-| LS 无图 | 图片 URL 不可达 | 设 `OMICS_AGENT_WEB_URL` / `LS_IMAGE_FETCH_BASE_URL=http://nginx` |
+| LS 无图 / `http://nginx` ERR | 任务 image 仍为内网 HTTP URL | 确认 `resolve_ls_import_image_payload` Base64 逻辑已部署；重建 api-server |
+| LS CSP 拦截图片 | 外部 HTTP 图源 | 同上，应变为 `data:image/...;base64,...` |
+| LS 无图（拉取侧） | 图片 URL 不可达 | 设 `OMICS_AGENT_WEB_URL`；导入侧已优先 Base64，一般无需 `LS_IMAGE_FETCH_BASE_URL` |
 | compose override 不生效 | 显式 `-f` 未包含 override 文件 | 命令行加 `-f docker-compose.override.yml` |
 
 ---

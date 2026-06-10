@@ -11,6 +11,7 @@
     var _lastHitlData = null;
     var _resumeInFlight = false;
     var _lsSubmitDetected = false;
+    var _hitlCompletedMode = false;
 
     function authHeadersMerge() {
         if (typeof window.mergeJsonAuthHeaders === 'function') return window.mergeJsonAuthHeaders();
@@ -140,6 +141,7 @@
         var status = String(data.status || '').toLowerCase();
         if (
             status === 'hitl_required'
+            || status === 'hitl_completed'
             || data.ls_url
             || data.ls_project_url
             || data.project_id != null
@@ -203,6 +205,86 @@
             }
         });
     }
+
+    function extractHitlFromSnapshot(snap) {
+        if (!snap || typeof snap !== 'object') return null;
+        var hitl = snap.hitl;
+        if (hitl && typeof hitl === 'object') {
+            return normalizeHitlPayload(Object.assign({ status: 'hitl_completed' }, hitl));
+        }
+        var ex = snap.execution_snapshot && typeof snap.execution_snapshot === 'object' ? snap.execution_snapshot : {};
+        var fromSteps = extractHitlFromSteps(ex.steps_details || []);
+        if (fromSteps) return fromSteps;
+        if (window.__lastStateSnapshotHitl) {
+            return normalizeHitlPayload(window.__lastStateSnapshotHitl);
+        }
+        return null;
+    }
+
+    function mountHitlCompletedCard(payload) {
+        if (!payload) return;
+        var anchor = resolveHitlMountAnchor();
+        if (!anchor) {
+            setTimeout(function () { mountHitlCompletedCard(payload); }, 400);
+            return;
+        }
+        var slots = ensureHitlArtifactRow(anchor);
+        if (!slots || !slots.right) return;
+
+        var lsUrl = resolveLsOpenUrl(payload);
+        var unavailable = isHitlLaunchUnavailable(payload);
+        var errText = unavailable ? resolveHitlErrorMessage(payload) : '';
+        var right = slots.right;
+        var card = right.querySelector('.hitl-entry-card');
+        if (!card) {
+            card = document.createElement('div');
+            card.className = 'hitl-entry-card card shadow-sm mt-2';
+            card.setAttribute('data-hitl-entry-card', '1');
+            right.appendChild(card);
+        }
+        card.classList.remove('hitl-entry-card--disabled', 'hitl-entry-card--skipped', 'hitl-entry-card--busy');
+        card.classList.add('hitl-entry-card--completed');
+        card.innerHTML =
+            '<div class="card-body p-3">' +
+            '<div class="hitl-entry-card__head">' +
+            '<h6 class="hitl-entry-card__title mb-1 text-success">' + iconHtml('check-circle-fill') + ' 专家复核已完成</h6>' +
+            '<p class="hitl-entry-card__desc text-muted mb-3">《专家分析报告（最终版）》已生成。如需修正标注，可重新打开 Label Studio 修改已提交数据，再次生成报告。</p>' +
+            (unavailable && errText
+                ? ('<div class="hitl-entry-card__error" role="alert">' +
+                    iconHtml('exclamation-octagon-fill') + ' <strong>Label Studio 暂不可用</strong><br>' +
+                    '<span class="hitl-entry-card__error-detail">' + escapeHitlHtml(errText) + '</span></div>')
+                : '') +
+            '</div>' +
+            '<div class="hitl-entry-card__actions d-flex flex-wrap gap-2 justify-content-end">' +
+            '<button type="button" class="btn btn-sm btn-outline-primary hitl-entry-reannotate-btn">' +
+            iconHtml('arrow-repeat') + ' 重新标注</button>' +
+            '</div></div>';
+
+        _lastHitlData = payload;
+        _hitlCompletedMode = true;
+        window.__hitlAnnotateDisabled = false;
+        window.__lastStateSnapshotHitl = payload;
+
+        var reBtn = card.querySelector('.hitl-entry-reannotate-btn');
+        if (reBtn) {
+            if (unavailable || !lsUrl) {
+                reBtn.disabled = true;
+                reBtn.title = errText || 'Label Studio 暂不可用';
+            } else {
+                reBtn.disabled = false;
+                reBtn.title = '重新打开 Label Studio 修改标注';
+            }
+            reBtn.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                if (unavailable || !lsUrl) return;
+                _lsSubmitDetected = false;
+                openLabelStudioModal(lsUrl);
+            });
+        }
+        slots.row.style.display = 'flex';
+    }
+    window.mountHitlCompletedCard = mountHitlCompletedCard;
 
     function mountHitlEntryCard(payload) {
         if (!payload) return;
@@ -286,26 +368,79 @@
     }
 
     function skipHitlReview() {
+        if (_resumeInFlight) return;
         var sid = typeof currentSessionId !== 'undefined' ? currentSessionId : null;
-        if (sid) {
-            fetch('/api/sessions/' + encodeURIComponent(sid) + '/resume_from_hitl', {
-                method: 'POST',
-                headers: authHeadersMerge(),
-                body: JSON.stringify({ skip: true, trigger: 'skip' }),
-            }).catch(function () { /* ignore */ });
+        if (!sid) {
+            if (typeof showToast === 'function') showToast('无法识别当前会话', 'warning');
+            return;
         }
-        window.__hitlAnnotateDisabled = true;
-        document.querySelectorAll('.hitl-entry-card').forEach(function (card) {
-            card.classList.add('hitl-entry-card--skipped');
-            card.innerHTML =
-                '<div class="card-body p-3 text-muted small">' +
-                iconHtml('skip-forward') + ' 已跳过专家复核，保留初稿报告。' +
-                '</div>';
-        });
-        if (typeof showToast === 'function') showToast('已跳过 Label Studio 专家复核', 'info');
+        _resumeInFlight = true;
+        setHitlEntryCardBusy(true, '正在跳过专家复核…');
+        fetch('/api/sessions/' + encodeURIComponent(sid) + '/resume_from_hitl', {
+            method: 'POST',
+            headers: authHeadersMerge(),
+            body: JSON.stringify({ skip: true, trigger: 'skip' }),
+        })
+            .then(function (resp) {
+                if (!resp.ok) {
+                    return resp.text().then(function (t) {
+                        throw new Error(t || ('HTTP ' + resp.status));
+                    });
+                }
+                var reader = resp.body && resp.body.getReader ? resp.body.getReader() : null;
+                if (!reader) return resp.text();
+                var decoder = new TextDecoder();
+                var buf = '';
+                function pump() {
+                    return reader.read().then(function (chunk) {
+                        if (chunk.done) return;
+                        buf += decoder.decode(chunk.value, { stream: true });
+                        var idx;
+                        while ((idx = buf.indexOf('\n\n')) >= 0) {
+                            var slice = buf.slice(0, idx + 2);
+                            buf = buf.slice(idx + 2);
+                            parseSseChunk(slice, function (eventType, data) {
+                                if (typeof window.handleServerEvent === 'function') {
+                                    window.handleServerEvent(eventType, data);
+                                }
+                            });
+                        }
+                        return pump();
+                    });
+                }
+                return pump();
+            })
+            .then(function () {
+                window.__hitlAnnotateDisabled = true;
+                document.querySelectorAll('.hitl-entry-card').forEach(function (card) {
+                    card.classList.add('hitl-entry-card--skipped');
+                    card.innerHTML =
+                        '<div class="card-body p-3 text-muted small">' +
+                        iconHtml('skip-forward') + ' 已跳过专家复核，保留初稿报告。语料将在一键入库时生成。' +
+                        '</div>';
+                });
+                if (typeof window.disableHitlActionCards === 'function') {
+                    window.disableHitlActionCards('已跳过专家复核');
+                }
+                if (typeof showToast === 'function') {
+                    showToast('已跳过专家复核；标准语料将在一键入库时生成', 'success');
+                }
+                if (typeof fetchSessions === 'function') fetchSessions();
+            })
+            .catch(function (e) {
+                setHitlEntryCardBusy(false);
+                if (typeof showToast === 'function') showToast('跳过复核失败: ' + e.message, 'danger');
+            })
+            .finally(function () {
+                _resumeInFlight = false;
+            });
     }
 
     window.syncHitlEntryCard = function syncHitlEntryCard() {
+        if (_hitlCompletedMode && _lastHitlData) {
+            mountHitlCompletedCard(_lastHitlData);
+            return;
+        }
         if (!_lastHitlData || window.__hitlAnnotateDisabled) {
             removeHitlEntryCards();
             return;
@@ -449,14 +584,21 @@
             })
             .then(function () {
                 closeLabelStudioModal();
-                if (typeof window.disableHitlActionCards === 'function') {
-                    window.disableHitlActionCards('专家报告（最终版）已生成，标注入口已关闭');
+                var completedPayload = _lastHitlData ? Object.assign({}, _lastHitlData) : null;
+                if (completedPayload) {
+                    mountHitlCompletedCard(completedPayload);
                 }
-                if (typeof showToast === 'function') showToast('专家知识已固化，《最终版报告》已生成', 'success');
+                if (typeof showToast === 'function') {
+                    showToast('专家知识已更新，《最终版报告》已覆盖生成', 'success');
+                }
                 if (typeof fetchSessions === 'function') fetchSessions();
             })
             .catch(function (e) {
-                setHitlEntryCardBusy(false);
+                if (_hitlCompletedMode && _lastHitlData) {
+                    mountHitlCompletedCard(_lastHitlData);
+                } else {
+                    setHitlEntryCardBusy(false);
+                }
                 if (typeof showToast === 'function') showToast('HITL 唤醒失败: ' + e.message, 'danger');
             })
             .finally(function () {
@@ -471,6 +613,7 @@
 
     window.disableHitlActionCards = function disableHitlActionCards(_reason) {
         window.__hitlAnnotateDisabled = true;
+        _hitlCompletedMode = false;
         removeHitlEntryCards();
     };
 
@@ -479,6 +622,7 @@
         var payload = normalizeHitlPayload(data);
         if (!payload) return;
         _lastHitlData = payload;
+        _hitlCompletedMode = false;
         window.__hitlAnnotateDisabled = false;
         window.__lastStateSnapshotHitl = payload;
         mountHitlEntryCard(payload);
@@ -487,8 +631,14 @@
     window.restoreHitlFromSnapshot = function restoreHitlFromSnapshot(snap, sessionStatus) {
         if (!snap || typeof snap !== 'object') return;
         var ex = snap.execution_snapshot && typeof snap.execution_snapshot === 'object' ? snap.execution_snapshot : {};
-        if (snap.hitl_resumed || ex.hitl_final || window.__expertReportVersion === 'final') {
-            window.disableHitlActionCards('会话已完成 HITL 唤醒，标注入口已关闭');
+        if (snap.hitl_resumed || ex.hitl_final || snap.hitl_final || window.__expertReportVersion === 'final') {
+            var completedPayload = extractHitlFromSnapshot(snap);
+            if (completedPayload) {
+                mountHitlCompletedCard(completedPayload);
+            }
+            return;
+        }
+        if (snap.hitl_skipped || ex.hitl_skipped) {
             return;
         }
         var waiting = String(sessionStatus || '').toLowerCase() === 'waiting_for_hitl';
@@ -571,8 +721,9 @@
                 }
             }
             if (eventType === 'diagnosis' && data && data.report_data && data.report_data.hitl_final) {
-                if (typeof window.disableHitlActionCards === 'function') {
-                    window.disableHitlActionCards('最终版报告已生成');
+                var snapHitl = window.__lastStateSnapshotHitl || _lastHitlData;
+                if (snapHitl && typeof window.mountHitlCompletedCard === 'function') {
+                    window.mountHitlCompletedCard(snapHitl);
                 }
             }
             return orig.apply(this, arguments);

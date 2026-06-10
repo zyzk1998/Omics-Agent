@@ -671,15 +671,11 @@ def update_session_expert_report(
         snap = content.get("state_snapshot") if isinstance(content.get("state_snapshot"), dict) else {}
         if not snap:
             snap = content if isinstance(content, dict) else {}
+        from gibh_agent.core.execution_snapshot import mirror_execution_snapshot_to_message_content
+
         update_expert_report_in_state(snap, md)
         content["state_snapshot"] = snap
-        if isinstance(content.get("execution_snapshot"), dict):
-            content["execution_snapshot"]["expert_report_markdown"] = md
-        ex_col = content.get("execution_snapshots")
-        if isinstance(ex_col, dict) and isinstance(ex_col.get("snapshots"), dict):
-            active = ex_col.get("active_snapshot_id")
-            if active and isinstance(ex_col["snapshots"].get(active), dict):
-                ex_col["snapshots"][active]["expert_report_markdown"] = md
+        mirror_execution_snapshot_to_message_content(content, snap)
         msg.content = content
         flag_modified(msg, "content")
         db.commit()

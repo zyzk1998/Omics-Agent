@@ -10,6 +10,7 @@ import logging
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
+import re
 from pathlib import Path
 from typing import Any, Callable, TypeVar, Union
 
@@ -120,6 +121,27 @@ def sanitize_for_json(obj):
 
 
 _PLOT_EXTENSIONS = (".png", ".pdf", ".svg", ".jpg", ".jpeg")
+
+
+_MARKDOWN_POISON_RESULTS_RE = re.compile(
+    r"https?://[^/\s\"')>\]]+(?::\d+)?/results/",
+    re.IGNORECASE,
+)
+_MARKDOWN_POISON_UPLOADS_RE = re.compile(
+    r"https?://[^/\s\"')>\]]+(?::\d+)?/uploads/",
+    re.IGNORECASE,
+)
+
+
+def scrub_markdown_poison_urls(markdown: str) -> str:
+    """
+    清洗 Markdown 中的绝对 URL 毒药前缀，强制降级为同源相对路径。
+    例：https://192.168.x.x:8028/results/foo.png → /results/foo.png
+    """
+    if not markdown or not isinstance(markdown, str):
+        return markdown or ""
+    text = _MARKDOWN_POISON_RESULTS_RE.sub("/results/", markdown)
+    return _MARKDOWN_POISON_UPLOADS_RE.sub("/uploads/", text)
 
 
 def sanitize_plot_path(path: Union[str, Path]) -> Path:

@@ -1,11 +1,12 @@
 /**
- * 工作台底部 · 三轨合一入库动态操作栏（Phase 3：进度 / 成功 / 失败态）
+ * 工作台底部 · 三轨合一入库动态操作栏（Smart Mount Discovery + 静默入库）
  */
 (function () {
     'use strict';
 
     var _lastIngestionResult = null;
     var _ingestInFlight = false;
+    var LS_INGESTION_PATH_KEY = 'omics_ingestion_path';
 
     function authHeadersMerge() {
         if (typeof window.mergeJsonAuthHeaders === 'function') return window.mergeJsonAuthHeaders();
@@ -15,7 +16,22 @@
         );
     }
 
+    function getStoredIngestionPath() {
+        try {
+            return (localStorage.getItem(LS_INGESTION_PATH_KEY) || '').trim();
+        } catch (_e) {
+            return '';
+        }
+    }
+
+    function setStoredIngestionPath(path) {
+        try {
+            localStorage.setItem(LS_INGESTION_PATH_KEY, String(path || '').trim());
+        } catch (_e) { /* ignore quota */ }
+    }
+
     function isConfigured(cfg) {
+        if (getStoredIngestionPath()) return true;
         if (!cfg) return false;
         var mt = cfg.mount_type || 'local_volume';
         if (mt === 'local_volume') return !!((cfg.local_volume || {}).mount_path);
@@ -152,25 +168,105 @@
         document.body.appendChild(overlay);
     }
 
-    function triggerIngestion(skipHitl) {
+    function showMountConfirmModal(defaultPath, hint) {
+        return new Promise(function (resolve, reject) {
+            var existing = document.getElementById('ingestion-mount-confirm-modal');
+            if (existing) existing.remove();
+
+            var overlay = document.createElement('div');
+            overlay.id = 'ingestion-mount-confirm-modal';
+            overlay.className = 'ingestion-result-modal-overlay';
+            overlay.innerHTML =
+                '<div class="ingestion-result-modal" role="dialog" aria-labelledby="ingestion-mount-title">' +
+                '<button type="button" class="ingestion-result-modal__close" aria-label="关闭">&times;</button>' +
+                '<h3 id="ingestion-mount-title">确认入库挂载路径</h3>' +
+                '<p class="text-muted small">系统已自动探测到 Docker 容器内可写目录。此为<strong>容器内路径</strong>，' +
+                '对应 docker-compose 挂载卷；请勿填写宿主机盘符（如 D:\\project）。</p>' +
+                '<p><strong>落盘路径（不可修改）：</strong></p>' +
+                '<p><span class="mount-path-card" role="button" tabindex="0" data-path="' + escapeHtml(defaultPath).replace(/"/g, '&quot;') + '" title="在文件管理器中打开">' +
+                '<span class="mount-path-card__icon" aria-hidden="true">📂</span>' +
+                '<span class="mount-path-card__text">' + escapeHtml(defaultPath) + '</span></span></p>' +
+                (hint ? ('<p class="small text-muted">' + escapeHtml(hint) + '</p>') : '') +
+                '<div class="d-flex gap-2 justify-content-end mt-3">' +
+                '<button type="button" class="btn btn-sm btn-outline-secondary ingestion-mount-cancel">取消</button>' +
+                '<button type="button" class="btn btn-sm btn-primary ingestion-mount-confirm">确认并开始入库</button>' +
+                '</div></div>';
+
+            function closeModal(result) {
+                overlay.remove();
+                if (result) resolve(defaultPath);
+                else reject(new Error('用户取消入库'));
+            }
+            overlay.querySelector('.ingestion-result-modal__close').addEventListener('click', function () {
+                closeModal(false);
+            });
+            overlay.querySelector('.ingestion-mount-cancel').addEventListener('click', function () {
+                closeModal(false);
+            });
+            overlay.querySelector('.ingestion-mount-confirm').addEventListener('click', function () {
+                closeModal(true);
+            });
+            overlay.addEventListener('click', function (e) {
+                if (e.target === overlay) closeModal(false);
+            });
+            document.body.appendChild(overlay);
+        });
+    }
+
+    function discoverDefaultMountPath() {
+        return fetch('/api/ingestion/discover-mount', { headers: authHeadersMerge() })
+            .then(function (r) { return r.json(); })
+            .then(function (body) {
+                if (body.status !== 'success' || !body.default_path) {
+                    throw new Error(body.message || '未能探测到可用挂载目录');
+                }
+                return body;
+            });
+    }
+
+    function resolveMountPathForIngestion() {
+        var stored = getStoredIngestionPath();
+        if (stored) {
+            return Promise.resolve({ path: stored, firstTime: false });
+        }
+        return discoverDefaultMountPath().then(function (body) {
+            return showMountConfirmModal(body.default_path, body.hint).then(function (path) {
+                setStoredIngestionPath(path);
+                return { path: path, firstTime: true };
+            });
+        });
+    }
+
+    function triggerIngestion(skipHitl, mountPathOverride) {
         if (_ingestInFlight) return Promise.resolve();
         _ingestInFlight = true;
         setLoadingState();
 
-        return fetch('/api/ingestion/trigger', {
-            method: 'POST',
-            headers: authHeadersMerge(),
-            body: JSON.stringify({
-                session_id: typeof currentSessionId !== 'undefined' ? currentSessionId : null,
-                skip_hitl: !!skipHitl,
-            }),
-        })
-            .then(function (r) {
-                return r.json().then(function (body) {
-                    if (!r.ok && body && !body.message) {
-                        body.message = body.detail || ('HTTP ' + r.status);
-                    }
-                    return body;
+        var mountPromise;
+        if (mountPathOverride) {
+            mountPromise = Promise.resolve({ path: mountPathOverride, firstTime: false });
+        } else {
+            mountPromise = resolveMountPathForIngestion();
+        }
+
+        return mountPromise
+            .then(function (ctx) {
+                return fetch('/api/ingestion/trigger', {
+                    method: 'POST',
+                    headers: authHeadersMerge(),
+                    body: JSON.stringify({
+                        session_id: typeof currentSessionId !== 'undefined' ? currentSessionId : null,
+                        skip_hitl: !!skipHitl,
+                        mount_path: ctx.path,
+                        persist_mount_path: !!ctx.firstTime,
+                    }),
+                }).then(function (r) {
+                    return r.json().then(function (body) {
+                        if (!r.ok && body && !body.message) {
+                            body.message = body.detail || ('HTTP ' + r.status);
+                        }
+                        return body;
+                    });
                 });
             })
             .then(function (res) {
@@ -185,7 +281,7 @@
                 if (res.status === 'success') {
                     setSuccessState(res);
                     if (typeof showToast === 'function') {
-                        showToast(res.message || '入库成功', 'success');
+                        showToast(res.message || '入库成功，数据已落盘至挂载目录', 'success');
                     }
                 } else {
                     setFailureState(res.message || '入库失败');
@@ -202,6 +298,12 @@
                 return res;
             })
             .catch(function (e) {
+                if (e && e.message === '用户取消入库') {
+                    resetBtnVisual(getEls().btn);
+                    if (getEls().btn) getEls().btn.textContent = '💾 一键入库';
+                    setSpinner(false);
+                    return;
+                }
                 setFailureState('入库请求失败: ' + (e.message || e));
                 if (typeof showToast === 'function') showToast('入库请求失败: ' + e.message, 'danger');
                 var els = getEls();
@@ -223,6 +325,7 @@
         var wp = document.getElementById('workspace-pane');
         var configured = isConfigured(cfg);
         var auto = cfg && cfg.is_auto_ingestion_enabled;
+        var storedPath = getStoredIngestionPath();
 
         els.bar.classList.add('is-visible');
         if (wp && wp.classList.contains('workspace-active')) {
@@ -235,28 +338,22 @@
         setSpinner(false);
         setError('');
 
-        if (!configured) {
-            els.hint.textContent = '尚未关联业务数据库，完成挂载后可一键入库。';
-            els.btn.textContent = '💾 一键入库 / 关联业务库';
-            els.btn.onclick = function () {
-                if (typeof window.openDatabaseSettingsPanel === 'function') {
-                    window.openDatabaseSettingsPanel();
-                }
-            };
-            return;
+        if (storedPath) {
+            els.hint.textContent = '已记忆入库路径，点击后将静默落盘至 ' + storedPath;
+        } else if (!configured) {
+            els.hint.textContent = '首次入库将自动探测容器挂载路径，确认后终身免打扰。';
+        } else if (auto) {
+            els.hint.textContent = '已开启自动入库，可随时检查入库状态。';
+        } else {
+            els.hint.textContent = '业务库已关联，可手动触发三轨合一入库。';
         }
 
         if (auto) {
-            els.hint.textContent = '已开启自动入库，可随时检查入库状态。';
             els.btn.textContent = '✅ 检查数据是否成功入库';
-            els.btn.onclick = function () {
-                triggerIngestion(false);
-            };
-            return;
+        } else {
+            els.btn.textContent = storedPath ? '💾 一键入库' : '💾 一键入库 / 关联业务库';
         }
 
-        els.hint.textContent = '业务库已关联，可手动触发三轨合一入库。';
-        els.btn.textContent = '💾 一键入库';
         els.btn.onclick = function () {
             triggerIngestion(false);
         };
@@ -281,6 +378,10 @@
     };
 
     window.triggerWorkspaceIngestion = triggerIngestion;
+    window.getOmicsIngestionPath = getStoredIngestionPath;
+    window.clearOmicsIngestionPath = function () {
+        try { localStorage.removeItem(LS_INGESTION_PATH_KEY); } catch (_e) { /* ignore */ }
+    };
 
     document.addEventListener('DOMContentLoaded', function () {
         window.refreshWorkspaceIngestionBar();

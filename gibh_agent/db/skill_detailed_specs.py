@@ -620,17 +620,18 @@ def resolve_detailed_spec(
     tool_id_hint: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    解析技能的 detailed_spec：DB 列优先，否则静态注册表。
+    解析技能的 detailed_spec：默认 DB 列优先，否则静态注册表。
+    多模态组学 7 条旗舰管线（pipeline_*）以代码注册表为准，避免 DB 陈旧 demo 覆盖新版本。
     tool_id_hint 用于前端 Featured 卡片（id 即 tool_id）。
     """
+    tid = (tool_id_hint or "").strip() or extract_tool_id_from_prompt(prompt_template)
+    if tid and tid in OMICS_PIPELINE_SPECS_BY_TOOL_ID:
+        return dict(OMICS_PIPELINE_SPECS_BY_TOOL_ID[tid])
     if isinstance(db_detailed_spec, dict) and db_detailed_spec:
         out = dict(db_detailed_spec)
-        if not out.get("tool_id"):
-            tid = tool_id_hint or extract_tool_id_from_prompt(prompt_template)
-            if tid:
-                out["tool_id"] = tid
+        if not out.get("tool_id") and tid:
+            out["tool_id"] = tid
         return out
-    tid = (tool_id_hint or "").strip() or extract_tool_id_from_prompt(prompt_template)
     if tid and tid in SKILL_DETAILED_SPECS_BY_TOOL_ID:
         return dict(SKILL_DETAILED_SPECS_BY_TOOL_ID[tid])
     return None

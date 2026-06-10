@@ -239,7 +239,7 @@ try:
     from gibh_agent.api.routers.ingestion_api import router as ingestion_router
 
     app.include_router(ingestion_router)
-    logger.info("✅ 数据入库路由: POST /api/ingestion/trigger")
+    logger.info("✅ 数据入库路由: GET /api/ingestion/discover-mount, POST /api/ingestion/trigger")
 except Exception as e:
     logger.warning("⚠️ 数据入库路由注册失败: %s", e)
 

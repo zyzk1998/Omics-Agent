@@ -4019,7 +4019,7 @@ class AgentOrchestrator:
                 if p and any(k in p.lower() for k in ("umap", "cluster", "annotation")):
                     image_path = p
                     break
-        from gibh_agent.tools.hitl_tools import Trigger_Expert_Annotation, resolve_ls_import_image_url
+        from gibh_agent.tools.hitl_tools import Trigger_Expert_Annotation
 
         wf_name = (workflow_config or {}).get("workflow_name") or "单细胞分析"
         sid = (session_id or "").strip() or "session"
@@ -4045,12 +4045,11 @@ class AgentOrchestrator:
                 ls_unavailable=True,
             )
 
-        ls_image = resolve_ls_import_image_url(image_path)
         try:
             result = Trigger_Expert_Annotation(
                 scenario_type=scenario,
                 project_title=f"{wf_name} · 细胞类型专家复核 ({sid[:8]})",
-                image_path=ls_image or image_path,
+                image_path=image_path,
             )
         except Exception as exc:
             logger.warning("[Orchestrator] 执行后 HITL 创建 LS 项目失败: %s", exc)

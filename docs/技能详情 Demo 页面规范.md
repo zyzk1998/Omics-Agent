@@ -123,10 +123,29 @@
 | Phase 1 | `skill_detailed_specs.py` | 10 | 手工精修 + 专属 `demo_visualization` |
 | Phase 2 | `skill_detailed_specs_phase2.py` | 10 | 同上 |
 | **Bulk** | `skill_detailed_spec_builder.py` → `skill_detailed_specs_bulk.py` | ~72 | **除 `main_category=多模态组学` 外**，凡 seed 中带 `[Skill_Route]` 且未在 Phase1/2 登记的技能 |
+| **组学旗舰管线** | `skill_detail_demo_visualizations_omics.py` + `OMICS_PIPELINE_SPECS_BY_TOOL_ID` | 7 | `pipeline_transcriptomics` 等；**代码注册表优先于 DB** |
 
-合并顺序：`Phase1` → `Phase2` → `BULK`（后者**不覆盖**前两批 `tool_id`）。
+合并顺序：`Phase1` → `Phase2` → `BULK`（后者**不覆盖**前两批 `tool_id`）。组学管线由 `resolve_detailed_spec()` 与 `/api/skills/detailed-specs` **强制 merge** `OMICS_PIPELINE_SPECS_BY_TOOL_ID`，避免 DB 旧占位覆盖新 demo 图。
 
-### 5.1 文案与参数要求
+### 5.2 组学管线 Demo 图运维（成功经验）
+
+更新「输出效果预览」真实截图时，按序执行：
+
+```bash
+cd /home/ubuntu/GIBH-AGENT-V2
+# 1. 从 data/results/run_* 同步 PNG 到 nginx 静态目录
+PYTHONPATH=. python3 scripts/build_omics_pipeline_demo_assets.py
+# 2. 可选：回写 DB detailed_specs（与代码注册表双保险）
+PYTHONPATH=. python3 scripts/patch_omics_pipeline_detailed_specs.py
+# 3. 重启 API 使 Gunicorn 加载新 Python
+docker compose -f docker-compose.yml restart api-server
+# 4. 浏览器 Ctrl+Shift+R；验收 GET /api/skills/detailed-specs 含 sample1_R1 / manhattan_plot 等字段
+PYTHONPATH=. python3 -m pytest tests/test_skill_detailed_specs.py -q
+```
+
+静态资源路径：`services/nginx/html/assets/images/demos/pipelines/{genomics,transcriptomics,...}/`
+
+### 5.3 文案与参数要求
 
 1. 调用示例须与 `launch_skill_demos.py` / `prompt_template` 同源。  
 2. 有可视化交付的技能**必须**提供 `demo_visualization`（截图路径或示意 HTML）；批量项由 builder 按技能类型生成示意 HTML。  
@@ -139,5 +158,6 @@
 
 - [ ] 抽屉从右侧滑出，宽 900px；含收藏 + 立即使用  
 - [ ] `blueprint_drafter` 右侧可见流程蓝图示意  
+- [ ] 组学旗舰管线（如 `pipeline_genomics`）右侧为真实 FASTQ/曼哈顿图等，非占位 HTML  
 - [ ] 点击「立即使用」关闭抽屉并填入 Prompt  
 - [ ] 浏览器硬刷新后样式与脚本生效  

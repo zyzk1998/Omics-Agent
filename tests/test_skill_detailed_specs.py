@@ -94,6 +94,22 @@ def test_db_override_wins():
     assert resolved["description_long"] == "自定义长描述"
 
 
+def test_omics_pipeline_code_registry_overrides_db():
+    stale = {
+        "tool_id": "pipeline_genomics",
+        "demo_visualization": "<div>基因组学 WGS/WES · 标准交付结构</div>",
+    }
+    resolved = resolve_detailed_spec(
+        "",
+        db_detailed_spec=stale,
+        tool_id_hint="pipeline_genomics",
+    )
+    viz = resolved.get("demo_visualization") or ""
+    assert "sample1_R1" in viz
+    assert "标准交付结构" not in viz
+    assert "manhattan_plot" in viz
+
+
 def test_unrouted_biopharma_chemistry_have_rich_detailed_spec():
     """无 [Skill_Route] 的占位技能通过 name 映射获得完整说明书与预览。"""
     from gibh_agent.db.seed_skills import get_all_system_skills_list
@@ -162,7 +178,21 @@ def test_omics_pipeline_specs_seven_flagship():
     spatial_viz = SKILL_DETAILED_SPECS_BY_TOOL_ID["pipeline_spatial"]["demo_visualization"]
     assert "spatial_multires.png" in spatial_viz
     radio_viz = SKILL_DETAILED_SPECS_BY_TOOL_ID["pipeline_radiomics"]["demo_visualization"]
+    assert "brain_mri_preview.png" in radio_viz
     assert "original_firstorder_10Percentile" in radio_viz
+    metabo_viz = SKILL_DETAILED_SPECS_BY_TOOL_ID["pipeline_metabolomics"]["demo_visualization"]
+    assert "metabolomics/pca_plot.png" in metabo_viz
+    assert "Quinolinate" in metabo_viz
+    prot_viz = SKILL_DETAILED_SPECS_BY_TOOL_ID["pipeline_proteomics"]["demo_visualization"]
+    assert "proteomics/volcano_plot.png" in prot_viz
+    assert "BSA1_F1.mzML" in prot_viz
+    epi_viz = SKILL_DETAILED_SPECS_BY_TOOL_ID["pipeline_epigenomics"]["demo_visualization"]
+    assert "epigenomics/motif_logo.png" in epi_viz
+    assert "SRR1822153" in epi_viz
+    geno_viz = SKILL_DETAILED_SPECS_BY_TOOL_ID["pipeline_genomics"]["demo_visualization"]
+    assert "genomics/manhattan_plot.png" in geno_viz
+    assert "sample1_R1" in geno_viz
+    assert "BRCA2" in geno_viz
     assert "Harmony" in scrna["query_examples"][1]["prompt"]
     assert "CD8+ T cells" in scrna["query_examples"][2]["prompt"]
     assert "```mermaid" in scrna["description_long"]

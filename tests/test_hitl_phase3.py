@@ -6,12 +6,25 @@ import json
 from pathlib import Path
 
 from gibh_agent.core.data_packager import build_artifacts_archive
+from gibh_agent.core.utils import scrub_markdown_poison_urls
 from gibh_agent.core.hitl_session_registry import (
     get_hitl_session,
     register_hitl_session,
     resolve_session_by_project,
 )
 from gibh_agent.core.orchestrator import AgentOrchestrator
+
+
+def test_scrub_markdown_poison_urls():
+    md = (
+        "![UMAP](https://192.168.32.31:8028/results/run_01/umap.png)\n"
+        "[link](http://10.0.0.5:8028/uploads/a.png)"
+    )
+    cleaned = scrub_markdown_poison_urls(md)
+    assert "8028" not in cleaned
+    assert "192.168." not in cleaned
+    assert "![UMAP](/results/run_01/umap.png)" in cleaned
+    assert "(/uploads/a.png)" in cleaned
 
 
 def test_hitl_session_registry_roundtrip(tmp_path, monkeypatch):

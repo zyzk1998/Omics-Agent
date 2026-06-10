@@ -3,8 +3,10 @@
 
 入库载体为 messages.content（JSON），字段 execution_snapshot 独立存储：
   - data_diagnosis_html：数据诊断/校验富文本（Markdown 或 HTML 字符串）
-  - expert_report_markdown：专家结题报告 Markdown
+  - expert_report_markdown：专家结题报告 Markdown（有 HITL 最终版时为最终稿）
+  - expert_report_draft_markdown：专家分析报告初稿（HITL 最终版生成后保留用于时光机对比）
   - steps_details：与 Live 工作台一致的完整步骤数组（含诊断节点、管线步骤、日志与图表等）
+  - hitl_final / hitl_skipped：HITL 终态标记
   - report_timestamp：报告生成时刻（YYYY-MM-DD HH:MM:SS，入库瞬间冻结，不可变）
   - input_draft_text：主页面输入框未发送自然语言草稿
   - input_draft_attachments：输入框上方待发送/已挂载文件药丸元数据列表
@@ -25,6 +27,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from gibh_agent.core.file_asset_meta import normalize_attachment_list
+from gibh_agent.core.utils import sanitize_for_json, scrub_markdown_poison_urls
 
 logger = logging.getLogger(__name__)
 
@@ -148,14 +151,23 @@ def _resolve_expert_markdown_from_state(state_snapshot: Dict[str, Any]) -> str:
     return ""
 
 
+def _is_final_expert_report_markdown(markdown: str, *, is_final: bool = False) -> bool:
+    if is_final:
+        return True
+    return "最终版" in (markdown or "")
+
+
 def build_execution_snapshot(
     steps_details: List[Dict[str, Any]],
     *,
     workflow_name: Optional[str] = None,
     data_diagnosis_html: str = "",
     expert_report_markdown: str = "",
+    expert_report_draft_markdown: str = "",
     input_draft_text: str = "",
     input_draft_attachments: Optional[List[Dict[str, Any]]] = None,
+    hitl_final: bool = False,
+    hitl_skipped: bool = False,
 ) -> Dict[str, Any]:
     """
     构造执行快照（写入 state_snapshot.execution_snapshot）。
@@ -164,17 +176,23 @@ def build_execution_snapshot(
     steps = deep_copy_steps_details(steps_details)
     diag = (data_diagnosis_html or "").strip()
     expert = (expert_report_markdown or "").strip()
+    expert_draft = (expert_report_draft_markdown or "").strip()
     draft_text = (input_draft_text or "").strip() if isinstance(input_draft_text, str) else ""
     draft_att = normalize_input_draft_attachments(input_draft_attachments or [])
     payload: Dict[str, Any] = {
-        "version": 4,
+        "version": 5,
         "workflow_name": workflow_name or "",
         "data_diagnosis_html": diag,
         "expert_report_markdown": expert,
+        "expert_report_draft_markdown": expert_draft,
         "steps_details": steps,
         "input_draft_text": draft_text,
         "input_draft_attachments": draft_att,
     }
+    if hitl_final:
+        payload["hitl_final"] = True
+    if hitl_skipped:
+        payload["hitl_skipped"] = True
     if workflow_name:
         payload["report_data"] = {
             "workflow_name": workflow_name,
@@ -330,19 +348,38 @@ def update_diagnosis_in_state(state_snapshot: Dict[str, Any], diagnosis: Any) ->
     state_snapshot["report"] = report
 
 
-def update_expert_report_in_state(state_snapshot: Dict[str, Any], markdown: str) -> None:
-    """仅更新 expert_report_markdown，不触碰 steps_details。"""
+def update_expert_report_in_state(
+    state_snapshot: Dict[str, Any],
+    markdown: str,
+    *,
+    is_final: bool = False,
+) -> None:
+    """更新专家报告 Markdown；最终版时保留初稿至 expert_report_draft_markdown。"""
     if not isinstance(state_snapshot, dict):
         return
-    md = (markdown or "").strip()
+    md = scrub_markdown_poison_urls((markdown or "").strip())
     if not md:
         return
-    state_snapshot["expert_report_markdown"] = md
+    final_report = _is_final_expert_report_markdown(md, is_final=is_final)
     ex = state_snapshot.get("execution_snapshot")
     if not isinstance(ex, dict):
-        ex = build_execution_snapshot([], expert_report_markdown=md)
+        ex = {}
+    current = str(ex.get("expert_report_markdown") or state_snapshot.get("expert_report_markdown") or "").strip()
+    draft_stored = str(ex.get("expert_report_draft_markdown") or "").strip()
+
+    if final_report:
+        if not draft_stored and current and not _is_final_expert_report_markdown(current):
+            ex["expert_report_draft_markdown"] = scrub_markdown_poison_urls(current)
+        ex["expert_report_markdown"] = md
+        ex["hitl_final"] = True
+        state_snapshot["hitl_final"] = True
+        state_snapshot["hitl_resumed"] = True
     else:
-        ex = {**ex, "expert_report_markdown": md}
+        ex["expert_report_markdown"] = md
+        if not ex.get("hitl_final"):
+            ex["expert_report_draft_markdown"] = md
+
+    state_snapshot["expert_report_markdown"] = md
     _freeze_report_timestamp(ex)
     _merge_execution_snapshot(state_snapshot, ex)
 
@@ -353,9 +390,29 @@ def update_expert_report_in_state(state_snapshot: Dict[str, Any], markdown: str)
     if not isinstance(rd, dict):
         rd = {}
     rd["report"] = md
+    if final_report:
+        rd["hitl_final"] = True
     report["report_data"] = rd
     report["report"] = md
     state_snapshot["report"] = report
+
+
+def mirror_execution_snapshot_to_message_content(
+    content: Dict[str, Any],
+    state_snapshot: Dict[str, Any],
+) -> None:
+    """将 state_snapshot 内 execution_snapshot 双写至 messages.content 根级（时光机入库）。"""
+    if not isinstance(content, dict) or not isinstance(state_snapshot, dict):
+        return
+    ex = state_snapshot.get("execution_snapshot")
+    if isinstance(ex, dict):
+        content["execution_snapshot"] = sanitize_for_json(ex)
+    col = state_snapshot.get("execution_snapshots")
+    if isinstance(col, dict) and col.get("snapshots"):
+        content["execution_snapshots"] = sanitize_for_json(col)
+        active = col.get("active_snapshot_id")
+        if active:
+            content["active_snapshot_id"] = active
 
 
 def _resolve_composer_draft_from_state(state_snapshot: Dict[str, Any]) -> tuple:
@@ -416,16 +473,26 @@ def apply_execution_snapshot_to_state(
     diag_html = _resolve_diagnosis_from_state(state_snapshot)
     expert_md = _resolve_expert_markdown_from_state(state_snapshot)
     draft_text, draft_att = _resolve_composer_draft_from_state(state_snapshot)
+    prev = state_snapshot.get("execution_snapshot")
+    prev_draft = ""
+    prev_hitl_final = False
+    prev_hitl_skipped = False
+    if isinstance(prev, dict):
+        prev_draft = str(prev.get("expert_report_draft_markdown") or "").strip()
+        prev_hitl_final = bool(prev.get("hitl_final"))
+        prev_hitl_skipped = bool(prev.get("hitl_skipped"))
     ex = build_execution_snapshot(
         mirrored_steps,
         workflow_name=workflow_name,
         data_diagnosis_html=diag_html,
         expert_report_markdown=expert_md,
+        expert_report_draft_markdown=prev_draft,
         input_draft_text=draft_text,
         input_draft_attachments=draft_att,
+        hitl_final=prev_hitl_final,
+        hitl_skipped=prev_hitl_skipped,
     )
     if mirrored_steps or expert_md or diag_html:
-        prev = state_snapshot.get("execution_snapshot")
         if isinstance(prev, dict):
             if prev.get("report_timestamp"):
                 ex["report_timestamp"] = prev["report_timestamp"]
@@ -437,6 +504,14 @@ def apply_execution_snapshot_to_state(
                 ex["input_draft_attachments"] = normalize_input_draft_attachments(
                     prev.get("input_draft_attachments")
                 )
+            if prev.get("expert_report_draft_markdown"):
+                ex["expert_report_draft_markdown"] = prev.get("expert_report_draft_markdown")
+            if prev.get("hitl_final"):
+                ex["hitl_final"] = True
+            if prev.get("hitl_skipped"):
+                ex["hitl_skipped"] = True
+            if prev.get("hitl_annotations") is not None:
+                ex["hitl_annotations"] = prev.get("hitl_annotations")
         if not ex.get("report_timestamp"):
             _freeze_report_timestamp(ex)
     _merge_execution_snapshot(state_snapshot, ex)

@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from gibh_agent.db.corpus_skill_user_guide import (
+    CORPUS_SKILL_DESCRIPTION_SHORT,
+    CORPUS_SKILL_USER_GUIDE,
+)
+
 _CORPUS_IMG = "/assets/images/demos/corpus/test_corpus_umap.png"
 
 DEMO_VIZ_CORPUS_PROCESSING = f"""
@@ -21,7 +26,7 @@ DEMO_VIZ_CORPUS_PROCESSING = f"""
       <pre style="margin:0;font-size:9.5px;line-height:1.45;background:#fff;border:1px solid #d1fae5;border-radius:6px;padding:8px;overflow:auto;max-height:220px;color:#14532d;"><code>[
   {{
     "instruction": "请识别并标注该单细胞 UMAP 聚类图中的核心细胞类群。",
-    "input": "/uploads/test_corpus_umap.png",
+    "input": "/assets/images/demos/corpus/test_corpus_umap.png",
     "output": "检测到 4 个主要类群：左上区域 (x≈120, y≈80) 为 T-Cell；右下区域为 B-Cell；中部偏左为 Macrophage；右上为 Unknown 过渡态。"
   }}
 ]</code></pre>
@@ -37,18 +42,15 @@ DEMO_VIZ_CORPUS_PROCESSING = f"""
 _SPEC_CORPUS: Dict[str, Any] = {
     "tool_id": "skill_corpus_data_processing",
     "description_long": (
-        "【🔬 核心能力】\n"
-        "将杂乱的原始科研图像/文本，通过专家可视化复核，一键转化为可直接用于训练大模型的标准微调语料。\n\n"
+        f"{CORPUS_SKILL_DESCRIPTION_SHORT}\n\n"
+        f"{CORPUS_SKILL_USER_GUIDE}\n\n"
         "【✨ 效果预览】\n"
-        "📥 **输入**：一张未注释的单细胞聚类图 (.png) 或病理切片 / 文本语料。\n"
-        "🛠️ **处理**：自动拉起 Label Studio 工作台，专家在图上框选 T-Cell、B-Cell、Macrophage 等区域并填写 SFT 字段。\n"
-        "📤 **输出**：标准 SFT JSON 数组（instruction / input / output），可直接接入 LoRA / 全参微调流水线。\n\n"
-        "本技能采用 **硬 HITL** 挂起：收到有效文件后无需复杂 Prompt，系统自动创建 LS 标注项目；"
-        "专家完成标注并点击「继续生成报告」后，由 LLM 清洗导出语料文件至工作区。"
+        "📥 输入：未注释 UMAP / 病理图等。\n"
+        "📤 输出：SFT JSON（instruction / input / output）。\n"
+        "📦 归档：一键入库时自动生成 corpus_archive 标准语料包（图像路径引用，无 Base64）。"
     ),
     "usage_hint": (
-        "请上传需要进行打标加工的图像或数据文件（点击下方附件图标）。"
-        "无需输入复杂指令，发送后系统将自动为您拉起 Label Studio 标注工作台。"
+        "上传图像后点击发送，系统将自动打开标注画板；按上方画板操作指南完成框选与提交。"
     ),
     "demo_visualization": DEMO_VIZ_CORPUS_PROCESSING,
     "inputs": [
@@ -102,11 +104,7 @@ _SPEC_CORPUS: Dict[str, Any] = {
             "tier": "zero_shot",
             "label": "一键打标（推荐）",
             "hint": "上传 test_corpus_umap.png 或任意科研图像后直接发送，无需额外指令。",
-            "prompt": (
-                "[Skill_Route: skill_corpus_data_processing]\n"
-                "请上传需要进行打标加工的图像或数据文件（点击下方附件图标）。"
-                "无需输入复杂指令，发送后系统将自动为您拉起 Label Studio 标注工作台。"
-            ),
+            "prompt": CORPUS_SKILL_DESCRIPTION_SHORT + "\n\n" + CORPUS_SKILL_USER_GUIDE,
         },
         {
             "tier": "dynamic_routing",
@@ -115,7 +113,7 @@ _SPEC_CORPUS: Dict[str, Any] = {
             "prompt": (
                 '[Skill_Route: skill_corpus_data_processing]\n'
                 '```json\n'
-                '{"image_path": "/uploads/test_corpus_umap.png", "project_title": "单细胞 UMAP 语料批次-01"}\n'
+                '{"image_path": "/assets/images/demos/corpus/test_corpus_umap.png", "project_title": "单细胞 UMAP 语料批次-01"}\n'
                 '```'
             ),
         },

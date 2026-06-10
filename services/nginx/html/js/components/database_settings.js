@@ -65,10 +65,29 @@
             .then(function (res) {
                 if (res.config) applyPayloadToForm(res.config);
                 window.__userDatabaseMountConfig = res.config || null;
-                if (typeof window.refreshWorkspaceIngestionBar === 'function') {
-                    window.refreshWorkspaceIngestionBar();
+                var lvPath = res.config && res.config.local_volume && res.config.local_volume.mount_path;
+                var finish = function () {
+                    if (typeof window.refreshWorkspaceIngestionBar === 'function') {
+                        window.refreshWorkspaceIngestionBar();
+                    }
+                    return res.config;
+                };
+                if (!lvPath) {
+                    return fetch('/api/ingestion/discover-mount', { headers: authHeadersMerge() })
+                        .then(function (r) { return r.json(); })
+                        .then(function (disc) {
+                            if (disc && disc.default_path) {
+                                var el = document.getElementById('db-local-path');
+                                if (el && !String(el.value || '').trim()) {
+                                    el.value = disc.default_path;
+                                    el.placeholder = disc.default_path;
+                                }
+                            }
+                            return finish();
+                        })
+                        .catch(function () { return finish(); });
                 }
-                return res.config;
+                return finish();
             })
             .catch(function () { return null; });
     }

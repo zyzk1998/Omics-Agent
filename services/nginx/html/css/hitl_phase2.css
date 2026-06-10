@@ -310,6 +310,50 @@
     box-shadow: 0 4px 18px rgba(5, 150, 105, 0.18);
 }
 
+.omics-expert-report-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.omics-expert-report-card--draft.omics-expert-report-card--archived {
+    opacity: 0.92;
+    border: 1px solid #cbd5e1;
+    box-shadow: none;
+}
+.omics-expert-report-card--draft.omics-expert-report-card--archived .omics-expert-report-header--draft-toggle {
+    background: linear-gradient(135deg, #64748b 0%, #475569 100%) !important;
+    cursor: pointer;
+    user-select: none;
+}
+.omics-expert-report-card--draft.omics-expert-report-card--archived .omics-expert-report-header--draft-toggle:hover {
+    filter: brightness(1.05);
+}
+.omics-expert-report-card--collapsed .expert-report-draft-body,
+.omics-expert-report-card--collapsed .expert-report-final-body {
+    display: none !important;
+}
+.omics-expert-report-card--final .omics-expert-report-header--final-toggle {
+    cursor: pointer;
+    user-select: none;
+}
+.omics-expert-report-card--final .omics-expert-report-header--final-toggle:hover {
+    filter: brightness(1.05);
+}
+.omics-expert-report-toggle-icon {
+    display: inline-block;
+    min-width: 1.1em;
+    margin-right: 6px;
+    font-size: 0.82em;
+    vertical-align: middle;
+    opacity: 0.9;
+}
+.omics-expert-report-draft-hint {
+    font-size: 0.78em;
+    font-weight: 400;
+    opacity: 0.85;
+    margin-left: 6px;
+}
+
 .hitl-action-card--dock {
     margin-top: 10px;
     max-width: 100%;

@@ -14,6 +14,9 @@
 | [STED_EC_细胞类型探针与报告展示规范.md](./STED_EC_细胞类型探针与报告展示规范.md) | STED-EC 细胞类型探针、自动标注、报告 Obs 表折叠 |
 | [技能扩展规范文档.md](./技能扩展规范文档.md) | 技能种子、路由、广场扩容 |
 | [PARAM_RENDER_LOGIC.md](./PARAM_RENDER_LOGIC.md) | 工作流参数表单渲染逻辑 |
+| [本地工作区与文件管理器闭环.md](./本地工作区与文件管理器闭环.md) | 挂载路径卡片、Sidecar 预览、CORS 与工作台目录跳转（2026-06-09） |
+| [Label_Studio嵌入与HITL人机协同架构指南.md](./Label_Studio嵌入与HITL人机协同架构指南.md) | LS iframe、Session 桥接、语料硬 HITL、Base64 内嵌图源 |
+| [技能详情 Demo 页面规范.md](./技能详情 Demo 页面规范.md) | 技能广场抽屉、`demo_visualization`、组学管线预览图 |
 
 ## 索引与导出（脚本生成）
 
@@ -32,5 +35,6 @@
 | [转正汇报PPT素材.md](./转正汇报PPT素材.md) | 汇报素材 |
 | [hpc_agent_architecture.html](./hpc_agent_architecture.html) | 系统级数据流交互演示 |
 | [hpc_mcp_tools_catalog.json](./hpc_mcp_tools_catalog.json) | 超算 MCP 工具固定目录 |
+| `../monitor-lite.sh` | 运维监控脚本；**须** `-f docker-compose.yml` 避免 override 中无 image 服务导致 compose 失败 |
 
 根目录 [README.md](../README.md) 仍为主入口；API 手册见 [api/README.md](../api/README.md) 与 `services/nginx/html/API.md`（文档中心静态页）。

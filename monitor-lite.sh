@@ -17,6 +17,8 @@ BOLD='\033[1m'
 # 项目配置
 PROJECT_DIR="/home/ubuntu/GIBH-AGENT-V2"
 API_PORT=8028
+# 默认仅主 compose，避免 docker-compose.override.yml 中 label-studio 无 image/build 导致 compose 整体失效
+COMPOSE_FILE_ARGS=(-f "${PROJECT_DIR}/docker-compose.yml")
 
 # Docker 命令前缀
 DOCKER_CMD_PREFIX=""
@@ -39,12 +41,54 @@ check_docker_permission() {
 docker_compose_cmd() {
     local cmd="$1"
     shift
+    local errfile
+    errfile="$(mktemp)"
+    local rc=0
     if [ -n "${DOCKER_CMD_PREFIX}" ]; then
-        ${DOCKER_CMD_PREFIX}docker compose $cmd "$@" 2>/dev/null || \
-        ${DOCKER_CMD_PREFIX}docker-compose $cmd "$@" 2>/dev/null
+        ${DOCKER_CMD_PREFIX}docker compose "${COMPOSE_FILE_ARGS[@]}" $cmd "$@" 2>"${errfile}" || \
+        ${DOCKER_CMD_PREFIX}docker-compose "${COMPOSE_FILE_ARGS[@]}" $cmd "$@" 2>"${errfile}" || rc=$?
     else
-        docker compose $cmd "$@" 2>/dev/null || \
-        docker-compose $cmd "$@" 2>/dev/null
+        docker compose "${COMPOSE_FILE_ARGS[@]}" $cmd "$@" 2>"${errfile}" || \
+        docker-compose "${COMPOSE_FILE_ARGS[@]}" $cmd "$@" 2>"${errfile}" || rc=$?
+    fi
+    if [ "${rc}" -ne 0 ] && [ -s "${errfile}" ]; then
+        echo -e "${YELLOW}⚠️  docker compose ${cmd} 失败：$(head -1 "${errfile}")${NC}" >&2
+    fi
+    rm -f "${errfile}"
+    return "${rc}"
+}
+
+# compose 失败时回退到容器名直读（与 docker-compose.yml container_name 对齐）
+docker_service_logs() {
+    local -a compose_args=("$@")
+    local follow=false
+    local tail_n=100
+    local arg
+    for arg in "${compose_args[@]}"; do
+        case "${arg}" in
+            -f) follow=true ;;
+            --tail=*) tail_n="${arg#*=}" ;;
+        esac
+    done
+    local idx=0
+    while [ "${idx}" -lt "${#compose_args[@]}" ]; do
+        arg="${compose_args[idx]}"
+        if [ "${arg}" = "--tail" ] && [ $((idx + 1)) -lt "${#compose_args[@]}" ]; then
+            tail_n="${compose_args[$((idx + 1))]}"
+            idx=$((idx + 2))
+            continue
+        fi
+        idx=$((idx + 1))
+    done
+    cd "${PROJECT_DIR}" || return 1
+    if docker_compose_cmd logs "${compose_args[@]}"; then
+        return 0
+    fi
+    echo -e "${YELLOW}⚠️  compose logs 不可用，回退 docker logs gibh_v2_api gibh_v2_worker${NC}" >&2
+    if [ "${follow}" = true ]; then
+        ${DOCKER_CMD_PREFIX}docker logs -f --tail "${tail_n}" gibh_v2_api gibh_v2_worker
+    else
+        ${DOCKER_CMD_PREFIX}docker logs --tail "${tail_n}" gibh_v2_api gibh_v2_worker
     fi
 }
 
@@ -54,9 +98,11 @@ show_container_health() {
     echo -e "${CYAN}${BOLD}======== 容器状态（docker compose ps）========${NC}"
     cd "${PROJECT_DIR}" || return 1
     if [ -n "${DOCKER_CMD_PREFIX}" ]; then
-        ${DOCKER_CMD_PREFIX}docker compose ps 2>&1 || ${DOCKER_CMD_PREFIX}docker-compose ps 2>&1 || true
+        ${DOCKER_CMD_PREFIX}docker compose "${COMPOSE_FILE_ARGS[@]}" ps 2>&1 || \
+        ${DOCKER_CMD_PREFIX}docker-compose "${COMPOSE_FILE_ARGS[@]}" ps 2>&1 || true
     else
-        docker compose ps 2>&1 || docker-compose ps 2>&1 || true
+        docker compose "${COMPOSE_FILE_ARGS[@]}" ps 2>&1 || \
+        docker-compose "${COMPOSE_FILE_ARGS[@]}" ps 2>&1 || true
     fi
     echo ""
     echo -e "${CYAN}${BOLD}======== 本机容器一览（docker ps）========${NC}"
@@ -256,7 +302,7 @@ for line in sys.stdin:
         return
     fi
     
-    docker_compose_cmd logs -f api-server worker 2>/dev/null 2>&1 | python3 -u -c "
+    docker_service_logs -f api-server worker 2>&1 | python3 -u -c "
 import sys, re, json
 
 hard_noise = [r'^GET /health', r'^GET /static', r'^200 OK$', r'^$']
@@ -303,7 +349,7 @@ for line in sys.stdin:
             break
     if not matched:
         print(f'\033[0;37m{line}{NC}', flush=True)
-" || docker_compose_cmd logs -f api-server worker 2>/dev/null
+" || docker_service_logs -f api-server worker
 }
 
 # ============================================
@@ -328,7 +374,7 @@ system_logs() {
         1)
             if check_docker_permission 2>/dev/null; then
                 echo -e "${YELLOW}按 Ctrl+C 退出${NC}\n"
-                docker_compose_cmd logs -f api-server worker 2>/dev/null
+                docker_service_logs -f api-server worker
             else
                 echo -e "${YELLOW}按 Ctrl+C 退出${NC}\n"
                 tail -f ${PROJECT_DIR}/gibh_agent.log 2>/dev/null
@@ -336,7 +382,7 @@ system_logs() {
             ;;
         2)
             if check_docker_permission 2>/dev/null; then
-                docker_compose_cmd logs --tail 100 api-server worker 2>/dev/null
+                docker_service_logs --tail 100 api-server worker
             else
                 tail -100 ${PROJECT_DIR}/gibh_agent.log 2>/dev/null
             fi
@@ -344,7 +390,7 @@ system_logs() {
             ;;
         3)
             if check_docker_permission 2>/dev/null; then
-                docker_compose_cmd logs --tail 200 api-server worker 2>/dev/null | \
+                docker_service_logs --tail 200 api-server worker 2>&1 | \
                     grep -i -E "error|exception|failed|traceback|❌" | tail -30
             else
                 grep -i -E "error|exception|failed|traceback|❌" ${PROJECT_DIR}/gibh_agent.log 2>/dev/null | tail -30
@@ -446,10 +492,10 @@ for line in sys.stdin:
     else
         # 🔥 Task 2: 使用更简单、更健壮的命令
         if [ "$USE_JQ" = true ]; then
-            docker_compose_cmd logs -f api-server worker 2>/dev/null | grep --line-buffered "LLM_RAW_DUMP" | sed 's/.*\[LLM_RAW_DUMP\] //' | jq . 2>/dev/null || \
-            docker_compose_cmd logs -f api-server worker 2>/dev/null | grep --line-buffered "LLM_RAW_DUMP" | sed 's/.*\[LLM_RAW_DUMP\] //' | sed 's/^/\033[0;36m🔥 [LLM_RAW_DUMP]\033[0m /'
+            docker_service_logs -f api-server worker 2>&1 | grep --line-buffered "LLM_RAW_DUMP" | sed 's/.*\[LLM_RAW_DUMP\] //' | jq . 2>/dev/null || \
+            docker_service_logs -f api-server worker 2>&1 | grep --line-buffered "LLM_RAW_DUMP" | sed 's/.*\[LLM_RAW_DUMP\] //' | sed 's/^/\033[0;36m🔥 [LLM_RAW_DUMP]\033[0m /'
         else
-            docker_compose_cmd logs -f api-server worker 2>/dev/null | grep --line-buffered "LLM_RAW_DUMP" | python3 -u -c "
+            docker_service_logs -f api-server worker 2>&1 | grep --line-buffered "LLM_RAW_DUMP" | python3 -u -c "
 import sys, json
 
 for line in sys.stdin:
@@ -490,7 +536,7 @@ profiler_logs() {
     fi
     echo -e "${CYAN}正在监听后端实时日志，按 Ctrl+C 退出...${NC}"
     echo ""
-    docker_compose_cmd logs -f --tail=200 api-server
+    docker_service_logs -f --tail=200 api-server
     read -p "按 Enter 继续..."
 }
 

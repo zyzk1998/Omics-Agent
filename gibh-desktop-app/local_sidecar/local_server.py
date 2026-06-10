@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import platform
+import re
 import threading
 import time
 from pathlib import Path
@@ -10,10 +11,11 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from starlette.responses import Response
 
 
 logging.basicConfig(
@@ -23,13 +25,73 @@ logging.basicConfig(
 logger = logging.getLogger("omics-local-sidecar")
 
 app = FastAPI(title="Omics Agent Local Sidecar", version="1.0.0")
+
+# 本地 Sidecar 仅监听 127.0.0.1；前端可能来自 8018 Web、Electron 或远程 nginx 反代页面。
+# 注意：allow_credentials=True 与 allow_origins=["*"] 互斥，浏览器会收不到 ACAO 头（CORS 彻底失败）。
+_SIDECAR_CORS_ORIGIN_REGEX = r"https?://.*"
+_SIDECAR_CORS_EXPLICIT_ORIGINS = [
+    "http://127.0.0.1:8018",
+    "http://localhost:8018",
+    "http://127.0.0.1:8019",
+    "http://localhost:8019",
+    "http://127.0.0.1",
+    "http://localhost",
+    "null",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_SIDECAR_CORS_EXPLICIT_ORIGINS,
+    allow_origin_regex=_SIDECAR_CORS_ORIGIN_REGEX,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition", "Content-Length", "Content-Type"],
+    max_age=86400,
 )
+
+
+def _sidecar_cors_allow_origin(request: Request) -> str:
+    origin = (request.headers.get("origin") or "").strip()
+    if not origin:
+        return "*"
+    if origin == "null":
+        return "null"
+    if origin in _SIDECAR_CORS_EXPLICIT_ORIGINS:
+        return origin
+    if re.fullmatch(_SIDECAR_CORS_ORIGIN_REGEX, origin):
+        return origin
+    return "*"
+
+
+@app.middleware("http")
+async def sidecar_cors_fallback_middleware(request: Request, call_next):
+    """
+    兜底 CORS：确保 FileResponse、HTTPException 与 OPTIONS 预检均返回跨域头。
+    修复历史配置 allow_credentials+\\* 导致 CORSMiddleware 不写 ACAO 的问题。
+    """
+    allow_origin = _sidecar_cors_allow_origin(request)
+    cors_base = {
+        "Access-Control-Allow-Origin": allow_origin,
+        "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD",
+        "Access-Control-Allow-Headers": request.headers.get(
+            "access-control-request-headers", "*"
+        ),
+        "Access-Control-Max-Age": "86400",
+    }
+    if allow_origin != "*":
+        cors_base["Vary"] = "Origin"
+
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=cors_base)
+
+    response = await call_next(request)
+    for key, value in cors_base.items():
+        if key.lower() == "access-control-allow-headers" and value == "*":
+            response.headers.setdefault(key, "*")
+        else:
+            response.headers.setdefault(key, value)
+    return response
 
 
 class WorkspaceInitRequest(BaseModel):
@@ -343,9 +405,31 @@ async def download_workspace_file(path: str = Query(...)):
         "png": "image/png",
         "jpg": "image/jpeg",
         "jpeg": "image/jpeg",
+        "jfif": "image/jpeg",
+        "jpe": "image/jpeg",
+        "pjpeg": "image/jpeg",
         "gif": "image/gif",
         "webp": "image/webp",
         "svg": "image/svg+xml",
+        "svgz": "image/svg+xml",
+        "bmp": "image/bmp",
+        "dib": "image/bmp",
+        "ico": "image/x-icon",
+        "cur": "image/x-icon",
+        "tif": "image/tiff",
+        "tiff": "image/tiff",
+        "avif": "image/avif",
+        "heic": "image/heic",
+        "heif": "image/heif",
+        "apng": "image/apng",
+        "jxl": "image/jxl",
+        "jp2": "image/jp2",
+        "j2k": "image/jp2",
+        "jpx": "image/jpx",
+        "psd": "image/vnd.adobe.photoshop",
+        "eps": "application/postscript",
+        "emf": "image/emf",
+        "wmf": "image/wmf",
         "pdf": "application/pdf",
     }.get(ext, "application/octet-stream")
     return FileResponse(path=str(target), media_type=media, filename=target.name)

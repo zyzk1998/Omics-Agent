@@ -39,6 +39,58 @@ def _safe_read_text(path: Path, limit: int = 512_000) -> str:
         return ""
 
 
+def _resolve_results_fs_path(url_or_path: str) -> Optional[Path]:
+    raw = str(url_or_path or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("/results/"):
+        base = Path(os.getenv("RESULTS_DIR", "/app/results")).expanduser()
+        candidate = base / raw[len("/results/") :]
+        return candidate if candidate.is_file() else None
+    p = Path(raw).expanduser()
+    return p if p.is_file() else None
+
+
+def _copy_tree_into_archive(src_root: Path, dest_root: Path, manifest_files: List[str], prefix: str) -> None:
+    if not src_root.is_dir():
+        return
+    for p in sorted(src_root.rglob("*")):
+        if not p.is_file():
+            continue
+        try:
+            if p.stat().st_size > _MAX_FILE_BYTES:
+                continue
+        except OSError:
+            continue
+        rel = p.relative_to(src_root)
+        dest = dest_root / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            dest.write_bytes(p.read_bytes())
+            manifest_files.append(f"{prefix}/{rel.as_posix()}")
+        except OSError as exc:
+            logger.warning("[DataPackager] skip corpus asset %s: %s", p, exc)
+
+
+def _resolve_corpus_archive_dir(
+    *,
+    session_id: str,
+    corpus_archive_dir: Optional[str] = None,
+) -> Optional[Path]:
+    if corpus_archive_dir:
+        p = Path(corpus_archive_dir).expanduser()
+        if p.is_dir() and (p / "dataset.json").is_file():
+            return p.resolve()
+    default = (
+        Path(os.getenv("RESULTS_DIR", "/app/results")).expanduser()
+        / "corpus_archive"
+        / str(session_id or "").strip()
+    )
+    if default.is_dir() and (default / "dataset.json").is_file():
+        return default.resolve()
+    return None
+
+
 def _collect_output_files(output_dir: Optional[str], max_files: int = 40) -> List[Dict[str, str]]:
     if not output_dir:
         return []
@@ -72,6 +124,8 @@ def build_artifacts_archive(
     hitl_meta: Optional[Dict[str, Any]] = None,
     output_dir: Optional[str] = None,
     skip_hitl: bool = False,
+    corpus_archive_dir: Optional[str] = None,
+    corpus_modality: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     构建标准归档包并返回 manifest + archive_path。
@@ -79,6 +133,9 @@ def build_artifacts_archive(
     目录结构（tar 内）:
         manifest.json
         expert_report_final.md
+        corpus_archive/dataset.json
+        corpus_archive/images/...
+        corpus_archive/reports/...
         hitl/annotations.json   (若有)
         workflow/steps_summary.json
         outputs/...              (精选文件)
@@ -96,6 +153,8 @@ def build_artifacts_archive(
         "skip_hitl": bool(skip_hitl),
         "hitl_meta": hitl_meta or {},
         "output_dir": output_dir,
+        "corpus_modality": corpus_modality,
+        "corpus_archive_dir": corpus_archive_dir,
         "files": [],
     }
 
@@ -124,6 +183,15 @@ def build_artifacts_archive(
             encoding="utf-8",
         )
         manifest["files"].append("hitl/annotations.json")
+
+    corpus_src = _resolve_corpus_archive_dir(
+        session_id=sid,
+        corpus_archive_dir=corpus_archive_dir,
+    )
+    if corpus_src:
+        corpus_dest = work / "corpus_archive"
+        _copy_tree_into_archive(corpus_src, corpus_dest, manifest["files"], "corpus_archive")
+        manifest["corpus_modality"] = corpus_modality or manifest.get("corpus_modality")
 
     out_pick = _collect_output_files(output_dir)
     for item in out_pick:

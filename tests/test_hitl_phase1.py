@@ -135,12 +135,36 @@ def test_trigger_expert_annotation_tasks_from_file(tmp_path: Path, monkeypatch):
     imp.assert_called_once()
 
 
-def test_resolve_ls_accessible_image_url_uses_fetch_base(monkeypatch):
-    monkeypatch.setenv("LS_IMAGE_FETCH_BASE_URL", "http://nginx")
-    url = resolve_ls_accessible_image_url("/results/run1/umap_annotated.png")
-    assert url == "http://nginx/results/run1/umap_annotated.png"
-    assert url.startswith("http://")
-    assert "192.168." not in url
+def test_resolve_ls_import_image_payload_base64(tmp_path, monkeypatch):
+    monkeypatch.setenv("RESULTS_DIR", str(tmp_path))
+    img = tmp_path / "umap_annotated.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+    payload = resolve_ls_accessible_image_url("/results/umap_annotated.png")
+    assert payload.startswith("data:image/png;base64,")
+    assert "nginx" not in payload
+    assert "192.168." not in payload
+
+
+def test_resolve_ls_import_image_payload_from_nginx_url(tmp_path, monkeypatch):
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
+    nested = tmp_path / "user@example.com" / "20260608"
+    nested.mkdir(parents=True)
+    img = nested / "test_corpus_umap.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x01" * 16)
+    from gibh_agent.tools.hitl_tools import resolve_ls_import_image_payload
+
+    payload = resolve_ls_import_image_payload("http://nginx/uploads/test_corpus_umap.png")
+    assert payload.startswith("data:image/png;base64,")
+
+
+def test_resolve_ls_import_image_payload_from_assets_demo():
+    from gibh_agent.tools.hitl_tools import resolve_ls_import_image_payload
+
+    demo = Path(__file__).resolve().parents[1] / "services/nginx/html/assets/images/demos/corpus/test_corpus_umap.png"
+    if not demo.is_file():
+        pytest.skip("demo corpus image not present in workspace")
+    payload = resolve_ls_import_image_payload("/assets/images/demos/corpus/test_corpus_umap.png")
+    assert payload.startswith("data:image/png;base64,")
 
 
 def test_normalize_frontend_media_path_strips_toxic_https():
@@ -152,22 +176,66 @@ def test_normalize_frontend_media_path_strips_toxic_https():
     assert rel == "/results/run_20240602/umap_annotated.png"
 
 
-def test_resolve_ls_import_rejects_https_base(monkeypatch):
-    monkeypatch.setenv("LS_IMAGE_FETCH_BASE_URL", "https://nginx")
-    from gibh_agent.tools.hitl_tools import resolve_ls_import_image_url
+def test_get_image_base64_data_uri(tmp_path):
+    from gibh_agent.tools.hitl_tools import get_image_base64_data_uri
 
-    url = resolve_ls_import_image_url("/results/a.png")
-    assert url.startswith("http://nginx/")
-    assert not url.startswith("https://")
+    img = tmp_path / "slice.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n")
+    uri = get_image_base64_data_uri(str(img))
+    assert uri.startswith("data:image/png;base64,")
 
 
-def test_resolve_ls_import_rewrites_toxic_absolute_url(monkeypatch):
-    monkeypatch.setenv("LS_IMAGE_FETCH_BASE_URL", "http://nginx")
-    from gibh_agent.tools.hitl_tools import resolve_ls_import_image_url
+def test_parse_image_path_inputs_multi():
+    from gibh_agent.tools.hitl_tools import parse_image_path_inputs
 
-    toxic = "https://192.168.32.31:8028/results/run_20240602/umap_annotated.png"
-    url = resolve_ls_import_image_url(toxic)
-    assert url == "http://nginx/results/run_20240602/umap_annotated.png"
+    assert parse_image_path_inputs("/uploads/a.png,/uploads/b.png") == [
+        "/uploads/a.png",
+        "/uploads/b.png",
+    ]
+    assert parse_image_path_inputs(["/uploads/a.png", "/uploads/b.png"]) == [
+        "/uploads/a.png",
+        "/uploads/b.png",
+    ]
+
+
+def test_parse_image_path_inputs_preserves_data_uri():
+    from gibh_agent.tools.hitl_tools import parse_image_path_inputs
+
+    uri = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAE="
+    assert parse_image_path_inputs(uri) == [uri]
+
+
+def test_trigger_expert_annotation_multi_image_tasks(tmp_path, monkeypatch):
+    monkeypatch.setenv("LABEL_STUDIO_API_KEY", "test-token")
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
+    (tmp_path / "a.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (tmp_path / "b.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    mock_project = {"id": 99, "title": "Multi"}
+    with patch.object(LabelStudioClient, "create_project", return_value=mock_project):
+        with patch.object(LabelStudioClient, "import_task", return_value={"task_count": 2}) as imp:
+            with patch.object(LabelStudioClient, "project_url", return_value="http://127.0.0.1:8082/projects/99/data"):
+                result = Trigger_Expert_Annotation(
+                    scenario_type="generic_corpus_processing",
+                    project_title="Multi Image",
+                    image_path="/uploads/a.png,/uploads/b.png",
+                )
+    assert result["status"] == "hitl_required"
+    assert result["task_count"] == 2
+    tasks = imp.call_args[0][1]
+    assert len(tasks) == 2
+    assert all(t["data"]["image"].startswith("data:image/png;base64,") for t in tasks)
+
+
+def test_embed_task_image_fields_as_base64(tmp_path, monkeypatch):
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
+    img = tmp_path / "a.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n")
+    from gibh_agent.tools.hitl_tools import _embed_task_image_fields_as_base64
+
+    tasks = _embed_task_image_fields_as_base64(
+        [{"data": {"image": "http://nginx/uploads/a.png", "text": "x"}}]
+    )
+    assert tasks[0]["data"]["image"].startswith("data:image/png;base64,")
 
 
 def test_auto_bootstrap_session_login(monkeypatch):

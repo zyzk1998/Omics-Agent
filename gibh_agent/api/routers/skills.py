@@ -51,9 +51,14 @@ def get_skill_detailed_specs():
         SKILL_DETAILED_SPECS_BY_TOOL_ID,
         build_skill_name_to_tool_id_map,
     )
+    from gibh_agent.db.skill_pipeline_specs import OMICS_PIPELINE_SPECS_BY_TOOL_ID
+
+    specs = dict(SKILL_DETAILED_SPECS_BY_TOOL_ID)
+    # 组学旗舰管线以 skill_pipeline_specs 为准（与 resolve_detailed_spec 一致）
+    specs.update(OMICS_PIPELINE_SPECS_BY_TOOL_ID)
 
     return {
-        "specs": SKILL_DETAILED_SPECS_BY_TOOL_ID,
+        "specs": specs,
         "name_to_tool_id": build_skill_name_to_tool_id_map(),
         "version": 3,
     }

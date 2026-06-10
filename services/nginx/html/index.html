@@ -3374,21 +3374,28 @@
                     tool_name: 'skill_corpus_data_processing',
                     is_implemented: true,
                     is_new_skill: true,
-                    description: '【核心能力】原始图像/文本经 Label Studio 专家复核，一键导出 SFT 微调语料（instruction/input/output）。支持未注释 UMAP、病理切片等科研素材。',
+                    description: '【🔬 技能用途】可视化人工标注工具！上传未注释的聚类图、病理图等数据，系统将自动拉起专业标注画板。您框选的结果将一键导出为 SFT 高质量微调语料 JSON。',
                     tags: ['语料加工', 'Label Studio', 'SFT', 'HITL'],
                     prompt_template: [
                         '[Skill_Route: skill_corpus_data_processing]',
-                        '请上传需要进行打标加工的图像或数据文件（点击下方附件图标）。无需输入复杂指令，发送后系统将自动为您拉起 Label Studio 标注工作台。',
+                        '【🔬 技能用途】',
+                        '可视化人工标注工具！上传未注释的聚类图、病理图等数据，系统将自动拉起专业标注画板。您框选的结果将一键导出为 SFT 高质量微调语料 JSON。',
                         '',
-                        '**推荐测试样例**：上传 test_corpus_umap.png（未注释单细胞 UMAP 聚类图），在 LS 中框选 T-Cell / B-Cell 区域后唤醒导出 JSON。',
+                        '【🎨 画板操作指南】',
+                        '发送图片后，您将看到一个深色的专业标注工作台：',
                         '',
-                        '**支持格式**',
-                        '- 图像：.png / .jpg / .jpeg / .webp / .tif',
-                        '- 文本：.txt / .md',
-                        '- 任务清单：.json（Label Studio 任务数组）',
+                        '👁️ 定位图片：界面正中央即为您上传的待标注图像。',
+                        '',
+                        '🏷️ 选择标签：在界面右侧的 Labels 面板，点击选中您想标注的类型（如 T-Cell）。',
+                        '',
+                        '✏️ 框选目标：鼠标移至中央图片上，按住左键并拖动，画出矩形框圈出细胞群。',
+                        '',
+                        '💾 提交结果：全部画完后，点击界面上方或右侧醒目的蓝色 [Submit (提交)] 按钮。',
+                        '',
+                        '🔙 返回系统：最后，点击我们系统页面下方的 [✅ 我已标注完成] 按钮，系统将自动回收您的标注数据！',
                         '',
                         '```json',
-                        '{"image_path": "/uploads/test_corpus_umap.png", "project_title": "科学语料标注 · UMAP 演示"}',
+                        '{"image_path": "/assets/images/demos/corpus/test_corpus_umap.png", "project_title": "科学语料标注 · UMAP 演示"}',
                         '```'
                     ].join('\n')
                 },
@@ -3911,7 +3918,7 @@
                     '<pre style="margin:0;font-size:9.5px;line-height:1.45;background:#fff;border:1px solid #d1fae5;border-radius:6px;padding:8px;overflow:auto;max-height:220px;color:#14532d;"><code>[',
                     '  {',
                     '    "instruction": "请识别并标注该单细胞 UMAP 聚类图中的核心细胞类群。",',
-                    '    "input": "/uploads/test_corpus_umap.png",',
+                    '    "input": "/assets/images/demos/corpus/test_corpus_umap.png",',
                     '    "output": "检测到 4 个主要类群：左上区域 (x≈120, y≈80) 为 T-Cell；右下区域为 B-Cell；中部偏左为 Macrophage；右上为 Unknown 过渡态。"',
                     '  }',
                     ']</code></pre>',
@@ -3924,15 +3931,25 @@
                 var spec = {
                     tool_id: 'skill_corpus_data_processing',
                     description_long: [
-                        '【🔬 核心能力】',
-                        '将杂乱的原始科研图像/文本，通过专家可视化复核，一键转化为可直接用于训练大模型的标准微调语料。',
+                        '【🔬 技能用途】',
+                        '可视化人工标注工具！上传未注释的聚类图、病理图等数据，系统将自动拉起专业标注画板。',
+                        '您框选的结果将一键导出为 SFT 高质量微调语料 JSON。',
+                        '',
+                        '【🎨 画板操作指南】',
+                        '发送图片后，您将看到一个深色的专业标注工作台：',
+                        '',
+                        '👁️ 定位图片：界面正中央即为您上传的待标注图像。',
+                        '🏷️ 选择标签：在界面右侧的 Labels 面板，点击选中您想标注的类型（如 T-Cell）。',
+                        '✏️ 框选目标：鼠标移至中央图片上，按住左键并拖动，画出矩形框圈出细胞群。',
+                        '💾 提交结果：全部画完后，点击界面上方或右侧醒目的蓝色 [Submit (提交)] 按钮。',
+                        '🔙 返回系统：最后，点击我们系统页面下方的 [✅ 我已标注完成] 按钮，系统将自动回收您的标注数据！',
                         '',
                         '【✨ 效果预览】',
-                        '📥 输入：一张未注释的单细胞聚类图 (.png) 或病理切片。',
-                        '🛠️ 处理：自动拉起 Label Studio 工作台，专家在图上框选 T-Cell、B-Cell 等区域。',
-                        '📤 输出：标准 SFT JSON 数组（instruction / input / output），可直接接入微调流水线。'
+                        '📥 输入：未注释 UMAP / 病理图等。',
+                        '📤 输出：SFT JSON（instruction / input / output）。',
+                        '📦 归档：一键入库时自动生成 corpus_archive 标准语料包。'
                     ].join('\n'),
-                    usage_hint: '请上传需要进行打标加工的图像或数据文件（点击下方附件图标）。无需输入复杂指令，发送后系统将自动为您拉起 Label Studio 标注工作台。',
+                    usage_hint: '上传图像后点击发送，系统将自动打开标注画板；按画板操作指南完成框选与提交。',
                     demo_visualization: demoViz,
                     inputs: [
                         { name: 'image_path', type: 'image', required: false, description: '待标注科研图像（.png/.jpg 等）' },
@@ -3952,7 +3969,7 @@
                             tier: 'zero_shot',
                             label: '一键打标（推荐）',
                             hint: '上传 test_corpus_umap.png 后直接发送，无需额外指令。',
-                            prompt: '[Skill_Route: skill_corpus_data_processing]\n请上传需要进行打标加工的图像或数据文件（点击下方附件图标）。无需输入复杂指令，发送后系统将自动为您拉起 Label Studio 标注工作台。'
+                            prompt: '[Skill_Route: skill_corpus_data_processing]\n【🔬 技能用途】\n可视化人工标注工具！上传未注释的聚类图、病理图等数据，系统将自动拉起专业标注画板。您框选的结果将一键导出为 SFT 高质量微调语料 JSON。\n\n【🎨 画板操作指南】\n👁️ 定位图片 → 🏷️ 选择标签 → ✏️ 框选目标 → 💾 Submit → 🔙 点击「我已标注完成」回收数据。'
                         }
                     ],
                     workflow_highlights: ['Label Studio', '硬 HITL', 'SFT 导出', '语料清洗']
@@ -5212,11 +5229,180 @@
                     leftBtn.title = fullText;
                 }
                 var rightPath = document.getElementById('right-sidebar-workspace-path');
-                if (rightPath) {
-                    rightPath.textContent = fullText;
-                    rightPath.title = fullText;
+                if (rightPath && (window.__rightSidebarMode || 'local') === 'local') {
+                    if (sel && sel.workspace_path && typeof renderMountPathCardHtml === 'function') {
+                        rightPath.innerHTML = renderMountPathCardHtml(sel.workspace_path, { label: fullText, short: true });
+                        rightPath.title = fullText;
+                        rightPath.classList.add('has-mount-path-card');
+                    } else {
+                        rightPath.textContent = fullText;
+                        rightPath.title = fullText;
+                        rightPath.classList.remove('has-mount-path-card');
+                    }
                 }
             }
+            function mountPathAttrEscape(s) {
+                return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+            }
+            function normalizeMountPathString(path) {
+                var p = String(path || '').trim();
+                if (!p || p === '<PENDING_UPLOAD>' || p === '<待上传数据>' || p === '<user_input>') return '';
+                if (p.length > 1 && p.charAt(0) === '<' && p.charAt(p.length - 1) === '>') return '';
+                return p;
+            }
+            function normalizePathForCompare(path) {
+                return String(path || '').trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+            }
+            function inferPathNavigationMode(path) {
+                var p = normalizeMountPathString(path);
+                if (!p) return 'local';
+                var lower = p.toLowerCase().replace(/\\/g, '/');
+                if (lower.indexOf('hpc://') === 0 || lower.indexOf('/hpc/') >= 0 || lower.indexOf('hpc-open') >= 0) return 'hpc';
+                if (lower.indexOf('/app/results/') === 0 || lower.indexOf('/app/uploads/') === 0) return 'cloud';
+                if (lower.indexOf('/results/') === 0 || lower.indexOf('/uploads/') === 0) return 'cloud';
+                if (/^\/run_\d{8}_\d{6}(\/|$)/.test(lower)) return 'cloud';
+                if (typeof isWorkflowResultArtifactPath === 'function' && isWorkflowResultArtifactPath(p)) return 'cloud';
+                if (/^[a-z]:[\\/]/i.test(p) || lower.indexOf('/home/') === 0 || lower.indexOf('/users/') === 0) return 'local';
+                if (p.indexOf('/') !== 0 && p.indexOf('\\') !== 0 && !/^[a-z]:/i.test(p)) return 'hpc';
+                return 'local';
+            }
+            function inferFilePreviewSourceFromPath(path, modeHint) {
+                var mode = modeHint || inferPathNavigationMode(path);
+                if (mode === 'hpc') return 'hpc';
+                if (mode === 'local') return 'local';
+                return 'cloud';
+            }
+            function renderMountPathCardHtml(path, opts) {
+                opts = opts || {};
+                var p = normalizeMountPathString(path);
+                if (!p) return fileTreeEscapeHtml(opts.emptyLabel || '未挂载');
+                var mode = opts.mode || inferPathNavigationMode(p);
+                var label = opts.label != null ? String(opts.label) : p;
+                var shortLabel = (opts.short !== false && label.length > 56) ? ('\u2026' + label.slice(-52)) : label;
+                return '<span class="mount-path-card" role="button" tabindex="0" data-path="' + mountPathAttrEscape(p) + '" data-mode="' + mountPathAttrEscape(mode) + '" title="\u70b9\u51fb\u5728\u6587\u4ef6\u7ba1\u7406\u5668\u4e2d\u6253\u5f00\uff1a' + fileTreeEscapeHtml(p) + '">' +
+                    '<span class="mount-path-card__icon" aria-hidden="true">\ud83d\udcc2</span>' +
+                    '<span class="mount-path-card__text">' + fileTreeEscapeHtml(shortLabel) + '</span></span>';
+            }
+            function renderLinkedDirectoryHtml(path, label, mode) {
+                var p = normalizeMountPathString(path);
+                if (!p) return '';
+                var m = mode || inferPathNavigationMode(p);
+                var lbl = label || '\u7ed3\u679c\u5b58\u653e\u76ee\u5f55';
+                return '<div class="exec-result-output-dir mt-3 pt-2 border-top">' +
+                    '<span class="small text-muted d-block mb-1">' + fileTreeEscapeHtml(lbl) + '</span>' +
+                    '<button type="button" class="linked-directory" data-path="' + mountPathAttrEscape(p) + '" data-mode="' + mountPathAttrEscape(m) + '" title="\u5728\u6587\u4ef6\u7ba1\u7406\u5668\u4e2d\u6253\u5f00">' +
+                    '<i class="bi bi-folder2-open" aria-hidden="true"></i>' +
+                    '<span class="linked-directory__path">' + fileTreeEscapeHtml(p) + '</span></button></div>';
+            }
+            function extractWorkflowOutputDir(stepsDetails, reportMeta) {
+                var rd = reportMeta || window.__lastWorkflowReportMeta || {};
+                var out = normalizeMountPathString(rd.output_dir || rd.output_path || rd.results_dir || '');
+                if (out) return out;
+                (stepsDetails || []).forEach(function(step) {
+                    if (out || !step) return;
+                    var params = step.params || step.step_params || {};
+                    ['output_dir', 'output_path', 'results_dir'].forEach(function(k) {
+                        if (!out && params[k]) out = normalizeMountPathString(params[k]);
+                    });
+                    var sr = step.step_result || {};
+                    var data = sr.data || step.data || {};
+                    if (!out && data.output_dir) out = normalizeMountPathString(data.output_dir);
+                    if (!out && sr.output_dir) out = normalizeMountPathString(sr.output_dir);
+                    if (!out && sr.report_data && sr.report_data.output_dir) out = normalizeMountPathString(sr.report_data.output_dir);
+                });
+                return out;
+            }
+            function expandWorkspaceTreeToPath(targetPath) {
+                var p = normalizeMountPathString(targetPath);
+                if (!p) return;
+                var container = document.getElementById('file-tree-container');
+                if (!container) return;
+                var norm = normalizePathForCompare(p);
+                container.querySelectorAll('.file-tree-folder[data-path]').forEach(function(det) {
+                    var dp = normalizePathForCompare(det.dataset.path || '');
+                    if (dp && (norm === dp || norm.indexOf(dp + '/') === 0)) det.open = true;
+                });
+                var highlightEl = null;
+                container.querySelectorAll('.file-tree-file[data-path], .file-tree-folder[data-path]').forEach(function(el) {
+                    if (normalizePathForCompare(el.dataset.path || '') === norm) highlightEl = el;
+                });
+                if (highlightEl) {
+                    highlightEl.classList.add('file-tree-file--highlight');
+                    try { highlightEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_sv) {}
+                    window.setTimeout(function() { highlightEl.classList.remove('file-tree-file--highlight'); }, 3200);
+                }
+            }
+            function highlightFilesPanelByPathPrefix(prefix) {
+                var norm = normalizePathForCompare(prefix);
+                var container = document.getElementById('file-tree-container');
+                if (!container || !norm) return;
+                var best = null;
+                var bestScore = -1;
+                container.querySelectorAll('.files-panel-file-item[data-path]').forEach(function(row) {
+                    var rp = normalizePathForCompare(row.dataset.path || '');
+                    if (!rp) return;
+                    var score = (rp === norm) ? 100 : (norm.indexOf(rp) >= 0 || rp.indexOf(norm) >= 0) ? 50 : 0;
+                    if (score > bestScore) { bestScore = score; best = row; }
+                });
+                if (best) {
+                    best.classList.add('file-tree-file--highlight');
+                    try { best.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_sv2) {}
+                    window.setTimeout(function() { best.classList.remove('file-tree-file--highlight'); }, 3200);
+                }
+            }
+            async function navigateFileManagerToPath(targetPath, options) {
+                options = options || {};
+                var p = normalizeMountPathString(targetPath);
+                if (!p) return;
+                var mode = options.mode || inferPathNavigationMode(p);
+                if (typeof setRightSidebarVisible === 'function') setRightSidebarVisible(true);
+                if (mode === 'hpc') {
+                    if (typeof setRightSidebarMode === 'function') setRightSidebarMode('hpc');
+                    if (typeof enterHpcDirectory === 'function') await enterHpcDirectory(p);
+                    return;
+                }
+                if (mode === 'cloud') {
+                    if (typeof setRightSidebarMode === 'function') setRightSidebarMode('files');
+                    if (typeof fetchAndRenderFilesPanel === 'function') await fetchAndRenderFilesPanel();
+                    highlightFilesPanelByPathPrefix(p);
+                    if (typeof showToast === 'function') {
+                        showToast('\u5df2\u6253\u5f00\u6587\u4ef6\u7ba1\u7406\u5668\uff1b\u4e91\u7aef\u7ed3\u679c\u76ee\u5f55\uff1a' + p, 'info');
+                    }
+                    return;
+                }
+                if (typeof setRightSidebarMode === 'function') setRightSidebarMode('local');
+                var sel = typeof getCachedWorkspaceSelection === 'function' ? getCachedWorkspaceSelection() : null;
+                if (!sel || !sel.workspace_path) {
+                    if (typeof showToast === 'function') showToast('\u8bf7\u5148\u6302\u8f7d\u672c\u5730\u5de5\u4f5c\u76ee\u5f55', 'warning');
+                    return;
+                }
+                if (typeof fetchAndRenderWorkspaceTree === 'function') await fetchAndRenderWorkspaceTree();
+                expandWorkspaceTreeToPath(p);
+            }
+            function bindGlobalMountPathNavigation() {
+                if (window.__mountPathNavBound) return;
+                window.__mountPathNavBound = true;
+                document.body.addEventListener('click', function(e) {
+                    var card = e.target && e.target.closest ? e.target.closest('.mount-path-card, .linked-directory') : null;
+                    if (!card || !card.dataset || !card.dataset.path) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    navigateFileManagerToPath(card.dataset.path, { mode: card.dataset.mode || undefined });
+                });
+                document.body.addEventListener('keydown', function(e) {
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    var card = e.target && e.target.closest ? e.target.closest('.mount-path-card') : null;
+                    if (!card || !card.dataset || !card.dataset.path) return;
+                    e.preventDefault();
+                    navigateFileManagerToPath(card.dataset.path, { mode: card.dataset.mode || undefined });
+                });
+            }
+            window.renderMountPathCardHtml = renderMountPathCardHtml;
+            window.renderLinkedDirectoryHtml = renderLinkedDirectoryHtml;
+            window.navigateFileManagerToPath = navigateFileManagerToPath;
+            window.inferFilePreviewSourceFromPath = inferFilePreviewSourceFromPath;
+            window.extractWorkflowOutputDir = extractWorkflowOutputDir;
+            window.bindGlobalMountPathNavigation = bindGlobalMountPathNavigation;
             async function postWorkspaceInit(workspacePath) {
                 try {
                     var res = await fetch(localSidecarUrl('/api/workspace/init'), {
@@ -5566,10 +5752,181 @@
             window.renderOmicsAuditTrailBar = renderOmicsAuditTrailBar;
             window.maybeInsertChatTimeDivider = maybeInsertChatTimeDivider;
             window.generatePipelineAuditId = generatePipelineAuditId;
+            function scrubMarkdownPoisonUrls(md) {
+                if (md == null || typeof md !== 'string') return md || '';
+                return md
+                    .replace(/https?:\/\/[^\/\s"'>)]+(?::\d+)?\/results\//gi, '/results/')
+                    .replace(/https?:\/\/[^\/\s"'>)]+(?::\d+)?\/uploads\//gi, '/uploads/');
+            }
+            window.scrubMarkdownPoisonUrls = scrubMarkdownPoisonUrls;
+
+            function scrollExpertReportIntoView() {
+                var slot = document.getElementById('omics-expert-report-slot');
+                if (!slot) return;
+                if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
+                var wp = document.getElementById('workspace-pane');
+                if (wp) {
+                    wp.style.setProperty('display', 'flex', 'important');
+                    wp.classList.add('workspace-active');
+                }
+                try {
+                    slot.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                } catch (_e1) {
+                    slot.scrollIntoView(true);
+                }
+                if (wp && typeof wp.scrollTo === 'function') {
+                    try {
+                        var slotTop = slot.getBoundingClientRect().top - wp.getBoundingClientRect().top + wp.scrollTop;
+                        wp.scrollTo({ top: Math.max(0, slotTop - 16), behavior: 'smooth' });
+                    } catch (_e2) { /* ignore */ }
+                }
+            }
+            window.scrollExpertReportIntoView = scrollExpertReportIntoView;
+
+            function showFinalExpertReportWorkbench(data) {
+                if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
+                if (typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
+                var wp = document.getElementById('workspace-pane');
+                if (wp) {
+                    wp.style.setProperty('display', 'flex', 'important');
+                    wp.classList.add('workspace-active');
+                }
+                var report = data && data.report_data && data.report_data.report;
+                if (report == null) return;
+                var renderFn = window.globalRenderDiagnosisReportSection;
+                if (typeof renderFn === 'function') {
+                    var payload = Object.assign({}, data || {});
+                    payload.hitl_final = true;
+                    if (!payload.report_data) payload.report_data = {};
+                    payload.report_data.hitl_final = true;
+                    renderFn('summary', report, payload);
+                }
+            }
+            window.showFinalExpertReportWorkbench = showFinalExpertReportWorkbench;
+
+            function ensureExpertReportStack(slotEl) {
+                var stack = slotEl.querySelector(':scope > .omics-expert-report-stack');
+                if (!stack) {
+                    slotEl.innerHTML = '<div class="omics-expert-report-stack"></div>';
+                    stack = slotEl.querySelector(':scope > .omics-expert-report-stack');
+                }
+                return stack;
+            }
+
+            function normalizeExpertReportBuildOpts(opts, isFinal) {
+                if (typeof opts === 'boolean') {
+                    return { collapsed: opts && !isFinal, collapsible: opts && !isFinal };
+                }
+                opts = opts || {};
+                return {
+                    collapsed: !!opts.collapsed,
+                    collapsible: !!opts.collapsible,
+                };
+            }
+
+            function buildExpertReportCardElement(expertHtml, isFinal, buildOpts) {
+                var opts = normalizeExpertReportBuildOpts(buildOpts, isFinal);
+                var card = document.createElement('div');
+                card.className = 'card border-0 shadow-sm omics-expert-report-card ' +
+                    (isFinal ? 'omics-expert-report-card--final' : 'omics-expert-report-card--draft');
+                card.setAttribute('data-report-version', isFinal ? 'final' : 'draft');
+                if (opts.collapsible) {
+                    card.classList.add('omics-expert-report-card--collapsible');
+                }
+                if (opts.collapsed) {
+                    card.classList.add('omics-expert-report-card--collapsed');
+                }
+                if (!isFinal && opts.collapsible) {
+                    card.classList.add('omics-expert-report-card--archived');
+                }
+                var headerClass = 'card-header text-white ';
+                if (isFinal) {
+                    headerClass += opts.collapsible
+                        ? 'omics-expert-report-header--final omics-expert-report-header--final-toggle'
+                        : 'omics-expert-report-header--final';
+                } else {
+                    headerClass += opts.collapsible
+                        ? 'omics-expert-report-header--draft-toggle'
+                        : 'bg-primary omics-expert-report-header--draft';
+                }
+                var toggleIcon = opts.collapsed ? '▶' : '▼';
+                var titleHtml = isFinal
+                    ? (opts.collapsible
+                        ? '<span class="omics-expert-report-toggle-icon" aria-hidden="true">' + toggleIcon + '</span>' +
+                          '<span class="omics-expert-report-badge omics-expert-report-badge--final" aria-hidden="true"><i class="bi bi-circle-fill"></i></span> 专家分析报告 (最终版)'
+                        : '<span class="omics-expert-report-badge omics-expert-report-badge--final" aria-hidden="true"><i class="bi bi-circle-fill"></i></span> 专家分析报告 (最终版)')
+                    : (opts.collapsible
+                        ? '<span class="omics-expert-report-toggle-icon" aria-hidden="true">' + toggleIcon + '</span> 专家分析报告 (初稿)'
+                        : '专家分析报告 (初稿)');
+                var bodyExtraClass = isFinal
+                    ? (opts.collapsible ? ' expert-report-final-body' : '')
+                    : (opts.collapsible ? ' expert-report-draft-body' : '');
+                var headerAttrs = opts.collapsible
+                    ? ' role="button" tabindex="0" aria-expanded="' + (opts.collapsed ? 'false' : 'true') + '"'
+                    : '';
+                card.innerHTML =
+                    '<div class="' + headerClass + '"' + headerAttrs + '>' +
+                    '<h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> ' + titleHtml + '</h5></div>' +
+                    '<div class="card-body expert-report-md-body report-expert-body' + bodyExtraClass + '"' +
+                    (opts.collapsed ? ' style="display:none;"' : '') + '>' + expertHtml + '</div>';
+                return card;
+            }
+
+            function reorderExpertReportStack(stack) {
+                if (!stack) return;
+                var draft = stack.querySelector('.omics-expert-report-card--draft[data-report-version="draft"]');
+                var final = stack.querySelector('.omics-expert-report-card--final[data-report-version="final"]');
+                if (!draft || !final || draft.nextElementSibling === final) return;
+                stack.insertBefore(draft, final);
+            }
+
+            function bindExpertReportCardToggle(reportCard) {
+                if (!reportCard) return;
+                var header = reportCard.querySelector(
+                    '.omics-expert-report-header--draft-toggle, .omics-expert-report-header--final-toggle'
+                );
+                if (!header || header.__reportToggleBound) return;
+                header.__reportToggleBound = true;
+                function toggleCard(ev) {
+                    if (ev && ev.target && ev.target.closest && ev.target.closest('.expert-report-edit-btn')) {
+                        return;
+                    }
+                    var collapsed = reportCard.classList.toggle('omics-expert-report-card--collapsed');
+                    var body = reportCard.querySelector('.expert-report-draft-body, .expert-report-final-body');
+                    var icon = reportCard.querySelector('.omics-expert-report-toggle-icon');
+                    if (body) body.style.display = collapsed ? 'none' : '';
+                    if (icon) icon.textContent = collapsed ? '▶' : '▼';
+                    header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+                }
+                header.addEventListener('click', toggleCard);
+                header.addEventListener('keydown', function (ev) {
+                    if (ev.key === 'Enter' || ev.key === ' ') {
+                        ev.preventDefault();
+                        toggleCard(ev);
+                    }
+                });
+            }
+
+            function bindExpertReportDraftToggle(draftCard) {
+                bindExpertReportCardToggle(draftCard);
+            }
+
+            function renderExpertReportMarkdownToHtml(raw) {
+                var expertRaw = (typeof normalizeReportMarkdownInput === 'function') ? normalizeReportMarkdownInput(raw) : raw;
+                expertRaw = scrubMarkdownPoisonUrls(expertRaw);
+                return (typeof safeMarkedParse === 'function') ? safeMarkedParse(expertRaw) : expertRaw;
+            }
+
             function renderExpertReportIntoSlot(slotEl, markdown, options) {
-                if (!slotEl) return;
                 options = options || {};
+                var workspaceRoot = document.getElementById('active-workspace-content');
+                if (typeof ensureOmicsReportThreeSlots === 'function' && workspaceRoot) {
+                    var activeSlots = ensureOmicsReportThreeSlots(workspaceRoot);
+                    if (activeSlots && activeSlots.expert) slotEl = activeSlots.expert;
+                }
+                if (!slotEl) return;
                 var raw = markdown != null ? String(markdown).trim() : '';
+                raw = scrubMarkdownPoisonUrls(raw);
                 if (!raw) {
                     slotEl.innerHTML = '';
                     slotEl.style.display = 'none';
@@ -5579,24 +5936,95 @@
                     || options.report_version === 'final'
                     || /最终版/.test(raw)
                     || (window.__omicsFrozenExecutionSnapshot && window.__omicsFrozenExecutionSnapshot.hitl_final === true);
-                var isDraft = !isFinal;
                 window.__expertReportVersion = isFinal ? 'final' : 'draft';
-                var expertRaw = (typeof normalizeReportMarkdownInput === 'function') ? normalizeReportMarkdownInput(raw) : raw;
-                var expertHtml = (typeof safeMarkedParse === 'function') ? safeMarkedParse(expertRaw) : expertRaw;
-                var cardClass = 'omics-expert-report-card' + (isFinal ? ' omics-expert-report-card--final' : ' omics-expert-report-card--draft');
-                var headerClass = isFinal ? 'card-header omics-expert-report-header--final text-white' : 'card-header bg-primary text-white omics-expert-report-header--draft';
-                var titleHtml = isFinal
-                    ? '<span class="omics-expert-report-badge omics-expert-report-badge--final" aria-hidden="true"><i class="bi bi-circle-fill"></i></span> 专家分析报告 (最终版)'
-                    : '专家分析报告 (初稿)';
-                slotEl.innerHTML = '<div class="card border-0 shadow-sm ' + cardClass + '" data-report-version="' + (isFinal ? 'final' : 'draft') + '">' +
-                    '<div class="' + headerClass + '">' +
-                    '<h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> ' + titleHtml + '</h5></div>' +
-                    '<div class="card-body expert-report-md-body report-expert-body">' + expertHtml + '</div></div>';
+                if (!isFinal) {
+                    window.__expertReportDraftMarkdown = raw;
+                }
+                var expertHtml = renderExpertReportMarkdownToHtml(raw);
+                var stack = ensureExpertReportStack(slotEl);
+                var existingFinal = stack.querySelector('.omics-expert-report-card--final[data-report-version="final"]');
+                var existingDraft = stack.querySelector('.omics-expert-report-card--draft[data-report-version="draft"]');
+
+                if (!isFinal) {
+                    var draftCard = buildExpertReportCardElement(expertHtml, false, {
+                        collapsible: !!existingFinal,
+                        collapsed: !!existingFinal,
+                    });
+                    if (existingDraft) {
+                        existingDraft.replaceWith(draftCard);
+                    } else if (existingFinal) {
+                        stack.insertBefore(draftCard, existingFinal);
+                    } else {
+                        stack.innerHTML = '';
+                        stack.appendChild(draftCard);
+                    }
+                    if (existingFinal) {
+                        bindExpertReportDraftToggle(draftCard);
+                    }
+                } else {
+                    var draftMarkdown = window.__expertReportDraftMarkdown || '';
+                    var preservedDraft = existingDraft;
+                    var finalCard = buildExpertReportCardElement(expertHtml, true, {
+                        collapsible: true,
+                        collapsed: false,
+                    });
+                    if (existingFinal) {
+                        existingFinal.replaceWith(finalCard);
+                    } else if (preservedDraft && preservedDraft.parentNode === stack) {
+                        stack.insertBefore(finalCard, preservedDraft.nextSibling);
+                    } else {
+                        stack.appendChild(finalCard);
+                    }
+                    bindExpertReportCardToggle(finalCard);
+                    if (preservedDraft && preservedDraft.parentNode === stack) {
+                        preservedDraft.classList.add('omics-expert-report-card--archived', 'omics-expert-report-card--collapsed');
+                        var preservedBody = preservedDraft.querySelector('.expert-report-draft-body, .expert-report-md-body');
+                        if (preservedBody) {
+                            preservedBody.classList.add('expert-report-draft-body');
+                            preservedBody.style.display = 'none';
+                        }
+                        var preservedHeader = preservedDraft.querySelector('.card-header');
+                        if (preservedHeader && !preservedHeader.classList.contains('omics-expert-report-header--draft-toggle')) {
+                            preservedHeader.classList.add('omics-expert-report-header--draft-toggle');
+                            preservedHeader.setAttribute('role', 'button');
+                            preservedHeader.setAttribute('tabindex', '0');
+                            preservedHeader.setAttribute('aria-expanded', 'false');
+                            var h5 = preservedHeader.querySelector('h5');
+                            if (h5 && h5.innerHTML.indexOf('omics-expert-report-toggle-icon') < 0) {
+                                h5.innerHTML = '<i class="bi bi-file-earmark-text"></i> ' +
+                                    '<span class="omics-expert-report-toggle-icon" aria-hidden="true">▶</span> 专家分析报告 (初稿)';
+                            }
+                        }
+                        bindExpertReportDraftToggle(preservedDraft);
+                    } else if (draftMarkdown && draftMarkdown.trim() && draftMarkdown.trim() !== raw.trim()) {
+                        var draftHtml = renderExpertReportMarkdownToHtml(draftMarkdown);
+                        var rebuiltDraft = buildExpertReportCardElement(draftHtml, false, {
+                            collapsible: true,
+                            collapsed: true,
+                        });
+                        stack.insertBefore(rebuiltDraft, finalCard);
+                        bindExpertReportDraftToggle(rebuiltDraft);
+                    }
+                    reorderExpertReportStack(stack);
+                }
+                reorderExpertReportStack(stack);
+
                 slotEl.style.display = '';
                 slotEl.classList.remove('d-none', 'hidden');
                 slotEl.setAttribute('aria-hidden', 'false');
-                if (isFinal && typeof window.disableHitlActionCards === 'function') {
-                    window.disableHitlActionCards('专家报告（最终版）已生成，标注入口已关闭');
+                if (isFinal && typeof window.mountHitlCompletedCard === 'function' && window.__lastStateSnapshotHitl) {
+                    window.mountHitlCompletedCard(window.__lastStateSnapshotHitl);
+                }
+                if (isFinal) {
+                    if (typeof scrollExpertReportIntoView === 'function') {
+                        setTimeout(function () { scrollExpertReportIntoView(); }, 120);
+                    }
+                    if (!window.__hitlFinalReportToastShown) {
+                        window.__hitlFinalReportToastShown = true;
+                        if (typeof showToast === 'function') {
+                            showToast('✅ 融合专家标注的最终报告已生成（初稿已折叠保留，可展开对比）', 'success');
+                        }
+                    }
                 }
                 var auditSlot = document.getElementById('omics-audit-trail-slot');
                 if (auditSlot && window.__omicsFrozenExecutionSnapshot) {
@@ -5604,6 +6032,7 @@
                         sessionId: (typeof currentSessionId !== 'undefined' ? currentSessionId : null)
                     });
                 }
+                console.log('[renderExpertReportIntoSlot] 已注入专家分析报告', isFinal ? '(最终版，初稿已保留)' : '(初稿)');
             }
             function renderDiagnosisIntoSlot(slotEl, diagnosisHtml, payload) {
                 if (!slotEl) return;
@@ -5963,8 +6392,19 @@
                         : (typeof content === 'string' ? content : (content && content.message) ? content.message : JSON.stringify(content, null, 2));
                     if (typeof rawMessage === 'string') {
                         rawMessage = rawMessage.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+                        rawMessage = (typeof scrubMarkdownPoisonUrls === 'function') ? scrubMarkdownPoisonUrls(rawMessage) : rawMessage;
                     }
-                    if (typeof renderExpertReportIntoSlot === 'function') renderExpertReportIntoSlot(slots.expert, rawMessage);
+                    var _hitlFinal = !!(fullData && (
+                        fullData.hitl_final === true
+                        || (fullData.report_data && fullData.report_data.hitl_final)
+                        || fullData.hitl_resumed === true
+                    ));
+                    if (typeof renderExpertReportIntoSlot === 'function') {
+                        renderExpertReportIntoSlot(slots.expert, rawMessage, {
+                            hitl_final: _hitlFinal || /最终版/.test(String(rawMessage || '')),
+                            report_version: _hitlFinal ? 'final' : undefined
+                        });
+                    }
                 }
                 if (typeof window.syncWorkspacePanelWidthFromContent === 'function' && slots.shell) {
                     window.syncWorkspacePanelWidthFromContent(slots.shell);
@@ -5979,13 +6419,32 @@
 
             function resolveExecutionSnapshotMirror(snap, messageCreatedAt) {
                 if (!snap || typeof snap !== 'object') {
-                    return { data_diagnosis_html: '', expert_report_markdown: '', steps_details: [], report_timestamp: '', report_generated_at: null, pipeline_audit_id: null };
+                    return {
+                        data_diagnosis_html: '',
+                        expert_report_markdown: '',
+                        expert_report_draft_markdown: '',
+                        steps_details: [],
+                        report_timestamp: '',
+                        report_generated_at: null,
+                        pipeline_audit_id: null
+                    };
                 }
                 var ex = (snap.execution_snapshot && typeof snap.execution_snapshot === 'object') ? snap.execution_snapshot : {};
                 var rep = snap.report || {};
                 var rd = (rep.report_data && typeof rep.report_data === 'object') ? rep.report_data : {};
                 var diagRaw = ex.data_diagnosis_html || rd.diagnosis || rep.diagnosis || rep.diagnosis_report || snap.diagnosis_report || '';
                 var expertRaw = ex.expert_report_markdown || snap.expert_report_markdown || rd.report || rep.report || rd.summary || rep.summary || '';
+                var expertDraftRaw = String(ex.expert_report_draft_markdown || '').trim();
+                var hitlFinal = !!(ex.hitl_final || snap.hitl_final || snap.hitl_resumed || rd.hitl_final);
+                if (!expertDraftRaw && expertRaw && !hitlFinal && !/最终版/.test(expertRaw)) {
+                    expertDraftRaw = expertRaw.trim();
+                }
+                if (!expertDraftRaw && hitlFinal && expertRaw) {
+                    var _textDraft = String(snap.text || '').trim();
+                    if (_textDraft && _textDraft !== expertRaw && /专家分析/.test(_textDraft) && !/最终版/.test(_textDraft)) {
+                        expertDraftRaw = _textDraft;
+                    }
+                }
                 var steps = [];
                 if (Array.isArray(ex.steps_details) && ex.steps_details.length) {
                     steps = ex.steps_details.filter(Boolean);
@@ -6000,6 +6459,7 @@
                 return {
                     data_diagnosis_html: diagRaw,
                     expert_report_markdown: expertRaw,
+                    expert_report_draft_markdown: expertDraftRaw,
                     steps_details: steps,
                     execution_snapshot: ex,
                     workflow_name: workflowName,
@@ -6007,11 +6467,32 @@
                     message_created_at: messageCreatedAt || null,
                     report_generated_at: ex.report_generated_at || snap.report_generated_at || null,
                     pipeline_audit_id: ex.pipeline_audit_id || snap.pipeline_audit_id || null,
-                    hitl_final: !!(ex.hitl_final || snap.hitl_resumed),
+                    hitl_final: hitlFinal,
                     hitl_resumed: !!snap.hitl_resumed,
+                    hitl_skipped: !!(ex.hitl_skipped || snap.hitl_skipped),
                     input_draft_text: (ex.input_draft_text != null ? String(ex.input_draft_text) : (snap.input_draft_text != null ? String(snap.input_draft_text) : '')),
                     input_draft_attachments: Array.isArray(ex.input_draft_attachments) ? ex.input_draft_attachments : (Array.isArray(snap.input_draft_attachments) ? snap.input_draft_attachments : [])
                 };
+            }
+
+            function restoreExpertReportsFromTimeMachine(slots, payload) {
+                if (!slots || !slots.expert) return;
+                var draftMd = String(payload.expert_report_draft_markdown || '').trim();
+                var finalMd = String(payload.expert_report_markdown || '').trim();
+                var isFinal = !!(payload.hitl_final || payload.hitl_resumed || /最终版/.test(finalMd));
+                slots.expert.innerHTML = '';
+                window.__expertReportDraftMarkdown = '';
+                if (isFinal && draftMd && finalMd && draftMd !== finalMd) {
+                    window.__expertReportDraftMarkdown = draftMd;
+                    renderExpertReportIntoSlot(slots.expert, draftMd, { report_version: 'draft' });
+                    renderExpertReportIntoSlot(slots.expert, finalMd, { hitl_final: true, report_version: 'final' });
+                } else if (isFinal && finalMd) {
+                    renderExpertReportIntoSlot(slots.expert, finalMd, { hitl_final: true, report_version: 'final' });
+                } else if (draftMd || finalMd) {
+                    renderExpertReportIntoSlot(slots.expert, draftMd || finalMd, { report_version: 'draft' });
+                } else {
+                    slots.expert.style.display = 'none';
+                }
             }
             function inferComposerAttachmentType(name) {
                 var n = String(name || '').toLowerCase();
@@ -6426,12 +6907,6 @@
                         sessionCreatedAt: sessionCreatedAt
                     });
                 }
-                renderExpertReportIntoSlot(slots.expert, payload.expert_report_markdown, {
-                    hitl_final: !!(payload.execution_snapshot && payload.execution_snapshot.hitl_final)
-                        || payload.hitl_final === true
-                        || payload.hitl_resumed === true
-                        || /最终版/.test(String(payload.expert_report_markdown || ''))
-                });
                 renderDiagnosisIntoSlot(slots.diag, payload.data_diagnosis_html, payload);
                 if (slots.exec) {
                     slots.exec.innerHTML = '';
@@ -6448,6 +6923,7 @@
                         slots.exec.style.display = 'none';
                     }
                 }
+                restoreExpertReportsFromTimeMachine(slots, payload);
                 if (typeof window.syncWorkspacePanelWidthFromContent === 'function' && slots.shell) {
                     window.syncWorkspacePanelWidthFromContent(slots.shell);
                 }
@@ -6487,6 +6963,7 @@
             window.ensureOmicsReportThreeSlots = ensureOmicsReportThreeSlots;
             window.resolveExecutionSnapshotMirror = resolveExecutionSnapshotMirror;
             window.loadHistorySessionTimeMachine = loadHistorySessionTimeMachine;
+            window.restoreExpertReportsFromTimeMachine = restoreExpertReportsFromTimeMachine;
             window.renderExpertReportIntoSlot = renderExpertReportIntoSlot;
             window.renderDiagnosisIntoSlot = renderDiagnosisIntoSlot;
             window.liveRenderEngine = window.liveRenderEngine || {};
@@ -6844,7 +7321,11 @@
                 menu.style.left = Math.max(8, left) + 'px';
                 menu.style.top = Math.max(8, top) + 'px';
             }
-            var __FILE_PREVIEW_IMAGE_EXT = { png: 1, jpg: 1, jpeg: 1, gif: 1, webp: 1, svg: 1, bmp: 1 };
+            var __FILE_PREVIEW_IMAGE_EXT = {
+                png: 1, jpg: 1, jpeg: 1, jfif: 1, jpe: 1, pjpeg: 1, gif: 1, webp: 1, svg: 1, svgz: 1,
+                bmp: 1, dib: 1, ico: 1, cur: 1, tif: 1, tiff: 1, avif: 1, heic: 1, heif: 1, apng: 1,
+                jxl: 1, jp2: 1, j2k: 1, jpx: 1, psd: 1, eps: 1, emf: 1, wmf: 1
+            };
             var __FILE_PREVIEW_PDF_EXT = { pdf: 1 };
             var __FILE_PREVIEW_TEXT_EXT = {
                 txt: 1, md: 1, markdown: 1, py: 1, csv: 1, tsv: 1, json: 1, yaml: 1, yml: 1,
@@ -6869,6 +7350,34 @@
                 }
                 var dot = base.lastIndexOf('.');
                 return dot >= 0 ? base.slice(dot + 1).toLowerCase() : '';
+            }
+            function isImagePreviewExtension(ext) {
+                var e = String(ext || '').toLowerCase();
+                if (!e || __FILE_PREVIEW_BLOCKED_EXT[e]) return false;
+                if (__FILE_PREVIEW_IMAGE_EXT[e]) return true;
+                return /^jpe?g?$|^png$|^gif$|^webp$|^svgz?$|^bmp$|^dib$|^tiff?$|^ico$|^cur$|^avif$|^heic$|^heif$|^apng$|^jxl$|^jp2$|^j2k$|^jpx$|^psd$|^eps$|^emf$|^wmf$|^pjpeg$|^jfif$/.test(e);
+            }
+            function resolveFilePreviewSourceForPath(filePath, rowSource) {
+                var path = String(filePath || '').trim();
+                var inferred = (typeof inferFilePreviewSourceFromPath === 'function') ? inferFilePreviewSourceFromPath(path) : 'cloud';
+                var rs = String(rowSource || '').trim().toLowerCase();
+                if (inferred === 'local') return 'local';
+                if (rs === 'local') return 'local';
+                if (rs === 'hpc') return 'hpc';
+                if (rs === 'files') return 'cloud';
+                return inferred;
+            }
+            function isLocalSidecarPreviewUrl(url) {
+                try {
+                    var u = new URL(String(url || ''), window.location.href);
+                    var port = String(getLocalSidecarPort ? getLocalSidecarPort() : '8019');
+                    if (u.hostname === '127.0.0.1' || u.hostname === 'localhost') {
+                        return !port || String(u.port || '') === port || String(u.port || '8019') === port;
+                    }
+                } catch (_e) {
+                    return /https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//i.test(String(url || ''));
+                }
+                return false;
             }
             function normalizeFilePreviewSource(source) {
                 var s = String(source || '').trim().toLowerCase();
@@ -6909,10 +7418,11 @@
                 }
             }
             async function fetchFilePreviewBlobUrl(url) {
-                var res = await fetch(url, {
-                    method: 'GET',
-                    headers: (typeof getAuthHeaders === 'function') ? getAuthHeaders() : {}
-                });
+                var fetchOpts = { method: 'GET', mode: 'cors' };
+                if (!isLocalSidecarPreviewUrl(url) && typeof getAuthHeaders === 'function') {
+                    fetchOpts.headers = getAuthHeaders();
+                }
+                var res = await fetch(url, fetchOpts);
                 if (!res.ok) throw new Error('blob_failed');
                 revokeFilePreviewBlobUrl();
                 window.__filePreviewBlobUrl = URL.createObjectURL(await res.blob());
@@ -7008,26 +7518,43 @@
             }
             async function renderPreviewImage(bodyEl, filePath, source, displayName) {
                 var mode = normalizeFilePreviewSource(source);
-                var webUrl = '';
-                if (mode !== 'local' && typeof window.normalizeToolAssetWebUrl === 'function') {
-                    webUrl = window.normalizeToolAssetWebUrl(filePath);
-                }
+                var downloadUrl = filePreviewDownloadUrl(filePath, source);
                 bodyEl.innerHTML = '<div class="file-preview-modal__media"><img alt="' + fileTreeEscapeHtml(displayName) + '"></div>';
                 var img = bodyEl.querySelector('img');
                 if (!img) return;
-                async function loadBlob() {
-                    var blobUrl = await fetchFilePreviewBlobUrl(filePreviewDownloadUrl(filePath, source));
+                async function loadViaBlob() {
+                    var blobUrl = await fetchFilePreviewBlobUrl(downloadUrl);
                     img.src = blobUrl;
                 }
-                if (webUrl) {
-                    img.onerror = function() {
-                        img.onerror = null;
-                        loadBlob().catch(function() { throw new Error('img_failed'); });
-                    };
-                    img.src = webUrl;
+                if (mode === 'local') {
+                    await new Promise(function(resolve, reject) {
+                        img.onload = function() { img.onload = null; img.onerror = null; resolve(); };
+                        img.onerror = function() {
+                            img.onload = null;
+                            img.onerror = null;
+                            loadViaBlob().then(resolve).catch(reject);
+                        };
+                        img.src = downloadUrl;
+                    });
                     return;
                 }
-                await loadBlob();
+                var webUrl = '';
+                if (typeof window.normalizeToolAssetWebUrl === 'function') {
+                    webUrl = window.normalizeToolAssetWebUrl(filePath);
+                }
+                if (webUrl) {
+                    await new Promise(function(resolve, reject) {
+                        img.onload = function() { img.onload = null; img.onerror = null; resolve(); };
+                        img.onerror = function() {
+                            img.onload = null;
+                            img.onerror = null;
+                            loadViaBlob().then(resolve).catch(reject);
+                        };
+                        img.src = webUrl;
+                    });
+                    return;
+                }
+                await loadViaBlob();
             }
             async function renderPreviewPdf(bodyEl, filePath, source, displayName) {
                 var blobUrl = await fetchFilePreviewBlobUrl(filePreviewDownloadUrl(filePath, source));
@@ -7046,10 +7573,14 @@
                 var p = String(filePath || '').trim();
                 if (!p) return;
                 var displayName = String(fileName || '').trim() || p.split(/[\\/]/).pop() || '文件预览';
-                var source = sourceOverride
-                    || ((__fileTreeContextState && __fileTreeContextState.targetPath === p && __fileTreeContextState.source)
-                        ? __fileTreeContextState.source
-                        : 'cloud');
+                var source = resolveFilePreviewSourceForPath(
+                    p,
+                    (sourceOverride != null && String(sourceOverride).trim() !== '')
+                        ? sourceOverride
+                        : ((__fileTreeContextState && __fileTreeContextState.targetPath === p && __fileTreeContextState.source)
+                            ? __fileTreeContextState.source
+                            : '')
+                );
                 var modal = document.getElementById('file-preview-modal');
                 var titleEl = document.getElementById('file-preview-title');
                 var pathEl = document.getElementById('file-preview-path');
@@ -7080,7 +7611,7 @@
                     return;
                 }
                 try {
-                    if (__FILE_PREVIEW_IMAGE_EXT[ext]) {
+                    if (isImagePreviewExtension(ext) || (normalizeFilePreviewSource(source) === 'local' && ext && !__FILE_PREVIEW_TEXT_EXT[ext] && !__FILE_PREVIEW_PDF_EXT[ext])) {
                         await renderPreviewImage(bodyEl, p, source, displayName);
                         return;
                     }
@@ -7106,8 +7637,9 @@
                         return;
                     }
                 } catch (_e) {
+                    console.warn('[file-preview] failed:', p, _e);
                     if (typeof showToast === 'function') {
-                        showToast('暂不支持该格式在线预览，请下载后查看。', 'warning');
+                        showToast('图片预览失败，请确认本地 Sidecar 已启动且文件可读。', 'warning');
                     }
                     closeFilePreviewModal();
                     return;
@@ -7128,6 +7660,7 @@
                     if (node.type === 'directory') {
                         var det = document.createElement('details');
                         det.className = 'file-tree-folder';
+                        if (node.path) det.dataset.path = node.path;
                         var sum = document.createElement('summary');
                         sum.className = 'file-tree-summary';
                         sum.innerHTML = '<span class="file-tree-icon" aria-hidden="true">📁</span><span class="file-tree-name">' + fileTreeEscapeHtml(node.name) + '</span>';
@@ -7142,6 +7675,8 @@
                         row.className = 'file-tree-file';
                         row.title = node.path || '';
                         row.dataset.path = node.path || '';
+                        row.dataset.type = 'file';
+                        row.dataset.source = 'local';
                         row.innerHTML = '<span class="file-tree-icon" aria-hidden="true">📄</span><span class="file-tree-name">' + fileTreeEscapeHtml(node.name) + '</span>';
                         bindSidebarFileDragSource(row, {
                             path: node.path || '',
@@ -12253,12 +12788,17 @@
                                 else if (!displayValue && uniquePaths.length > 1) displayValue = '';
                                 if (displayValue) {
                                     formHtml += `<div class="mb-2">
-                                        <label class="form-label small"><strong>${displayName}</strong> (只读)</label>
-                                        <input type="text" class="form-control form-control-sm" 
+                                        <label class="form-label small"><strong>${displayName}</strong> (只读)</label>`;
+                                    if (isWorkflowOutputParamKey(paramName) && typeof renderLinkedDirectoryHtml === 'function') {
+                                        formHtml += renderLinkedDirectoryHtml(displayValue, displayName);
+                                        formHtml += `<input type="hidden" name="${inputName}" value="${escapeHtml(displayValue)}">`;
+                                    } else {
+                                        formHtml += `<input type="text" class="form-control form-control-sm" 
                                             name="${inputName}"
                                             value="${escapeHtml(displayValue)}" 
-                                            readonly style="background-color: #e9ecef;">
-                                    </div>`;
+                                            readonly style="background-color: #e9ecef;">`;
+                                    }
+                                    formHtml += `</div>`;
                                     if (!isWorkflowOutputParamKey(paramName) && (paramName === 'file_path' || paramName === 'data_path')) {
                                         formHtml += renderWorkflowFileSourceRowHtml(resolveFileSourceForWorkflow(workflowData, displayValue));
                                     }
@@ -13711,6 +14251,26 @@
                                 }
                             }
                         }
+                        var _lastAgentContent = null;
+                        var _lastAgentCreatedAt = null;
+                        for (var _lai = messages.length - 1; _lai >= 0; _lai--) {
+                            if (messages[_lai].role === 'agent' && messages[_lai].content) {
+                                _lastAgentContent = messages[_lai].content;
+                                _lastAgentCreatedAt = messages[_lai].created_at;
+                                break;
+                            }
+                        }
+                        if (_lastAgentContent && typeof loadHistorySessionTimeMachine === 'function' && typeof mergeAgentContentToSnapshot === 'function' && typeof resolveExecutionSnapshotMirror === 'function') {
+                            var _lastMergedSnap = mergeAgentContentToSnapshot(_lastAgentContent);
+                            var _lastTmPayload = resolveExecutionSnapshotMirror(_lastMergedSnap, _lastAgentCreatedAt);
+                            var _hasTmContent = String(_lastTmPayload.data_diagnosis_html || '').trim()
+                                || (_lastTmPayload.steps_details && _lastTmPayload.steps_details.length)
+                                || String(_lastTmPayload.expert_report_markdown || '').trim()
+                                || String(_lastTmPayload.expert_report_draft_markdown || '').trim();
+                            if (_hasTmContent) {
+                                loadHistorySessionTimeMachine(_lastTmPayload);
+                            }
+                        }
                         if (wp && (document.querySelector('#active-workspace-content .report-section, #active-workspace-content .process-steps') != null) && typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
                         if (typeof highlightActiveSession === 'function') highlightActiveSession(sessionId);
                         if (typeof captureWorkspaceSlot === 'function') captureWorkspaceSlot('main');
@@ -13921,7 +14481,13 @@
                                     }
                                     if (displayValue) {
                                         cardHtml += '<div class="mb-2"><label class="form-label small"><strong>' + esc(displayName) + '</strong> (只读)</label>';
-                                        cardHtml += '<input type="text" class="form-control form-control-sm" value="' + esc(displayValue) + '" readonly style="background-color: #e9ecef;"></div>';
+                                        if (isWorkflowOutputParamKey(paramName) && typeof renderLinkedDirectoryHtml === 'function') {
+                                            cardHtml += renderLinkedDirectoryHtml(displayValue, displayName);
+                                            cardHtml += '<input type="hidden" name="' + inputName + '" value="' + esc(displayValue) + '">';
+                                        } else {
+                                            cardHtml += '<input type="text" class="form-control form-control-sm" name="' + inputName + '" value="' + esc(displayValue) + '" readonly style="background-color: #e9ecef;">';
+                                        }
+                                        cardHtml += '</div>';
                                         if (!isWorkflowOutputParamKey(paramName) && (paramName === 'file_path' || paramName === 'data_path')) {
                                             cardHtml += renderWorkflowFileSourceRowHtml(resolveFileSourceForWorkflow(workflowData, displayValue));
                                         }
@@ -14011,8 +14577,12 @@
             // 🔥 时光机全量注水：工作流卡片 + 执行记录(中栏简略 + 右栏详情) + 分析报告（diagnosis/summary）
             function renderStaticHistorySnapshot(snap, targetZone, logZone, messageId, messageCreatedAt) {
                 var formId = null;
-                var _hasExecSnap = snap && snap.execution_snapshot && Array.isArray(snap.execution_snapshot.steps_details) && snap.execution_snapshot.steps_details.length > 0;
-                if (!snap || (!snap.workflow && (!snap.steps || snap.steps.length === 0) && !snap.report && !_hasExecSnap)) return formId;
+                var _exSnapEarly = snap && snap.execution_snapshot;
+                var _hasExecSnap = _exSnapEarly && Array.isArray(_exSnapEarly.steps_details) && _exSnapEarly.steps_details.length > 0;
+                var _hasDiagEarly = _exSnapEarly && String(_exSnapEarly.data_diagnosis_html || '').trim();
+                var _hasExpertEarly = _exSnapEarly && (String(_exSnapEarly.expert_report_markdown || '').trim() || String(_exSnapEarly.expert_report_draft_markdown || '').trim());
+                var _hasReportEarly = snap && snap.report;
+                if (!snap || (!snap.workflow && (!snap.steps || snap.steps.length === 0) && !_hasReportEarly && !_hasExecSnap && !_hasDiagEarly && !_hasExpertEarly)) return formId;
                 if (snap.workflow && targetZone) {
                     try { formId = _renderStaticWorkflowCard(snap.workflow, targetZone, messageId); } catch (e) { console.warn('[Snapshot] _renderStaticWorkflowCard:', e); }
                 }
@@ -14030,12 +14600,14 @@
                     if (logZone && (!snap.process_log || snap.process_log.length === 0))
                         renderStaticChecklistToLogZone(logZone, normalized);
                 }
-                var _exSnap = snap.execution_snapshot;
-                var _hasDiagSnap = _exSnap && _exSnap.data_diagnosis_html && String(_exSnap.data_diagnosis_html).trim();
-                var _hasExpertSnap = (_exSnap && _exSnap.expert_report_markdown && String(_exSnap.expert_report_markdown).trim()) || (snap.expert_report_markdown && String(snap.expert_report_markdown).trim());
+                var _tmPayload = (typeof resolveExecutionSnapshotMirror === 'function')
+                    ? resolveExecutionSnapshotMirror(snap, messageCreatedAt)
+                    : {};
+                var _hasDiagSnap = String(_tmPayload.data_diagnosis_html || '').trim();
+                var _hasExpertSnap = String(_tmPayload.expert_report_markdown || '').trim() || String(_tmPayload.expert_report_draft_markdown || '').trim();
                 if (snap.report || _hasExecSnap || _hasDiagSnap || _hasExpertSnap || (stepsForRestore && stepsForRestore.length > 0)) {
                     if (typeof loadHistorySessionTimeMachine === 'function') {
-                        loadHistorySessionTimeMachine(resolveExecutionSnapshotMirror(snap, messageCreatedAt));
+                        loadHistorySessionTimeMachine(_tmPayload);
                     }
                 }
                 return formId;
@@ -14380,6 +14952,7 @@
                         } catch (_r) {}
                     }
                 })();
+                if (typeof bindGlobalMountPathNavigation === 'function') bindGlobalMountPathNavigation();
                 if (typeof updateSidebarUser === 'function') updateSidebarUser();
                 if (typeof window.syncImmersiveDemoEntryVisibility === 'function') window.syncImmersiveDemoEntryVisibility();
                 var btnImmersive = document.getElementById('btnImmersiveSpatiotemporalDemo');
@@ -14577,7 +15150,7 @@
                         if (!path) return;
                         e.preventDefault();
                         e.stopPropagation();
-                        var src = (row.dataset && row.dataset.source) ? row.dataset.source : 'cloud';
+                        var src = resolveFilePreviewSourceForPath(path, row.dataset && row.dataset.source);
                         var fn = path.split(/[\\/]/).pop() || path;
                         previewAssetFile(path, fn, src);
                     });
@@ -17987,8 +18560,12 @@
                                             title: '数据诊断报告'
                                         });
                                     } else if (data.report_data && data.report_data.report != null && data.report_data.hitl_final) {
-                                        var _rrsFinal = window.__workspace_renderReportSection || window.globalRenderDiagnosisReportSection;
-                                        if (typeof _rrsFinal === 'function') _rrsFinal('summary', data.report_data.report, data);
+                                        if (typeof window.showFinalExpertReportWorkbench === 'function') {
+                                            window.showFinalExpertReportWorkbench(data);
+                                        } else {
+                                            var _rrsFinal = window.__workspace_renderReportSection || window.globalRenderDiagnosisReportSection;
+                                            if (typeof _rrsFinal === 'function') _rrsFinal('summary', data.report_data.report, data);
+                                        }
                                     } else if (data.diagnosis_report != null) {
                                         var _rrsDx = window.__workspace_renderReportSection || window.globalRenderDiagnosisReportSection;
                                         if (typeof _rrsDx === 'function') _rrsDx('diagnosis', data.diagnosis_report, data);
@@ -18006,6 +18583,10 @@
                                 case 'step_result':
                                     // 🔥 步骤级异常透传：失败步骤的 traceback 在控制台高亮打印
                                     if (data.report_data && data.report_data.steps_details) {
+                                        if (data.report_data.output_dir || data.report_data.output_path || data.report_data.results_dir) {
+                                            window.__lastWorkflowReportMeta = window.__lastWorkflowReportMeta || {};
+                                            window.__lastWorkflowReportMeta.output_dir = data.report_data.output_dir || data.report_data.output_path || data.report_data.results_dir;
+                                        }
                                         data.report_data.steps_details.forEach(function(step) {
                                             var status = (step.status || '').toLowerCase();
                                             if (status === 'error' || status === 'failed' || step.error) {
@@ -18090,6 +18671,10 @@
                                         });
                                     }
                                     if (data.report_data) {
+                                        if (data.report_data.output_dir || data.report_data.output_path || data.report_data.results_dir) {
+                                            window.__lastWorkflowReportMeta = window.__lastWorkflowReportMeta || {};
+                                            window.__lastWorkflowReportMeta.output_dir = data.report_data.output_dir || data.report_data.output_path || data.report_data.results_dir;
+                                        }
                                         if (data.report_data.steps_details && data.report_data.steps_details.length > 0) {
                                             renderExecutionSteps(data.report_data.steps_details);
                                             if (typeof window.scanAndRenderHitlFromSteps === 'function') {
@@ -19310,6 +19895,12 @@
                             });
                             
                             stepsHtml += `</div>`;
+                            var _execOutputDir = (typeof extractWorkflowOutputDir === 'function')
+                                ? extractWorkflowOutputDir(stepsDetails, window.__lastWorkflowReportMeta)
+                                : '';
+                            if (_execOutputDir && typeof renderLinkedDirectoryHtml === 'function') {
+                                stepsHtml += renderLinkedDirectoryHtml(_execOutputDir, '结果存放目录');
+                            }
                             
                             executionSection.innerHTML = stepsHtml;
                             if (typeof window.hydrateToolAssetPreviews === 'function') window.hydrateToolAssetPreviews(executionSection);

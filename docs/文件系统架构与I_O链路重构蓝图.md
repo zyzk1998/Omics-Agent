@@ -1,7 +1,8 @@
 # 文件系统架构与 I/O 链路重构蓝图
 
-> 版本：2026-06-02 · 审计范围：转录组 / 多模态组学上传 → 工具执行全链路  
-> 关联实现：`gibh_agent/core/tool_input_validator.py`（第一阶段止血）
+> 版本：2026-06-09 · 审计范围：转录组 / 多模态组学上传 → 工具执行全链路 + 桌面本地轨  
+> 关联实现：`gibh_agent/core/tool_input_validator.py`（第一阶段止血）  
+> 本地挂载闭环详见：[本地工作区与文件管理器闭环.md](./本地工作区与文件管理器闭环.md)
 
 ---
 
@@ -372,4 +373,15 @@ flowchart LR
 - 前端 `foldDirtyContentInMarkdownSource` → `safeMarkedParse` 前置
 - 影像工具 `nifti_preview.py` 输出 `<details class="omics-dirty-accordion">`
 - 指标卡 `_skillVisRenderValueHtml` 长 Base64/长文本折叠
+
+### 11.4 桌面本地轨与文件管理器（2026-06-09）
+
+| 能力 | 实现要点 |
+|------|----------|
+| 挂载路径可点击 | 全局委托 `.mount-path-card` / `.linked-directory` → `navigateFileManagerToPath()` |
+| 本地图片预览 | Sidecar `GET /api/files/download`；树节点 `dataset.source=local` |
+| CORS | Sidecar `allow_credentials=False` + 兜底中间件（勿用 `credentials=True` + `origins=*`） |
+| 云结果目录 | `/app/results/...` → 文件管理 Tab 高亮，非 Sidecar 列目录 |
+
+完整 SOP 与验收：[本地工作区与文件管理器闭环.md](./本地工作区与文件管理器闭环.md)
 
