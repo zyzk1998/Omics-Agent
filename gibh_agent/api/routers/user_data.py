@@ -16,7 +16,7 @@ import os
 import logging
 import traceback
 from pathlib import Path
-from typing import AsyncIterator, List, Optional
+from typing import Any, AsyncIterator, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -30,6 +30,7 @@ from gibh_agent.core.session_runtime import SESSION_RUNNING, normalize_session_s
 from gibh_agent.core.session_stream_hub import get_session_stream_hub
 from gibh_agent.core.utils import sanitize_for_json
 from gibh_agent.db.connection import get_db_session
+from gibh_agent.db.message_queries import get_latest_agent_message
 from gibh_agent.db.models import (
     Session as SessionModel,
     Message as MessageModel,
@@ -88,6 +89,67 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["User Data"])
 
 
+def _extract_workflow_steps_from_content(content: dict) -> list:
+    wf = content.get("workflow") if isinstance(content.get("workflow"), dict) else {}
+    if not wf:
+        ss = content.get("state_snapshot")
+        if isinstance(ss, dict) and isinstance(ss.get("workflow"), dict):
+            wf = ss["workflow"]
+    if not wf:
+        return []
+    for key_path in (
+        ("workflow_config", "workflow_data", "steps"),
+        ("workflow_config", "steps"),
+        ("workflow_data", "steps"),
+        ("steps",),
+    ):
+        node = wf
+        for k in key_path:
+            if not isinstance(node, dict):
+                node = None
+                break
+            node = node.get(k)
+        if isinstance(node, list) and node:
+            return node
+    return []
+
+
+def _is_single_skill_agent_content(content: dict) -> bool:
+    if not isinstance(content, dict):
+        return False
+    for key in ("skill_last_tool", "skill_id", "skill_tool_id"):
+        if content.get(key):
+            return True
+    ss = content.get("state_snapshot")
+    if isinstance(ss, dict):
+        if ss.get("skill_last_tool") or ss.get("skill_id") or ss.get("skill_tool_id"):
+            return True
+        ex = ss.get("execution_snapshot")
+        if isinstance(ex, dict) and (ex.get("skill_id") or ex.get("skill_tool_id")):
+            return True
+    return False
+
+
+def _strip_ghost_workflow_from_agent_content(content: Any) -> Any:
+    """单点技能会话：移除空步骤 workflow 占位，避免前端渲染幽灵 Task 卡片。"""
+    if not isinstance(content, dict):
+        return content
+    if not _is_single_skill_agent_content(content):
+        return content
+    steps = _extract_workflow_steps_from_content(content)
+    if steps:
+        return content
+    cleaned = dict(content)
+    if "workflow" in cleaned:
+        cleaned.pop("workflow", None)
+    ss = cleaned.get("state_snapshot")
+    if isinstance(ss, dict) and "workflow" in ss:
+        ss = dict(ss)
+        ss.pop("workflow", None)
+        cleaned["state_snapshot"] = ss
+    return cleaned
+
+
 @router.get("/api/sessions")
 def list_sessions(
     owner_id: str = Depends(get_current_owner_id),
@@ -137,6 +199,34 @@ def get_session(
         "input_draft_text": draft.get("input_draft_text") or "",
         "input_draft_attachments": draft.get("input_draft_attachments") or [],
     })
+
+
+@router.get("/api/sessions/{session_id}/files")
+def list_session_files(
+    session_id: str,
+    owner_id: str = Depends(get_current_owner_id),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    """返回当前会话 upload/result 文件清单（临时缓存 + 挂载永久目录）。"""
+    from gibh_agent.core.storage.session_file_index import build_session_files_inventory
+    from gibh_agent.core.user_database_settings_store import get_database_mount_config
+
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session.owner_id != owner_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该会话")
+
+    cfg = get_database_mount_config(owner_id)
+    mount_path = str((cfg.get("local_volume") or {}).get("mount_path") or "")
+    messages = db.query(MessageModel).filter(MessageModel.session_id == session_id).all()
+    inventory = build_session_files_inventory(
+        session_id=session_id,
+        session_title=getattr(session, "title", None),
+        mount_path=mount_path or None,
+        messages=messages,
+    )
+    return sanitize_for_json({"status": "success", **inventory})
 
 
 @router.get("/api/sessions/{session_id}/stream")
@@ -229,11 +319,14 @@ def list_messages(
         rows.sort(key=lambda x: x.created_at)
         out = []
         for r in rows:
+            content = r.content
+            if r.role == "agent" and isinstance(content, dict):
+                content = _strip_ghost_workflow_from_agent_content(content)
             raw = {
                 "id": r.id,
                 "session_id": r.session_id,
                 "role": r.role,
-                "content": r.content,
+                "content": content,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
             }
             try:
@@ -655,12 +748,7 @@ def update_session_expert_report(
     if not md:
         raise HTTPException(status_code=400, detail="markdown 不能为空")
 
-    msg = (
-        db.query(MessageModel)
-        .filter(MessageModel.session_id == session_id, MessageModel.role == "agent")
-        .order_by(MessageModel.created_at.desc(), MessageModel.id.desc())
-        .first()
-    )
+    msg = get_latest_agent_message(db, session_id)
     if not msg:
         raise HTTPException(status_code=404, detail="该会话尚无 Agent 消息可更新")
 

@@ -1,8 +1,9 @@
 {
-  "version": "0.14.6",
-  "displayVersion": "V0.14.6",
+  "version": "0.15.0",
+  "displayVersion": "V0.15.0",
   "productName": "Omics Agent",
-  "winSetupFile": "Omics Agent Setup 0.14.6.exe",
-  "linuxAppImageFile": "Omics Agent-0.14.6.AppImage",
-  "updatedAt": "2026-05-18T07:38:27.439Z"
+  "winSetupFile": "Omics Agent Setup 0.15.0.exe",
+  "linuxAppImageFile": "Omics Agent-0.15.0.AppImage",
+  "updatedAt": "2026-06-12T01:30:29.975Z",
+  "releaseNotes": "V0.15.0 更新说明（自 V0.14.8 起）\n\n【桌面客户端】\n• 应用更新：确认「重启并安装」时自动退出托盘与 Sidecar 后台进程，Windows 安装程序正确终止旧实例，无需用户手动退出\n• Sidecar 兼容性探测增强（silent_deploy / write_bytes / capabilities）；旧版 Sidecar 自动 shutdown 并重启\n• 本地文件 IPC 兜底预览（read-local-file-buffer），Sidecar 404 时仍可预览 PNG/PDF\n\n【Web / 内置网页】\n• 会话文件管理：工作台顶栏「会话中的文件」手风琴、Deep Link 跳转文件管理器\n• 客户端文件系统双路存储（永久挂载 + 7 天临时缓存清理）\n• 一键入库客户端中继落盘（local_sidecar_deploy）；文件树导航与语料资产面板\n• HITL 重标注与语料门禁全链路优化；入库失败可复制 Stack Trace 诊断"
 }

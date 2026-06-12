@@ -16,8 +16,46 @@ def set_workspace_context(workspace_path: str) -> Dict[str, Any]:
     result_dir = (resolved / "result").resolve()
     payload = {
         "workspace_path": str(resolved),
+        "host_workspace_path": str(resolved),
+        "container_workspace_path": None,
         "workspace_name": resolved.name,
         "result_path": str(result_dir),
+    }
+    with _LOCK:
+        _WORKSPACE_CONTEXT.clear()
+        _WORKSPACE_CONTEXT.update(payload)
+    return dict(payload)
+
+
+def register_session_workspace(
+    workspace_path: str,
+    *,
+    container_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    注册会话工作区：host 路径（Sidecar/Windows）与可选的容器内映射路径。
+    """
+    host = str(workspace_path or "").strip()
+    if not host:
+        return get_workspace_context()
+    container = str(container_path or "").strip() or None
+    from gibh_agent.utils.path_resolver import is_windows_abs_path
+
+    if container:
+        root = Path(container).expanduser().resolve()
+    elif is_windows_abs_path(host) or not Path(host).exists():
+        root = None
+    else:
+        root = Path(host).expanduser().resolve()
+
+    payload: Dict[str, Any] = {
+        "workspace_path": str(root) if root else host,
+        "host_workspace_path": host,
+        "container_workspace_path": container,
+        "workspace_name": Path(host.replace("\\", "/")).name or "workspace",
+        "result_path": str((Path(host) / "result")) if is_windows_abs_path(host) else (
+            str((root / "result").resolve()) if root else f"{host.rstrip('/')}/result"
+        ),
     }
     with _LOCK:
         _WORKSPACE_CONTEXT.clear()

@@ -23,6 +23,11 @@ window.hardReloadFrontend = function hardReloadFrontend() {
   ipcRenderer.send('omics-hard-reload');
 };
 
+/** Sidecar 无 files/download 时，经主进程直读本地文件（base64）供预览兜底 */
+window.readLocalFileBuffer = function readLocalFileBuffer(filePath) {
+  return ipcRenderer.invoke('read-local-file-buffer', filePath);
+};
+
 /**
  * @param {(payload: {
  *   type: 'checking-for-update'|'update-available'|'update-not-available'|'download-progress'|'update-downloaded'|'error',

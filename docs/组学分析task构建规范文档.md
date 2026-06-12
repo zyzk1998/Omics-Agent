@@ -27,6 +27,8 @@
 
 用户侧标准测试文件（`test_data/`，可用 `scripts/download_omics_test_data.py` 拉取）：`genomics/sample1_R1.fastq.gz`、`proteomics/BSA1_F1.mzML`、`epigenomics/SRR1822153_1.fastq.gz`。
 
+**七大多模态分类**：上传文件如何归到转录组 / 空间 / 代谢 / 影像 / 基因组 / 表观 / 蛋白七域，见 **§2.5**（资产总线 `OmicsAssetManager` → 体检 → 路由 → Planner → 资产库回写）。
+
 ---
 
 ## 摘要 · 一步到位融合路线图（步骤清单 + 工具名 → 可跑 Task）
@@ -58,7 +60,7 @@
 | 3   | **工作流 DAG + 元数据**            | 新建或扩展 `gibh_agent/core/workflows/<your_workflow>.py`，继承 `BaseWorkflow`，实现 `get_name` / `get_description` / `get_steps_dag` / `get_step_metadata`。                                                                                       |
 | 4   | **注册到 WorkflowRegistry**     | `gibh_agent/core/workflows/registry.py` 的 `_auto_register()`：`import` 你的类并 `self.register(...)`。                                                                                                                                        |
 | 5   | **生成模板 `generate_template`** | 默认继承 `BaseWorkflow.generate_template` 即可；若覆写（强参考 `**RNAWorkflow`、`SpatialWorkflow`、`RadiomicsWorkflow**`），必须仍返回 `type: workflow_config`，且 `**workflow_data` 内含 `domain_name: self.get_name()**`（编排器 Reporting / 资产分类依赖，见 `base.py` 注释）。 |
-| 6   | **Planner 意图分类同步**           | `gibh_agent/core/planner.py` 中 `_classify_intent` 的 **system_prompt**：**Available Domains**、**Available Steps (YourDomain)** 与你的 DAG **一致**（否则 LLM 会吐出无效 `target_steps`）。                                                               |
+| 6   | **Planner 意图分类同步**           | `gibh_agent/core/planner.py` 中 `_classify_intent` 的 **system_prompt**：**Available Domains**、**Available Steps (YourDomain)** 与你的 DAG **一致**（否则 LLM 会吐出无效 `target_steps`）。上传文件的 **域名** 还依赖 **§2.5 多模态分类链路**（资产总线 → 体检 → 路由规则）。 |
 | 7   | **编排器 Agent 绑定**             | `gibh_agent/core/orchestrator.py`：根据 `domain_name` 选择 `metabolomics_agent` / `rna_agent` / `spatial_agent` / `radiomics_agent`（或扩展新 specialist）。                                                                                        |
 | 8   | **前端步骤展示名（可选但强烈推荐）**         | `services/nginx/html/index.html` 内 `window.STEP_NAME_MAP`：`step_id` 或关键 `tool_id` → 中文进度文案；与 `planner.py` 中 `_get_step_display_name` 的 `name_mapping` **对齐**，避免直播/右栏显示原始 snake_case。                                                    |
 | 9   | **冒烟或集成验证**                  | `PYTHONPATH=. python -c "from gibh_agent.core.tool_registry import registry; assert registry.get_tool('你的tool_id')"`；再跑一条「规划 → 执行」链路或现有 pytest。                                                                                         |
@@ -173,11 +175,166 @@ PYTHONPATH=. python -c "from gibh_agent.core.workflows.registry import registry 
 
 ---
 
+## 2.5 多模态文件分类：七域路由全链路
+
+> **与 Task 的关系**：工作流 `domain_name` 并非凭空推断——用户上传的文件会经 **资产总线 → 体检 → 全局路由 → Planner 域名分类 → 资产库回写** 逐层收敛到七大多模态组学之一（或 Chat/专项通道）。新增模态时，除 §1–§2 的 DAG/工具外，还须同步本节所列嗅探与路由落点，否则易出现「广场卡片对了、上传即拒 / 域名串台 / 资产栏仍显示未分类」。
+
+### 2.5.1 七域定义与前端对齐
+
+用户数据资产栏与编排器回写使用同一套 **modality 键**（见 `services/nginx/html/index.html` 中 `FIXED_MODALITY_KEYS` / `FIXED_MODALITY_LABELS`）：
+
+| modality 键 | 中文标签 | 典型 `WorkflowRegistry` 域名 |
+| --- | --- | --- |
+| `rna` | 转录组学 | `RNA`（路由别名 `transcriptomics` / `single_cell` 均归并写 `rna`） |
+| `spatial` | 空间组学 | `Spatial` |
+| `metabolomics` | 代谢组学 | `Metabolomics` |
+| `radiomics` | 医学影像组学 | `Radiomics` |
+| `genomics` | 基因组学 | `genomics` |
+| `epigenomics` | 表观遗传组学 | `epigenomics` |
+| `proteomics` | 蛋白质组学 | `proteomics` |
+| `uncategorized` | 其他文件 | 尚未完成规划或未命中嗅探规则 |
+
+**专项通道（非七域 tab，但影响域名）**：`STED_EC` / `SPATIOTEMPORAL_DYNAMICS` 仍走 `rna_agent`，资产栏可写 `sted_ec`；技能快车道 `[Omics_Route: genomics|proteomics|epigenomics]` 直接锁定三大组学 Agent。
+
+### 2.5.2 分层架构（上传 → 可执行 Task）
+
+```mermaid
+flowchart TD
+  U[用户上传 / 多文件路径] --> G[格式注册表 omics_io_registry]
+  G --> P[path_resolver 路径解析与存在性]
+  P --> B[OmicsAssetManager 资产总线]
+  B --> F[FileInspector 策略体检]
+  F --> R[RouterAgent / Orchestrator 全局意图]
+  R --> L[SOPPlanner._classify_intent → domain_name]
+  L --> W[generate_plan / workflow_config]
+  W --> A[DB Asset.modality 回写 + 前端资产栏]
+```
+
+**设计原则（架构宪法）**：
+
+- **多文件不拼逗号串进工具**：`parse_multiple_files` / `OmicsAssetManager.classify_assets` 产出 `DataAsset` 列表，Executor 经 `to_legacy_resolved_dict` 对齐旧桶语义。
+- **捆绑优先**：同一会话内 10x 三件套 → `10x_bundle`；Visium 矩阵 + `spatial/` → `spatial_bundle`；影像 + 掩膜 → `radiomics_pair`。
+- **文件格式优先于 LLM 臆测**：Planner 提示词明确「Visium → Spatial、NIfTI → Radiomics、mzML → proteomics」等硬规则（见 §3.1 与 `planner.py` CRITICAL ROUTING RULES）。
+
+### 2.5.3 第一层：格式注册表与路径门禁
+
+| 模块 | 文件 | 职责 |
+| --- | --- | --- |
+| 扩展名字典 | `gibh_agent/core/omics_io_registry.py` | `OMICS_COMPOUND_EXTENSIONS` / `OMICS_SIMPLE_EXTENSIONS` 统一维护 `.fastq.gz`、`.nii.gz`、`.mzml` 等；**新增模态后缀须在此登记**（§10.2 体检闸口同源）。 |
+| 格式校验 | `gibh_agent/utils/path_resolver.py` · `validate_inspector_file_format` | 仅解析后缀、不读盘；未知后缀**不阻断**，改由 `get_inspector_format_warning` 写入 warning。 |
+| 远程占位 | `infer_loose_file_type_from_path_string` | Local/HPC 挂载无法在容器内 stat 时，按路径推断 `fastq` / `proteomics_ms` / `tabular` / `radiomics` 等，供 Planner 与诊断路由。 |
+
+### 2.5.4 第二层：OmicsAssetManager（多模态资产总线）
+
+文件：`gibh_agent/core/asset_manager.py`。
+
+**输入**：规范化 `List[str]` 路径（可选 `lineage_group_ids` 隔离多批次上传）。
+
+**分类阶梯**（单血缘组内，`_classify_lineage_group`）：
+
+1. **10x 三件套** → `10x_bundle`（`matrix.mtx` + `barcodes.tsv` + `features.tsv`/`genes.tsv`）
+2. **空间 Visium** → `spatial_bundle`（矩阵 `.h5` 或 10x_mtx 目录 + 含 `spatial/` 或 tissue_positions 等标记的目录）
+3. **影像组学** → `radiomics_pair` / `radiomics_image` / `radiomics_mask`（按文件名 mask/roi/seg 启发式配对）
+4. **表格** → `metabolomics_csv`（`.csv`/`.tsv`/`.xlsx`/`.txt`）
+5. **AnnData** → `h5ad_single`
+6. **10x HDF5 矩阵** → `10x_h5_matrix`（如 `filtered_feature_bc_matrix.h5`）
+7. **蛋白 FASTA** → `protein_fasta`
+8. **后缀映射** → `protein_structure` / `document` / `plain_text` / `generic_unknown`（`_DYNAMIC_ASSET_SUFFIXES_BY_TYPE`）
+
+**路由辅助字段**（并入 `file_metadata` 供 LLM 读取）：
+
+- `routing_asset_types`：去重后的 `asset_type` 列表
+- `routing_asset_inventory`：`[{asset_type, file_name, primary_path}, …]`
+- `routing_asset_digest`：人类可读摘要
+
+**工作流原生 vs 非工作流资产**（全局 Chat/Task 分流）：
+
+- `ROUTING_WORKFLOW_NATIVE_ASSET_TYPES`：`10x_bundle`、`spatial_bundle`、`h5ad_single`、`metabolomics_csv`、`radiomics_*` 等 → 倾向 **task** 模式
+- `ROUTING_NON_WORKFLOW_ASSET_TYPES`：`protein_structure`、`document`、`plain_text` 等 + 模糊分析请求 → 倾向 **chat**（PyMOL 等技能工具）
+
+编排器在 `_merge_routing_asset_fields` 与 `_classify_global_intent` 中调用；**Task 作者扩展新原生资产类型时须同步更新上述两个 frozenset**。
+
+### 2.5.5 第三层：FileInspector 深度体检
+
+文件：`gibh_agent/core/file_inspector.py`（策略模式 + `SpatialVisiumHandler` 等）。
+
+| 阶段 | 行为 |
+| --- | --- |
+| 路径自愈 | `asset_locator.bridge_data_asset_to_physical_path` + `heal_web_path_if_missing`（basename 模糊匹配） |
+| Handler 链 | 按优先级 `can_handle` → `inspect`；Visium 目录返回 `file_type="visium"`、`domain="Spatial"` |
+| 医学影像旁路 | `.nii`/`.dcm` 禁止走表格 pandas 逻辑，直接 `build_medical_imaging_inspection_result` |
+| **组学回退** | 无专用 Handler 时，`.fastq`/`.mzml`/`.bam`/`.vcf` 等仍 **路径级 success**（`file_type=fastq|proteomics_ms|alignment|variants`），避免误报「无法识别」（§10.2 第 3 项） |
+| 多文件解析 | `parse_multiple_files` 将逗号拼接路径拆入 `images`/`masks`/`matrix`/`barcodes`/`features`/`tables`/`unknown` 桶 |
+
+`file_metadata` 中的 `file_type` / `domain` 是 Planner **CRITICAL ROUTING RULES** 的硬输入之一。
+
+### 2.5.6 第四层：RouterAgent 与编排器快车道
+
+| 机制 | 文件 | 规则摘要 |
+| --- | --- | --- |
+| `[Omics_Route: …]` | `router_agent.py` · `_quick_route` | 技能模板注入标签 → 直接 `genomics`/`proteomics`/`epigenomics` + 对应 Agent |
+| 扩展名快车道 | 同上 | `.h5ad`/`.mtx`/`.fastq` → 转录组；`.csv` → 代谢组；同批 RNA+CSV 冲突时 **以最后上传文件** 为准 |
+| 查询关键词 | 同上 | 空间 / 影像 / 代谢 / STED_EC / 时空动力学关键词优先于泛化转录组 |
+| 全局 Chat vs Task | `orchestrator.py` · `_classify_global_intent` | 结合 `OmicsAssetManager` 嗅探 + 模糊查询（「帮我分析」）决定是否进工作流 DAG |
+
+### 2.5.7 第五层：Planner 域名分类（`domain_name`）
+
+文件：`gibh_agent/core/planner.py` · `_classify_intent`。
+
+LLM 在 system_prompt 列出九域（含 `STED_EC` / `SPATIOTEMPORAL_DYNAMICS`）；user_prompt 注入 **File Metadata + routing_asset_digest**，并附 **优先级**：
+
+```text
+文件格式（visium→Spatial, medical_image→Radiomics, mzML→proteomics）
+  > routing_asset_types / routing_asset_inventory
+  > 用户查询关键词
+  > LLM 自由推断
+```
+
+**典型歧义消解**（Task 联调时常见）：
+
+| 上传形态 | 用户意图线索 | 应落域名 |
+| --- | --- | --- |
+| `.fastq` | 单细胞 / Cell Ranger | `RNA` |
+| `.fastq` | WGS/WES/GATK/BWA/变异 | `genomics` |
+| `.fastq` | ATAC/ChIP/MACS2/peak | `epigenomics` |
+| `.h5ad` / 10x | visium / 空间转录组 | `Spatial` |
+| `.h5ad` | 时空动力学硬核词 | `SPATIOTEMPORAL_DYNAMICS` |
+| `.h5ad` | moscot / 轨迹 | `STED_EC` |
+| `.csv` | 无 RNA 明示 | `Metabolomics` |
+| `.mzml` / `.raw` | — | `proteomics` |
+| `.pdb` / 文档 | 无组学流程明示 | 全局路由 → **chat**；勿强行 RNA/Spatial |
+
+`generate_template` 必须在 `workflow_data.domain_name` 写入与 `get_name()` 一致的域名（§1.4、§4.1），供 Executor 与报告资产分类使用。
+
+### 2.5.8 第六层：规划完成后资产 modality 回写
+
+文件：`gibh_agent/core/orchestrator.py`（Path A 规划成功分支）。
+
+- 根据最终 `domain_name` 映射 `workflow_type`（如 `Metabolomics`→`metabolomics`，`RNA`/`transcriptomics`→`rna`）
+- 对 DB 中 **同 owner、modality 为空、file_name 命中本轮上传** 的 `Asset` 行批量更新
+- 与 `user_data.py` · `_infer_modality_from_file_name`（按文件名轻量推断）及 `POST /api/assets/reclassify` 互补：后者处理历史未分类资产，前者保证 **本轮规划与会话资产栏即时一致**
+
+### 2.5.9 新模态扩展检查清单（分类侧）
+
+| # | 检查项 |
+| --- | --- |
+| 1 | `omics_io_registry.py` 登记新后缀；§10.2 体检闸口可放行 |
+| 2 | `OmicsAssetManager`：必要时新增 `asset_type` 与分类阶梯；更新 `ROUTING_WORKFLOW_NATIVE_ASSET_TYPES` |
+| 3 | `FileInspector`：新增 Handler 或确认组学回退 `file_type` 与 Planner 规则一致 |
+| 4 | `router_agent._quick_route`：扩展名 / 关键词快车道（可选） |
+| 5 | `planner._classify_intent`：**Available Domains/Steps** + CRITICAL ROUTING RULES |
+| 6 | `orchestrator`：`domain_name`→Agent 绑定 + `modality_map` 回写键 |
+| 7 | 前端 `FIXED_MODALITY_LABELS` 与 `STEP_NAME_MAP`（若新域需资产栏展示） |
+
+---
+
 ## 3. Planner：意图分类与工作流生成
 
 文件：`gibh_agent/core/planner.py` · `SOPPlanner`。
 
 ### 3.1 `_classify_intent` 与你的 DAG 同步（强制）
+
+> **上游输入**：本节 LLM 分类读取的 `file_metadata` 已含 FileInspector 体检结果与 **§2.5** 的 `routing_asset_*` 嗅探字段；扩展模态时须同时维护分类链路与本节提示词。
 
 - **system_prompt** 内的 **Available Steps (Metabolomics/RNA/Spatial/…)** 必须与 `get_steps_dag().keys()` **一致**。
 - 若只改 DAG 不改此提示词，会出现 `**target_steps` 指向不存在步骤** → `resolve_dependencies` 剔除 → 行为不符合预期。
@@ -204,6 +361,8 @@ PYTHONPATH=. python -c "from gibh_agent.core.workflows.registry import registry 
 - 用户消息或技能模板可含 `[Omics_Route: ...]` 与编排快车道协同；一般组学 Task **以 `workflow_config` + domain 为主路径**，不必强行快车道。
 
 ### 4.3 多轮对话文件继承（防「数据集为空」与第一步空载）
+
+> **分类延续**：多轮场景下，编排器会从 `conversation_state` / `history` 恢复上传路径并重新走 FileInspector + **§2.5** 资产嗅探；`domain_name` 仍由 Planner 在本轮 query 上重判，但文件元数据不会丢失。
 
 - **现象**：首轮上传数据，次轮仅文字要求「生成工作流」时，若请求体未再次附带 `uploaded_files`，旧逻辑会走「无文件 → Plan-First」或诊断统计为 0。
 - **机制**：`AgentOrchestrator` 在本轮 `files` 规范化结果为空时，会依次尝试：
@@ -292,6 +451,7 @@ PYTHONPATH=. python -c "from gibh_agent.core.workflows.registry import registry 
 | 6   | `generate_template` 返回结构合法，且含 `**domain_name`**        |
 | 7   | `STEP_NAME_MAP` / `_get_step_display_name` 已补充关键步骤（可选） |
 | 8   | 路径参数命名符合宪法词汇表                                          |
+| 9   | **§2.5.9** 分类侧：扩展名注册、资产类型、Planner 路由规则、前端 `FIXED_MODALITY_LABELS`（新域时） |
 
 
 ---
@@ -379,8 +539,8 @@ PYTHONPATH=. python -c "from gibh_agent.core.workflows.registry import registry 
   - 核对 `gibh_agent/core/skill_plaza_utils.py` 的 `is_multimodal_skill_hidden_from_plaza`：不得将新模态的 `sub_category` 留在「仅隐藏、不展示」逻辑中；若确需灰度，须在 PR 中说明并同步改 `services/nginx/html/index.html` 中技能广场过滤（如 `filterDeferredMultimodalSkillsForPlaza`），**禁止**只改一侧。  
   - 本地或容器内执行种子 / PATCH 后，**强刷前端**，在「多模态组学」下可见新卡片；或调用 `GET /api/skills` 确认 payload 出现且 `is_implemented` 等标签正确。
 2. **文件体检闸口**
-  - 在 `gibh_agent/utils/path_resolver.py` 的 `validate_inspector_file_format` 白名单中加入该模态真实会用的后缀（如蛋白组 `**.mzml` / `.raw`**），否则 orchestrator 在 `FileInspector` 首步即拒绝，工作流不会生成。  
-  - 对无专用 `FileHandler` 的原始格式（如 FASTQ），须确认 `FileInspector` 有 **handler 失败后的组学回退** 或等价的浅层成功路径，避免误报「无法识别文件类型」。
+  - 在 `gibh_agent/utils/path_resolver.py` 的 `validate_inspector_file_format` 白名单中加入该模态真实会用的后缀（如蛋白组 `**.mzml` / `.raw`**），否则 orchestrator 在 `FileInspector` 首步即拒绝，工作流不会生成；**后缀登记权威来源为 `omics_io_registry.py`（见 §2.5.3）**。  
+  - 对无专用 `FileHandler` 的原始格式（如 FASTQ），须确认 `FileInspector` 有 **handler 失败后的组学回退** 或等价的浅层成功路径，避免误报「无法识别文件类型」（§2.5.5）。
 3. **执行链**
   - 使用真实测试文件（仓库 `test_data/` 或约定目录）跑通：  
    `SOPPlanner.generate_plan`（传入 `domain_name` + 全量 `target_steps` + `file_metadata`，与快车道一致）→ `WorkflowExecutor.execute_workflow`。  
@@ -511,4 +671,4 @@ PYTHONPATH=. python3 tests/test_omics_three_modalities_e2e.py
 
 ---
 
-*文档版本：与 `gibh_agent/core/workflows/base.py`、`registry.py`、`executor.py`、`planner.py`（`_classify_intent`）、`orchestrator.py`（domain 路由）、`diagnosis_param_whitelist.py`、四模态 workflow、**genomics_workflow / omics_genomics_runner** 及 `index.html` 中 `STEP_NAME_MAP` 对齐；若实现变更，请同步更新 **§8 速查表**、**§11–§12 组学映射** 与 **§3.1 Planner 同步** 条款。*
+*文档版本：与 `gibh_agent/core/workflows/base.py`、`registry.py`、`executor.py`、`planner.py`（`_classify_intent`）、`orchestrator.py`（domain 路由）、`diagnosis_param_whitelist.py`、**`asset_manager.py`（OmicsAssetManager）**、**`omics_io_registry.py`**、**`file_inspector.py`**、四模态 workflow、**genomics_workflow / omics_genomics_runner** 及 `index.html` 中 `FIXED_MODALITY_LABELS` / `STEP_NAME_MAP` 对齐；若实现变更，请同步更新 **§2.5 分类链路**、**§8 速查表**、**§11–§12 组学映射** 与 **§3.1 Planner 同步** 条款。*

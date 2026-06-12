@@ -117,17 +117,20 @@
         if (typeof window.ensureHitlArtifactRow === 'function') {
             return window.ensureHitlArtifactRow(anchorEl);
         }
-        var row = anchorEl.querySelector(':scope > .hitl-artifact-row');
+        var row = anchorEl.querySelector(':scope > .chat-action-cards-wrapper');
+        if (!row) row = anchorEl.querySelector(':scope > .hitl-artifact-row');
         if (!row) {
             row = document.createElement('div');
-            row.className = 'hitl-artifact-row';
+            row.className = 'hitl-artifact-row chat-action-cards-wrapper chat-action-card-group';
             var left = document.createElement('div');
-            left.className = 'hitl-artifact-row__left';
+            left.className = 'hitl-artifact-row__left action-card-slot';
             var right = document.createElement('div');
-            right.className = 'hitl-artifact-row__right';
+            right.className = 'hitl-artifact-row__right action-card-slot';
             row.appendChild(left);
             row.appendChild(right);
             anchorEl.appendChild(row);
+        } else {
+            row.classList.add('chat-action-cards-wrapper', 'chat-action-card-group');
         }
         return {
             row: row,
@@ -221,8 +224,16 @@
         return null;
     }
 
+    function removeHitlEntryCards() {
+        document.querySelectorAll('.hitl-entry-card').forEach(function (card) {
+            card.remove();
+        });
+    }
+    window.removeHitlEntryCards = removeHitlEntryCards;
+
     function mountHitlCompletedCard(payload) {
         if (!payload) return;
+        removeHitlEntryCards();
         var anchor = resolveHitlMountAnchor();
         if (!anchor) {
             setTimeout(function () { mountHitlCompletedCard(payload); }, 400);
@@ -238,24 +249,24 @@
         var card = right.querySelector('.hitl-entry-card');
         if (!card) {
             card = document.createElement('div');
-            card.className = 'hitl-entry-card card shadow-sm mt-2';
+            card.className = 'hitl-entry-card action-card card shadow-sm mt-2';
             card.setAttribute('data-hitl-entry-card', '1');
             right.appendChild(card);
         }
         card.classList.remove('hitl-entry-card--disabled', 'hitl-entry-card--skipped', 'hitl-entry-card--busy');
         card.classList.add('hitl-entry-card--completed');
         card.innerHTML =
-            '<div class="card-body p-3">' +
-            '<div class="hitl-entry-card__head">' +
+            '<div class="card-body p-3 chat-action-card__body d-flex flex-column h-100">' +
+            '<div class="chat-action-card__meta hitl-entry-card__head">' +
             '<h6 class="hitl-entry-card__title mb-1 text-success">' + iconHtml('check-circle-fill') + ' 专家复核已完成</h6>' +
-            '<p class="hitl-entry-card__desc text-muted mb-3">《专家分析报告（最终版）》已生成。如需修正标注，可重新打开 Label Studio 修改已提交数据，再次生成报告。</p>' +
+            '<p class="hitl-entry-card__desc text-muted mb-0 chat-action-card__subtitle">《专家分析报告（最终版）》已生成。如需修正标注，可重新打开 Label Studio 修改已提交数据，再次生成报告。</p>' +
             (unavailable && errText
-                ? ('<div class="hitl-entry-card__error" role="alert">' +
+                ? ('<div class="hitl-entry-card__error mt-2" role="alert">' +
                     iconHtml('exclamation-octagon-fill') + ' <strong>Label Studio 暂不可用</strong><br>' +
                     '<span class="hitl-entry-card__error-detail">' + escapeHitlHtml(errText) + '</span></div>')
                 : '') +
             '</div>' +
-            '<div class="hitl-entry-card__actions d-flex flex-wrap gap-2 justify-content-end">' +
+            '<div class="chat-action-card__actions hitl-entry-card__actions mt-auto w-100 d-flex flex-wrap gap-2 justify-content-end">' +
             '<button type="button" class="btn btn-sm btn-outline-primary hitl-entry-reannotate-btn">' +
             iconHtml('arrow-repeat') + ' 重新标注</button>' +
             '</div></div>';
@@ -286,8 +297,44 @@
     }
     window.mountHitlCompletedCard = mountHitlCompletedCard;
 
+    function isCorpusProcessingHitl(payload) {
+        payload = payload || _lastHitlData || window.__lastStateSnapshotHitl || {};
+        if (String(payload.scenario_type || '') === 'generic_corpus_processing') return true;
+        if (String(payload.workflow_name || '') === '科学语料数据加工') return true;
+        if (String(payload.skill_id || '') === 'skill_corpus_data_processing') return true;
+        var skill = window._activeSkillPayload;
+        if (skill && (skill.tool_id === 'skill_corpus_data_processing' || skill.id === 'skill_corpus_data_processing')) {
+            return true;
+        }
+        return false;
+    }
+
+    function syncHitlModalCorpusSkipButton(payload) {
+        var actions = document.querySelector('.hitl-ls-modal__footer-actions');
+        if (!actions) return;
+        var existing = document.getElementById('hitl-ls-modal-skip-btn');
+        if (!isCorpusProcessingHitl(payload)) {
+            if (existing) existing.remove();
+            return;
+        }
+        if (!existing) {
+            existing = document.createElement('button');
+            existing.type = 'button';
+            existing.id = 'hitl-ls-modal-skip-btn';
+            existing.className = 'btn btn-outline-secondary btn-sm me-2 hitl-ls-modal__skip-btn';
+            existing.textContent = '取消修改';
+            existing.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                closeLabelStudioModal();
+                skipHitlReview();
+            });
+            actions.insertBefore(existing, actions.firstChild);
+        }
+    }
+
     function mountHitlEntryCard(payload) {
         if (!payload) return;
+        removeHitlEntryCards();
         var anchor = resolveHitlMountAnchor();
         if (!anchor) {
             setTimeout(function () { mountHitlEntryCard(payload); }, 400);
@@ -299,28 +346,36 @@
         var lsUrl = resolveLsOpenUrl(payload);
         var unavailable = isHitlLaunchUnavailable(payload);
         var errText = unavailable ? resolveHitlErrorMessage(payload) : '';
+        var isCorpusSkill = isCorpusProcessingHitl(payload);
+        var cardTitle = isCorpusSkill
+            ? iconHtml('tags') + ' 科学语料数据加工 / Label Studio'
+            : iconHtml('bullseye') + ' 专家复核 / Label Studio';
+        var cardSubtitle = isCorpusSkill
+            ? '点击进入 Label Studio 进行可选人工标注'
+            : '点击进入 Label Studio 完成专家复核';
+        var skipLabel = isCorpusSkill ? '取消修改' : '取消修改';
         var right = slots.right;
         var card = right.querySelector('.hitl-entry-card');
         if (!card) {
             card = document.createElement('div');
-            card.className = 'hitl-entry-card card shadow-sm mt-2';
+            card.className = 'hitl-entry-card action-card card shadow-sm mt-2';
             card.setAttribute('data-hitl-entry-card', '1');
             right.appendChild(card);
         }
         card.classList.remove('hitl-entry-card--disabled', 'hitl-entry-card--skipped', 'hitl-entry-card--busy');
         card.innerHTML =
-            '<div class="card-body p-3">' +
-            '<div class="hitl-entry-card__head">' +
-            '<h6 class="hitl-entry-card__title mb-1">' + iconHtml('bullseye') + ' 专家复核 / Label Studio</h6>' +
-            '<p class="hitl-entry-card__desc text-muted mb-3">检测到需人工确认的步骤。Label Studio 是开源数据标注平台，可可视化修正 AI 对细胞类型、区域边界的预测。</p>' +
+            '<div class="card-body p-3 chat-action-card__body d-flex flex-column h-100">' +
+            '<div class="chat-action-card__meta hitl-entry-card__meta">' +
+            '<h6 class="hitl-entry-card__title mb-1">' + cardTitle + '</h6>' +
+            '<small class="text-muted chat-action-card__subtitle">' + cardSubtitle + '</small>' +
             (unavailable && errText
-                ? ('<div class="hitl-entry-card__error" role="alert">' +
+                ? ('<div class="hitl-entry-card__error mt-2" role="alert">' +
                     iconHtml('exclamation-octagon-fill') + ' <strong>Label Studio 未就绪</strong><br>' +
                     '<span class="hitl-entry-card__error-detail">' + escapeHitlHtml(errText) + '</span></div>')
                 : '') +
             '</div>' +
-            '<div class="hitl-entry-card__actions d-flex flex-wrap gap-2 justify-content-end">' +
-            '<button type="button" class="btn btn-sm btn-outline-secondary hitl-entry-skip-btn">跳过</button>' +
+            '<div class="chat-action-card__actions hitl-entry-card__actions mt-auto w-100 d-flex justify-content-end flex-wrap gap-2">' +
+            '<button type="button" class="btn btn-sm btn-outline-secondary hitl-entry-skip-btn">' + skipLabel + '</button>' +
             '<button type="button" class="btn btn-sm btn-warning hitl-entry-open-btn">' +
             iconHtml('box-arrow-up-right') + ' 进入手动标注</button>' +
             '</div></div>';
@@ -358,82 +413,20 @@
                 skipHitlReview();
             });
         }
+        syncHitlModalCorpusSkipButton(payload);
         slots.row.style.display = 'flex';
     }
 
-    function removeHitlEntryCards() {
-        document.querySelectorAll('.hitl-entry-card').forEach(function (card) {
-            card.remove();
-        });
-    }
-
     function skipHitlReview() {
-        if (_resumeInFlight) return;
-        var sid = typeof currentSessionId !== 'undefined' ? currentSessionId : null;
-        if (!sid) {
-            if (typeof showToast === 'function') showToast('无法识别当前会话', 'warning');
-            return;
+        closeLabelStudioModal();
+        removeHitlEntryCards();
+        window.__hitlAnnotateDisabled = true;
+        if (typeof window.disableHitlActionCards === 'function') {
+            window.disableHitlActionCards('已取消人工标注');
         }
-        _resumeInFlight = true;
-        setHitlEntryCardBusy(true, '正在跳过专家复核…');
-        fetch('/api/sessions/' + encodeURIComponent(sid) + '/resume_from_hitl', {
-            method: 'POST',
-            headers: authHeadersMerge(),
-            body: JSON.stringify({ skip: true, trigger: 'skip' }),
-        })
-            .then(function (resp) {
-                if (!resp.ok) {
-                    return resp.text().then(function (t) {
-                        throw new Error(t || ('HTTP ' + resp.status));
-                    });
-                }
-                var reader = resp.body && resp.body.getReader ? resp.body.getReader() : null;
-                if (!reader) return resp.text();
-                var decoder = new TextDecoder();
-                var buf = '';
-                function pump() {
-                    return reader.read().then(function (chunk) {
-                        if (chunk.done) return;
-                        buf += decoder.decode(chunk.value, { stream: true });
-                        var idx;
-                        while ((idx = buf.indexOf('\n\n')) >= 0) {
-                            var slice = buf.slice(0, idx + 2);
-                            buf = buf.slice(idx + 2);
-                            parseSseChunk(slice, function (eventType, data) {
-                                if (typeof window.handleServerEvent === 'function') {
-                                    window.handleServerEvent(eventType, data);
-                                }
-                            });
-                        }
-                        return pump();
-                    });
-                }
-                return pump();
-            })
-            .then(function () {
-                window.__hitlAnnotateDisabled = true;
-                document.querySelectorAll('.hitl-entry-card').forEach(function (card) {
-                    card.classList.add('hitl-entry-card--skipped');
-                    card.innerHTML =
-                        '<div class="card-body p-3 text-muted small">' +
-                        iconHtml('skip-forward') + ' 已跳过专家复核，保留初稿报告。语料将在一键入库时生成。' +
-                        '</div>';
-                });
-                if (typeof window.disableHitlActionCards === 'function') {
-                    window.disableHitlActionCards('已跳过专家复核');
-                }
-                if (typeof showToast === 'function') {
-                    showToast('已跳过专家复核；标准语料将在一键入库时生成', 'success');
-                }
-                if (typeof fetchSessions === 'function') fetchSessions();
-            })
-            .catch(function (e) {
-                setHitlEntryCardBusy(false);
-                if (typeof showToast === 'function') showToast('跳过复核失败: ' + e.message, 'danger');
-            })
-            .finally(function () {
-                _resumeInFlight = false;
-            });
+        if (typeof showToast === 'function') {
+            showToast('您已取消人工标注，保留当前 AI 自动生成结果', 'info');
+        }
     }
 
     window.syncHitlEntryCard = function syncHitlEntryCard() {
@@ -490,6 +483,7 @@
                     doneBtn.disabled = false;
                     doneBtn.classList.remove('hitl-ls-modal__done-btn--pulse');
                 }
+                syncHitlModalCorpusSkipButton(_lastHitlData);
             });
     }
     window.openLabelStudioModal = openLabelStudioModal;
@@ -586,6 +580,7 @@
                 closeLabelStudioModal();
                 var completedPayload = _lastHitlData ? Object.assign({}, _lastHitlData) : null;
                 if (completedPayload) {
+                    _hitlCompletedMode = true;
                     mountHitlCompletedCard(completedPayload);
                 }
                 if (typeof showToast === 'function') {
@@ -643,7 +638,12 @@
         }
         var waiting = String(sessionStatus || '').toLowerCase() === 'waiting_for_hitl';
         var hitl = snap.hitl;
-        if (!waiting && !snap.hitl_pending && !hitl) return;
+        var optionalHitl = !!(snap.hitl_reannotation_enabled || ex.hitl_reannotation_enabled || (hitl && hitl.reannotation_enabled));
+        if (!waiting && !snap.hitl_pending && !hitl && !optionalHitl) return;
+        if (!hitl && optionalHitl) {
+            hitl = { status: 'hitl_required', reannotation_enabled: true };
+        }
+        if (!waiting && !snap.hitl_pending && !optionalHitl && !hitl) return;
         var payload = hitl && typeof hitl === 'object' ? Object.assign({ status: 'hitl_required' }, hitl) : { status: 'hitl_required' };
         window.renderHitlActionCard(payload);
     };
@@ -710,7 +710,9 @@
             }
             if (eventType === 'done') {
                 var st = String((data && data.status) || '').toLowerCase();
-                if ((st === 'waiting_for_hitl' || st === 'success') && window.__lastStateSnapshotHitl && !window.__hitlAnnotateDisabled) {
+                if (data && data.hitl_resumed) {
+                    /* 覆写完成：completed 卡由 diagnosis / resume 回调统一挂载，避免重复 entry 卡 */
+                } else if ((st === 'waiting_for_hitl' || st === 'success') && window.__lastStateSnapshotHitl && !window.__hitlAnnotateDisabled) {
                     window.renderHitlActionCard(window.__lastStateSnapshotHitl);
                 }
             }
@@ -723,6 +725,7 @@
             if (eventType === 'diagnosis' && data && data.report_data && data.report_data.hitl_final) {
                 var snapHitl = window.__lastStateSnapshotHitl || _lastHitlData;
                 if (snapHitl && typeof window.mountHitlCompletedCard === 'function') {
+                    _hitlCompletedMode = true;
                     window.mountHitlCompletedCard(snapHitl);
                 }
             }

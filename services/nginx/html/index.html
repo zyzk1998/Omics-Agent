@@ -828,8 +828,15 @@
 
         <div id="custom-context-menu" class="custom-context-menu" style="display:none;" aria-hidden="true">
             <button type="button" class="custom-context-menu__item" data-action="add-to-chat"><i class="bi bi-chat-left-text"></i><span>添加到对话框</span></button>
-            <button type="button" class="custom-context-menu__item" data-action="copy-path"><i class="bi bi-clipboard"></i><span>复制文件路径</span></button>
+            <button type="button" class="custom-context-menu__item" data-action="copy-file"><i class="bi bi-clipboard"></i><span>复制文件</span></button>
+            <button type="button" class="custom-context-menu__item" data-action="copy-path"><i class="bi bi-link-45deg"></i><span>复制文件路径</span></button>
+            <button type="button" class="custom-context-menu__item" data-action="open-in-explorer"><i class="bi bi-folder2-open"></i><span>打开文件目录</span></button>
+            <button type="button" class="custom-context-menu__item" data-action="delete-file"><i class="bi bi-trash"></i><span>删除文件</span></button>
             <button type="button" class="custom-context-menu__item" data-action="preview"><i class="bi bi-eye"></i><span>预览</span></button>
+        </div>
+        <div id="mount-path-context-menu" class="mount-path-context-menu custom-context-menu" style="display:none;" aria-hidden="true" role="menu">
+            <button type="button" class="custom-context-menu__item mount-path-context-menu__item" data-action="open-in-explorer" role="menuitem"><i class="bi bi-folder2-open"></i><span>打开文件目录</span></button>
+            <button type="button" class="custom-context-menu__item mount-path-context-menu__item" data-action="switch-workdir" role="menuitem"><i class="bi bi-arrow-repeat"></i><span>切换工作目录</span></button>
         </div>
         <div id="file-preview-modal" class="file-preview-modal" style="display:none;" aria-hidden="true">
             <div class="file-preview-modal__backdrop" id="file-preview-backdrop"></div>
@@ -5150,65 +5157,33 @@
                 } catch (_e) {}
                 return null;
             }
+            window.getCachedWorkspaceSelection = getCachedWorkspaceSelection;
             function getWorkspaceDisplayText(selection) {
                 if (!selection) return '未挂载';
                 var path = String(selection.workspace_path || '').trim();
                 if (path) return path;
                 return String(selection.workspace_name || '未挂载');
             }
-            function setRightSidebarVisible(visible) {
-                var rex = document.getElementById('right-file-explorer');
+            window.__rightPanelState = window.__rightPanelState || 'NONE';
+            function _syncRightSidebarToggleChrome(visible) {
                 var toggleIcon = document.getElementById('right-sidebar-toggle-icon');
                 var toggleBtn = document.getElementById('btn-right-sidebar-toggle');
-                if (!rex) return;
                 if (visible) {
-                    if (typeof collapseWorkspacePaneWhenOpeningRightFileExplorer === 'function') {
-                        collapseWorkspacePaneWhenOpeningRightFileExplorer();
-                    }
-                    rex.style.display = 'flex';
-                    rex.classList.remove('right-sidebar-collapsed');
-                    rex.setAttribute('aria-hidden', 'false');
                     if (toggleIcon) {
                         toggleIcon.classList.add('is-collapsing');
                         toggleIcon.classList.remove('is-expanding');
                     }
                     if (toggleBtn) toggleBtn.title = '收起本地项目栏';
                 } else {
-                    rex.classList.add('right-sidebar-collapsed');
-                    rex.setAttribute('aria-hidden', 'true');
                     if (toggleIcon) {
                         toggleIcon.classList.remove('is-collapsing');
                         toggleIcon.classList.add('is-expanding');
                     }
                     if (toggleBtn) toggleBtn.title = '展开本地项目栏';
-                    window.setTimeout(function() {
-                        if (rex.classList.contains('right-sidebar-collapsed')) {
-                            rex.style.display = 'none';
-                        }
-                    }, 240);
                 }
             }
-            function toggleRightSidebar() {
-                var rex = document.getElementById('right-file-explorer');
-                if (!rex) return;
-                var hiddenByDisplay = rex.style.display === 'none';
-                var collapsed = rex.classList.contains('right-sidebar-collapsed');
-                setRightSidebarVisible(hiddenByDisplay || collapsed);
-            }
-            function toggleRightSidebarPanel(mode) {
+            function _fetchRightSidebarDataForMode(mode) {
                 var m = (mode === 'hpc' || mode === 'files') ? mode : 'local';
-                var rex = document.getElementById('right-file-explorer');
-                if (!rex) return;
-                var hidden = rex.style.display === 'none' || rex.classList.contains('right-sidebar-collapsed');
-                if (hidden) {
-                    setRightSidebarVisible(true);
-                    setRightSidebarMode(m);
-                } else if (window.__rightSidebarMode === m) {
-                    setRightSidebarVisible(false);
-                    return;
-                } else {
-                    setRightSidebarMode(m);
-                }
                 if (m === 'hpc') {
                     if (typeof fetchAndRenderHpcTreeView === 'function') fetchAndRenderHpcTreeView();
                 } else if (m === 'files') {
@@ -5217,21 +5192,111 @@
                     fetchAndRenderWorkspaceTree();
                 }
             }
+            window.setRightPanelState = function(state, tabMode, targetPath) {
+                var wp = document.getElementById('workspace-pane');
+                var rfe = document.getElementById('right-file-explorer');
+                var rzR = document.getElementById('resizer-right');
+                if (!wp || !rfe) return;
+                var st = String(state || 'NONE').toUpperCase();
+                window.__rightPanelState = st;
+                if (st === 'NONE') {
+                    if (typeof clearWorkspacePaneInlineLayout === 'function') clearWorkspacePaneInlineLayout(wp);
+                    wp.classList.remove('workspace-active');
+                    wp.style.setProperty('display', 'none', 'important');
+                    window.__omicsActiveSnapshotId = null;
+                    rfe.classList.add('right-sidebar-collapsed');
+                    rfe.setAttribute('aria-hidden', 'true');
+                    _syncRightSidebarToggleChrome(false);
+                    window.setTimeout(function() {
+                        if (rfe.classList.contains('right-sidebar-collapsed')) rfe.style.display = 'none';
+                    }, 240);
+                } else if (st === 'WORKBENCH') {
+                    rfe.classList.add('right-sidebar-collapsed');
+                    rfe.style.display = 'none';
+                    rfe.setAttribute('aria-hidden', 'true');
+                    _syncRightSidebarToggleChrome(false);
+                    if (typeof clearWorkspacePaneInlineLayout === 'function') clearWorkspacePaneInlineLayout(wp);
+                    wp.style.setProperty('display', 'flex', 'important');
+                    if (rzR) rzR.style.setProperty('display', 'block', 'important');
+                    wp.classList.add('workspace-active');
+                } else if (st === 'FILE_MANAGER') {
+                    wp.classList.remove('workspace-active');
+                    wp.style.setProperty('display', 'none', 'important');
+                    window.__omicsActiveSnapshotId = null;
+                    if (typeof clearWorkspacePaneInlineLayout === 'function') clearWorkspacePaneInlineLayout(wp);
+                    rfe.style.display = 'flex';
+                    rfe.classList.remove('right-sidebar-collapsed');
+                    rfe.setAttribute('aria-hidden', 'false');
+                    _syncRightSidebarToggleChrome(true);
+                    var m = (tabMode === 'hpc' || tabMode === 'files') ? tabMode : (tabMode || window.__rightSidebarMode || 'local');
+                    if (typeof setRightSidebarMode === 'function') setRightSidebarMode(m);
+                    _fetchRightSidebarDataForMode(m);
+                    if (targetPath) {
+                        var p = normalizeMountPathString(targetPath);
+                        if (p) {
+                            window.setTimeout(function() {
+                                if (typeof _navigateFileManagerToPathCore === 'function') {
+                                    _navigateFileManagerToPathCore(p, { mode: inferPathNavigationMode(p), skipOpenPanel: true });
+                                }
+                            }, 100);
+                        }
+                    }
+                }
+                if (typeof syncAnalysisArtifactCardActiveStates === 'function') syncAnalysisArtifactCardActiveStates();
+                if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
+            };
+            function setRightSidebarVisible(visible) {
+                if (visible) {
+                    window.setRightPanelState('FILE_MANAGER', window.__rightSidebarMode || 'local');
+                } else {
+                    window.setRightPanelState('NONE');
+                }
+            }
+            window.setRightSidebarVisible = setRightSidebarVisible;
+            function toggleRightSidebar() {
+                var rex = document.getElementById('right-file-explorer');
+                if (!rex) return;
+                var hiddenByDisplay = rex.style.display === 'none';
+                var collapsed = rex.classList.contains('right-sidebar-collapsed');
+                if (hiddenByDisplay || collapsed) {
+                    window.setRightPanelState('FILE_MANAGER', window.__rightSidebarMode || 'local');
+                } else {
+                    window.setRightPanelState('NONE');
+                }
+            }
+            function toggleRightSidebarPanel(mode) {
+                var m = (mode === 'hpc' || mode === 'files') ? mode : 'local';
+                var rex = document.getElementById('right-file-explorer');
+                if (!rex) return;
+                var hidden = rex.style.display === 'none' || rex.classList.contains('right-sidebar-collapsed');
+                if (hidden) {
+                    window.setRightPanelState('FILE_MANAGER', m);
+                } else if (window.__rightSidebarMode === m) {
+                    window.setRightPanelState('NONE');
+                } else {
+                    window.setRightPanelState('FILE_MANAGER', m);
+                }
+            }
             function syncWorkspaceIndicators(selection) {
                 var sel = selection || getCachedWorkspaceSelection();
                 var fullText = getWorkspaceDisplayText(sel);
-                var shortText = fullText.length > 38 ? ('…' + fullText.slice(-37)) : fullText;
-                var leftText = document.getElementById('sidebar-workspace-indicator-text');
                 var leftBtn = document.getElementById('sidebar-workspace-indicator');
-                if (leftText) leftText.textContent = shortText;
                 if (leftBtn) {
-                    leftBtn.classList.toggle('is-empty', !sel || !sel.workspace_path);
-                    leftBtn.title = fullText;
+                    if (sel && sel.workspace_path && typeof renderMountPathCardHtml === 'function') {
+                        leftBtn.innerHTML = renderMountPathCardHtml(sel.workspace_path, { title: '\u5f53\u524d\u5de5\u4f5c\u76ee\u5f55' });
+                        leftBtn.classList.remove('is-empty');
+                        leftBtn.classList.add('has-mount-path-card');
+                    } else {
+                        leftBtn.innerHTML = '<span class="sidebar-workspace-indicator__icon" aria-hidden="true">\ud83d\udcc2</span><span class="sidebar-workspace-indicator__text" id="sidebar-workspace-indicator-text">\u672a\u6302\u8f7d</span>';
+                        leftBtn.classList.add('is-empty');
+                        leftBtn.classList.remove('has-mount-path-card');
+                    }
+                    leftBtn.title = (sel && sel.workspace_path) ? fullText : '\u8bf7\u5148\u6302\u8f7d\u672c\u5730\u5de5\u4f5c\u76ee\u5f55';
                 }
                 var rightPath = document.getElementById('right-sidebar-workspace-path');
                 if (rightPath && (window.__rightSidebarMode || 'local') === 'local') {
                     if (sel && sel.workspace_path && typeof renderMountPathCardHtml === 'function') {
-                        rightPath.innerHTML = renderMountPathCardHtml(sel.workspace_path, { label: fullText, short: true });
+                        rightPath.innerHTML = renderMountPathCardHtml(sel.workspace_path, { title: '\u5df2\u6302\u8f7d\u672c\u5730\u5de5\u4f5c\u533a' });
                         rightPath.title = fullText;
                         rightPath.classList.add('has-mount-path-card');
                     } else {
@@ -5240,6 +5305,7 @@
                         rightPath.classList.remove('has-mount-path-card');
                     }
                 }
+                if (typeof bindMountCardContextMenuHosts === 'function') bindMountCardContextMenuHosts();
             }
             function mountPathAttrEscape(s) {
                 return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -5277,11 +5343,15 @@
                 var p = normalizeMountPathString(path);
                 if (!p) return fileTreeEscapeHtml(opts.emptyLabel || '未挂载');
                 var mode = opts.mode || inferPathNavigationMode(p);
-                var label = opts.label != null ? String(opts.label) : p;
-                var shortLabel = (opts.short !== false && label.length > 56) ? ('\u2026' + label.slice(-52)) : label;
-                return '<span class="mount-path-card" role="button" tabindex="0" data-path="' + mountPathAttrEscape(p) + '" data-mode="' + mountPathAttrEscape(mode) + '" title="\u70b9\u51fb\u5728\u6587\u4ef6\u7ba1\u7406\u5668\u4e2d\u6253\u5f00\uff1a' + fileTreeEscapeHtml(p) + '">' +
-                    '<span class="mount-path-card__icon" aria-hidden="true">\ud83d\udcc2</span>' +
-                    '<span class="mount-path-card__text">' + fileTreeEscapeHtml(shortLabel) + '</span></span>';
+                var title = opts.title || opts.label || '\u5df2\u6302\u8f7d\u672c\u5730\u5de5\u4f5c\u533a';
+                var pathHtml = fileTreeEscapeHtml(p);
+                return '<div class="omics-mount-card mount-path-card" role="button" tabindex="0" data-path="' + mountPathAttrEscape(p) + '" data-mode="' + mountPathAttrEscape(mode) + '" title="\u70b9\u51fb\u5728\u6587\u4ef6\u7ba1\u7406\u5668\u4e2d\u6253\u5f00\uff1a' + pathHtml + '">' +
+                    '<div class="omics-mount-header">' +
+                    '<span class="omics-mount-status-dot" aria-hidden="true"></span>' +
+                    '<span class="omics-mount-title">' + fileTreeEscapeHtml(String(title)) + '</span>' +
+                    '</div>' +
+                    '<div class="omics-mount-path">' + pathHtml + '</div>' +
+                    '</div>';
             }
             function renderLinkedDirectoryHtml(path, label, mode) {
                 var p = normalizeMountPathString(path);
@@ -5312,11 +5382,14 @@
                 });
                 return out;
             }
-            function expandWorkspaceTreeToPath(targetPath) {
+            function expandWorkspaceTreeToPath(targetPath, options) {
+                if (typeof window.locateAndFocusFileInTree === 'function') {
+                    return window.locateAndFocusFileInTree(targetPath, options || {});
+                }
                 var p = normalizeMountPathString(targetPath);
-                if (!p) return;
+                if (!p) return { found: false };
                 var container = document.getElementById('file-tree-container');
-                if (!container) return;
+                if (!container) return { found: false };
                 var norm = normalizePathForCompare(p);
                 container.querySelectorAll('.file-tree-folder[data-path]').forEach(function(det) {
                     var dp = normalizePathForCompare(det.dataset.path || '');
@@ -5327,15 +5400,19 @@
                     if (normalizePathForCompare(el.dataset.path || '') === norm) highlightEl = el;
                 });
                 if (highlightEl) {
-                    highlightEl.classList.add('file-tree-file--highlight');
-                    try { highlightEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_sv) {}
+                    highlightEl.classList.add('selected-node', 'file-tree-file--highlight');
+                    try { highlightEl.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_sv) {}
                     window.setTimeout(function() { highlightEl.classList.remove('file-tree-file--highlight'); }, 3200);
                 }
+                return { found: !!highlightEl };
             }
-            function highlightFilesPanelByPathPrefix(prefix) {
+            function highlightFilesPanelByPathPrefix(prefix, options) {
+                if (typeof window.locateAndFocusFileInTree === 'function') {
+                    return window.locateAndFocusFileInTree(prefix, Object.assign({ relaxedFallback: true }, options || {}));
+                }
                 var norm = normalizePathForCompare(prefix);
                 var container = document.getElementById('file-tree-container');
-                if (!container || !norm) return;
+                if (!container || !norm) return { found: false };
                 var best = null;
                 var bestScore = -1;
                 container.querySelectorAll('.files-panel-file-item[data-path]').forEach(function(row) {
@@ -5345,17 +5422,17 @@
                     if (score > bestScore) { bestScore = score; best = row; }
                 });
                 if (best) {
-                    best.classList.add('file-tree-file--highlight');
-                    try { best.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_sv2) {}
+                    best.classList.add('selected-node', 'file-tree-file--highlight');
+                    try { best.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_sv2) {}
                     window.setTimeout(function() { best.classList.remove('file-tree-file--highlight'); }, 3200);
                 }
+                return { found: !!best };
             }
-            async function navigateFileManagerToPath(targetPath, options) {
+            async function _navigateFileManagerToPathCore(targetPath, options) {
                 options = options || {};
                 var p = normalizeMountPathString(targetPath);
                 if (!p) return;
                 var mode = options.mode || inferPathNavigationMode(p);
-                if (typeof setRightSidebarVisible === 'function') setRightSidebarVisible(true);
                 if (mode === 'hpc') {
                     if (typeof setRightSidebarMode === 'function') setRightSidebarMode('hpc');
                     if (typeof enterHpcDirectory === 'function') await enterHpcDirectory(p);
@@ -5364,9 +5441,21 @@
                 if (mode === 'cloud') {
                     if (typeof setRightSidebarMode === 'function') setRightSidebarMode('files');
                     if (typeof fetchAndRenderFilesPanel === 'function') await fetchAndRenderFilesPanel();
-                    highlightFilesPanelByPathPrefix(p);
+                    var cloudHit = highlightFilesPanelByPathPrefix(p, { relaxedFallback: true });
+                    if (!cloudHit || !cloudHit.found) {
+                        if (typeof fetchAndRenderWorkspaceTree === 'function') {
+                            var selCloud = typeof getCachedWorkspaceSelection === 'function' ? getCachedWorkspaceSelection() : null;
+                            if (selCloud && selCloud.workspace_path) {
+                                await fetchAndRenderWorkspaceTree();
+                                expandWorkspaceTreeToPath(p, { relaxedFallback: true });
+                            }
+                        }
+                    }
                     if (typeof showToast === 'function') {
-                        showToast('\u5df2\u6253\u5f00\u6587\u4ef6\u7ba1\u7406\u5668\uff1b\u4e91\u7aef\u7ed3\u679c\u76ee\u5f55\uff1a' + p, 'info');
+                        var hitMsg = (cloudHit && cloudHit.found && cloudHit.fuzzy)
+                            ? '\u5df2\u5b9a\u4f4d\u76f8\u4f3c\u6587\u4ef6\uff1a'
+                            : '\u5df2\u6253\u5f00\u6587\u4ef6\u7ba1\u7406\u5668\uff1b\u4e91\u7aef\u7ed3\u679c\u76ee\u5f55\uff1a';
+                        showToast(hitMsg + p, 'info');
                     }
                     return;
                 }
@@ -5376,30 +5465,191 @@
                     if (typeof showToast === 'function') showToast('\u8bf7\u5148\u6302\u8f7d\u672c\u5730\u5de5\u4f5c\u76ee\u5f55', 'warning');
                     return;
                 }
-                if (typeof fetchAndRenderWorkspaceTree === 'function') await fetchAndRenderWorkspaceTree();
-                expandWorkspaceTreeToPath(p);
+                var skipRefresh = !!options.skipTreeRefresh;
+                var hasCachedTree = !!(window.__workspaceTreeData && window.__workspaceTreeData.length);
+                if (!skipRefresh && !hasCachedTree && typeof fetchAndRenderWorkspaceTree === 'function') {
+                    await fetchAndRenderWorkspaceTree();
+                }
+                expandWorkspaceTreeToPath(p, { relaxedFallback: true });
+            }
+            async function navigateFileManagerToPath(targetPath, options) {
+                options = options || {};
+                var p = normalizeMountPathString(targetPath);
+                if (!p) return;
+                if (!options.skipOpenPanel) {
+                    var mode = options.mode || inferPathNavigationMode(p);
+                    if (typeof window.setRightPanelState === 'function') {
+                        window.setRightPanelState('FILE_MANAGER', mode === 'cloud' ? 'files' : (mode === 'hpc' ? 'hpc' : 'local'));
+                    }
+                }
+                await _navigateFileManagerToPathCore(p, options);
+            }
+            function hideMountPathContextMenu() {
+                var menu = document.getElementById('mount-path-context-menu');
+                if (!menu) return;
+                menu.style.display = 'none';
+                menu.setAttribute('aria-hidden', 'true');
+                menu.dataset.path = '';
+                menu.dataset.mode = '';
+            }
+            function showMountPathContextMenu(clientX, clientY, path, mode) {
+                hideMountPathContextMenu();
+                var menu = document.getElementById('mount-path-context-menu');
+                if (!menu) return;
+                menu.dataset.path = String(path || '').trim();
+                menu.dataset.mode = String(mode || '').trim();
+                menu.style.display = 'block';
+                menu.setAttribute('aria-hidden', 'false');
+                menu.style.left = '0px';
+                menu.style.top = '0px';
+                var menuWidth = menu.offsetWidth || 200;
+                var menuHeight = menu.offsetHeight || 88;
+                var left = Math.min(clientX, window.innerWidth - menuWidth - 8);
+                var top = Math.min(clientY, window.innerHeight - menuHeight - 8);
+                menu.style.left = Math.max(8, left) + 'px';
+                menu.style.top = Math.max(8, top) + 'px';
+            }
+            function resolveActiveWorkspaceMountPath(hintPath) {
+                var sel = typeof getCachedWorkspaceSelection === 'function' ? getCachedWorkspaceSelection() : null;
+                var fromSelection = sel && sel.workspace_path ? normalizeMountPathString(sel.workspace_path) : '';
+                if (fromSelection) return fromSelection;
+                return normalizeMountPathString(hintPath);
+            }
+            function openPathInLocalExplorer(absPath) {
+                var p = String(absPath || '').trim();
+                if (!p) return Promise.reject(new Error('\u8def\u5f84\u65e0\u6548'));
+                return sidecarFsRequest('/api/fs/show_in_explorer', p).then(function() {
+                    if (typeof showToast === 'function') showToast('\u5df2\u5728\u6587\u4ef6\u7ba1\u7406\u5668\u4e2d\u5b9a\u4f4d', 'success');
+                }).catch(function(err) {
+                    if (typeof showToast === 'function') showToast('\u5b9a\u4f4d\u5931\u8d25: ' + (err.message || err), 'danger');
+                    throw err;
+                });
+            }
+            function openMountPathInExplorer(mountPath) {
+                var target = resolveActiveWorkspaceMountPath(mountPath);
+                if (!target) return Promise.reject(new Error('\u8bf7\u5148\u6302\u8f7d\u672c\u5730\u5de5\u4f5c\u76ee\u5f55'));
+                return openPathInLocalExplorer(target);
+            }
+            function handleMountPathCardClick(pathCard) {
+                if (!pathCard || !pathCard.dataset || !pathCard.dataset.path) return;
+                navigateFileManagerToPath(pathCard.dataset.path, {
+                    mode: pathCard.dataset.mode || undefined,
+                    skipTreeRefresh: true,
+                });
+            }
+            function bindMountCardContextMenuHosts() {
+                ['sidebar-workspace-indicator', 'right-sidebar-workspace-path'].forEach(function(hostId) {
+                    var host = document.getElementById(hostId);
+                    if (!host || host.dataset.mountCtxBound === '1') return;
+                    host.dataset.mountCtxBound = '1';
+                    host.addEventListener('contextmenu', function(e) {
+                        var card = e.target && e.target.closest ? e.target.closest('.omics-mount-card, .mount-path-card') : null;
+                        if (!card || !card.dataset || !card.dataset.path) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        showMountPathContextMenu(e.clientX, e.clientY, card.dataset.path, card.dataset.mode || '');
+                    }, true);
+                });
             }
             function bindGlobalMountPathNavigation() {
                 if (window.__mountPathNavBound) return;
                 window.__mountPathNavBound = true;
                 document.body.addEventListener('click', function(e) {
-                    var card = e.target && e.target.closest ? e.target.closest('.mount-path-card, .linked-directory') : null;
+                    var mpMenu = document.getElementById('mount-path-context-menu');
+                    if (mpMenu && mpMenu.style.display !== 'none') {
+                        if (!e.target || !e.target.closest || !e.target.closest('#mount-path-context-menu')) {
+                            hideMountPathContextMenu();
+                        }
+                    }
+                    var emptyInd = e.target && e.target.closest ? e.target.closest('#sidebar-workspace-indicator.is-empty') : null;
+                    if (emptyInd) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (typeof showToast === 'function') showToast('\u8bf7\u5148\u6302\u8f7d\u672c\u5730\u5de5\u4f5c\u76ee\u5f55', 'warning');
+                        return;
+                    }
+                    var card = e.target && e.target.closest ? e.target.closest('.omics-mount-card, .mount-path-card, .linked-directory') : null;
+                    if (!card || !card.dataset || !card.dataset.path) return;
+                    if (typeof e.button === 'number' && e.button !== 0) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleMountPathCardClick(card);
+                });
+                document.body.addEventListener('contextmenu', function(e) {
+                    var card = e.target && e.target.closest ? e.target.closest('.omics-mount-card, .mount-path-card') : null;
                     if (!card || !card.dataset || !card.dataset.path) return;
                     e.preventDefault();
                     e.stopPropagation();
-                    navigateFileManagerToPath(card.dataset.path, { mode: card.dataset.mode || undefined });
+                    showMountPathContextMenu(e.clientX, e.clientY, card.dataset.path, card.dataset.mode || '');
                 });
                 document.body.addEventListener('keydown', function(e) {
                     if (e.key !== 'Enter' && e.key !== ' ') return;
-                    var card = e.target && e.target.closest ? e.target.closest('.mount-path-card') : null;
+                    var card = e.target && e.target.closest ? e.target.closest('.omics-mount-card, .mount-path-card') : null;
                     if (!card || !card.dataset || !card.dataset.path) return;
                     e.preventDefault();
-                    navigateFileManagerToPath(card.dataset.path, { mode: card.dataset.mode || undefined });
+                    handleMountPathCardClick(card);
                 });
+                var mpMenu = document.getElementById('mount-path-context-menu');
+                if (mpMenu && !mpMenu.dataset.actionBound) {
+                    mpMenu.dataset.actionBound = '1';
+                    mpMenu.addEventListener('click', function(e) {
+                        var item = e.target && e.target.closest ? e.target.closest('.mount-path-context-menu__item') : null;
+                        if (!item || !item.dataset) return;
+                        var action = item.dataset.action || '';
+                        var path = mpMenu.dataset.path || '';
+                        var mode = mpMenu.dataset.mode || undefined;
+                        hideMountPathContextMenu();
+                        if (action === 'open-in-explorer' && path) {
+                            openMountPathInExplorer(path);
+                        } else if (action === 'switch-workdir') {
+                            if (typeof closeWorkspaceMountDropdown === 'function') closeWorkspaceMountDropdown();
+                            if (typeof openLocalProjectWorkspace === 'function') {
+                                openLocalProjectWorkspace().catch(function(err) {
+                                    console.warn('[workspace-init]', err);
+                                    if (err && err._omcsSidecarAlerted) return;
+                                    if (typeof showToast === 'function') {
+                                        showToast('\u521d\u59cb\u5316\u5de5\u4f5c\u533a\u5931\u8d25\uff1a' + (err && err.message ? err.message : err), 'danger');
+                                    }
+                                });
+                            }
+                        }
+                    });
+                }
+                window.addEventListener('resize', hideMountPathContextMenu);
+                window.addEventListener('scroll', hideMountPathContextMenu, true);
             }
+            bindGlobalMountPathNavigation();
+            bindMountCardContextMenuHosts();
             window.renderMountPathCardHtml = renderMountPathCardHtml;
             window.renderLinkedDirectoryHtml = renderLinkedDirectoryHtml;
             window.navigateFileManagerToPath = navigateFileManagerToPath;
+            window.highlightSessionFilePath = function (targetPath, status) {
+                var p = normalizeMountPathString(targetPath);
+                if (!p) return;
+                if (typeof window.applyIdeStyleHighlight === 'function') {
+                    window.applyIdeStyleHighlight(p, status || 'added');
+                }
+                if (typeof window.locateAndFocusFileInTree === 'function') {
+                    window.locateAndFocusFileInTree(p, { relaxedFallback: true, flashHighlight: true });
+                }
+            };
+            window.addEventListener('omics:session-files-changed', function (ev) {
+                var detail = (ev && ev.detail) || {};
+                if (detail.client_deploy_package && typeof window.handleFilesNotificationWithClientDeploy === 'function') {
+                    window.handleFilesNotificationWithClientDeploy(detail);
+                    return;
+                }
+                if (typeof window.handleSessionFilesChangedHighlight === 'function') {
+                    window.handleSessionFilesChangedHighlight(detail);
+                } else {
+                    var paths = detail.changed_paths || [];
+                    paths.forEach(function (p) {
+                        window.highlightSessionFilePath(p, 'added');
+                    });
+                }
+            });
+            window.handleMountPathCardClick = handleMountPathCardClick;
+            window.hideMountPathContextMenu = hideMountPathContextMenu;
             window.inferFilePreviewSourceFromPath = inferFilePreviewSourceFromPath;
             window.extractWorkflowOutputDir = extractWorkflowOutputDir;
             window.bindGlobalMountPathNavigation = bindGlobalMountPathNavigation;
@@ -5454,12 +5704,64 @@
                 });
                 return out;
             }
-            function renderWorkspaceTreeByKeyword(keyword) {
+            function collectExpandedFileTreePaths(container) {
+                var paths = new Set();
+                if (!container) return paths;
+                container.querySelectorAll('.file-tree-folder[data-path]').forEach(function(det) {
+                    if (det.open && det.dataset && det.dataset.path) paths.add(det.dataset.path);
+                });
+                return paths;
+            }
+            function mergeExpandedFileTreePathSets() {
+                var merged = new Set();
+                var args = Array.prototype.slice.call(arguments);
+                args.forEach(function(item) {
+                    if (!item) return;
+                    if (item instanceof Set) {
+                        item.forEach(function(p) { if (p) merged.add(p); });
+                    } else if (Array.isArray(item)) {
+                        item.forEach(function(p) { if (p) merged.add(p); });
+                    }
+                });
+                return merged;
+            }
+            function snapshotWorkspaceTreeExpandedPaths(container) {
+                var live = collectExpandedFileTreePaths(container);
+                var cached = window.__workspaceTreeExpandedPaths;
+                var merged = mergeExpandedFileTreePathSets(cached, live);
+                window.__workspaceTreeExpandedPaths = merged;
+                return merged;
+            }
+            function restoreExpandedFileTreePaths(container, expandedPaths) {
+                if (!container) return;
+                var paths = mergeExpandedFileTreePathSets(expandedPaths, window.__workspaceTreeExpandedPaths);
+                if (!paths.size) return;
+                paths.forEach(function(path) {
+                    var normTarget = normalizePathForCompare(path);
+                    container.querySelectorAll('.file-tree-folder[data-path]').forEach(function(det) {
+                        var dp = normalizePathForCompare(det.dataset.path || '');
+                        if (dp && (normTarget === dp || normTarget.indexOf(dp + '/') === 0)) det.open = true;
+                    });
+                });
+                window.__workspaceTreeExpandedPaths = collectExpandedFileTreePaths(container);
+            }
+            function bindFileTreeExpandPersistence(container) {
+                container = container || document.getElementById('file-tree-container');
+                if (!container || container.dataset.expandPersistBound === '1') return;
+                container.dataset.expandPersistBound = '1';
+                container.addEventListener('toggle', function(e) {
+                    var det = e.target;
+                    if (!det || det.tagName !== 'DETAILS' || !det.classList.contains('file-tree-folder')) return;
+                    window.__workspaceTreeExpandedPaths = collectExpandedFileTreePaths(container);
+                }, true);
+            }
+            function renderWorkspaceTreeByKeyword(keyword, restoreExpanded) {
                 var container = document.getElementById('file-tree-container');
                 if (!container) return;
                 if (window.__rightSidebarMode === 'hpc') return;
                 var q = String(keyword || '').trim();
                 window.__workspaceTreeKeyword = q;
+                var expandedBefore = restoreExpanded || collectExpandedFileTreePaths(container);
                 container.innerHTML = '';
                 var source = window.__workspaceTreeData || [];
                 var tree = q ? filterWorkspaceTreeNodes(source, q) : source;
@@ -5468,6 +5770,14 @@
                     return;
                 }
                 renderWorkspaceTreeNodes(tree, container);
+                restoreExpandedFileTreePaths(container, expandedBefore);
+                bindFileTreeExpandPersistence(container);
+                if (typeof window.clearAllFileTreeStatusClasses === 'function') {
+                    window.clearAllFileTreeStatusClasses(container);
+                }
+                if (typeof window.reapplyFileTreeStatusHighlights === 'function') {
+                    window.reapplyFileTreeStatusHighlights(container);
+                }
             }
             function hasDataTransferType(dt, type) {
                 if (!dt || !dt.types || !type) return false;
@@ -5763,12 +6073,9 @@
             function scrollExpertReportIntoView() {
                 var slot = document.getElementById('omics-expert-report-slot');
                 if (!slot) return;
-                if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
+                if (typeof window.setRightPanelState === 'function') window.setRightPanelState('WORKBENCH');
+                else if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
                 var wp = document.getElementById('workspace-pane');
-                if (wp) {
-                    wp.style.setProperty('display', 'flex', 'important');
-                    wp.classList.add('workspace-active');
-                }
                 try {
                     slot.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 } catch (_e1) {
@@ -5784,13 +6091,9 @@
             window.scrollExpertReportIntoView = scrollExpertReportIntoView;
 
             function showFinalExpertReportWorkbench(data) {
-                if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
+                if (typeof window.setRightPanelState === 'function') window.setRightPanelState('WORKBENCH');
+                else if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
                 if (typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
-                var wp = document.getElementById('workspace-pane');
-                if (wp) {
-                    wp.style.setProperty('display', 'flex', 'important');
-                    wp.classList.add('workspace-active');
-                }
                 var report = data && data.report_data && data.report_data.report;
                 if (report == null) return;
                 var renderFn = window.globalRenderDiagnosisReportSection;
@@ -6136,17 +6439,20 @@
 
             function ensureHitlArtifactRow(anchorEl) {
                 if (!anchorEl) return null;
-                var row = anchorEl.querySelector(':scope > .hitl-artifact-row');
+                var row = anchorEl.querySelector(':scope > .chat-action-cards-wrapper');
+                if (!row) row = anchorEl.querySelector(':scope > .hitl-artifact-row');
                 if (!row) {
                     row = document.createElement('div');
-                    row.className = 'hitl-artifact-row';
+                    row.className = 'hitl-artifact-row chat-action-cards-wrapper chat-action-card-group';
                     var left = document.createElement('div');
-                    left.className = 'hitl-artifact-row__left';
+                    left.className = 'hitl-artifact-row__left action-card-slot';
                     var right = document.createElement('div');
-                    right.className = 'hitl-artifact-row__right';
+                    right.className = 'hitl-artifact-row__right action-card-slot';
                     row.appendChild(left);
                     row.appendChild(right);
                     anchorEl.appendChild(row);
+                } else {
+                    row.classList.add('chat-action-cards-wrapper', 'chat-action-card-group');
                 }
                 return {
                     row: row,
@@ -6187,13 +6493,14 @@
                     return existingAny;
                 }
                 var card = document.createElement('div');
-                card.className = 'analysis-artifact-card card shadow-sm mt-2 border-primary';
+                card.className = 'analysis-artifact-card workspace-toggle-card action-card card shadow-sm mt-2 border-primary';
                 card.setAttribute('data-snapshot-id', snapshotId);
                 card.innerHTML =
-                    '<div class="card-body p-3 d-flex justify-content-between align-items-center gap-2">' +
-                    '<div class="analysis-artifact-card__meta"><h6 class="mb-1 text-primary"><i class="bi bi-bar-chart-fill me-2"></i>' + esc(title) + '</h6>' +
-                    '<small class="text-muted">点击按钮查看或折叠右侧完整报告</small></div>' +
-                    '<div class="analysis-artifact-card__actions d-flex gap-2 flex-shrink-0 align-items-center">' +
+                    '<div class="card-body p-3 chat-action-card__body d-flex flex-column h-100">' +
+                    '<div class="chat-action-card__meta analysis-artifact-card__meta">' +
+                    '<h6 class="mb-1 text-primary"><i class="bi bi-bar-chart-fill me-2"></i>' + esc(title) + '</h6>' +
+                    '<small class="text-muted chat-action-card__subtitle">点击查看或折叠右侧完整报告</small></div>' +
+                    '<div class="chat-action-card__actions analysis-artifact-card__actions mt-auto w-100 d-flex justify-content-end">' +
                     '<button type="button" class="btn btn-sm btn-outline-primary analysis-artifact-toggle-btn" data-snapshot-id="' + snapshotId + '">' +
                     '<i class="bi bi-layout-sidebar-inset-reverse"></i> 查看工作台</button>' +
                     '</div></div>';
@@ -6340,12 +6647,8 @@
                 opts = opts || {};
                 var diagContent = opts.diagnosisContent != null ? opts.diagnosisContent : extractPlanningDiagnosisContent(data);
                 if (diagContent == null) return null;
-                if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
-                var wpDiag = document.getElementById('workspace-pane');
-                if (wpDiag) {
-                    wpDiag.style.setProperty('display', 'flex', 'important');
-                    wpDiag.classList.add('workspace-active');
-                }
+                if (typeof window.setRightPanelState === 'function') window.setRightPanelState('WORKBENCH');
+                else if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
                 var renderFn = window.globalRenderDiagnosisReportSection;
                 if (typeof renderFn === 'function') {
                     renderFn('diagnosis', diagContent, data || {});
@@ -6471,7 +6774,12 @@
                     hitl_resumed: !!snap.hitl_resumed,
                     hitl_skipped: !!(ex.hitl_skipped || snap.hitl_skipped),
                     input_draft_text: (ex.input_draft_text != null ? String(ex.input_draft_text) : (snap.input_draft_text != null ? String(snap.input_draft_text) : '')),
-                    input_draft_attachments: Array.isArray(ex.input_draft_attachments) ? ex.input_draft_attachments : (Array.isArray(snap.input_draft_attachments) ? snap.input_draft_attachments : [])
+                    input_draft_attachments: Array.isArray(ex.input_draft_attachments) ? ex.input_draft_attachments : (Array.isArray(snap.input_draft_attachments) ? snap.input_draft_attachments : []),
+                    corpus_sft_json: ex.corpus_sft_json || snap.corpus_sft_json || '',
+                    corpus_sft_records: Array.isArray(ex.corpus_sft_records) ? ex.corpus_sft_records : (Array.isArray(snap.corpus_sft_records) ? snap.corpus_sft_records : []),
+                    corpus_standard: ex.corpus_standard || snap.corpus_standard || '',
+                    corpus_modality: ex.corpus_modality || snap.corpus_modality || '',
+                    corpus_count: ex.corpus_count != null ? ex.corpus_count : snap.corpus_count
                 };
             }
 
@@ -6924,8 +7232,16 @@
                     }
                 }
                 restoreExpertReportsFromTimeMachine(slots, payload);
+                if (typeof window.restoreCorpusAssetFromTimeMachine === 'function') {
+                    window.restoreCorpusAssetFromTimeMachine(slots, payload);
+                }
                 if (typeof window.syncWorkspacePanelWidthFromContent === 'function' && slots.shell) {
                     window.syncWorkspacePanelWidthFromContent(slots.shell);
+                }
+                if (typeof window.fetchAndRenderSessionFiles === 'function') {
+                    window.fetchAndRenderSessionFiles(null, true);
+                } else if (typeof window.refreshWorkspaceSessionFiles === 'function') {
+                    window.refreshWorkspaceSessionFiles(true);
                 }
                 if (typeof hydrateComposerDraftFromPayload === 'function') {
                     var _draftText = payload.input_draft_text != null ? String(payload.input_draft_text) : '';
@@ -7249,11 +7565,11 @@
                     if (!item) return;
                     var row = document.createElement('div');
                     var isDir = item.type === 'directory';
-                    row.className = isDir ? 'file-tree-file hpc-tree-dir-item' : 'file-tree-file hpc-tree-file-item';
+                    row.className = (isDir ? 'file-tree-file hpc-tree-dir-item' : 'file-tree-file hpc-tree-file-item') + ' file-tree-node';
                     row.dataset.path = item.path || '';
                     row.dataset.type = item.type || '';
                     row.dataset.source = 'hpc';
-                    row.innerHTML = '<span class="file-tree-icon" aria-hidden="true">' + (isDir ? '📁' : '📄') + '</span><span class="file-tree-name">' + fileTreeEscapeHtml(item.name || '') + '</span>';
+                    row.innerHTML = '<div class="file-tree-node-content"><span class="file-tree-icon" aria-hidden="true">' + (isDir ? '📁' : '📄') + '</span><span class="file-tree-name file-tree-label">' + fileTreeEscapeHtml(item.name || '') + '</span></div>';
                     if (!isDir) {
                         bindSidebarFileDragSource(row, {
                             path: item.path || '',
@@ -7263,6 +7579,9 @@
                     }
                     container.appendChild(row);
                 });
+                if (typeof window.reapplyFileTreeStatusHighlights === 'function') {
+                    window.reapplyFileTreeStatusHighlights(container);
+                }
             }
             function renderRightSidebarCurrentMode() {
                 if (window.__rightSidebarMode === 'hpc') {
@@ -7285,11 +7604,11 @@
                 list.forEach(function(item) {
                     if (!item) return;
                     var row = document.createElement('div');
-                    row.className = 'file-tree-file files-panel-file-item';
+                    row.className = 'file-tree-file files-panel-file-item file-tree-node';
                     row.dataset.path = item.path || '';
                     row.dataset.type = 'file';
                     row.dataset.source = 'files';
-                    row.innerHTML = '<span class="file-tree-icon" aria-hidden="true">📄</span><span class="file-tree-name">' + fileTreeEscapeHtml(item.name || item.path || '') + '</span>';
+                    row.innerHTML = '<div class="file-tree-node-content"><span class="file-tree-icon" aria-hidden="true">📄</span><span class="file-tree-name file-tree-label">' + fileTreeEscapeHtml(item.name || item.path || '') + '</span></div>';
                     bindSidebarFileDragSource(row, {
                         path: item.path || '',
                         name: item.name || item.path || '',
@@ -7297,6 +7616,16 @@
                     });
                     container.appendChild(row);
                 });
+                if (typeof window.reapplyFileTreeStatusHighlights === 'function') {
+                    window.reapplyFileTreeStatusHighlights(container);
+                }
+                if (window.__pendingFileTreeNavigatePath) {
+                    var pending = window.__pendingFileTreeNavigatePath;
+                    window.__pendingFileTreeNavigatePath = null;
+                    if (typeof window.locateAndFocusFileInTree === 'function') {
+                        window.locateAndFocusFileInTree(pending, { relaxedFallback: true });
+                    }
+                }
             }
             function hideCustomContextMenu() {
                 var menu = document.getElementById('custom-context-menu');
@@ -7304,12 +7633,50 @@
                 menu.style.display = 'none';
                 menu.setAttribute('aria-hidden', 'true');
             }
+            function sidecarFsRequest(endpoint, filePath) {
+                var url = (typeof localSidecarUrl === 'function') ? localSidecarUrl(endpoint) : ('http://127.0.0.1:8019' + endpoint);
+                return fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: filePath })
+                }).then(function(r) {
+                    return r.json().then(function(body) {
+                        if (!r.ok) {
+                            var msg = (body && (body.detail || body.message)) || ('HTTP ' + r.status);
+                            throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+                        }
+                        return body;
+                    });
+                });
+            }
+            function removeFileTreeRowByPath(absPath) {
+                var container = document.getElementById('file-tree-container');
+                if (!container || !absPath) return;
+                container.querySelectorAll('.file-tree-file[data-path]').forEach(function(row) {
+                    if ((row.dataset.path || '') === absPath) row.remove();
+                });
+            }
             function openCustomContextMenu(clientX, clientY, absPath, source) {
                 var menu = document.getElementById('custom-context-menu');
                 if (!menu) return;
                 __fileTreeContextState.targetPath = String(absPath || '').trim();
                 var src = String(source || '').trim().toLowerCase();
                 __fileTreeContextState.source = (src === 'hpc' || src === 'files' || src === 'local') ? src : 'local';
+                var isLocal = (__fileTreeContextState.source === 'local') ||
+                    (typeof inferPathNavigationMode === 'function' && inferPathNavigationMode(absPath) === 'local');
+                menu.querySelectorAll('[data-action]').forEach(function(btn) {
+                    var act = btn.getAttribute('data-action');
+                    var needsLocal = (act === 'open-in-explorer' || act === 'delete-file');
+                    if (needsLocal && !isLocal) {
+                        btn.disabled = true;
+                        btn.classList.add('is-disabled');
+                        btn.title = '仅本地挂载文件支持此操作';
+                    } else {
+                        btn.disabled = false;
+                        btn.classList.remove('is-disabled');
+                        btn.title = '';
+                    }
+                });
                 menu.style.display = 'block';
                 menu.setAttribute('aria-hidden', 'false');
                 menu.style.left = '0px';
@@ -7417,13 +7784,340 @@
                     window.__filePreviewBlobUrl = null;
                 }
             }
-            async function fetchFilePreviewBlobUrl(url) {
-                var fetchOpts = { method: 'GET', mode: 'cors' };
+            function _previewMimeFromPath(filePath) {
+                var ext = filePreviewExt(filePath);
+                var map = {
+                    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+                    webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', pdf: 'application/pdf',
+                    tif: 'image/tiff', tiff: 'image/tiff', ico: 'image/x-icon'
+                };
+                return map[ext] || 'application/octet-stream';
+            }
+            function _blobUrlFromBase64(b64, mime) {
+                var bin = atob(String(b64 || ''));
+                var arr = new Uint8Array(bin.length);
+                for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+                revokeFilePreviewBlobUrl();
+                window.__filePreviewBlobUrl = URL.createObjectURL(new Blob([arr], { type: mime || 'application/octet-stream' }));
+                return window.__filePreviewBlobUrl;
+            }
+            async function _sidecarPostDownloadAttempt(endpoint, filePath) {
+                var url = localSidecarUrl(endpoint);
+                var res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: filePath }),
+                    mode: 'cors',
+                    cache: 'no-store'
+                });
+                var bodyText = '';
+                try { bodyText = await res.clone().text(); } catch (_t) {}
+                return { url: url, res: res, bodyText: bodyText };
+            }
+            async function _tryElectronLocalFileBlob(filePath) {
+                var p = String(filePath || '').trim();
+                if (!p) return null;
+                var reader = null;
+                if (typeof window.readLocalFileBuffer === 'function') {
+                    reader = window.readLocalFileBuffer.bind(window);
+                } else {
+                    try {
+                        var isElectron = typeof process !== 'undefined' && process.versions && !!process.versions.electron;
+                        if (isElectron && typeof require === 'function') {
+                            var ipc = require('electron').ipcRenderer;
+                            if (ipc && typeof ipc.invoke === 'function') {
+                                reader = function(fp) { return ipc.invoke('read-local-file-buffer', fp); };
+                            }
+                        }
+                    } catch (_ipc) {}
+                }
+                if (!reader) return null;
+                var data = await reader(p);
+                if (!data || data.status !== 'success' || !data.base64) {
+                    var ipcErr = new Error('electron_read_failed');
+                    ipcErr.detail = (data && data.message) ? String(data.message) : 'Electron 主进程未能读取文件';
+                    throw ipcErr;
+                }
+                return {
+                    blobUrl: _blobUrlFromBase64(data.base64, data.mime_type || _previewMimeFromPath(p)),
+                    via: 'electron-ipc',
+                    meta: {
+                        file_path: data.file_path || p,
+                        size_bytes: data.size_bytes,
+                        file_name: data.file_name
+                    }
+                };
+            }
+            async function fetchLocalSidecarFileBlob(filePath) {
+                var p = String(filePath || '').trim();
+                if (!p) {
+                    var emptyErr = new Error('empty_path');
+                    emptyErr.previewMeta = { reason: 'empty_path' };
+                    throw emptyErr;
+                }
+                var sidecarBase = '';
+                try {
+                    sidecarBase = getLocalSidecarBase().replace(/\/+$/, '');
+                    if (!/^https?:\/\//i.test(sidecarBase)) sidecarBase = 'http://127.0.0.1:' + getLocalSidecarPort();
+                } catch (_sb) {
+                    sidecarBase = 'http://127.0.0.1:' + (typeof getLocalSidecarPort === 'function' ? getLocalSidecarPort() : '8019');
+                }
+                var attempts = [];
+                var endpoints = ['/api/files/download', '/api/tools/download_file'];
+                var ei;
+                for (ei = 0; ei < endpoints.length; ei++) {
+                    var ep = endpoints[ei];
+                    var postAttempt;
+                    try {
+                        postAttempt = await _sidecarPostDownloadAttempt(ep, p);
+                    } catch (netErr) {
+                        var netE = new Error('sidecar_network_failed');
+                        netE.previewMeta = {
+                            sidecarBase: sidecarBase,
+                            postUrl: localSidecarUrl(ep),
+                            networkError: String(netErr && netErr.message ? netErr.message : netErr),
+                            attempts: attempts
+                        };
+                        throw netE;
+                    }
+                    attempts.push({
+                        method: 'POST',
+                        url: postAttempt.url,
+                        status: postAttempt.res.status,
+                        response: postAttempt.bodyText
+                    });
+                    if (postAttempt.res.ok) {
+                        revokeFilePreviewBlobUrl();
+                        window.__filePreviewBlobUrl = URL.createObjectURL(await postAttempt.res.blob());
+                        return window.__filePreviewBlobUrl;
+                    }
+                }
+                var normPath = p.replace(/\\/g, '/');
+                var getUrl = localSidecarUrl('/api/files/download?path=' + encodeURIComponent(normPath));
+                var getRes;
+                var getBodyText = '';
+                try {
+                    getRes = await fetch(getUrl, { method: 'GET', mode: 'cors', cache: 'no-store' });
+                    try { getBodyText = await getRes.clone().text(); } catch (_gt) {}
+                    attempts.push({ method: 'GET', url: getUrl, status: getRes.status, response: getBodyText });
+                } catch (getNetErr) {
+                    attempts.push({
+                        method: 'GET',
+                        url: getUrl,
+                        status: 'network_error',
+                        response: String(getNetErr && getNetErr.message ? getNetErr.message : getNetErr)
+                    });
+                }
+                if (getRes && getRes.ok) {
+                    revokeFilePreviewBlobUrl();
+                    window.__filePreviewBlobUrl = URL.createObjectURL(await getRes.blob());
+                    return window.__filePreviewBlobUrl;
+                }
+                try {
+                    var ipcHit = await _tryElectronLocalFileBlob(p);
+                    if (ipcHit && ipcHit.blobUrl) {
+                        attempts.push({
+                            method: 'Electron IPC',
+                            url: 'read-local-file-buffer',
+                            status: 200,
+                            response: JSON.stringify(ipcHit.meta || {})
+                        });
+                        return ipcHit.blobUrl;
+                    }
+                } catch (ipcErr) {
+                    attempts.push({
+                        method: 'Electron IPC',
+                        url: 'read-local-file-buffer',
+                        status: 'error',
+                        response: String(ipcErr && (ipcErr.detail || ipcErr.message) ? (ipcErr.detail || ipcErr.message) : ipcErr)
+                    });
+                }
+                var lastPost = attempts.length ? attempts[attempts.length - 1] : {};
+                var err = new Error('sidecar_download_failed');
+                err.status = (getRes && getRes.status) || lastPost.status;
+                err.detail = _extractPreviewHttpDetail(getBodyText)
+                    || _extractPreviewHttpDetail(lastPost.response)
+                    || ('HTTP ' + (err.status || '404'));
+                if (String(err.status) === '404' || err.detail === 'Not Found') {
+                    err.detail = 'Sidecar 缺少 /api/files/download 路由（旧版 Sidecar 仍在 8019 端口运行）。请完全退出并重启 Omics Agent 桌面客户端；Electron 将自动重启 Sidecar。';
+                }
+                err.previewMeta = {
+                    sidecarBase: sidecarBase,
+                    postUrl: attempts[0] ? attempts[0].url : localSidecarUrl('/api/files/download'),
+                    postStatus: attempts[0] ? attempts[0].status : undefined,
+                    postResponse: attempts[0] ? attempts[0].response : '',
+                    getUrl: getUrl,
+                    getStatus: getRes ? getRes.status : undefined,
+                    getResponse: getBodyText,
+                    attempts: attempts
+                };
+                throw err;
+            }
+            function _extractPreviewHttpDetail(bodyText) {
+                var raw = String(bodyText || '').trim();
+                if (!raw) return '';
+                try {
+                    var j = JSON.parse(raw);
+                    if (j && j.detail != null) {
+                        if (typeof j.detail === 'string') return j.detail;
+                        try { return JSON.stringify(j.detail, null, 2); } catch (_js) { return String(j.detail); }
+                    }
+                    if (j && j.message) return String(j.message);
+                } catch (_p) {}
+                return raw.length > 8000 ? raw.slice(0, 8000) + '\n…（响应体已截断，完整内容见下方日志区）' : raw;
+            }
+            function buildFilePreviewErrorReport(ctx, err) {
+                ctx = ctx || {};
+                err = err || {};
+                var meta = err.previewMeta || {};
+                var lines = [];
+                lines.push('=== 文件预览失败 ===');
+                lines.push('');
+                lines.push('时间: ' + new Date().toISOString());
+                lines.push('文件: ' + (ctx.fileName || '(未知)'));
+                lines.push('路径: ' + (ctx.filePath || ''));
+                lines.push('来源: ' + (ctx.source || ''));
+                lines.push('扩展名: ' + (ctx.ext || ''));
+                if (ctx.downloadUrl) lines.push('请求 URL: ' + ctx.downloadUrl);
+                if (meta.sidecarBase) lines.push('Sidecar 基址: ' + meta.sidecarBase);
+                if (meta.postUrl) lines.push('POST: ' + meta.postUrl + (meta.postStatus != null ? (' → HTTP ' + meta.postStatus) : ''));
+                if (meta.postResponse) {
+                    lines.push('POST 响应体:');
+                    lines.push(_extractPreviewHttpDetail(meta.postResponse) || String(meta.postResponse));
+                }
+                if (meta.getUrl) lines.push('GET: ' + meta.getUrl + (meta.getStatus != null ? (' → HTTP ' + meta.getStatus) : ''));
+                if (meta.getResponse) {
+                    lines.push('GET 响应体:');
+                    lines.push(_extractPreviewHttpDetail(meta.getResponse) || String(meta.getResponse));
+                }
+                if (meta.attempts && meta.attempts.length) {
+                    lines.push('');
+                    lines.push('全部尝试:');
+                    meta.attempts.forEach(function(at, idx) {
+                        lines.push('  [' + (idx + 1) + '] ' + (at.method || '?') + ' ' + (at.url || '') +
+                            (at.status != null ? (' → ' + at.status) : ''));
+                        if (at.response) {
+                            lines.push('      ' + String(_extractPreviewHttpDetail(at.response) || at.response).replace(/\n/g, '\n      '));
+                        }
+                    });
+                }
+                if (meta.networkError) lines.push('网络错误: ' + meta.networkError);
+                if (meta.httpStatus != null) lines.push('HTTP 状态: ' + meta.httpStatus);
+                if (meta.httpResponse) {
+                    lines.push('HTTP 响应体:');
+                    lines.push(_extractPreviewHttpDetail(meta.httpResponse) || String(meta.httpResponse));
+                }
+                lines.push('');
+                lines.push('错误摘要: ' + (err.detail || err.message || String(err) || '未知错误'));
+                if (err.stack) {
+                    lines.push('');
+                    lines.push('堆栈:');
+                    lines.push(String(err.stack));
+                }
+                lines.push('');
+                lines.push('排查建议:');
+                lines.push('1) 确认 Omics Agent 桌面客户端已启动，Sidecar 监听 127.0.0.1:8019');
+                lines.push('2) 确认「本地项目」工作区已挂载且文件存在于该目录下');
+                lines.push('3) 若 POST 返回 404/405，请完全退出 Omics Agent 后重新打开（Electron 会自动检测并重启 Sidecar）');
+                lines.push('4) 纯浏览器访问时，在本地执行: cd gibh-desktop-app/local_sidecar && python local_server.py');
+                lines.push('5) 硬刷新页面（Ctrl+Shift+R）后重试');
+                return lines.join('\n');
+            }
+            async function copyTextToClipboard(text) {
+                var t = String(text || '');
+                if (!t) return false;
+                try {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(t);
+                        return true;
+                    }
+                } catch (_c) {}
+                try {
+                    var ta = document.createElement('textarea');
+                    ta.value = t;
+                    ta.setAttribute('readonly', 'readonly');
+                    ta.style.position = 'fixed';
+                    ta.style.left = '-9999px';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    var ok = document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    return ok;
+                } catch (_e2) {
+                    return false;
+                }
+            }
+            function renderFilePreviewErrorPanel(bodyEl, ctx, err) {
+                var report = buildFilePreviewErrorReport(ctx, err);
+                var summary = (err && err.detail) ? String(err.detail) : ((err && err.message) ? String(err.message) : '预览失败');
+                bodyEl.innerHTML =
+                    '<div class="file-preview-modal__error">' +
+                    '<p class="file-preview-modal__error-lead">' + fileTreeEscapeHtml(summary) + '</p>' +
+                    '<p class="file-preview-modal__error-hint">完整诊断信息如下（可选中复制）。点击「复制全部」或按 Ctrl+C 复制选区；点击右上角 × 关闭。</p>' +
+                    '<div class="file-preview-modal__error-actions">' +
+                    '<button type="button" class="file-preview-modal__error-copy" data-action="copy-preview-error">复制全部</button>' +
+                    '<button type="button" class="file-preview-modal__error-copy" data-action="close-preview-error">关闭</button>' +
+                    '</div>' +
+                    '<pre class="file-preview-modal__error-log" id="file-preview-error-log" tabindex="0" role="textbox" aria-readonly="true">' +
+                    fileTreeEscapeHtml(report) +
+                    '</pre></div>';
+                var copyBtn = bodyEl.querySelector('[data-action="copy-preview-error"]');
+                if (copyBtn) {
+                    copyBtn.addEventListener('click', function() {
+                        copyTextToClipboard(report).then(function(ok) {
+                            if (typeof showToast === 'function') {
+                                showToast(ok ? '已复制完整报错信息' : '复制失败，请手动选中下方文本复制', ok ? 'success' : 'warning');
+                            }
+                        });
+                    });
+                }
+                var closeBtn = bodyEl.querySelector('[data-action="close-preview-error"]');
+                if (closeBtn) {
+                    closeBtn.addEventListener('click', function() {
+                        closeFilePreviewModal();
+                    });
+                }
+            }
+            function showFilePreviewErrorInModal(titleEl, pathEl, bodyEl, ctx, err) {
+                if (titleEl) titleEl.textContent = '预览失败 · ' + (ctx.fileName || '文件');
+                if (pathEl) {
+                    pathEl.textContent = ctx.filePath || '';
+                    pathEl.classList.add('file-preview-modal__path--wrap');
+                    pathEl.title = ctx.filePath || '';
+                }
+                renderFilePreviewErrorPanel(bodyEl, ctx, err);
+            }
+            async function fetchFilePreviewBlobUrl(url, filePath, source) {
+                var mode = normalizeFilePreviewSource(source);
+                if (mode === 'local' && filePath) {
+                    return fetchLocalSidecarFileBlob(filePath);
+                }
+                var fetchOpts = { method: 'GET', mode: 'cors', cache: 'no-store' };
                 if (!isLocalSidecarPreviewUrl(url) && typeof getAuthHeaders === 'function') {
                     fetchOpts.headers = getAuthHeaders();
                 }
-                var res = await fetch(url, fetchOpts);
-                if (!res.ok) throw new Error('blob_failed');
+                var res;
+                try {
+                    res = await fetch(url, fetchOpts);
+                } catch (netErr) {
+                    var netE = new Error('cloud_preview_network_failed');
+                    netE.detail = String(netErr && netErr.message ? netErr.message : netErr);
+                    netE.previewMeta = { downloadUrl: url, networkError: netE.detail };
+                    throw netE;
+                }
+                if (!res.ok) {
+                    var bodyText = '';
+                    try { bodyText = await res.clone().text(); } catch (_bt) {}
+                    var failErr = new Error('blob_failed');
+                    failErr.status = res.status;
+                    failErr.detail = _extractPreviewHttpDetail(bodyText) || ('HTTP ' + res.status);
+                    failErr.previewMeta = {
+                        downloadUrl: url,
+                        httpStatus: res.status,
+                        httpResponse: bodyText
+                    };
+                    throw failErr;
+                }
                 revokeFilePreviewBlobUrl();
                 window.__filePreviewBlobUrl = URL.createObjectURL(await res.blob());
                 return window.__filePreviewBlobUrl;
@@ -7523,19 +8217,11 @@
                 var img = bodyEl.querySelector('img');
                 if (!img) return;
                 async function loadViaBlob() {
-                    var blobUrl = await fetchFilePreviewBlobUrl(downloadUrl);
+                    var blobUrl = await fetchFilePreviewBlobUrl(downloadUrl, filePath, source);
                     img.src = blobUrl;
                 }
                 if (mode === 'local') {
-                    await new Promise(function(resolve, reject) {
-                        img.onload = function() { img.onload = null; img.onerror = null; resolve(); };
-                        img.onerror = function() {
-                            img.onload = null;
-                            img.onerror = null;
-                            loadViaBlob().then(resolve).catch(reject);
-                        };
-                        img.src = downloadUrl;
-                    });
+                    await loadViaBlob();
                     return;
                 }
                 var webUrl = '';
@@ -7557,7 +8243,7 @@
                 await loadViaBlob();
             }
             async function renderPreviewPdf(bodyEl, filePath, source, displayName) {
-                var blobUrl = await fetchFilePreviewBlobUrl(filePreviewDownloadUrl(filePath, source));
+                var blobUrl = await fetchFilePreviewBlobUrl(filePreviewDownloadUrl(filePath, source), filePath, source);
                 bodyEl.innerHTML = '<iframe class="file-preview-modal__iframe" src="' + fileTreeEscapeHtml(blobUrl) + '" title="' + fileTreeEscapeHtml(displayName) + '"></iframe>';
             }
             function closeFilePreviewModal() {
@@ -7568,6 +8254,10 @@
                 modal.setAttribute('aria-hidden', 'true');
                 var bodyEl = document.getElementById('file-preview-body');
                 if (bodyEl) bodyEl.innerHTML = '';
+                var pathEl = document.getElementById('file-preview-path');
+                if (pathEl) pathEl.classList.remove('file-preview-modal__path--wrap');
+                var titleEl = document.getElementById('file-preview-title');
+                if (titleEl) titleEl.textContent = '文件预览';
             }
             async function previewAssetFile(filePath, fileName, sourceOverride) {
                 var p = String(filePath || '').trim();
@@ -7591,23 +8281,31 @@
                 modal.style.display = 'flex';
                 modal.setAttribute('aria-hidden', 'false');
                 pathEl.textContent = p;
+                pathEl.classList.remove('file-preview-modal__path--wrap');
+                pathEl.title = p;
                 bodyEl.innerHTML = '<div class="file-preview-modal__loading">正在加载预览…</div>';
-                if (normalizeFilePreviewSource(source) === 'hpc') {
-                    if (typeof showToast === 'function') {
-                        showToast('暂不支持该格式在线预览，请下载后查看。', 'warning');
-                    }
-                    closeFilePreviewModal();
-                    return;
-                }
                 var ext = filePreviewExt(p);
                 if (!ext && (p.indexOf('.') < 0 || p.split(/[\\/]/).pop().indexOf('.') < 0)) {
                     ext = 'txt';
                 }
+                if (normalizeFilePreviewSource(source) === 'hpc') {
+                    showFilePreviewErrorInModal(titleEl, pathEl, bodyEl, {
+                        filePath: p, fileName: displayName, source: source, ext: ext
+                    }, {
+                        message: 'hpc_preview_unsupported',
+                        detail: 'HPC 超算资产暂不支持浏览器内联预览，请下载后查看。',
+                        previewMeta: { reason: 'hpc_source' }
+                    });
+                    return;
+                }
                 if (__FILE_PREVIEW_BLOCKED_EXT[ext]) {
-                    if (typeof showToast === 'function') {
-                        showToast('暂不支持该格式在线预览，请下载后查看。', 'warning');
-                    }
-                    closeFilePreviewModal();
+                    showFilePreviewErrorInModal(titleEl, pathEl, bodyEl, {
+                        filePath: p, fileName: displayName, source: source, ext: ext
+                    }, {
+                        message: 'blocked_extension',
+                        detail: '该扩展名（.' + ext + '）暂不支持在线预览，请下载后查看。',
+                        previewMeta: { reason: 'blocked_extension', ext: ext }
+                    });
                     return;
                 }
                 try {
@@ -7638,16 +8336,28 @@
                     }
                 } catch (_e) {
                     console.warn('[file-preview] failed:', p, _e);
-                    if (typeof showToast === 'function') {
-                        showToast('图片预览失败，请确认本地 Sidecar 已启动且文件可读。', 'warning');
-                    }
-                    closeFilePreviewModal();
+                    var errCtx = {
+                        filePath: p,
+                        fileName: displayName,
+                        source: source,
+                        ext: ext,
+                        downloadUrl: filePreviewDownloadUrl(p, source)
+                    };
+                    showFilePreviewErrorInModal(titleEl, pathEl, bodyEl, errCtx, _e);
                     return;
                 }
-                if (typeof showToast === 'function') {
-                    showToast('暂不支持该格式在线预览，请下载后查看。', 'warning');
-                }
-                closeFilePreviewModal();
+                var unsupportedCtx = {
+                    filePath: p,
+                    fileName: displayName,
+                    source: source,
+                    ext: ext,
+                    downloadUrl: filePreviewDownloadUrl(p, source)
+                };
+                var unsupportedErr = new Error('unsupported_preview_format');
+                unsupportedErr.detail = '暂不支持该格式在线预览，请下载后查看。';
+                unsupportedErr.previewMeta = { reason: 'unsupported_extension', ext: ext };
+                showFilePreviewErrorInModal(titleEl, pathEl, bodyEl, unsupportedCtx, unsupportedErr);
+                return;
             }
             window.previewAssetFile = previewAssetFile;
             function openFilePreviewModal(absPath, source) {
@@ -7655,15 +8365,26 @@
                 previewAssetFile(absPath, name, source);
             }
             function renderWorkspaceTreeNodes(nodes, parentEl) {
+                var wsRootNorm = '';
+                try {
+                    var wsSel = typeof getCachedWorkspaceSelection === 'function' ? getCachedWorkspaceSelection() : null;
+                    if (wsSel && wsSel.workspace_path && typeof normalizePathForCompare === 'function') {
+                        wsRootNorm = normalizePathForCompare(wsSel.workspace_path);
+                    }
+                } catch (_ws) { wsRootNorm = ''; }
                 (nodes || []).forEach(function(node) {
                     if (!node) return;
                     if (node.type === 'directory') {
                         var det = document.createElement('details');
-                        det.className = 'file-tree-folder';
+                        det.className = 'file-tree-folder file-tree-node';
+                        det.dataset.type = 'directory';
                         if (node.path) det.dataset.path = node.path;
+                        if (wsRootNorm && node.path && normalizePathForCompare(node.path) === wsRootNorm) {
+                            det.classList.add('is-workspace-root');
+                        }
                         var sum = document.createElement('summary');
                         sum.className = 'file-tree-summary';
-                        sum.innerHTML = '<span class="file-tree-icon" aria-hidden="true">📁</span><span class="file-tree-name">' + fileTreeEscapeHtml(node.name) + '</span>';
+                        sum.innerHTML = '<div class="file-tree-node-content"><span class="file-tree-icon" aria-hidden="true">📁</span><span class="file-tree-name file-tree-label">' + fileTreeEscapeHtml(node.name) + '</span></div>';
                         det.appendChild(sum);
                         var childWrap = document.createElement('div');
                         childWrap.className = 'file-tree-children';
@@ -7672,12 +8393,12 @@
                         parentEl.appendChild(det);
                     } else if (node.type === 'file') {
                         var row = document.createElement('div');
-                        row.className = 'file-tree-file';
+                        row.className = 'file-tree-file file-tree-node';
                         row.title = node.path || '';
                         row.dataset.path = node.path || '';
                         row.dataset.type = 'file';
                         row.dataset.source = 'local';
-                        row.innerHTML = '<span class="file-tree-icon" aria-hidden="true">📄</span><span class="file-tree-name">' + fileTreeEscapeHtml(node.name) + '</span>';
+                        row.innerHTML = '<div class="file-tree-node-content"><span class="file-tree-icon" aria-hidden="true">📄</span><span class="file-tree-name file-tree-label">' + fileTreeEscapeHtml(node.name) + '</span></div>';
                         bindSidebarFileDragSource(row, {
                             path: node.path || '',
                             name: node.name || '',
@@ -7790,6 +8511,7 @@
             async function fetchAndRenderWorkspaceTree() {
                 var container = document.getElementById('file-tree-container');
                 if (!container) return;
+                var expandedBefore = snapshotWorkspaceTreeExpandedPaths(container);
                 container.innerHTML = '<div class="file-tree-loading">加载中…</div>';
                 try {
                     var res = await fetch(localSidecarUrl('/api/workspace/tree'), { headers: getAuthHeaders() });
@@ -7806,12 +8528,18 @@
                         container.innerHTML = '<div class="file-tree-empty">（空目录）</div>';
                         return;
                     }
-                    renderWorkspaceTreeByKeyword(window.__workspaceTreeKeyword || '');
+                    renderWorkspaceTreeByKeyword(window.__workspaceTreeKeyword || '', expandedBefore);
                 } catch (e) {
                     container.innerHTML = '<div class="file-tree-error">' + fileTreeEscapeHtml((e && e.message) ? e.message : String(e)) + '</div>';
                 }
             }
             window.fetchAndRenderWorkspaceTree = fetchAndRenderWorkspaceTree;
+            window.collectExpandedFileTreePaths = collectExpandedFileTreePaths;
+            window.restoreExpandedFileTreePaths = restoreExpandedFileTreePaths;
+            window.openMountPathInExplorer = openMountPathInExplorer;
+            window.openPathInLocalExplorer = openPathInLocalExplorer;
+            window.resolveActiveWorkspaceMountPath = resolveActiveWorkspaceMountPath;
+            window.bindMountCardContextMenuHosts = bindMountCardContextMenuHosts;
             async function openLocalProjectWorkspace() {
                 var selection = null;
                 var isElectron = false;
@@ -8553,10 +9281,10 @@
                     });
                 }
                 var fallback = {
-                    version: '0.14.6',
-                    displayVersion: 'V0.14.6',
-                    winSetupFile: 'Omics Agent Setup 0.14.6.exe',
-                    linuxAppImageFile: 'Omics Agent-0.14.6.AppImage'
+                    version: '0.14.8',
+                    displayVersion: 'V0.14.8',
+                    winSetupFile: 'Omics Agent Setup 0.14.8.exe',
+                    linuxAppImageFile: 'Omics Agent-0.14.8.AppImage'
                 };
                 function apply(meta) {
                     if (verEl) {
@@ -8988,6 +9716,7 @@
                     var skillTitleEl = document.getElementById('skill-live-title');
                     if (skillTitleEl) skillTitleEl.textContent = String(skill.name).trim();
                 }
+                if (typeof rehydrateComposerAttachmentUi === 'function') rehydrateComposerAttachmentUi();
             }
             /**
              * @param {object} skill 技能对象
@@ -9033,7 +9762,7 @@
                             if (typeof highlightActiveSkillInSidebar === 'function') highlightActiveSkillInSidebar(skill);
                             return;
                         }
-                        if (typeof clearMainChatOnly === 'function') clearMainChatOnly();
+                        if (typeof clearMainChatOnly === 'function') clearMainChatOnly({ preserveAttachments: true });
                         else if (typeof clearChatAndReset === 'function') clearChatAndReset();
                         else if (typeof showChatView === 'function') showChatView();
                         if (typeof activateSkillLiveRoute === 'function') activateSkillLiveRoute({ resetContent: true });
@@ -9056,7 +9785,7 @@
                     applySkillPromptToChat(skill);
                     return;
                 }
-                if (typeof clearMainChatOnly === 'function') clearMainChatOnly();
+                if (typeof clearMainChatOnly === 'function') clearMainChatOnly({ preserveAttachments: true });
                 else if (typeof clearChatAndReset === 'function') clearChatAndReset();
                 else if (typeof showChatView === 'function') showChatView();
                 if (typeof activateSkillLiveRoute === 'function') activateSkillLiveRoute({ resetContent: true });
@@ -9142,7 +9871,8 @@
                     window.__omicsSnapshotRegistry = {};
                     window.__omicsActiveSnapshotId = null;
                     if (ph) ph.style.display = '';
-                    if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(false);
+                    if (typeof window.setRightPanelState === 'function') window.setRightPanelState('NONE');
+                    else if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(false);
                     return;
                 }
                 if (root) root.innerHTML = cached.html || '';
@@ -9152,7 +9882,11 @@
                 window.__omicsActiveSnapshotId = cached.omicsActive || null;
                 if (ph) ph.style.display = cached.placeholderVisible ? '' : 'none';
                 if (typeof setWorkspaceTitle === 'function' && cached.title) setWorkspaceTitle(cached.title);
-                if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(!!cached.expanded);
+                if (typeof window.setRightPanelState === 'function') {
+                    window.setRightPanelState(cached.expanded ? 'WORKBENCH' : 'NONE');
+                } else if (typeof setWorkspacePaneExpanded === 'function') {
+                    setWorkspacePaneExpanded(!!cached.expanded);
+                }
                 if (root && typeof hydrateSkillWorkspacePanels === 'function') {
                     try { hydrateSkillWorkspacePanels(root); } catch (_hwErr) { console.warn('[restoreWorkspaceSlot] hydrate', _hwErr); }
                 }
@@ -9418,44 +10152,26 @@
             window.clearWorkspacePaneInlineLayout = clearWorkspacePaneInlineLayout;
             /** 手动展开右侧文件栏时强制收起分析报告工作台，避免双栏挤占 */
             function collapseWorkspacePaneWhenOpeningRightFileExplorer() {
-                var wsPane = document.getElementById('workspace-pane');
-                if (wsPane && wsPane.classList.contains('workspace-active')) {
-                    if (typeof window.clearWorkspacePaneInlineLayout === 'function') {
-                        window.clearWorkspacePaneInlineLayout(wsPane);
-                    }
-                    if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(false);
+                if (typeof window.setRightPanelState === 'function') {
+                    /* 已由 setRightPanelState 互斥处理 */
                 }
                 if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
             }
             window.collapseWorkspacePaneWhenOpeningRightFileExplorer = collapseWorkspacePaneWhenOpeningRightFileExplorer;
-            /** 分析报告工作台与右侧本地/文件管理栏互斥（王不见王） */
+            /** 分析报告工作台与右侧本地/文件管理栏互斥 — 委托单一状态机 */
             function setWorkspacePaneExpanded(expanded) {
-                var wp = document.getElementById('workspace-pane');
-                if (!wp) return;
-                if (expanded) {
-                    var rex = document.getElementById('right-file-explorer');
-                    if (rex && rex.style.display !== 'none' && !rex.classList.contains('right-sidebar-collapsed')) {
-                        if (typeof setRightSidebarVisible === 'function') setRightSidebarVisible(false);
-                    }
-                    if (typeof clearWorkspacePaneInlineLayout === 'function') clearWorkspacePaneInlineLayout(wp);
-                    wp.style.setProperty('display', 'flex', 'important');
-                    var rzR = document.getElementById('resizer-right');
-                    if (rzR) rzR.style.setProperty('display', 'block', 'important');
-                    wp.classList.add('workspace-active');
-                } else {
-                    if (typeof clearWorkspacePaneInlineLayout === 'function') clearWorkspacePaneInlineLayout(wp);
-                    wp.classList.remove('workspace-active');
-                    window.__omicsActiveSnapshotId = null;
+                if (typeof window.setRightPanelState === 'function') {
+                    window.setRightPanelState(expanded ? 'WORKBENCH' : 'NONE');
                 }
-                if (typeof syncAnalysisArtifactCardActiveStates === 'function') syncAnalysisArtifactCardActiveStates();
-                if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
             }
             function bindWorkspaceExpandButtons() {
                 function toggleWorkspaceFromHeader() {
                     var wp = document.getElementById('workspace-pane');
                     if (!wp) return;
                     var open = !wp.classList.contains('workspace-active');
-                    if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(open);
+                    if (typeof window.setRightPanelState === 'function') {
+                        window.setRightPanelState(open ? 'WORKBENCH' : 'NONE');
+                    }
                 }
                 var btnExpand = document.getElementById('btn-expand-workspace');
                 if (btnExpand && !btnExpand.dataset.workspaceToggleBound) {
@@ -9501,8 +10217,8 @@
             }
             async function switchToHpcFtpView() {
                 if (typeof showChatView === 'function') showChatView();
-                if (typeof setRightSidebarVisible === 'function') setRightSidebarVisible(true);
-                if (typeof setRightSidebarMode === 'function') setRightSidebarMode('hpc');
+                if (typeof window.setRightPanelState === 'function') window.setRightPanelState('FILE_MANAGER', 'hpc');
+                else if (typeof setRightSidebarVisible === 'function') setRightSidebarVisible(true);
                 if (!window.currentHpcPath) window.currentHpcPath = '.';
                 if (typeof fetchAndRenderHpcTreeView === 'function') {
                     await fetchAndRenderHpcTreeView();
@@ -11822,21 +12538,33 @@
                     userInputEl.value = '';
                     if (typeof autoResize === 'function') autoResize(userInputEl);
                 }
-                pendingFiles = [];
-                while (uploadedFiles.length) uploadedFiles.pop();
-                window.uploadedFiles = uploadedFiles;
-                if (typeof window.currentAttachments !== 'undefined') window.currentAttachments = [];
+                if (!opts.preserveAttachments) {
+                    pendingFiles = [];
+                    while (uploadedFiles.length) uploadedFiles.pop();
+                    window.uploadedFiles = uploadedFiles;
+                    if (typeof window.currentAttachments !== 'undefined') window.currentAttachments = [];
+                    if (typeof renderFilePreviewArea === 'function') renderFilePreviewArea();
+                    if (typeof renderAttachmentPreviewArea === 'function') renderAttachmentPreviewArea();
+                }
+                if (typeof checkInput === 'function') checkInput();
+            }
+            function rehydrateComposerAttachmentUi() {
                 if (typeof renderFilePreviewArea === 'function') renderFilePreviewArea();
                 if (typeof renderAttachmentPreviewArea === 'function') renderAttachmentPreviewArea();
                 if (typeof checkInput === 'function') checkInput();
             }
+            window.rehydrateComposerAttachmentUi = rehydrateComposerAttachmentUi;
             window.resetComposerLifecycle = resetComposerLifecycle;
 
-            function clearMainChatOnly() {
+            function clearMainChatOnly(opts) {
+                opts = opts || {};
                 if (typeof switchToChatView === 'function') switchToChatView({ preserveVolatileReturn: true });
                 var _sidBeforeReset = (typeof currentSessionId !== 'undefined' ? currentSessionId : null);
                 if (typeof resetComposerLifecycle === 'function') {
-                    resetComposerLifecycle({ flushSessionId: _sidBeforeReset });
+                    resetComposerLifecycle({
+                        flushSessionId: _sidBeforeReset,
+                        preserveAttachments: !!opts.preserveAttachments
+                    });
                 }
                 if (typeof abortMainChatStreamsOnly === 'function') abortMainChatStreamsOnly();
                 else if (currentAbortController && typeof isImmortalController === 'function' && !isImmortalController(currentAbortController)) {
@@ -11876,7 +12604,13 @@
                 if (titleEl) titleEl.textContent = '新会话';
                 chatHistory = [];
                 currentSessionId = null;
+                if (typeof window.resetWorkspaceIngestionForSessionChange === 'function') {
+                    window.resetWorkspaceIngestionForSessionChange(_sidBeforeReset);
+                }
                 if (typeof activateMainChatRoute === 'function') activateMainChatRoute();
+                if (opts.preserveAttachments && typeof rehydrateComposerAttachmentUi === 'function') {
+                    rehydrateComposerAttachmentUi();
+                }
             }
             window.clearMainChatOnly = clearMainChatOnly;
 
@@ -11933,7 +12667,8 @@
                 }
                 if (wp) {
                     if (typeof clearWorkspacePaneInlineLayout === 'function') clearWorkspacePaneInlineLayout(wp);
-                    if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(false);
+                    if (typeof window.setRightPanelState === 'function') window.setRightPanelState('NONE');
+                    else if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(false);
                 }
                 if (titleEl) titleEl.textContent = '新会话';
                 if (workspaceContent) workspaceContent.innerHTML = '';
@@ -11946,6 +12681,9 @@
                 if (wsPhReset) wsPhReset.style.display = '';
                 chatHistory = [];
                 currentSessionId = null;  // Phase 5: 新建会话时清空
+                if (typeof window.resetWorkspaceIngestionForSessionChange === 'function') {
+                    window.resetWorkspaceIngestionForSessionChange(_sidBeforeReset);
+                }
                 window._volatileActiveSessionIdToReturn = null;
                 if (typeof refreshReturnToSessionButtons === 'function') refreshReturnToSessionButtons();
                 window.DEMO_STATE = 'IDLE';
@@ -13778,7 +14516,24 @@
                 }
             }
             window.fetchAndRenderFilesPanel = fetchAndRenderFilesPanel;
+            function collectExpandedAssetGroupKeys(el) {
+                var keys = new Set();
+                if (!el) return keys;
+                el.querySelectorAll('details.asset-modality-group[data-group-key]').forEach(function(det) {
+                    if (det.open && det.dataset.groupKey) keys.add(det.dataset.groupKey);
+                });
+                return keys;
+            }
+            function restoreExpandedAssetGroupKeys(el, expandedKeys) {
+                if (!el || !expandedKeys || !expandedKeys.size) return;
+                expandedKeys.forEach(function(key) {
+                    var det = el.querySelector('details.asset-modality-group[data-group-key="' + key + '"]');
+                    if (det) det.open = true;
+                });
+            }
             function fetchAssets() {
+                var assetsEl = document.getElementById('sidebar-assets-list');
+                var expandedAssetGroups = collectExpandedAssetGroupKeys(assetsEl);
                 fetch('/api/assets', { method: 'GET', headers: getAuthHeaders() })
                     .then(function(r) { return r.ok ? r.json() : r.text().then(function(t) { try { return Promise.reject(JSON.parse(t)); } catch (e) { return Promise.reject({ detail: t || ('HTTP ' + r.status) }); } }); })
                     .then(function(list) {
@@ -13807,6 +14562,8 @@
                             var label = FIXED_MODALITY_LABELS[groupKey];
                             var details = document.createElement('details');
                             details.className = 'asset-modality-group';
+                            details.dataset.groupKey = groupKey;
+                            if (expandedAssetGroups.has(groupKey)) details.open = true;
                             var summary = document.createElement('summary');
                             summary.className = 'asset-category sub-nav-item';
                             summary.setAttribute('aria-expanded', 'false');
@@ -13885,6 +14642,7 @@
                             details.appendChild(fileList);
                             el.appendChild(details);
                         });
+                        restoreExpandedAssetGroupKeys(el, expandedAssetGroups);
                         if (typeof syncAssetModalityGroupAriaExpanded === 'function') syncAssetModalityGroupAriaExpanded(el);
                         renderHpcAssetsPlaceholder(el);
                         var fileMgmtEntry = document.createElement('div');
@@ -14151,6 +14909,9 @@
                 if (_prevSessionForDraft && _prevSessionForDraft !== sessionId && typeof window.flushComposerDraftAutoSave === 'function') {
                     window.flushComposerDraftAutoSave(_prevSessionForDraft);
                 }
+                if (typeof window.resetWorkspaceIngestionForSessionChange === 'function') {
+                    window.resetWorkspaceIngestionForSessionChange(_prevSessionForDraft);
+                }
                 if (typeof captureWorkspaceSlot === 'function') {
                     captureWorkspaceSlot(getActiveWorkspaceSlotKey());
                 }
@@ -14190,7 +14951,8 @@
                     if (!displayTitle) displayTitle = '复用工作流';
                     titleEl.textContent = (displayTitle || sessionId).slice(0, 24);
                 }
-                if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
+                if (typeof window.setRightPanelState === 'function') window.setRightPanelState('NONE');
+                else if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(false);
                 chatHistory = [];
                 if (typeof pinSidebarDeepHistorySession === 'function') pinSidebarDeepHistorySession(sessionId, title);
                 else if (typeof setActiveSessionInSidebar === 'function') setActiveSessionInSidebar(sessionId);
@@ -14266,9 +15028,11 @@
                             var _hasTmContent = String(_lastTmPayload.data_diagnosis_html || '').trim()
                                 || (_lastTmPayload.steps_details && _lastTmPayload.steps_details.length)
                                 || String(_lastTmPayload.expert_report_markdown || '').trim()
-                                || String(_lastTmPayload.expert_report_draft_markdown || '').trim();
+                                || String(_lastTmPayload.expert_report_draft_markdown || '').trim()
+                                || String(_lastTmPayload.corpus_sft_json || '').trim();
                             if (_hasTmContent) {
                                 loadHistorySessionTimeMachine(_lastTmPayload);
+                                if (typeof window.setRightPanelState === 'function') window.setRightPanelState('WORKBENCH');
                             }
                         }
                         if (wp && (document.querySelector('#active-workspace-content .report-section, #active-workspace-content .process-steps') != null) && typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
@@ -14310,6 +15074,11 @@
                                 }
                             }
                         }).finally(function() {
+                            if (typeof window.fetchAndRenderSessionFiles === 'function') {
+                                window.fetchAndRenderSessionFiles(sessionId, true);
+                            } else if (typeof window.refreshWorkspaceSessionFiles === 'function') {
+                                window.refreshWorkspaceSessionFiles(true);
+                            }
                             if (typeof onLoaded === 'function') {
                                 try { onLoaded(); } catch (eCb) { console.warn('[loadSessionAndRestore] onLoaded', eCb); }
                             }
@@ -14423,6 +15192,37 @@
                 });
                 logZone.appendChild(container);
             }
+            // 🔥 单点技能会话：识别快照是否来自 Skill 快车道（非 Task 多步工作流）
+            function isSingleSkillSessionSnapshot(snap) {
+                if (!snap || typeof snap !== 'object') return false;
+                if (snap.skill_last_tool && snap.skill_last_tool.tool_name) return true;
+                if (snap.skill_id || snap.skill_tool_id) return true;
+                var ex = snap.execution_snapshot;
+                if (ex && typeof ex === 'object' && (ex.skill_id || ex.skill_tool_id)) return true;
+                var slt = snap.skill_last_tool;
+                if (slt && slt.tool_result && slt.tool_result.status === 'success') return true;
+                return false;
+            }
+            function extractWorkflowStepsFromSnapshot(snap) {
+                if (!snap || typeof snap !== 'object') return [];
+                var wf = snap.workflow;
+                if (!wf || typeof wf !== 'object') return [];
+                return (wf.workflow_config && wf.workflow_config.workflow_data && wf.workflow_config.workflow_data.steps)
+                    || (wf.workflow_config && wf.workflow_config.steps)
+                    || (wf.workflow_data && wf.workflow_data.steps)
+                    || wf.steps
+                    || [];
+            }
+            function isGhostWorkflowStepCardData(snap) {
+                if (!snap || !snap.workflow) return false;
+                if (!isSingleSkillSessionSnapshot(snap)) return false;
+                var steps = extractWorkflowStepsFromSnapshot(snap);
+                if (Array.isArray(steps) && steps.length > 0) return false;
+                return true;
+            }
+            window.isSingleSkillSessionSnapshot = isSingleSkillSessionSnapshot;
+            window.isGhostWorkflowStepCardData = isGhostWorkflowStepCardData;
+
             // 🔥 内部：仅渲染工作流卡片到 targetZone，返回 formId（供 renderStaticHistorySnapshot 调用）；messageId 用于 data-message-id 与自动保存
             function _renderStaticWorkflowCard(workflowData, targetZone, messageId) {
                 if (!targetZone || !workflowData) return null;
@@ -14583,7 +15383,9 @@
                 var _hasExpertEarly = _exSnapEarly && (String(_exSnapEarly.expert_report_markdown || '').trim() || String(_exSnapEarly.expert_report_draft_markdown || '').trim());
                 var _hasReportEarly = snap && snap.report;
                 if (!snap || (!snap.workflow && (!snap.steps || snap.steps.length === 0) && !_hasReportEarly && !_hasExecSnap && !_hasDiagEarly && !_hasExpertEarly)) return formId;
-                if (snap.workflow && targetZone) {
+                if (snap.workflow && targetZone && isGhostWorkflowStepCardData(snap)) {
+                    console.log('[Snapshot] 忽略单点技能会话中的冗余工作流卡片（步骤为空）');
+                } else if (snap.workflow && targetZone) {
                     try { formId = _renderStaticWorkflowCard(snap.workflow, targetZone, messageId); } catch (e) { console.warn('[Snapshot] _renderStaticWorkflowCard:', e); }
                 }
                 // 已有 process_log 时 logZone 已在 createRestoreAIMessageRowWithSnapshot 中填充，不重复
@@ -14684,6 +15486,9 @@
                 fillFromRoot('skill_last_tool');
                 fillFromRoot('execution_snapshot');
                 fillFromRoot('execution_snapshots');
+                fillFromRoot('corpus_sft_json');
+                fillFromRoot('corpus_standard');
+                fillFromRoot('corpus_modality');
                 fillFromRoot('hitl');
                 fillFromRoot('hitl_pending');
                 if (content.hitl && typeof content.hitl === 'object') snap.hitl = content.hitl;
@@ -14828,12 +15633,15 @@
                     }
                 }
                 // 4) cards-zone + 未用 process_log 时的 logZone 用 steps 填充
-                if (snap.workflow || (snap.steps && snap.steps.length > 0) || snap.report) {
+                var _skipGhostWf = isGhostWorkflowStepCardData(snap);
+                if (!_skipGhostWf && (snap.workflow || (snap.steps && snap.steps.length > 0) || snap.report)) {
                     var histFormId = typeof renderStaticHistorySnapshot === 'function' ? renderStaticHistorySnapshot(snap, cardZone, logZone, messageId, createdAt) : null;
                     if (histFormId && snap.workflow) {
                         window.workflowCache = window.workflowCache || {};
                         window.workflowCache[histFormId] = { workflowData: snap.workflow, originalQuery: '' };
                     }
+                } else if (_skipGhostWf) {
+                    console.log('[history] 跳过单点技能会话幽灵工作流卡片');
                 }
                 if (snap.skill_last_tool && snap.skill_last_tool.tool_result && snap.skill_last_tool.tool_result.status === 'success' && typeof renderSkillToolWorkspace === 'function') {
                     try {
@@ -14952,6 +15760,7 @@
                         } catch (_r) {}
                     }
                 })();
+                if (typeof window.setRightPanelState === 'function') window.setRightPanelState('NONE');
                 if (typeof bindGlobalMountPathNavigation === 'function') bindGlobalMountPathNavigation();
                 if (typeof updateSidebarUser === 'function') updateSidebarUser();
                 if (typeof window.syncImmersiveDemoEntryVisibility === 'function') window.syncImmersiveDemoEntryVisibility();
@@ -15010,21 +15819,20 @@
                 }
                 if (sidebarToggleBtn) { sidebarToggleBtn.onclick = function(e) { e.stopPropagation(); toggleSidebarCollapse(); }; }
                 if (sidebarWorkspaceIndicator) {
-                    sidebarWorkspaceIndicator.onclick = function() {
-                        var rex = document.getElementById('right-file-explorer');
-                        var visible = rex && rex.style.display !== 'none' && !rex.classList.contains('right-sidebar-collapsed');
-                        if (visible && window.__rightSidebarMode === 'local') {
-                            setRightSidebarVisible(false);
-                            return;
-                        }
+                    sidebarWorkspaceIndicator.onclick = function(ev) {
+                        if (ev.target && ev.target.closest && ev.target.closest('.omics-mount-card, .mount-path-card')) return;
                         var sel = typeof getCachedWorkspaceSelection === 'function' ? getCachedWorkspaceSelection() : null;
                         if (!sel || !sel.workspace_path) {
-                            showToast('请先挂载本地工作目录', 'warning');
+                            if (typeof showToast === 'function') showToast('\u8bf7\u5148\u6302\u8f7d\u672c\u5730\u5de5\u4f5c\u76ee\u5f55', 'warning');
                             return;
                         }
-                        setRightSidebarVisible(true);
-                        setRightSidebarMode('local');
-                        if (typeof window.fetchAndRenderWorkspaceTree === 'function') window.fetchAndRenderWorkspaceTree();
+                        var rex = document.getElementById('right-file-explorer');
+                        var hidden = !rex || rex.style.display === 'none' || rex.classList.contains('right-sidebar-collapsed');
+                        if (!hidden && (window.__rightSidebarMode || 'local') === 'local') {
+                            window.setRightPanelState('NONE');
+                        } else {
+                            window.setRightPanelState('FILE_MANAGER', 'local');
+                        }
                     };
                 }
                 if (rightSidebarToggleBtn) {
@@ -15038,14 +15846,12 @@
                         if (show && rightSidebarSearchInput) rightSidebarSearchInput.focus();
                     };
                 }
-                if (rightSidebarTabLocal) rightSidebarTabLocal.onclick = function() { setRightSidebarMode('local'); };
+                if (rightSidebarTabLocal) rightSidebarTabLocal.onclick = function() { window.setRightPanelState('FILE_MANAGER', 'local'); };
                 if (rightSidebarTabHpc) rightSidebarTabHpc.onclick = function() {
-                    setRightSidebarMode('hpc');
-                    if (typeof fetchAndRenderHpcTreeView === 'function') fetchAndRenderHpcTreeView();
+                    window.setRightPanelState('FILE_MANAGER', 'hpc');
                 };
                 if (rightSidebarTabFiles) rightSidebarTabFiles.onclick = function() {
-                    setRightSidebarMode('files');
-                    if (typeof fetchAndRenderFilesPanel === 'function') fetchAndRenderFilesPanel();
+                    window.setRightPanelState('FILE_MANAGER', 'files');
                 };
                 if (rightSidebarSearchInput) {
                     rightSidebarSearchInput.addEventListener('input', function() {
@@ -15142,7 +15948,7 @@
                         e.stopPropagation();
                         openCustomContextMenu(e.clientX, e.clientY, (row.dataset && row.dataset.path) ? row.dataset.path : '', (row.dataset && row.dataset.source) ? row.dataset.source : 'local');
                     });
-                    fileTreeContainer.addEventListener('dblclick', function(e) {
+                    fileTreeContainer.addEventListener('click', function(e) {
                         var row = e.target && e.target.closest ? e.target.closest('.file-tree-file') : null;
                         if (!row || !fileTreeContainer.contains(row)) return;
                         if (row.dataset && row.dataset.type === 'directory') return;
@@ -15150,6 +15956,9 @@
                         if (!path) return;
                         e.preventDefault();
                         e.stopPropagation();
+                        if (typeof window.focusFileTreeNode === 'function') {
+                            window.focusFileTreeNode(row, { flashHighlight: false });
+                        }
                         var src = resolveFilePreviewSourceForPath(path, row.dataset && row.dataset.source);
                         var fn = path.split(/[\\/]/).pop() || path;
                         previewAssetFile(path, fn, src);
@@ -15168,11 +15977,42 @@
                         }
                         if (action === 'add-to-chat') {
                             addPathAsAttachment(absPath, source);
+                        } else if (action === 'copy-file') {
+                            var isLocalCopy = (__fileTreeContextState.source === 'local') ||
+                                (typeof inferPathNavigationMode === 'function' && inferPathNavigationMode(absPath) === 'local');
+                            var copyPromise = isLocalCopy
+                                ? sidecarFsRequest('/api/fs/copy_file', absPath).then(function(body) {
+                                    return (body && body.clipboard_text) ? body.clipboard_text : absPath;
+                                })
+                                : Promise.resolve(absPath);
+                            copyPromise.then(function(text) {
+                                return navigator.clipboard.writeText(text);
+                            }).then(function() {
+                                showToast(isLocalCopy ? '已复制到剪贴板' : '路径已复制', 'success');
+                            }).catch(function() {
+                                showToast('复制失败，请检查剪贴板权限', 'warning');
+                            });
                         } else if (action === 'copy-path') {
                             navigator.clipboard.writeText(absPath).then(function() {
                                 showToast('路径已复制', 'success');
                             }).catch(function() {
                                 showToast('复制失败，请检查剪贴板权限', 'warning');
+                            });
+                        } else if (action === 'open-in-explorer') {
+                            openPathInLocalExplorer(absPath);
+                        } else if (action === 'delete-file') {
+                            if (!window.confirm('确定删除本地文件？\n' + absPath)) {
+                                hideCustomContextMenu();
+                                return;
+                            }
+                            sidecarFsRequest('/api/fs/delete_file', absPath).then(function() {
+                                removeFileTreeRowByPath(absPath);
+                                if (typeof window.refreshWorkspaceSessionFiles === 'function') {
+                                    window.refreshWorkspaceSessionFiles(true);
+                                }
+                                showToast('文件已删除', 'success');
+                            }).catch(function(err) {
+                                showToast('删除失败: ' + (err.message || err), 'danger');
                             });
                         } else if (action === 'preview') {
                             var fn = (absPath.split(/[\\/]/).pop()) || absPath;
@@ -15183,13 +16023,27 @@
                 }
                 document.addEventListener('click', function(e) {
                     var menu = document.getElementById('custom-context-menu');
-                    if (!menu || menu.style.display === 'none') return;
-                    if (e.target && e.target.closest && e.target.closest('#custom-context-menu')) return;
-                    hideCustomContextMenu();
+                    if (menu && menu.style.display !== 'none') {
+                        if (!e.target || !e.target.closest || !e.target.closest('#custom-context-menu')) hideCustomContextMenu();
+                    }
+                    var wsMenu = document.getElementById('workspace-session-file-context-menu');
+                    if (wsMenu && wsMenu.parentNode) {
+                        if (!e.target || !e.target.closest || !e.target.closest('#workspace-session-file-context-menu')) {
+                            wsMenu.remove();
+                        }
+                    }
+                    var mpMenu = document.getElementById('mount-path-context-menu');
+                    if (mpMenu && mpMenu.style.display !== 'none') {
+                        if (!e.target || !e.target.closest || !e.target.closest('#mount-path-context-menu')) {
+                            if (typeof hideMountPathContextMenu === 'function') hideMountPathContextMenu();
+                        }
+                    }
                 });
                 document.addEventListener('contextmenu', function(e) {
                     if (e.target && e.target.closest && e.target.closest('.file-tree-file')) return;
+                    if (e.target && e.target.closest && e.target.closest('.omics-mount-card, .mount-path-card')) return;
                     hideCustomContextMenu();
+                    if (typeof hideMountPathContextMenu === 'function') hideMountPathContextMenu();
                 });
                 window.addEventListener('resize', hideCustomContextMenu);
                 window.addEventListener('scroll', hideCustomContextMenu, true);
@@ -15236,11 +16090,8 @@
                 }
                 var btnClose = document.getElementById('btn-workspace-close');
                 if (btnClose) btnClose.onclick = function() {
-                    var wp = document.getElementById('workspace-pane');
-                    if (wp) {
-                        if (typeof clearWorkspacePaneInlineLayout === 'function') clearWorkspacePaneInlineLayout(wp);
-                        if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(false);
-                    }
+                    if (typeof window.setRightPanelState === 'function') window.setRightPanelState('NONE');
+                    else if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(false);
                     if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
                 };
                 if (typeof syncWorkspaceExpandButtonUI === 'function') syncWorkspaceExpandButtonUI();
@@ -17597,6 +18448,9 @@
                 var _mountedLocalWorkspace = !!(_wsSel && _wsSel.workspace_path);
                 payload.client_track = _mountedLocalWorkspace ? 'local_sidecar' : 'web';
                 payload.local_workspace_mounted = _mountedLocalWorkspace;
+                if (_mountedLocalWorkspace && _wsSel && _wsSel.workspace_path) {
+                    payload.workspace_path = String(_wsSel.workspace_path).trim();
+                }
                 var _pendingLocalToolResponse = window.__pendingLocalToolResponse || null;
                 if (_pendingLocalToolResponse) {
                     payload.local_tool_response = _pendingLocalToolResponse;
@@ -18482,6 +19336,16 @@
                                         break;
                                     }
                                     updateProcessLog(contentStr, data.state || 'running');
+                                    if (data.files_notification && typeof window.dispatchEvent === 'function') {
+                                        if (data.files_notification.client_deploy_package
+                                            && typeof window.handleFilesNotificationWithClientDeploy === 'function') {
+                                            window.handleFilesNotificationWithClientDeploy(data.files_notification);
+                                        } else {
+                                            window.dispatchEvent(new CustomEvent('omics:session-files-changed', {
+                                                detail: data.files_notification
+                                            }));
+                                        }
+                                    }
                                     if (window._activeSkillPayload && typeof refreshActiveSkillRunningFromSession === 'function') {
                                         var _stNorm = String(data.state != null ? data.state : 'running').toLowerCase();
                                         if (_stNorm === 'running' || _stNorm === 'active' || _stNorm === 'start' || _stNorm === 'analyzing' || _stNorm === 'thinking' || _stNorm === 'loading') {
@@ -18542,12 +19406,8 @@
                                     break;
                                     
                                 case 'diagnosis': {
-                                    if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
-                                    var wpDx = document.getElementById('workspace-pane');
-                                    if (wpDx) {
-                                        wpDx.style.setProperty('display', 'flex', 'important');
-                                        wpDx.classList.add('workspace-active');
-                                    }
+                                    if (typeof window.setRightPanelState === 'function') window.setRightPanelState('WORKBENCH');
+                                    else if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
                                     // 规划期：实时写入右栏诊断区 + 挂载「查看工作台」卡片（不等待 done / execution_snapshot）
                                     var _planDx = (typeof extractPlanningDiagnosisContent === 'function')
                                         ? extractPlanningDiagnosisContent(data)
@@ -18710,6 +19570,15 @@
                                         }
                                     }
                                     break;
+
+                                case 'corpus_asset': {
+                                    if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
+                                    var _corpusPayload = data || {};
+                                    if (typeof window.mountCorpusPanelAfterExpertReport === 'function') {
+                                        window.mountCorpusPanelAfterExpertReport(_corpusPayload);
+                                    }
+                                    break;
+                                }
                                     
                                 case 'clarification':
                                     sseIntentClarifyOnly = true;
@@ -18913,6 +19782,10 @@
                                             _ssPayload.snapshot_id = _ssId;
                                             window.__omicsSnapshotRegistry = window.__omicsSnapshotRegistry || {};
                                             window.__omicsSnapshotRegistry[_ssId] = _ssPayload;
+                                            if (typeof window.mountCorpusPanelAfterExpertReport === 'function'
+                                                && String(_ssPayload.corpus_sft_json || '').trim()) {
+                                                window.mountCorpusPanelAfterExpertReport(_ssPayload);
+                                            }
                                         }
                                         var snapshotStr = typeof data === 'object' ? JSON.stringify(data) : String(data);
                                         var currentRow = null;
@@ -23674,7 +24547,11 @@
         <script src="/js/components/database_settings.js" defer></script>
         <script src="/js/components/hitl_ui.js" defer></script>
         <script src="/js/components/expert_report_edit.js" defer></script>
+        <script src="/js/components/corpus_asset_panel.js" defer></script>
+        <script src="/js/components/local_sidecar_deploy.js" defer></script>
         <script src="/js/components/workspace_action_bar.js" defer></script>
+        <script src="/js/components/file_tree_nav.js" defer></script>
+        <script src="/js/components/workspace_session_files.js" defer></script>
         <script src="/js/components/im_channels_modal.js" defer></script>
         <script src="/js/feedback_ui.js"></script>
         <script type="module" src="/js/components/admin_console.js"></script>
@@ -23701,7 +24578,7 @@
                     <div style="padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 12px; color: #475569; line-height: 1.55; margin-bottom: 12px;">
                         <div style="font-weight: 600; margin-bottom: 6px; color: #1e293b;">V0.14.x 更新摘要</div>
                         <ul style="margin: 0; padding-left: 1.15rem;">
-                            <li>当前推荐 <strong>0.14.6</strong>：技能报告中文名映射、Open Babel/化学技能修复、数据诊断血缘优化。</li>
+                            <li>当前推荐 <strong>0.14.8</strong>：本地落盘 Sidecar（silent_deploy / URL 流式中继）、一键入库 local_sidecar、旧 Sidecar 自动重启。</li>
                             <li>浏览器端「下载客户端」弹窗与完整下载页版本、安装包链接同步。</li>
                             <li>桌面版自动更新需确认后下载；托盘唤起与内置网页与主站能力对齐。</li>
                         </ul>

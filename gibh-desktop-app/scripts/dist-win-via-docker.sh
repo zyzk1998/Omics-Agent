@@ -5,6 +5,8 @@
 # 可选环境变量（宿主机 export 后执行本脚本即可传入容器）：
 #   GIBH_ELECTRON_MIRROR — 国内拉 Electron 二进制易断时，可设为：
 #     https://npmmirror.com/mirrors/electron/
+#   PIP_INDEX_URL — Wine 交叉构建 Sidecar 时 pip 源，如：
+#     https://pypi.tuna.tsinghua.edu.cn/simple
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -12,21 +14,25 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # ① 旧构建可能以 root 写入 dist-out（如 win-unpacked/resources/elevate.exe），非 root 跑 electron-builder 会 unlinkat: permission denied。
 #    同时清理 node_modules，避免属主混杂导致 npm ci EACCES。
 echo "[dist-win-via-docker] 清理旧 node_modules 与 dist-out（root 一步）…"
-docker run --rm -u 0:0 \
+docker run --rm --network host -u 0:0 \
   -v "${REPO_ROOT}:/repo" \
   electronuserland/builder:wine \
   /bin/bash -lc 'rm -rf /repo/gibh-desktop-app/node_modules /repo/gibh-desktop-app/dist-out'
 
-ELECTRON_MIRROR_ARGS=()
+DOCKER_ENV_ARGS=()
 if [[ -n "${GIBH_ELECTRON_MIRROR:-}" ]]; then
-  ELECTRON_MIRROR_ARGS+=(-e "ELECTRON_MIRROR=${GIBH_ELECTRON_MIRROR}")
+  DOCKER_ENV_ARGS+=(-e "ELECTRON_MIRROR=${GIBH_ELECTRON_MIRROR}")
   echo "[dist-win-via-docker] 使用 ELECTRON_MIRROR=${GIBH_ELECTRON_MIRROR}"
+fi
+if [[ -n "${PIP_INDEX_URL:-}" ]]; then
+  DOCKER_ENV_ARGS+=(-e "PIP_INDEX_URL=${PIP_INDEX_URL}")
+  echo "[dist-win-via-docker] 使用 PIP_INDEX_URL=${PIP_INDEX_URL}"
 fi
 
 # ② 以宿主机 UID 写入 /repo；拉长 npm 拉取与 electron postinstall 超时；npm ci 失败时自动重试（缓解 socket hang up）。
 echo "[dist-win-via-docker] npm ci + dist:win（宿主机 UID $(id -u):$(id -g)）…"
 # 必须 -i：否则 heredoc  stdin 不会进容器，bash -s 立刻 EOF，npm ci 根本不会跑。
-exec docker run --rm -i \
+exec docker run --rm -i --network host \
   -u "$(id -u):$(id -g)" \
   -v "${REPO_ROOT}:/repo" \
   -w /repo/gibh-desktop-app \
@@ -38,7 +44,7 @@ exec docker run --rm -i \
   -e NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
   -e NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 \
   -e NPM_CONFIG_FETCH_TIMEOUT=600000 \
-  "${ELECTRON_MIRROR_ARGS[@]}" \
+  "${DOCKER_ENV_ARGS[@]}" \
   electronuserland/builder:wine \
   /bin/bash -s <<'EOS'
 set -euo pipefail

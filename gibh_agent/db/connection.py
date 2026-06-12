@@ -43,6 +43,8 @@ _sessions_status_schema_lock = threading.Lock()
 _sessions_status_schema_done = False
 _feedbacks_status_schema_lock = threading.Lock()
 _feedbacks_status_schema_done = False
+_messages_index_schema_lock = threading.Lock()
+_messages_index_schema_done = False
 
 
 def is_available() -> bool:
@@ -51,7 +53,7 @@ def is_available() -> bool:
 
 
 def get_db_session() -> Generator:
-    global _users_approval_schema_done, _sessions_composer_schema_done, _sessions_status_schema_done, _feedbacks_status_schema_done
+    global _users_approval_schema_done, _sessions_composer_schema_done, _sessions_status_schema_done, _feedbacks_status_schema_done, _messages_index_schema_done
     db = SessionLocal()
     try:
         if not _users_approval_schema_done:
@@ -90,6 +92,15 @@ def get_db_session() -> Generator:
 
                     ensure_user_feedbacks_status_column(engine)
                     _feedbacks_status_schema_done = True
+        if not _messages_index_schema_done:
+            with _messages_index_schema_lock:
+                if not _messages_index_schema_done:
+                    from gibh_agent.db.message_index_schema import (
+                        ensure_messages_session_role_created_index,
+                    )
+
+                    ensure_messages_session_role_created_index(engine)
+                    _messages_index_schema_done = True
         yield db
     finally:
         db.close()

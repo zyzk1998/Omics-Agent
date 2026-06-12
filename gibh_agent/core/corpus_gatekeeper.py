@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-语料库就绪 (Corpus-Ready) · 一键入库守门人。
+语料库就绪 (Corpus-Ready) · 模态嗅探与磁盘归档定位。
 
-在 POST /api/ingestion/trigger 打包前盘点快照资产；若尚无标准语料归档，
-则按模态（VLM / NLP）代偿生成 corpus_archive/ 后再交付 Data Packager。
+语料**生成**已迁移至 `corpus_terminal_hook`（Task/Skill 执行终点站）；
+本模块保留模态嗅探、归档路径解析，供打包与终点站复用。
 """
 from __future__ import annotations
 

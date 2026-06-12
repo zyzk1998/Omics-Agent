@@ -12,6 +12,7 @@
  * 安装包 EXE 内嵌图标来自构建时的 build/icon.ico；网页上的 client-app-icon.png 仅影响站点展示，不能单独替换资源管理器里 exe 的图标。
  * 4) 将 dist-out 中的 latest.yml、latest-linux.yml 及同目录 .blockmap 复制到 services/nginx/html/downloads/，
  *    供 electron-updater（generic provider）拉取元数据；缺 yml 时客户端更新检查必失败。
+ * 5) 读取 release-notes/{version}.txt 写入 client-release.json.releaseNotes 及 latest*.yml.releaseNotes（更新弹窗展示）。
  */
 const fs = require('fs');
 const path = require('path');
@@ -69,6 +70,63 @@ function readYmlSemver(filePath) {
     return m ? String(m[1]).trim() : '';
   } catch (e) {
     return '';
+  }
+}
+
+/** 读取 gibh-desktop-app/release-notes/{version}.txt，供自动更新弹窗展示 */
+function readClientReleaseNotes(version) {
+  const notesDir = path.join(appRoot, 'release-notes');
+  const byVersion = path.join(notesDir, `${version}.txt`);
+  const current = path.join(notesDir, 'current.txt');
+  for (const p of [byVersion, current]) {
+    if (fs.existsSync(p)) {
+      const text = fs.readFileSync(p, 'utf8').trim();
+      if (text) {
+        console.log('已读取客户端更新说明', path.basename(p));
+        return text;
+      }
+    }
+  }
+  return '';
+}
+
+function formatYamlReleaseNotesBlock(notesText) {
+  const lines = String(notesText).trim().split('\n');
+  if (!lines.length || !lines[0]) return '';
+  if (lines.length === 1) {
+    return `releaseNotes: ${JSON.stringify(lines[0])}\n`;
+  }
+  return `releaseNotes: |\n${lines.map((line) => `  ${line}`).join('\n')}\n`;
+}
+
+/** 向 latest*.yml 写入 releaseNotes（electron-updater generic 源读取） */
+function injectReleaseNotesIntoYml(ymlPath, notesText) {
+  if (!notesText || !fs.existsSync(ymlPath)) return false;
+  let content = fs.readFileSync(ymlPath, 'utf8');
+  content = content.replace(/^releaseNotes:.*(?:\n(?:  .+|\s*)*)*/m, '').trimEnd();
+  const block = formatYamlReleaseNotesBlock(notesText);
+  fs.writeFileSync(ymlPath, `${content}\n${block}`, 'utf8');
+  return true;
+}
+
+function applyReleaseNotesToDownloads(downloadsDir, version, notesText) {
+  if (!notesText) {
+    console.warn('[sync] 未找到 release-notes/' + version + '.txt，跳过 releaseNotes 注入');
+    return;
+  }
+  const ymlNames = ['latest.yml', 'latest-linux.yml'];
+  for (const name of ymlNames) {
+    const dest = path.join(downloadsDir, name);
+    if (injectReleaseNotesIntoYml(dest, notesText)) {
+      console.log('已写入 releaseNotes → downloads/', name);
+    }
+  }
+  const distYmlNames = ['latest.yml', 'latest-linux.yml'];
+  for (const name of distYmlNames) {
+    const src = path.join(distOutDir, name);
+    if (injectReleaseNotesIntoYml(src, notesText)) {
+      console.log('已写入 releaseNotes → dist-out/', name);
+    }
   }
 }
 
@@ -172,6 +230,8 @@ const linuxTpl =
   (pkg.build && pkg.build.linux && pkg.build.linux.artifactName) || '${productName}-${version}.${ext}';
 const linuxAppImageFile = expandTemplate(linuxTpl, productName, version, 'AppImage');
 
+const releaseNotesText = readClientReleaseNotes(version);
+
 const payload = {
   version,
   displayVersion: displayFromSemver(version),
@@ -180,6 +240,9 @@ const payload = {
   linuxAppImageFile,
   updatedAt: new Date().toISOString(),
 };
+if (releaseNotesText) {
+  payload.releaseNotes = releaseNotesText;
+}
 
 /** 若站点已手动固定 Windows 安装包文件名（如暂提供旧版 exe），保留 winSetupFile，避免 npm run sync 覆盖。
  * 发布新包时设置环境变量 GIBH_CLIENT_UNPIN_WIN=1（见 scripts/publish-windows-installer.sh），则忽略 pin，按 package.json 版本生成文件名。
@@ -221,4 +284,5 @@ if (fs.existsSync(iconSrc)) {
 ensureArtifactInDownloads(effectiveWin, downloadsDir);
 ensureArtifactInDownloads(effectiveLinux, downloadsDir);
 copyAutoUpdateMetadataToDownloads(downloadsDir, version);
+applyReleaseNotesToDownloads(downloadsDir, version, releaseNotesText);
 removeStaleArtifacts(downloadsDir, productName, effectiveWin, effectiveLinux);

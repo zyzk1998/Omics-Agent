@@ -282,7 +282,7 @@ class CorpusProcessingAgent(BaseAgent):
         owner_id: str,
         model_name: str,
     ) -> AsyncIterator[str]:
-        """技能快车道：收到有效文件后立即挂起进入 Label Studio（硬 HITL）。"""
+        """技能快车道：创建 LS 可选入口后立即生成银标准语料（非阻塞）。"""
         self.set_request_model_name(model_name)
         yield emit_sse("status", {"content": "正在准备语料标注任务…", "state": "running"})
 
@@ -318,19 +318,20 @@ class CorpusProcessingAgent(BaseAgent):
             return
 
         sid = str(session_id or "").strip()
-        if db and sid:
-            from gibh_agent.core.session_runtime import SESSION_WAITING_FOR_HITL, set_session_status
-
-            set_session_status(db, sid, SESSION_WAITING_FOR_HITL, owner_id=owner_id)
 
         _hitl_event = {
             "ls_url": hitl_result.get("ls_project_url") or hitl_result.get("ls_url") or "",
             "project_id": hitl_result.get("ls_project_id") or hitl_result.get("project_id"),
             "scenario_type": _SCENARIO,
-            "message": hitl_result.get("message") or "请在 Label Studio 中完成语料标注",
+            "message": hitl_result.get("message")
+            or "可选：在 Label Studio 中修改标注；不修改则保留当前 AI 自动生成语料",
             "workflow_name": _WORKFLOW_NAME,
+            "skill_id": _SKILL_ID,
+            "reannotation_enabled": True,
+            "optional": True,
         }
-        state_snapshot["hitl_pending"] = True
+        state_snapshot["hitl_pending"] = False
+        state_snapshot["hitl_reannotation_enabled"] = True
         state_snapshot["hitl"] = _hitl_event
         state_snapshot["workflow"] = {"workflow_name": _WORKFLOW_NAME, "skill_id": _SKILL_ID}
 
@@ -345,16 +346,24 @@ class CorpusProcessingAgent(BaseAgent):
                     "scenario_type": _SCENARIO,
                     "workflow_name": _WORKFLOW_NAME,
                     "agent_key": "corpus_processing_agent",
+                    "skill_id": _SKILL_ID,
+                    "image_paths": media.get("image_paths") or [],
+                    "image_path": media.get("image_path") or "",
+                    "file_path": media.get("file_path") or "",
+                    "uploaded_file_paths": list(file_paths or []),
                 },
             )
 
-        yield emit_sse("message", {"content": "已创建 Label Studio 语料标注项目，请在右侧进入专家工作台完成打标。"})
-        yield emit_sse("hitl_action", _hitl_event)
         yield emit_sse(
-            "status",
-            {"content": "⏸ 流程已挂起，等待您在 Label Studio 中完成语料标注", "state": "waiting"},
+            "message",
+            {
+                "content": (
+                    "已创建 Label Studio 项目；**银标准 SFT JSON 将自动生成**。"
+                    "如需修改标注，可随时进入 LS，提交后将覆盖为金标准语料。"
+                ),
+            },
         )
-        yield emit_sse("done", {"status": "waiting_for_hitl", "tool_name": _SKILL_ID, "tool_result": hitl_result})
+        yield emit_sse("hitl_action", _hitl_event)
 
     async def _generate_analysis_summary(
         self,
@@ -378,7 +387,7 @@ class CorpusProcessingAgent(BaseAgent):
             )
         return (
             "## 科学语料导出\n\n"
-            "当前无专家标注导出。标准语料将在 **一键入库** 时基于 AI 初稿按模态（有图→VLM，无图→NLP）自动生成。"
+            "当前无专家标注导出。标准语料已在 **Task/Skill 执行收尾** 时按模态（有图→VLM，无图→NLP）自动生成。"
         )
 
     async def generate_corpus_archive_bundle(
@@ -1039,6 +1048,13 @@ class CorpusProcessingAgent(BaseAgent):
         steps_details: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         draft = str(draft_report or "").strip()
+        if not draft and image_paths:
+            draft = (
+                "用户上传的原始科研图像（已跳过 Label Studio 手动框选）。"
+                "请对整张图做 Global Description（全局视觉描述），"
+                "覆盖主要结构、颜色分布、空间模式及可推断的生物学/实验含义，"
+                "并生成标准 LLaVA / Qwen-VL 微调语料。"
+            )
         if not draft and steps_details:
             lines: List[str] = []
             for sd in steps_details[:12]:

@@ -52,11 +52,16 @@ def test_deploy_artifacts_copies_archive_and_bundle(tmp_path):
         session_id="sess-1",
         owner_id="owner-abc",
         bundle_dir=str(bundle),
+        session_title="可视化标注工具",
     )
     dest_dir = Path(result["destination_dir"])
+    session_root = Path(result["session_root"])
+    assert session_root.name == "可视化标注工具"
     assert (dest_dir / archive.name).is_file()
     assert (dest_dir / bundle.name / "corpus_archive" / "dataset.json").is_file()
     assert result["bundle_destination"]
+    assert (session_root / "upload").is_dir()
+    assert (session_root / "result").is_dir()
 
 
 def test_reannotation_resume_allowed_when_completed(monkeypatch, tmp_path):
@@ -100,3 +105,49 @@ def test_reannotation_resume_allowed_when_completed(monkeypatch, tmp_path):
     assert hitl_api._session_allows_hitl_resume(_FakeDb(), session, "owner") is True
 
     assert hitl_api._resolve_hitl_project_id("sess-x", snap) == 42
+
+
+def test_completed_status_entry_allowed_for_resume():
+    assert hitl_api._session_status_allows_hitl_resume_entry("completed") is True
+    assert hitl_api._session_status_allows_hitl_resume_entry("waiting_for_hitl") is True
+    assert hitl_api._session_status_allows_hitl_resume_entry("running") is True
+    assert hitl_api._session_status_allows_hitl_resume_entry("failed") is False
+
+
+def test_optional_hitl_reannotation_after_auto_complete(monkeypatch, tmp_path):
+    monkeypatch.setenv("GIBH_HITL_REGISTRY_DIR", str(tmp_path))
+    snap = {
+        "hitl_reannotation_enabled": True,
+        "hitl": {
+            "status": "hitl_required",
+            "project_id": 25,
+            "reannotation_enabled": True,
+            "ls_url": "/label-studio/projects/25/data",
+        },
+    }
+    register_hitl_session("sess-auto", {"project_id": 25})
+
+    class _FakeMsg:
+        content = {"state_snapshot": snap}
+
+    class _FakeQuery:
+        def filter(self, *args, **kwargs):
+            return self
+
+        def order_by(self, *args, **kwargs):
+            return self
+
+        def first(self):
+            return _FakeMsg()
+
+    class _FakeDb:
+        def query(self, *args, **kwargs):
+            return _FakeQuery()
+
+    monkeypatch.setattr(
+        "gibh_agent.core.hitl_resume._load_latest_agent_snapshot",
+        lambda db, sid, oid: (_FakeMsg(), snap),
+    )
+    session = SimpleNamespace(id="sess-auto", status="completed")
+    assert hitl_api._session_status_allows_hitl_resume_entry(session.status) is True
+    assert hitl_api._session_allows_hitl_resume(_FakeDb(), session, "owner") is True

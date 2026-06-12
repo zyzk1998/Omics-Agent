@@ -38,8 +38,6 @@ def test_build_artifacts_archive_includes_corpus_archive_tree(tmp_path, monkeypa
         expert_report_markdown="# 初稿报告",
         steps_details=[{"step_name": "UMAP", "status": "success"}],
         skip_hitl=True,
-        corpus_archive_dir=str(archive_src),
-        corpus_modality="vlm",
     )
 
     assert pack["status"] == "success"

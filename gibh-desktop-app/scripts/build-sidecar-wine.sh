@@ -54,13 +54,19 @@ if [[ ! -f "${GET_PIP}" ]]; then
   curl -fsSL -o "${GET_PIP}" https://bootstrap.pypa.io/get-pip.py
 fi
 
+PIP_INDEX_ARGS=()
+if [[ -n "${PIP_INDEX_URL:-}" ]]; then
+  PIP_INDEX_ARGS=(--index-url "${PIP_INDEX_URL}")
+  echo "[build-sidecar-wine] 使用 PIP_INDEX_URL=${PIP_INDEX_URL}"
+fi
+
 echo "[build-sidecar-wine] Wine 初始化 / 安装 pip（首次可能较慢）…"
 wineboot -i 2>/dev/null || true
-(cd "${CACHE}/embed" && wine python.exe "${GET_PIP}" --no-warn-script-location)
+(cd "${CACHE}/embed" && wine python.exe "${GET_PIP}" --no-warn-script-location "${PIP_INDEX_ARGS[@]}")
 
 echo "[build-sidecar-wine] 安装依赖与 PyInstaller …"
-(cd "${CACHE}/embed" && wine python.exe -m pip install -q -U pip)
-(cd "${CACHE}/embed" && wine python.exe -m pip install -q "pyinstaller>=6.0" -r "${SIDECAR}/requirements.txt")
+(cd "${CACHE}/embed" && wine python.exe -m pip install -q -U pip "${PIP_INDEX_ARGS[@]}")
+(cd "${CACHE}/embed" && wine python.exe -m pip install -q "pyinstaller>=6.0" -r "${SIDECAR}/requirements.txt" "${PIP_INDEX_ARGS[@]}")
 
 echo "[build-sidecar-wine] PyInstaller 打包 …"
 rm -rf "${CACHE}/embed/build" "${CACHE}/embed/dist" "${SIDECAR}/local_sidecar-wine.spec"

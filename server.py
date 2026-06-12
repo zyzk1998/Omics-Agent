@@ -1311,6 +1311,7 @@ class ChatRequest(BaseModel):
     mode: Optional[str] = "standard"  # LLM API 深度思考开关：standard | flagship（经 OpenAI SDK extra_body.thinking 下发）
     client_track: Optional[str] = "web"  # dual-track: web | local_sidecar
     local_workspace_mounted: Optional[bool] = False
+    workspace_path: Optional[str] = None  # 宿主机工作区根路径（Sidecar 落盘用）
     local_tool_response: Optional[dict] = None  # 前端 relay 回传的本地工具结果
     intent_override_id: Optional[str] = None  # LUI 澄清闭环：用户点击 Action Pill 后直路由，跳过 LLM 意图探针
     clarification_context_message: Optional[str] = None  # 澄清前原始自然语言（闭环时与 override 一并透传）
@@ -2869,6 +2870,11 @@ def _build_agent_message_content(state_snapshot_for_db: Optional[Dict[str, Any]]
     }
     if execution_snapshot:
         payload["execution_snapshot"] = execution_snapshot
+        if execution_snapshot.get("corpus_sft_json"):
+            payload["corpus_sft_json"] = execution_snapshot.get("corpus_sft_json")
+        for key in ("corpus_standard", "corpus_modality", "corpus_count", "corpus_sft_records"):
+            if execution_snapshot.get(key) is not None:
+                payload[key] = execution_snapshot.get(key)
     execution_snapshots = snap.get("execution_snapshots")
     if isinstance(execution_snapshots, dict) and execution_snapshots.get("snapshots"):
         payload["execution_snapshots"] = execution_snapshots
@@ -2902,14 +2908,9 @@ def _augment_history_with_db_tool_memory(
     if not session_id or db is None:
         return list(history or [])
     try:
-        from gibh_agent.db.models import Message as MessageModel
+        from gibh_agent.db.message_queries import get_latest_agent_message
 
-        row = (
-            db.query(MessageModel)
-            .filter(MessageModel.session_id == session_id, MessageModel.role == "agent")
-            .order_by(MessageModel.id.desc())
-            .first()
-        )
+        row = get_latest_agent_message(db, session_id)
         if not row or not isinstance(row.content, dict):
             return list(history or [])
         mem = _extract_tool_output_memory_from_agent_content(row.content)
@@ -3134,6 +3135,16 @@ async def chat_endpoint(
                         _track = "web"
                     _workspace_ctx["execution_track"] = _track
                     _workspace_ctx["local_workspace_mounted"] = bool(req.local_workspace_mounted)
+                    if req.local_workspace_mounted and getattr(req, "workspace_path", None):
+                        from gibh_agent.core.storage.mount_path_resolver import resolve_container_writable_mount
+                        from gibh_agent.core.workspace_context import register_session_workspace
+
+                        container_mount = resolve_container_writable_mount(req.workspace_path)
+                        register_session_workspace(
+                            str(req.workspace_path).strip(),
+                            container_path=container_mount,
+                        )
+                        _workspace_ctx.update(get_workspace_context())
 
                     # —— Master LLM Intent Router（LUI 自然语言入口；澄清则物理硬阻断，绝不进入 Orchestrator）——
                     _route_message = (req.message or "").strip()

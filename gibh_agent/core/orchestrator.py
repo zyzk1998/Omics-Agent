@@ -851,6 +851,9 @@ class AgentOrchestrator:
         }
         owner_id = kwargs.get("owner_id") or kwargs.get("user_id")
         db = kwargs.get("db")
+        _corpus_ws_ctx = dict(kwargs.get("workspace_context") or get_workspace_context() or {})
+        _corpus_local_mounted = bool(_corpus_ws_ctx.get("local_workspace_mounted"))
+        state_snapshot["local_workspace_mounted"] = _corpus_local_mounted
         # 🔥 第一入口：数据资产 asset_id 查库映射 + preemptive basename 自愈（早于 FileInspector / Planner）
         if files:
             try:
@@ -1125,6 +1128,33 @@ class AgentOrchestrator:
                     "message",
                     {"content": f"**技能快车道失败**：{e}"},
                 )
+            _ex_snap_sk = state_snapshot.get("execution_snapshot")
+            _steps_sk = (
+                (_ex_snap_sk.get("steps_details") if isinstance(_ex_snap_sk, dict) else None)
+                or state_snapshot.get("steps")
+                or []
+            )
+            _expert_sk = ""
+            if isinstance(_ex_snap_sk, dict):
+                _expert_sk = str(_ex_snap_sk.get("expert_report_markdown") or "").strip()
+            if not _expert_sk:
+                _expert_sk = str(state_snapshot.get("text") or "").strip()
+            async for _corpus_sse in self._stream_session_corpus_terminal(
+                state_snapshot,
+                session_id=kwargs.get("session_id"),
+                steps_details=_steps_sk,
+                expert_report_md=_expert_sk,
+                skip_if_pending_hitl=False,
+                db=db,
+                owner_id=owner_id or str(kwargs.get("user_id") or ""),
+                workflow_name=str(
+                    (state_snapshot.get("workflow") or {}).get("workflow_name") or "技能快车道"
+                ),
+                workspace_context=_corpus_ws_ctx,
+                local_workspace_mounted=_corpus_local_mounted,
+            ):
+                yield _corpus_sse
+                await asyncio.sleep(0.01)
             yield self._emit_sse(state_snapshot, "status", {"content": "回答完成", "state": "completed"})
             await asyncio.sleep(0.01)
             done_payload: Dict[str, Any] = {"status": "success"}
@@ -1360,6 +1390,33 @@ class AgentOrchestrator:
                     "message",
                     {"content": f"**技能快车道失败**：{e}"},
                 )
+            _ex_snap_fl = state_snapshot.get("execution_snapshot")
+            _steps_fl = (
+                (_ex_snap_fl.get("steps_details") if isinstance(_ex_snap_fl, dict) else None)
+                or state_snapshot.get("steps")
+                or []
+            )
+            _expert_fl = ""
+            if isinstance(_ex_snap_fl, dict):
+                _expert_fl = str(_ex_snap_fl.get("expert_report_markdown") or "").strip()
+            if not _expert_fl:
+                _expert_fl = str(state_snapshot.get("text") or "").strip()
+            async for _corpus_sse in self._stream_session_corpus_terminal(
+                state_snapshot,
+                session_id=kwargs.get("session_id"),
+                steps_details=_steps_fl,
+                expert_report_md=_expert_fl,
+                skip_if_pending_hitl=False,
+                db=db,
+                owner_id=owner_id or str(kwargs.get("user_id") or ""),
+                workflow_name=str(
+                    (state_snapshot.get("workflow") or {}).get("workflow_name") or "技能快车道"
+                ),
+                workspace_context=_corpus_ws_ctx,
+                local_workspace_mounted=_corpus_local_mounted,
+            ):
+                yield _corpus_sse
+                await asyncio.sleep(0.01)
             yield self._emit_sse(state_snapshot, "status", {"content": "回答完成", "state": "completed"})
             await asyncio.sleep(0.01)
             done_payload_fl: Dict[str, Any] = {"status": "success"}
@@ -1844,7 +1901,7 @@ class AgentOrchestrator:
                     yield self._format_sse("state_snapshot", state_snapshot)
                     return  # STOP HERE - Do not continue to next steps
 
-                # 🎯 HITL：硬挂起（非软 HITL）— 中止 LLM 续推与专家报告生成
+                # 🎯 HITL：非阻塞可选复核 — 推送 LS 入口后继续生成报告与银标语料
                 _results_dict = results if isinstance(results, dict) else {}
                 if _results_dict.get("hitl_soft"):
                     hitl_payload = None
@@ -1852,15 +1909,6 @@ class AgentOrchestrator:
                     hitl_payload = self._extract_hitl_payload(_results_dict)
                 if hitl_payload:
                     _session_id = (kwargs.get("session_id") or "").strip()
-                    if db and _session_id:
-                        from gibh_agent.core.session_runtime import (
-                            SESSION_WAITING_FOR_HITL,
-                            set_session_status,
-                        )
-
-                        set_session_status(
-                            db, _session_id, SESSION_WAITING_FOR_HITL, owner_id=owner_id
-                        )
                     steps_details = results.get("steps_details", []) if isinstance(results, dict) else []
                     if steps_details:
                         yield self._emit_sse(
@@ -1880,49 +1928,32 @@ class AgentOrchestrator:
                             },
                         )
                         await asyncio.sleep(0.01)
-                    _hitl_event = {
-                        "ls_url": hitl_payload.get("ls_project_url") or hitl_payload.get("ls_url") or "",
-                        "project_id": hitl_payload.get("ls_project_id"),
-                        "scenario_type": hitl_payload.get("scenario_type", ""),
-                        "message": hitl_payload.get("message", "等待专家标注复核"),
-                        "step_id": results.get("hitl_step_id") if isinstance(results, dict) else None,
-                    }
-                    state_snapshot["hitl_pending"] = True
-                    state_snapshot["hitl"] = _hitl_event
-                    if _session_id:
-                        from gibh_agent.core.hitl_session_registry import register_hitl_session
-
-                        register_hitl_session(
-                            _session_id,
-                            {
-                                "project_id": _hitl_event.get("project_id"),
-                                "ls_url": _hitl_event.get("ls_url"),
-                                "scenario_type": _hitl_event.get("scenario_type"),
-                                "workflow_name": workflow_config.get("workflow_name"),
-                                "output_dir": results.get("output_dir") if isinstance(results, dict) else None,
-                                "hitl_step_id": _hitl_event.get("step_id"),
-                            },
-                        )
-                    yield self._emit_sse(state_snapshot, "hitl_action", _hitl_event)
-                    await asyncio.sleep(0.01)
-                    yield self._emit_sse(
+                    _hitl_event = self._prepare_optional_hitl_in_state(
                         state_snapshot,
-                        "status",
                         {
-                            "content": "⏸ 流程已挂起，等待专家在 Label Studio 中完成标注",
-                            "state": "waiting",
+                            "ls_url": hitl_payload.get("ls_project_url") or hitl_payload.get("ls_url") or "",
+                            "project_id": hitl_payload.get("ls_project_id"),
+                            "scenario_type": hitl_payload.get("scenario_type", ""),
+                            "message": hitl_payload.get(
+                                "message",
+                                "可选：在 Label Studio 中修改标注后将覆盖 AI 初稿与语料",
+                            ),
+                            "step_id": results.get("hitl_step_id") if isinstance(results, dict) else None,
+                        },
+                        session_id=_session_id,
+                        workflow_name=workflow_config.get("workflow_name"),
+                        output_dir=results.get("output_dir") if isinstance(results, dict) else None,
+                        extra_registry={
+                            "hitl_step_id": results.get("hitl_step_id") if isinstance(results, dict) else None,
                         },
                     )
+                    yield self._emit_sse(state_snapshot, "hitl_action", _hitl_event)
                     await asyncio.sleep(0.01)
-                    yield self._emit_sse(state_snapshot, "done", {"status": "waiting_for_hitl"})
-                    state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
-                    yield self._format_sse("state_snapshot", state_snapshot)
                     logger.info(
-                        "[Orchestrator] HITL 挂起 session=%s project_id=%s",
+                        "[Orchestrator] HITL 可选复核已挂载（非阻塞）session=%s project_id=%s",
                         _session_id,
                         _hitl_event.get("project_id"),
                     )
-                    return  # 跳出 stream_process，不再生成专家报告
                 
                 # 4. Generate Summary (if agent available and no async job)
                 # 🔥 CRITICAL FIX: ALWAYS generate summary, regardless of workflow status
@@ -2314,35 +2345,33 @@ class AgentOrchestrator:
                         owner_id,
                     )
                 if _post_hitl:
-                    state_snapshot["hitl_pending"] = True
-                    state_snapshot["hitl"] = _post_hitl
-                    _sid_hitl = (kwargs.get("session_id") or "").strip()
-                    if _sid_hitl:
-                        from gibh_agent.core.hitl_session_registry import register_hitl_session
-                        from gibh_agent.core.session_runtime import (
-                            SESSION_WAITING_FOR_HITL,
-                            set_session_status,
-                        )
-
-                        register_hitl_session(
-                            _sid_hitl,
-                            {
-                                "project_id": _post_hitl.get("project_id"),
-                                "ls_url": _post_hitl.get("ls_url") or _post_hitl.get("ls_project_url"),
-                                "scenario_type": _post_hitl.get("scenario_type"),
-                                "workflow_name": workflow_config.get("workflow_name"),
-                                "output_dir": results.get("output_dir") if isinstance(results, dict) else None,
-                            },
-                        )
-                        if db:
-                            set_session_status(
-                                db,
-                                _sid_hitl,
-                                SESSION_WAITING_FOR_HITL,
-                                owner_id=owner_id,
-                            )
+                    _post_hitl = self._prepare_optional_hitl_in_state(
+                        state_snapshot,
+                        _post_hitl,
+                        session_id=(kwargs.get("session_id") or "").strip(),
+                        workflow_name=workflow_config.get("workflow_name"),
+                        output_dir=results.get("output_dir") if isinstance(results, dict) else None,
+                    )
                     yield self._emit_sse(state_snapshot, "hitl_action", _post_hitl)
                     await asyncio.sleep(0.01)
+                async for _corpus_sse in self._stream_session_corpus_terminal(
+                    state_snapshot,
+                    session_id=kwargs.get("session_id"),
+                    steps_details=steps_details,
+                    expert_report_md=summary or "",
+                    output_dir=results.get("output_dir") if isinstance(results, dict) else None,
+                    db=db,
+                    owner_id=owner_id or str(kwargs.get("user_id") or ""),
+                    workflow_name=workflow_config.get("workflow_name") or "",
+                    skip_if_pending_hitl=False,
+                    workspace_context=_corpus_ws_ctx,
+                    local_workspace_mounted=_corpus_local_mounted,
+                ):
+                    yield _corpus_sse
+                    await asyncio.sleep(0.01)
+                _ex_corpus = state_snapshot.get("execution_snapshot")
+                if isinstance(_ex_corpus, dict) and _ex_corpus.get("steps_details"):
+                    steps_details = _ex_corpus["steps_details"]
                 yield self._emit_sse(state_snapshot,"status", {
                     "content": "执行完成",
                     "state": "completed"
@@ -2357,6 +2386,11 @@ class AgentOrchestrator:
                         steps_details,
                         workflow_name=workflow_config.get("workflow_name"),
                     )
+                _sid_done = (kwargs.get("session_id") or "").strip()
+                if db and _sid_done:
+                    from gibh_agent.core.session_runtime import SESSION_COMPLETED, set_session_status
+
+                    set_session_status(db, _sid_done, SESSION_COMPLETED, owner_id=owner_id)
                 state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
                 yield self._format_sse("state_snapshot", state_snapshot)
                 return  # STOP HERE - Do not continue to planning
@@ -4105,14 +4139,9 @@ class AgentOrchestrator:
         if not session_id or db is None:
             return ""
         try:
-            from gibh_agent.db.models import Message as MessageModel
+            from gibh_agent.db.message_queries import get_latest_agent_message
 
-            row = (
-                db.query(MessageModel)
-                .filter(MessageModel.session_id == session_id, MessageModel.role == "agent")
-                .order_by(MessageModel.id.desc())
-                .first()
-            )
+            row = get_latest_agent_message(db, session_id)
             if not row or not isinstance(row.content, dict):
                 return ""
             c = row.content
@@ -4397,6 +4426,43 @@ class AgentOrchestrator:
             model_name=model_name,
         ):
             yield chunk
+
+        if not state_snapshot.get("hitl"):
+            return
+
+        from gibh_agent.core.hitl_resume import _extract_standalone_corpus_media_paths
+        from gibh_agent.core.hitl_session_registry import get_hitl_session
+
+        sid = str(session_id or "").strip()
+        reg = get_hitl_session(sid) or {}
+        hitl = state_snapshot.get("hitl") if isinstance(state_snapshot.get("hitl"), dict) else {}
+        media_paths = _extract_standalone_corpus_media_paths(state_snapshot, reg, hitl)
+
+        async for _corpus_sse in self._stream_session_corpus_terminal(
+            state_snapshot,
+            session_id=session_id,
+            steps_details=[],
+            expert_report_md="",
+            hitl_meta=reg,
+            skip_hitl=True,
+            skip_if_pending_hitl=False,
+            standalone_media_paths=media_paths,
+            db=db,
+            owner_id=owner_id or "",
+            workflow_name="科学语料数据加工",
+            workspace_context=get_workspace_context(),
+            local_workspace_mounted=bool(state_snapshot.get("local_workspace_mounted")),
+        ):
+            yield _corpus_sse
+            await asyncio.sleep(0.01)
+
+        yield self._emit_sse(state_snapshot, "status", {"content": "执行完成", "state": "completed"})
+        await asyncio.sleep(0.01)
+        yield self._emit_sse(state_snapshot, "done", {"status": "success"})
+        if db and sid:
+            from gibh_agent.core.session_runtime import SESSION_COMPLETED, set_session_status
+
+            set_session_status(db, sid, SESSION_COMPLETED, owner_id=owner_id)
 
     @staticmethod
     def _sanitize_snapshot_text(text: str) -> str:
@@ -5246,6 +5312,43 @@ class AgentOrchestrator:
             await asyncio.sleep(0.01)
 
     @staticmethod
+    def _prepare_optional_hitl_in_state(
+        state_snapshot: Dict[str, Any],
+        hitl_event: Dict[str, Any],
+        *,
+        session_id: str = "",
+        workflow_name: str = "",
+        output_dir: Optional[str] = None,
+        extra_registry: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """挂载可选 LS 复核入口（不挂起 Session，不阻塞语料/报告生成）。"""
+        event = dict(hitl_event or {})
+        event["reannotation_enabled"] = True
+        event["optional"] = True
+        event.setdefault(
+            "message",
+            "可选：在 Label Studio 中修改标注后将覆盖 AI 初稿与语料 JSON",
+        )
+        state_snapshot["hitl_pending"] = False
+        state_snapshot["hitl_reannotation_enabled"] = True
+        state_snapshot["hitl"] = event
+        sid = str(session_id or "").strip()
+        if sid:
+            from gibh_agent.core.hitl_session_registry import register_hitl_session
+
+            reg: Dict[str, Any] = {
+                "project_id": event.get("project_id"),
+                "ls_url": event.get("ls_url") or event.get("ls_project_url"),
+                "scenario_type": event.get("scenario_type"),
+                "workflow_name": workflow_name or event.get("workflow_name"),
+                "output_dir": output_dir,
+            }
+            if extra_registry:
+                reg.update({k: v for k, v in extra_registry.items() if v is not None})
+            register_hitl_session(sid, reg)
+        return event
+
+    @staticmethod
     def _format_hitl_action_event(hitl: Dict[str, Any]) -> Dict[str, Any]:
         """将 executor / Trigger_Expert_Annotation 载荷格式化为 SSE hitl_action 事件。"""
         from gibh_agent.tools.hitl_tools import normalize_hitl_payload_for_frontend
@@ -5262,10 +5365,12 @@ class AgentOrchestrator:
             "scenario_type": normalized.get("scenario_type", "scrna_cell_type_annotation"),
             "message": normalized.get(
                 "message",
-                "细胞类型注释已完成，请在 Label Studio 中进行专家复核标注。",
+                "细胞类型注释已完成，可在 Label Studio 中可选修改标注。",
             ),
             "error_detail": normalized.get("error_detail") or normalized.get("message") or "",
             "ls_unavailable": bool(normalized.get("ls_unavailable")),
+            "reannotation_enabled": True,
+            "optional": True,
         }
 
     @staticmethod
@@ -5294,6 +5399,51 @@ class AgentOrchestrator:
             if data.get("status") == "hitl_required":
                 return data
         return None
+
+    async def _stream_session_corpus_terminal(
+        self,
+        state_snapshot: Dict[str, Any],
+        *,
+        session_id: Optional[str],
+        steps_details: Optional[List[Dict[str, Any]]] = None,
+        expert_report_md: str = "",
+        output_dir: Optional[str] = None,
+        hitl_annotations: Any = None,
+        hitl_meta: Optional[Dict[str, Any]] = None,
+        skip_hitl: bool = False,
+        skip_if_pending_hitl: bool = False,
+        standalone_media_paths: Optional[List[str]] = None,
+        db: Any = None,
+        owner_id: str = "",
+        workflow_name: str = "",
+        workspace_context: Optional[Dict[str, Any]] = None,
+        local_workspace_mounted: bool = False,
+        session_title: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        """Task/Skill 执行终点站：生成 SFT 语料并写入 state_snapshot。"""
+        from gibh_agent.core.corpus_terminal_hook import stream_finalize_session_corpus
+
+        async for chunk in stream_finalize_session_corpus(
+            emit_sse=lambda et, payload: self._emit_sse(state_snapshot, et, payload),
+            state_snapshot=state_snapshot,
+            session_id=session_id,
+            agent_root=self.agent,
+            steps_details=steps_details,
+            expert_report_md=expert_report_md,
+            output_dir=output_dir,
+            hitl_annotations=hitl_annotations,
+            hitl_meta=hitl_meta,
+            skip_hitl=skip_hitl,
+            skip_if_pending_hitl=skip_if_pending_hitl,
+            standalone_media_paths=standalone_media_paths,
+            db=db,
+            owner_id=owner_id or "",
+            workflow_name=workflow_name,
+            workspace_context=workspace_context,
+            local_workspace_mounted=local_workspace_mounted,
+            session_title=session_title,
+        ):
+            yield chunk
 
     def _emit_sse(
         self,
@@ -5329,8 +5479,16 @@ class AgentOrchestrator:
 
                 update_expert_report_in_state(state_snapshot, md.strip())
         elif event_type == "hitl_action" and isinstance(data, dict):
-            state_snapshot["hitl_pending"] = True
-            state_snapshot["hitl"] = dict(data)
+            state_snapshot["hitl_pending"] = False
+            enriched = dict(data)
+            enriched.setdefault("reannotation_enabled", True)
+            enriched.setdefault("optional", True)
+            state_snapshot["hitl"] = enriched
+            state_snapshot["hitl_reannotation_enabled"] = True
+        elif event_type == "corpus_asset" and isinstance(data, dict):
+            from gibh_agent.core.execution_snapshot import update_corpus_asset_in_state
+
+            update_corpus_asset_in_state(state_snapshot, data)
         elif event_type == "status" and data:
             # 🔥 约束二：process_log 与前端 state 一致（running/completed/error/start 等），保证图标/动画一致
             # 技能快车道 [AgenticLog] 细粒度事件不入库：否则快照每条 token 一行，历史还原会出现数千条 JSON

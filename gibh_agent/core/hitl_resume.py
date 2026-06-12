@@ -7,6 +7,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import asyncio
 import time
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
@@ -30,20 +31,66 @@ logger = logging.getLogger(__name__)
 def _load_latest_agent_snapshot(
     db: OrmSession, session_id: str, owner_id: str
 ) -> Tuple[Optional[MessageModel], Dict[str, Any]]:
-    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
-    if not session or session.owner_id != owner_id:
-        return None, {}
-    msg = (
-        db.query(MessageModel)
-        .filter(MessageModel.session_id == session_id, MessageModel.role == "agent")
-        .order_by(MessageModel.created_at.desc(), MessageModel.id.desc())
-        .first()
-    )
-    if not msg:
-        return None, {}
-    content = msg.content if isinstance(msg.content, dict) else {}
-    snap = content.get("state_snapshot") if isinstance(content.get("state_snapshot"), dict) else content
-    return msg, snap if isinstance(snap, dict) else {}
+    from gibh_agent.db.message_queries import load_latest_agent_snapshot
+
+    return load_latest_agent_snapshot(db, session_id, owner_id)
+
+
+def _enrich_hitl_registry_from_snapshot(
+    session_id: str,
+    snap: Dict[str, Any],
+    reg: Optional[Dict[str, Any]] = None,
+    hitl: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """completed 会话重入：从 execution_snapshot / workflow / hitl 补全 registry 上下文。"""
+    merged: Dict[str, Any] = dict(reg or {})
+    hitl = hitl if isinstance(hitl, dict) else {}
+    ex = snap.get("execution_snapshot") if isinstance(snap.get("execution_snapshot"), dict) else {}
+    wf = snap.get("workflow") if isinstance(snap.get("workflow"), dict) else {}
+    skill = snap.get("skill_last_tool") if isinstance(snap.get("skill_last_tool"), dict) else {}
+
+    def _pick(key: str, *sources: Any) -> None:
+        if merged.get(key) is not None:
+            return
+        for src in sources:
+            if isinstance(src, dict) and src.get(key) is not None:
+                merged[key] = src[key]
+                return
+
+    for key in (
+        "project_id",
+        "ls_project_id",
+        "ls_url",
+        "ls_project_url",
+        "scenario_type",
+        "workflow_name",
+        "output_dir",
+        "agent_key",
+        "skill_id",
+        "image_path",
+        "file_path",
+    ):
+        _pick(key, hitl, ex, wf, reg, skill.get("tool_result") if isinstance(skill.get("tool_result"), dict) else {})
+
+    for list_key in ("image_paths", "uploaded_file_paths"):
+        if merged.get(list_key):
+            continue
+        for src in (hitl, ex, reg):
+            if isinstance(src, dict) and src.get(list_key):
+                merged[list_key] = list(src.get(list_key) or [])
+                break
+
+    pid = merged.get("project_id") or merged.get("ls_project_id")
+    if pid is not None:
+        try:
+            merged["project_id"] = int(pid)
+        except (TypeError, ValueError):
+            pass
+
+    sid = str(session_id or "").strip()
+    if sid:
+        register_hitl_session(sid, merged)
+    return merged
 
 
 def _extract_steps_details(snap: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -124,8 +171,138 @@ def _persist_agent_message_snapshot(
     content = msg.content if isinstance(msg.content, dict) else {}
     content["state_snapshot"] = sanitize_for_json(state_snapshot)
     mirror_execution_snapshot_to_message_content(content, state_snapshot)
+    ex = state_snapshot.get("execution_snapshot")
+    if isinstance(ex, dict):
+        for key in (
+            "corpus_sft_json",
+            "corpus_sft_records",
+            "corpus_standard",
+            "corpus_modality",
+            "corpus_count",
+        ):
+            if ex.get(key) is not None:
+                content[key] = sanitize_for_json(ex.get(key))
     msg.content = content
     flag_modified(msg, "content")
+
+
+def persist_session_snapshot_to_db(
+    db: OrmSession,
+    session_id: str,
+    owner_id: str,
+    state_snapshot: Dict[str, Any],
+    *,
+    steps_details: Optional[List[Dict[str, Any]]] = None,
+    workflow_name: str = "",
+) -> bool:
+    """将含 corpus 在内的 state_snapshot 写入最新 agent 消息并 commit。"""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return False
+    msg, _snap = _load_latest_agent_snapshot(db, sid, owner_id)
+    if not msg:
+        return False
+    _persist_agent_message_snapshot(
+        msg,
+        state_snapshot,
+        steps_details=steps_details,
+        workflow_name=workflow_name,
+    )
+    db.commit()
+    return True
+
+
+_CORPUS_SKILL_ID = "skill_corpus_data_processing"
+_CORPUS_WORKFLOW_NAME = "科学语料数据加工"
+
+
+def _is_standalone_corpus_skill(
+    snap: Dict[str, Any],
+    reg: Optional[Dict[str, Any]] = None,
+    hitl: Optional[Dict[str, Any]] = None,
+) -> bool:
+    reg = reg or {}
+    hitl = hitl or {}
+    wf = snap.get("workflow") if isinstance(snap.get("workflow"), dict) else {}
+    if reg.get("agent_key") == "corpus_processing_agent":
+        return True
+    if str(reg.get("skill_id") or hitl.get("skill_id") or wf.get("skill_id") or "").strip() == _CORPUS_SKILL_ID:
+        return True
+    for name in (
+        reg.get("workflow_name"),
+        hitl.get("workflow_name"),
+        wf.get("workflow_name"),
+    ):
+        if str(name or "").strip() == _CORPUS_WORKFLOW_NAME:
+            return True
+    st = snap.get("skill_last_tool")
+    if isinstance(st, dict) and st.get("tool_name") == _CORPUS_SKILL_ID:
+        return True
+    return False
+
+
+def _extract_standalone_corpus_media_paths(
+    snap: Dict[str, Any],
+    reg: Optional[Dict[str, Any]] = None,
+    hitl: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """独立语料技能 Skip：从会话快照 / HITL 注册表提取用户上传的图像或文件路径。"""
+    reg = reg or {}
+    hitl = hitl or {}
+    paths: List[str] = []
+    seen: set[str] = set()
+
+    def _add(raw: Any) -> None:
+        p = str(raw or "").strip()
+        if not p or p in seen:
+            return
+        seen.add(p)
+        paths.append(p)
+
+    for src in (reg, hitl):
+        if not isinstance(src, dict):
+            continue
+        for item in src.get("image_paths") or []:
+            _add(item)
+        _add(src.get("image_path"))
+        _add(src.get("file_path"))
+        for item in src.get("uploaded_file_paths") or []:
+            _add(item)
+
+    ex = snap.get("execution_snapshot") if isinstance(snap.get("execution_snapshot"), dict) else {}
+    for att in ex.get("input_draft_attachments") or snap.get("input_draft_attachments") or []:
+        if not isinstance(att, dict):
+            continue
+        _add(att.get("path") or att.get("file_path") or att.get("absolute_path") or att.get("name"))
+
+    wf = snap.get("workflow") if isinstance(snap.get("workflow"), dict) else {}
+    for item in wf.get("file_paths") or wf.get("files") or []:
+        if isinstance(item, dict):
+            _add(item.get("path") or item.get("file_path") or item.get("name"))
+        else:
+            _add(item)
+
+    st = snap.get("skill_last_tool")
+    if isinstance(st, dict):
+        tr = st.get("tool_result")
+        if isinstance(tr, dict):
+            for item in tr.get("image_paths") or []:
+                _add(item)
+            _add(tr.get("image_path"))
+            _add(tr.get("file_path"))
+
+    from gibh_agent.tools.hitl_tools import parse_image_path_inputs
+
+    expanded: List[str] = []
+    for p in paths:
+        expanded.extend(parse_image_path_inputs(p))
+    out: List[str] = []
+    seen2: set[str] = set()
+    for p in expanded:
+        if p and p not in seen2:
+            seen2.add(p)
+            out.append(p)
+    return out
 
 
 def _resolve_draft_expert_report(snap: Dict[str, Any]) -> str:
@@ -187,194 +364,240 @@ async def stream_resume_from_hitl(
     trigger: str = "api",
 ) -> AsyncIterator[str]:
     """
-    异步 SSE 流：唤醒 HITL → 生成最终专家报告 → 更新 DB → done。
+    异步 SSE 流：唤醒 HITL → 生成最终专家报告 → 覆写语料 JSON → 更新 DB → done。
+    支持 completed 会话二次重入（重新标注覆盖金标准）。
     """
     sid = str(session_id or "").strip()
+    seed_snap: Dict[str, Any] = {"text": "", "process_log": []}
 
-    session = db.query(SessionModel).filter(SessionModel.id == sid).first()
-    if not session or session.owner_id != owner_id:
-        yield orchestrator._emit_sse(
-            {"text": "", "process_log": []},
-            "error",
-            {"message": "会话不存在或无权访问"},
-        )
-        yield orchestrator._emit_sse({"text": "", "process_log": []}, "done", {"status": "error"})
-        return
-
-    msg, snap = _load_latest_agent_snapshot(db, sid, owner_id)
-    if not msg:
-        yield orchestrator._emit_sse(
-            {"text": "", "process_log": []},
-            "error",
-            {"message": "未找到可恢复的 Agent 消息"},
-        )
-        yield orchestrator._emit_sse({"text": "", "process_log": []}, "done", {"status": "error"})
-        return
-
-    state_snapshot: Dict[str, Any] = _seed_state_snapshot_from_prior(snap)
-
-    def emit(event_type: str, data: Dict[str, Any]) -> str:
-        return orchestrator._emit_sse(state_snapshot, event_type, data)
-
-    yield emit("status", {"content": "正在唤醒 HITL 流程…", "state": "running"})
-
-    reg = get_hitl_session(sid) or {}
-    hitl = snap.get("hitl") if isinstance(snap.get("hitl"), dict) else {}
-    pid = project_id or hitl.get("project_id") or reg.get("project_id")
-    if pid is None:
-        yield emit("error", {"message": "缺少 Label Studio project_id，无法拉取专家标注"})
-        yield emit("done", {"status": "error"})
-        return
-
-    set_session_status(db, sid, SESSION_RUNNING, owner_id=owner_id)
-
-    steps_details = _extract_steps_details(snap)
-    workflow_name = (
-        hitl.get("workflow_name")
-        or reg.get("workflow_name")
-        or (snap.get("workflow") or {}).get("workflow_name")
-        or "工作流"
-    )
-    output_dir = reg.get("output_dir") or hitl.get("output_dir")
-
-    yield emit("status", {"content": f"正在从 Label Studio 拉取标注 (project {pid})…", "state": "running"})
-
-    annotations, ann_summary = _fetch_ls_annotations(int(pid))
-
-    register_hitl_session(
-        sid,
-        {
-            **reg,
-            "project_id": int(pid),
-            "workflow_name": workflow_name,
-            "output_dir": output_dir,
-            "last_resume_trigger": trigger,
-        },
-    )
-
-    steps_results = []
-    for sd in steps_details:
-        sr = sd.get("step_result") if isinstance(sd.get("step_result"), dict) else sd
-        if isinstance(sr, dict):
-            steps_results.append(sr)
-
-    summary_context: Dict[str, Any] = {
-        "has_failures": any(s.get("status") == "error" for s in steps_details),
-        "failed_steps": [s for s in steps_details if s.get("status") == "error"],
-        "successful_steps": [s for s in steps_details if s.get("status") in ("success", "hitl_required")],
-        "workflow_status": "hitl_resumed",
-        "hitl_annotations_summary": ann_summary,
-        "hitl_resume": True,
-        "hitl_scenario": hitl.get("scenario_type") or reg.get("scenario_type"),
-    }
-    if annotations is not None:
-        summary_context["hitl_annotations_raw"] = annotations
-        try:
-            summary_context["hitl_annotations_json"] = json.dumps(annotations, ensure_ascii=False, default=str)[:12000]
-        except (TypeError, ValueError):
-            pass
-
-    target_agent = _pick_agent_for_workflow(
-        orchestrator.agent,
-        workflow_name,
-        steps_details,
-        scenario_type=str(hitl.get("scenario_type") or reg.get("scenario_type") or ""),
-        agent_key=str(reg.get("agent_key") or ""),
-    )
-    summary: Optional[str] = None
-
-    yield emit("status", {"content": "正在生成《专家分析报告（最终版）》…", "state": "generating_report"})
-
-    if target_agent and hasattr(target_agent, "_generate_analysis_summary"):
-        omics_type = workflow_name
-        try:
-            summary = await target_agent._generate_analysis_summary(
-                steps_results,
-                omics_type=omics_type,
-                workflow_name=workflow_name,
-                summary_context=summary_context,
-                output_dir=output_dir,
+    try:
+        session = db.query(SessionModel).filter(SessionModel.id == sid).first()
+        if not session or session.owner_id != owner_id:
+            yield orchestrator._emit_sse(
+                seed_snap,
+                "error",
+                {"message": "会话不存在或无权访问"},
             )
-        except Exception as exc:
-            logger.exception("[HITL Resume] LLM summary failed: %s", exc)
+            yield orchestrator._emit_sse(seed_snap, "done", {"status": "error"})
+            return
 
-    if not summary or not str(summary).strip():
-        summary = (
-            "## 专家分析报告（最终版）\n\n"
-            "本报告在 **Label Studio 专家标注完成** 后自动生成。\n\n"
-            "### 专家复核摘要\n\n"
-            f"{ann_summary}\n\n"
-            "### 说明\n\n"
-            "自动化 pipeline 已在 HITL 环节挂起；当前版本已合并专家标注导出。"
-            "若需完整生物学解读，请确认 LLM 服务可用后再次点击「继续生成报告」。"
+        msg, snap = _load_latest_agent_snapshot(db, sid, owner_id)
+        if not msg:
+            yield orchestrator._emit_sse(
+                seed_snap,
+                "error",
+                {"message": "未找到可恢复的 Agent 消息"},
+            )
+            yield orchestrator._emit_sse(seed_snap, "done", {"status": "error"})
+            return
+
+        state_snapshot: Dict[str, Any] = _seed_state_snapshot_from_prior(snap)
+
+        def emit(event_type: str, data: Dict[str, Any]) -> str:
+            return orchestrator._emit_sse(state_snapshot, event_type, data)
+
+        yield emit("status", {"content": "正在唤醒 HITL 流程…", "state": "running"})
+
+        hitl = snap.get("hitl") if isinstance(snap.get("hitl"), dict) else {}
+        reg = _enrich_hitl_registry_from_snapshot(sid, snap, get_hitl_session(sid) or {}, hitl)
+        pid = project_id or hitl.get("project_id") or hitl.get("ls_project_id") or reg.get("project_id")
+        if pid is None:
+            yield emit("error", {"message": "缺少 Label Studio project_id，无法拉取专家标注"})
+            yield emit("done", {"status": "error"})
+            return
+        try:
+            pid_int = int(pid)
+        except (TypeError, ValueError):
+            yield emit("error", {"message": f"无效的 Label Studio project_id: {pid!r}"})
+            yield emit("done", {"status": "error"})
+            return
+
+        set_session_status(db, sid, SESSION_RUNNING, owner_id=owner_id)
+
+        steps_details = _extract_steps_details(snap)
+        workflow_name = (
+            hitl.get("workflow_name")
+            or reg.get("workflow_name")
+            or (snap.get("workflow") or {}).get("workflow_name")
+            or "工作流"
         )
-    else:
-        if "最终版" not in summary and "专家分析" not in summary:
-            summary = "## 专家分析报告（最终版）\n\n" + summary.lstrip()
+        output_dir = reg.get("output_dir") or hitl.get("output_dir")
 
-    summary = scrub_markdown_poison_urls(summary.strip())
-    update_expert_report_in_state(state_snapshot, summary, is_final=True)
-    state_snapshot["hitl_pending"] = False
-    state_snapshot["hitl_resumed"] = True
-    ls_url = (
-        hitl.get("ls_url")
-        or hitl.get("ls_project_url")
-        or reg.get("ls_url")
-        or reg.get("ls_project_url")
-        or ""
-    )
-    if not ls_url and pid is not None:
-        ls_url = f"/label-studio/projects/{int(pid)}/data"
-    state_snapshot["hitl"] = sanitize_for_json(
-        {
-            "status": "hitl_completed",
-            "project_id": int(pid),
-            "ls_project_id": int(pid),
-            "ls_url": ls_url,
-            "ls_project_url": ls_url,
-            "scenario_type": hitl.get("scenario_type") or reg.get("scenario_type"),
-            "workflow_name": workflow_name,
-            "output_dir": output_dir,
-            "reannotation_enabled": True,
+        yield emit(
+            "status",
+            {"content": f"正在从 Label Studio 拉取标注 (project {pid_int})…", "state": "running"},
+        )
+
+        annotations, ann_summary = _fetch_ls_annotations(pid_int)
+
+        register_hitl_session(
+            sid,
+            {
+                **reg,
+                "project_id": pid_int,
+                "workflow_name": workflow_name,
+                "output_dir": output_dir,
+                "last_resume_trigger": trigger,
+            },
+        )
+
+        steps_results = []
+        for sd in steps_details:
+            sr = sd.get("step_result") if isinstance(sd.get("step_result"), dict) else sd
+            if isinstance(sr, dict):
+                steps_results.append(sr)
+
+        summary_context: Dict[str, Any] = {
+            "has_failures": any(s.get("status") == "error" for s in steps_details),
+            "failed_steps": [s for s in steps_details if s.get("status") == "error"],
+            "successful_steps": [s for s in steps_details if s.get("status") in ("success", "hitl_required")],
+            "workflow_status": "hitl_resumed",
+            "hitl_annotations_summary": ann_summary,
+            "hitl_resume": True,
+            "hitl_scenario": hitl.get("scenario_type") or reg.get("scenario_type"),
         }
-    )
-    if annotations is not None:
-        state_snapshot["hitl_annotations_export"] = sanitize_for_json(annotations)
-        ex_ann = state_snapshot.get("execution_snapshot")
-        if isinstance(ex_ann, dict):
+        if annotations is not None:
+            summary_context["hitl_annotations_raw"] = annotations
+            try:
+                summary_context["hitl_annotations_json"] = json.dumps(
+                    annotations, ensure_ascii=False, default=str
+                )[:12000]
+            except (TypeError, ValueError):
+                pass
+
+        target_agent = _pick_agent_for_workflow(
+            orchestrator.agent,
+            workflow_name,
+            steps_details,
+            scenario_type=str(hitl.get("scenario_type") or reg.get("scenario_type") or ""),
+            agent_key=str(reg.get("agent_key") or ""),
+        )
+        summary: Optional[str] = None
+
+        yield emit("status", {"content": "正在生成《专家分析报告（最终版）》…", "state": "generating_report"})
+
+        if target_agent and hasattr(target_agent, "_generate_analysis_summary"):
+            omics_type = workflow_name
+            try:
+                summary = await target_agent._generate_analysis_summary(
+                    steps_results,
+                    omics_type=omics_type,
+                    workflow_name=workflow_name,
+                    summary_context=summary_context,
+                    output_dir=output_dir,
+                )
+            except Exception as exc:
+                logger.exception("[HITL Resume] LLM summary failed: %s", exc)
+
+        if not summary or not str(summary).strip():
+            summary = (
+                "## 专家分析报告（最终版）\n\n"
+                "本报告在 **Label Studio 专家标注完成** 后自动生成。\n\n"
+                "### 专家复核摘要\n\n"
+                f"{ann_summary}\n\n"
+                "### 说明\n\n"
+                "已合并专家标注导出；如需完整生物学解读，请确认 LLM 服务可用后再次提交标注。"
+            )
+        else:
+            if "最终版" not in summary and "专家分析" not in summary:
+                summary = "## 专家分析报告（最终版）\n\n" + summary.lstrip()
+
+        summary = scrub_markdown_poison_urls(summary.strip())
+        update_expert_report_in_state(state_snapshot, summary, is_final=True)
+        state_snapshot["hitl_pending"] = False
+        state_snapshot["hitl_resumed"] = True
+        state_snapshot["hitl_reannotation_enabled"] = True
+        ls_url = (
+            hitl.get("ls_url")
+            or hitl.get("ls_project_url")
+            or reg.get("ls_url")
+            or reg.get("ls_project_url")
+            or ""
+        )
+        if not ls_url:
+            ls_url = f"/label-studio/projects/{pid_int}/data"
+        state_snapshot["hitl"] = sanitize_for_json(
+            {
+                "status": "hitl_completed",
+                "project_id": pid_int,
+                "ls_project_id": pid_int,
+                "ls_url": ls_url,
+                "ls_project_url": ls_url,
+                "scenario_type": hitl.get("scenario_type") or reg.get("scenario_type"),
+                "workflow_name": workflow_name,
+                "output_dir": output_dir,
+                "reannotation_enabled": True,
+            }
+        )
+        if annotations is not None:
+            state_snapshot["hitl_annotations_export"] = sanitize_for_json(annotations)
+            ex_ann = state_snapshot.get("execution_snapshot")
+            if not isinstance(ex_ann, dict):
+                ex_ann = {}
+                state_snapshot["execution_snapshot"] = ex_ann
             ex_ann["hitl_annotations"] = sanitize_for_json(annotations)
+            ex_ann["hitl_final"] = True
 
-    diagnosis_response = {
-        "report_data": {
-            "report": summary,
-            "workflow_name": workflow_name,
-            "hitl_final": True,
-        }
-    }
-    yield emit("diagnosis", diagnosis_response)
-    yield emit(
-        "result",
-        {
+        diagnosis_response = {
             "report_data": {
                 "report": summary,
-                "steps_details": steps_details,
                 "workflow_name": workflow_name,
+                "hitl_final": True,
             }
-        },
-    )
-    yield emit("status", {"content": "专家报告（最终版）已就绪", "state": "completed"})
-    yield emit("done", {"status": "success", "hitl_resumed": True})
+        }
+        yield emit("diagnosis", diagnosis_response)
+        yield emit(
+            "result",
+            {
+                "report_data": {
+                    "report": summary,
+                    "steps_details": steps_details,
+                    "workflow_name": workflow_name,
+                }
+            },
+        )
+        async for _corpus_sse in orchestrator._stream_session_corpus_terminal(
+            state_snapshot,
+            session_id=sid,
+            steps_details=steps_details,
+            expert_report_md=summary or "",
+            output_dir=output_dir,
+            hitl_annotations=annotations,
+            hitl_meta=reg,
+            skip_if_pending_hitl=False,
+            db=db,
+            owner_id=owner_id,
+            workflow_name=workflow_name,
+        ):
+            yield _corpus_sse
+            await asyncio.sleep(0.01)
+        _ex_after = state_snapshot.get("execution_snapshot")
+        if isinstance(_ex_after, dict) and _ex_after.get("steps_details"):
+            steps_details = _ex_after["steps_details"]
+        yield emit("status", {"content": "专家报告（最终版）已就绪", "state": "completed"})
+        yield emit("done", {"status": "success", "hitl_resumed": True})
 
-    _persist_agent_message_snapshot(
-        msg,
-        state_snapshot,
-        steps_details=steps_details,
-        workflow_name=workflow_name,
-    )
-    set_session_status(db, sid, SESSION_COMPLETED, owner_id=owner_id)
-    db.commit()
+        msg_fresh, _ = _load_latest_agent_snapshot(db, sid, owner_id)
+        if msg_fresh:
+            msg = msg_fresh
+        _persist_agent_message_snapshot(
+            msg,
+            state_snapshot,
+            steps_details=steps_details,
+            workflow_name=workflow_name,
+        )
+        set_session_status(db, sid, SESSION_COMPLETED, owner_id=owner_id)
+        db.commit()
 
-    yield orchestrator._format_sse("state_snapshot", state_snapshot)
+        yield orchestrator._format_sse("state_snapshot", state_snapshot)
+    except Exception as exc:
+        logger.exception("[HITL Resume] stream_resume_from_hitl failed session=%s: %s", sid, exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        yield orchestrator._emit_sse(seed_snap, "error", {"message": str(exc)})
+        yield orchestrator._emit_sse(seed_snap, "done", {"status": "error"})
 
 
 def finalize_hitl_skip(
@@ -385,8 +608,8 @@ def finalize_hitl_skip(
     trigger: str = "skip",
 ) -> Dict[str, Any]:
     """
-    用户跳过 HITL：仅关闭复核入口、保留初稿并标记会话完成。
-    标准语料归档延迟至【一键入库】时由 Corpus Gatekeeper 生成。
+    用户跳过 HITL：关闭复核入口、保留初稿并标记会话完成。
+    SFT 语料由 stream_skip_from_hitl / 编排器终点站生成（不再延迟至入库）。
     """
     sid = str(session_id or "").strip()
     session = db.query(SessionModel).filter(SessionModel.id == sid).first()
@@ -437,7 +660,7 @@ def finalize_hitl_skip(
 
     return {
         "status": "skipped",
-        "message": "已跳过专家复核，保留初稿报告。标准语料将在一键入库时按模态自动生成。",
+        "message": "已跳过专家复核，保留初稿报告。SFT 语料将在会话收尾自动生成。",
         "hitl_skipped": True,
     }
 
@@ -450,9 +673,13 @@ async def stream_skip_from_hitl(
     db: OrmSession,
     trigger: str = "skip",
 ) -> AsyncIterator[str]:
-    """轻量 SSE：仅同步 Skip 状态（语料生成交付入库守门人）。"""
+    """轻量 SSE：同步 Skip 状态并在收尾生成银标准语料（含独立语料技能 AI 代偿）。"""
     sid = str(session_id or "").strip()
-    state_snapshot: Dict[str, Any] = {
+
+    def emit(state_snapshot: Dict[str, Any], event_type: str, data: Dict[str, Any]) -> str:
+        return orchestrator._emit_sse(state_snapshot, event_type, data)
+
+    seed: Dict[str, Any] = {
         "text": "",
         "reasoning": "",
         "workflow": None,
@@ -461,23 +688,38 @@ async def stream_skip_from_hitl(
         "report": None,
         "_start_time": time.time(),
     }
-
-    def emit(event_type: str, data: Dict[str, Any]) -> str:
-        return orchestrator._emit_sse(state_snapshot, event_type, data)
-
-    yield emit("status", {"content": "已跳过专家复核，保留初稿报告…", "state": "running"})
+    yield emit(seed, "status", {"content": "已跳过专家复核，准备生成语料…", "state": "running"})
     result = finalize_hitl_skip(db, sid, owner_id, trigger=trigger)
     if result.get("status") == "error":
-        yield emit("error", {"message": result.get("message")})
-        yield emit("done", {"status": "error"})
+        yield emit(seed, "error", {"message": result.get("message")})
+        yield emit(seed, "done", {"status": "error"})
         return
 
-    draft_md = _resolve_draft_expert_report(
-        (_load_latest_agent_snapshot(db, sid, owner_id)[1]) or {}
+    msg, snap_after = _load_latest_agent_snapshot(db, sid, owner_id)
+    snap_after = snap_after or {}
+    state_snapshot = _seed_state_snapshot_from_prior(snap_after)
+    state_snapshot["hitl_pending"] = False
+    state_snapshot["hitl_skipped"] = True
+    state_snapshot.pop("hitl", None)
+
+    reg = get_hitl_session(sid) or {}
+    hitl = snap_after.get("hitl") if isinstance(snap_after.get("hitl"), dict) else {}
+    is_corpus_skill = _is_standalone_corpus_skill(snap_after, reg, hitl)
+    media_paths = _extract_standalone_corpus_media_paths(snap_after, reg, hitl) if is_corpus_skill else []
+    steps_details = _extract_steps_details(snap_after)
+    workflow_name = (
+        hitl.get("workflow_name")
+        or reg.get("workflow_name")
+        or (snap_after.get("workflow") or {}).get("workflow_name")
+        or (_CORPUS_WORKFLOW_NAME if is_corpus_skill else "")
     )
+    output_dir = reg.get("output_dir") or hitl.get("output_dir")
+    draft_md = _resolve_draft_expert_report(snap_after)
+
     if draft_md:
         state_snapshot["text"] = draft_md
         yield emit(
+            state_snapshot,
             "result",
             {
                 "report_data": {
@@ -486,6 +728,43 @@ async def stream_skip_from_hitl(
                 }
             },
         )
-    yield emit("status", {"content": "已跳过专家复核", "state": "completed"})
-    yield emit("done", {"status": "success", "hitl_skipped": True})
+    elif is_corpus_skill:
+        skip_msg = (
+            "已跳过 Label Studio 手动标注，将基于您上传的图像/文件自动生成 SFT 语料 JSON。"
+        )
+        state_snapshot["text"] = skip_msg
+        yield emit(state_snapshot, "message", {"content": skip_msg})
+
+    hitl_meta = {**reg, **hitl}
+    if media_paths:
+        hitl_meta["image_paths"] = media_paths
+        hitl_meta["image_path"] = media_paths[0]
+        hitl_meta["uploaded_file_paths"] = media_paths
+
+    async for _corpus_sse in orchestrator._stream_session_corpus_terminal(
+        state_snapshot,
+        session_id=sid,
+        steps_details=steps_details,
+        expert_report_md=draft_md,
+        output_dir=output_dir,
+        hitl_meta=hitl_meta,
+        skip_hitl=True,
+        skip_if_pending_hitl=False,
+        standalone_media_paths=media_paths if is_corpus_skill else None,
+        db=db,
+        owner_id=owner_id,
+        workflow_name=workflow_name,
+    ):
+        yield _corpus_sse
+        await asyncio.sleep(0.01)
+
+    yield emit(
+        state_snapshot,
+        "status",
+        {
+            "content": "已跳过专家复核" if not is_corpus_skill else "已自动生成语料 JSON",
+            "state": "completed",
+        },
+    )
+    yield emit(state_snapshot, "done", {"status": "success", "hitl_skipped": True})
     yield orchestrator._format_sse("state_snapshot", state_snapshot)

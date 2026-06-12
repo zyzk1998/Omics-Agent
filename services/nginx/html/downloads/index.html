@@ -54,7 +54,9 @@
                 <div style="margin-bottom: 1rem;">
                     <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.5rem;">V0.14.x（当前推荐 · 系列汇总）</div>
                     <ul class="changelog">
-                        <li><strong>【当前推荐】</strong>客户端 semver <strong>0.14.6</strong>；<strong>Windows</strong> NSIS 与 <strong>Linux</strong> AppImage 同步至本站 <code>/downloads/</code>；<code>client-release.json</code>、<code>latest.yml</code> / <code>latest-linux.yml</code> 与安装包同源构建。</li>
+                        <li><strong>【当前推荐】</strong>客户端 semver <strong>0.14.8</strong>；<strong>Windows</strong> NSIS 与 <strong>Linux</strong> AppImage 同步至本站 <code>/downloads/</code>；<code>client-release.json</code>、<code>latest.yml</code> / <code>latest-linux.yml</code> 与安装包同源构建。</li>
+                        <li><strong>0.14.8：</strong>Sidecar 本地落盘（<code>silent_deploy</code> / <code>silent_deploy_from_url</code>）、大文件 URL 流式中继、CORS 加固；一键入库 local_sidecar 与落盘进度 Toast。</li>
+                        <li><strong>0.14.7：</strong>本地项目文件预览（Sidecar <code>POST /api/files/download</code>、Electron IPC 直读兜底）；8019 旧 Sidecar 缺路由时桌面端自动重启；预览失败完整可复制诊断弹框。</li>
                         <li><strong>Web / 内置网页：</strong>右侧「技能报告」展示技能广场中文名（<code>tool_id</code> 友好映射）；Open Babel 等化学技能参数抽取与结果解析修复；数据诊断血缘 Banner 仅引用用户 uploads 原始文件；反馈与帮助 UI 优化。</li>
                         <li><strong>桌面端：</strong>自动更新须用户确认后再下载/重启；托盘二次唤起聚焦主界面；内置 <code>bundled-web-ui</code> 与主站同步（含拖拽上传、工作流文件预览、下载弹窗等 0.14 线能力）。</li>
                         <li><strong>后端技能：</strong>第三批生物医药科学计算、磐石文案对齐、化学 RDKit/Open Babel 工具链与技能广场模板更新（0.14.0～0.14.5 补丁细节合并于此，不再分补丁号展开）。</li>
@@ -112,11 +114,11 @@
             var verLine = document.getElementById('ver-line');
 
             var staticFallback = {
-                version: '0.14.6',
-                displayVersion: 'V0.14.6',
+                version: '0.14.8',
+                displayVersion: 'V0.14.8',
                 productName: 'Omics Agent',
-                winSetupFile: 'Omics Agent Setup 0.14.6.exe',
-                linuxAppImageFile: 'Omics Agent-0.14.6.AppImage'
+                winSetupFile: 'Omics Agent Setup 0.14.8.exe',
+                linuxAppImageFile: 'Omics Agent-0.14.8.AppImage'
             };
 
             function setVersion(meta) {

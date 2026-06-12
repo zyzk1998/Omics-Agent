@@ -10,6 +10,7 @@
   - report_timestamp：报告生成时刻（YYYY-MM-DD HH:MM:SS，入库瞬间冻结，不可变）
   - input_draft_text：主页面输入框未发送自然语言草稿
   - input_draft_attachments：输入框上方待发送/已挂载文件药丸元数据列表
+  - corpus_sft_json / corpus_sft_records / corpus_standard / corpus_modality：Task/Skill 终点站生成的 SFT 语料
 
 单会话多次分析：state_snapshot.execution_snapshots = {
   "snapshots": { "<task_id>": { ...完整镜像... }, ... },
@@ -21,6 +22,7 @@ execution_snapshot 始终指向 active_snapshot_id 对应条目（向后兼容�
 from __future__ import annotations
 
 import copy
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -397,6 +399,48 @@ def update_expert_report_in_state(
     state_snapshot["report"] = report
 
 
+def update_corpus_asset_in_state(
+    state_snapshot: Dict[str, Any],
+    payload: Dict[str, Any],
+) -> None:
+    """将 corpus_asset SSE 载荷写入 execution_snapshot（时光机 / MySQL 持久化）。"""
+    if not isinstance(state_snapshot, dict) or not isinstance(payload, dict):
+        return
+    records = payload.get("records")
+    if records is None and payload.get("corpus_sft_records") is not None:
+        records = payload.get("corpus_sft_records")
+    if not isinstance(records, list):
+        records = []
+
+    corpus_json = payload.get("corpus_json") or payload.get("corpus_sft_json")
+    if not isinstance(corpus_json, str) or not corpus_json.strip():
+        try:
+            corpus_json = json.dumps(sanitize_for_json(records), ensure_ascii=False, indent=2)
+        except (TypeError, ValueError):
+            corpus_json = "[]"
+
+    ex = state_snapshot.get("execution_snapshot")
+    if not isinstance(ex, dict):
+        ex = {}
+    ex["corpus_sft_records"] = sanitize_for_json(records)
+    ex["corpus_sft_json"] = corpus_json
+    ex["corpus_standard"] = payload.get("standard") or payload.get("corpus_standard") or ""
+    ex["corpus_modality"] = payload.get("modality") or payload.get("corpus_modality") or ""
+    ex["corpus_count"] = int(payload.get("count") or len(records) or 0)
+    archive_dir = payload.get("archive_dir") or payload.get("corpus_archive_path")
+    if archive_dir:
+        ex["corpus_archive_path"] = str(archive_dir)
+    hitl_path = payload.get("corpus_hitl_path")
+    if hitl_path:
+        ex["corpus_hitl_path"] = str(hitl_path)
+
+    _merge_execution_snapshot(state_snapshot, ex)
+    state_snapshot["corpus_sft_json"] = corpus_json
+    state_snapshot["corpus_sft_records"] = ex["corpus_sft_records"]
+    state_snapshot["corpus_standard"] = ex.get("corpus_standard")
+    state_snapshot["corpus_modality"] = ex.get("corpus_modality")
+
+
 def mirror_execution_snapshot_to_message_content(
     content: Dict[str, Any],
     state_snapshot: Dict[str, Any],
@@ -512,6 +556,17 @@ def apply_execution_snapshot_to_state(
                 ex["hitl_skipped"] = True
             if prev.get("hitl_annotations") is not None:
                 ex["hitl_annotations"] = prev.get("hitl_annotations")
+            for _corpus_key in (
+                "corpus_sft_json",
+                "corpus_sft_records",
+                "corpus_standard",
+                "corpus_modality",
+                "corpus_count",
+                "corpus_archive_path",
+                "corpus_hitl_path",
+            ):
+                if prev.get(_corpus_key) is not None:
+                    ex[_corpus_key] = prev.get(_corpus_key)
         if not ex.get("report_timestamp"):
             _freeze_report_timestamp(ex)
     _merge_execution_snapshot(state_snapshot, ex)

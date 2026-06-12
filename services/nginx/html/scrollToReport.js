@@ -11,9 +11,8 @@ window.scrollToReport = function(messageId) {
         if (!targetRow) return;
 
         // 激活右侧工作台
-        var wp = document.getElementById('workspace-pane');
-        if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
-        else if (wp) wp.classList.add('workspace-active');
+        if (typeof window.setRightPanelState === 'function') window.setRightPanelState('WORKBENCH');
+        else if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(true);
         if (typeof setWorkspaceTitle === 'function') setWorkspaceTitle('分析报告');
 
         // 滚动右侧报告容器到可见区域
@@ -29,4 +28,3 @@ window.scrollToReport = function(messageId) {
         console.warn('⚠️ [scrollToReport] 定位报告失败:', e);
     }
 };
-

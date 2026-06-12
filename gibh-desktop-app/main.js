@@ -435,6 +435,7 @@ function hookAutoUpdaterEventsOnce() {
         detail: ver ? `版本：${ver}` : undefined,
       });
       if (response === 0) {
+        prepareForQuitAndInstall();
         autoUpdater.quitAndInstall(false, true);
       }
     } catch (e) {
@@ -690,6 +691,131 @@ function probeCheckFileRouteRegistered() {
   });
 }
 
+/** POST /api/files/download 无 body 时 FastAPI 返回 422；404 表示旧 Sidecar 无预览路由 */
+function probeFilesDownloadRouteRegistered() {
+  return new Promise((resolve) => {
+    const postData = JSON.stringify({});
+    let req;
+    try {
+      req = http.request(
+        {
+          hostname: '127.0.0.1',
+          port: SIDECAR_HTTP_PORT,
+          path: '/api/files/download',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(postData),
+          },
+          timeout: 1500,
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode !== 404);
+        }
+      );
+    } catch (_e) {
+      resolve(false);
+      return;
+    }
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      try {
+        req.destroy();
+      } catch (_e) {}
+      resolve(false);
+    });
+    req.write(postData);
+    req.end();
+  });
+}
+
+async function probeSidecarCapabilitiesFromHealth() {
+  return new Promise((resolve) => {
+    const req = http.get(`${SIDECAR_LOOPBACK_BASE}/health`, { timeout: 1500 }, (res) => {
+      let data = '';
+      res.on('data', (c) => {
+        data += String(c);
+      });
+      res.on('end', () => {
+        if (res.statusCode !== 200) {
+          resolve(null);
+          return;
+        }
+        try {
+          const j = JSON.parse(data);
+          resolve(Array.isArray(j && j.capabilities) ? j.capabilities : null);
+        } catch (_e) {
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => {
+      try {
+        req.destroy();
+      } catch (_e) {}
+      resolve(null);
+    });
+  });
+}
+
+async function probeSilentDeployRouteRegistered() {
+  return new Promise((resolve) => {
+    const postData = JSON.stringify({});
+    let req;
+    try {
+      req = http.request(
+        {
+          hostname: '127.0.0.1',
+          port: SIDECAR_HTTP_PORT,
+          path: '/api/workspace/silent_deploy',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(postData),
+          },
+          timeout: 1500,
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode !== 404);
+        }
+      );
+    } catch (_e) {
+      resolve(false);
+      return;
+    }
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      try {
+        req.destroy();
+      } catch (_e) {}
+      resolve(false);
+    });
+    req.write(postData);
+    req.end();
+  });
+}
+
+async function isSidecarFullyCompatible() {
+  const healthy = await probeExistingSidecarHealth();
+  if (!healthy) return false;
+  const caps = await probeSidecarCapabilitiesFromHealth();
+  if (caps && caps.includes('silent_deploy_from_url')) {
+    return true;
+  }
+  if (caps && caps.includes('silent_deploy')) {
+    return true;
+  }
+  if (caps && caps.includes('write_bytes')) {
+    return true;
+  }
+  const silentOk = await probeSilentDeployRouteRegistered();
+  if (silentOk) return true;
+  return false;
+}
+
 /** 轮询直至 /health 成功或超时（spawn 后需等待 uvicorn 绑定端口） */
 async function waitForSidecarReady(timeoutMs) {
   const deadline = Date.now() + timeoutMs;
@@ -718,6 +844,37 @@ function requestSidecarShutdownBestEffortSync() {
  * 硬核兜底：杀掉本客户端 spawn 的 Sidecar 进程树（Windows taskkill /T /F；类 Unix kill -9）。
  * 解决 Electron 退出后 Python 子进程残留导致旧 Sidecar 长期占用 8019。
  */
+/** 销毁系统托盘，避免托盘驻留阻止进程退出 */
+function destroyTray() {
+  if (!tray) return;
+  try {
+    tray.destroy();
+  } catch (_e) {}
+  tray = null;
+}
+
+/**
+ * 用户确认「重启并更新」前：允许窗口真正关闭、清 Sidecar/托盘，避免 Windows 后台进程占用导致安装失败。
+ */
+function prepareForQuitAndInstall() {
+  if (globalThis.__OMICS_PREPARED_FOR_INSTALL__) return;
+  globalThis.__OMICS_PREPARED_FOR_INSTALL__ = true;
+  isAppQuitting = true;
+  forceQuit = true;
+  requestSidecarShutdownBestEffortSync();
+  forceKillSidecarProcessTree();
+  stopLocalSidecar();
+  destroyTray();
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w && !w.isDestroyed()) {
+      try {
+        w.removeAllListeners('close');
+        w.close();
+      } catch (_e) {}
+    }
+  }
+}
+
 function forceKillSidecarProcessTree() {
   if (!localSidecarProcess || localSidecarProcess.killed || !localSidecarProcess.pid) {
     localSidecarProcess = null;
@@ -832,14 +989,18 @@ async function startLocalSidecarIfNeeded() {
     await waitForSidecarReady(2500);
     return;
   }
-  const healthy = await probeExistingSidecarHealth();
-  const routeOk = healthy ? await probeCheckFileRouteRegistered() : false;
-  if (healthy && routeOk) {
-    console.log(`[Omics Agent] ${SIDECAR_LOOPBACK_BASE} 已有兼容 Sidecar（/health + check_file），跳过重复启动`);
+  const compatible = await isSidecarFullyCompatible();
+  if (compatible) {
+    console.log(
+      `[Omics Agent] ${SIDECAR_LOOPBACK_BASE} 已有兼容 Sidecar（含 silent_deploy / write_bytes），跳过重复启动`
+    );
     return;
   }
-  if (healthy && !routeOk) {
-    console.warn(`[Omics Agent] 端口 ${SIDECAR_HTTP_PORT} 上服务疑似旧版 Sidecar（缺少 check_file），尝试礼貌 shutdown…`);
+  const healthy = await probeExistingSidecarHealth();
+  if (healthy) {
+    console.warn(
+      `[Omics Agent] 端口 ${SIDECAR_HTTP_PORT} 上 Sidecar 缺少 silent_deploy（旧版），尝试 shutdown 后重启…`
+    );
     requestSidecarShutdownBestEffortSync();
     await new Promise((r) => setTimeout(r, 400));
   }
@@ -1094,11 +1255,51 @@ if (gotSingleInstanceLock) {
     ipcMain.on('app-install-update', () => {
       if (!autoUpdater) return;
       try {
+        prepareForQuitAndInstall();
         autoUpdater.quitAndInstall(false, true);
       } catch (e) {
         console.error('[app-install-update]', e);
       }
     });
+    ipcMain.handle('read-local-file-buffer', async (_event, filePath) => {
+      const raw = String(filePath || '').trim();
+      if (!raw) {
+        throw new Error('file_path 不能为空');
+      }
+      const resolved = path.resolve(raw);
+      if (!fs.existsSync(resolved)) {
+        throw new Error(`文件不存在: ${resolved}`);
+      }
+      const stat = fs.statSync(resolved);
+      if (!stat.isFile()) {
+        throw new Error(`不是文件: ${resolved}`);
+      }
+      const maxBytes = 80 * 1024 * 1024;
+      if (stat.size > maxBytes) {
+        throw new Error(`文件过大（${stat.size} 字节），预览上限 ${maxBytes} 字节`);
+      }
+      const ext = path.extname(resolved).toLowerCase().replace(/^\./, '');
+      const mimeMap = {
+        png: 'image/png',
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        gif: 'image/gif',
+        webp: 'image/webp',
+        svg: 'image/svg+xml',
+        bmp: 'image/bmp',
+        pdf: 'application/pdf',
+      };
+      const buf = fs.readFileSync(resolved);
+      return {
+        status: 'success',
+        base64: buf.toString('base64'),
+        mime_type: mimeMap[ext] || 'application/octet-stream',
+        file_name: path.basename(resolved),
+        file_path: resolved,
+        size_bytes: stat.size,
+      };
+    });
+
     ipcMain.handle('app-select-workspace-folder', async (event) => {
       const win = BrowserWindow.fromWebContents(event.sender);
       const targetWin = win && !win.isDestroyed() ? win : BrowserWindow.getAllWindows()[0];

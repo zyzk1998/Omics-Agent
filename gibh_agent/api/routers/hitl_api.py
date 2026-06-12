@@ -63,11 +63,8 @@ def _resolve_hitl_project_id(session_id: str, snap: Dict[str, Any]) -> Optional[
     return None
 
 
-def _snapshot_allows_soft_hitl_resume(db: OrmSession, session_id: str, owner_id: str) -> bool:
+def _snapshot_allows_soft_hitl_resume_from_snap(snap: Dict[str, Any]) -> bool:
     """软 HITL：初稿报告已生成但 hitl_pending 仍为真时允许 resume。"""
-    from gibh_agent.core.hitl_resume import _load_latest_agent_snapshot
-
-    _msg, snap = _load_latest_agent_snapshot(db, session_id, owner_id)
     if not snap:
         return False
     if snap.get("hitl_resumed"):
@@ -77,18 +74,9 @@ def _snapshot_allows_soft_hitl_resume(db: OrmSession, session_id: str, owner_id:
     return bool(snap.get("hitl_pending") or snap.get("hitl"))
 
 
-def _snapshot_allows_reannotation_resume(
-    db: OrmSession,
-    session_id: str,
-    owner_id: str,
-) -> bool:
+def _snapshot_allows_reannotation_resume_from_snap(session_id: str, snap: Dict[str, Any]) -> bool:
     """已完成 HITL 的会话允许二次唤醒（重新标注 → 覆盖最终版报告）。"""
-    from gibh_agent.core.hitl_resume import _load_latest_agent_snapshot
-
-    _msg, snap = _load_latest_agent_snapshot(db, session_id, owner_id)
-    if not snap:
-        return False
-    if snap.get("hitl_skipped"):
+    if not snap or snap.get("hitl_skipped"):
         return False
     ex = snap.get("execution_snapshot") if isinstance(snap.get("execution_snapshot"), dict) else {}
     had_hitl = bool(
@@ -102,6 +90,64 @@ def _snapshot_allows_reannotation_resume(
     return _resolve_hitl_project_id(session_id, snap) is not None
 
 
+def _snapshot_allows_optional_hitl_reannotation_from_snap(session_id: str, snap: Dict[str, Any]) -> bool:
+    """全自动首期已完成：快照仍保留 LS 入口，允许 resume 覆盖为金标准。"""
+    if not snap or snap.get("hitl_skipped"):
+        return False
+    if not _resolve_hitl_project_id(session_id, snap):
+        return False
+    if snap.get("hitl") or snap.get("hitl_reannotation_enabled"):
+        return True
+    return bool(get_hitl_session(session_id))
+
+
+def _snapshot_allows_soft_hitl_resume(db: OrmSession, session_id: str, owner_id: str) -> bool:
+    from gibh_agent.core.hitl_resume import _load_latest_agent_snapshot
+
+    _msg, snap = _load_latest_agent_snapshot(db, session_id, owner_id)
+    return _snapshot_allows_soft_hitl_resume_from_snap(snap)
+
+
+def _snapshot_allows_reannotation_resume(
+    db: OrmSession,
+    session_id: str,
+    owner_id: str,
+) -> bool:
+    from gibh_agent.core.hitl_resume import _load_latest_agent_snapshot
+
+    _msg, snap = _load_latest_agent_snapshot(db, session_id, owner_id)
+    return _snapshot_allows_reannotation_resume_from_snap(session_id, snap)
+
+
+def _snapshot_allows_optional_hitl_reannotation(
+    db: OrmSession,
+    session_id: str,
+    owner_id: str,
+) -> bool:
+    from gibh_agent.core.hitl_resume import _load_latest_agent_snapshot
+
+    _msg, snap = _load_latest_agent_snapshot(db, session_id, owner_id)
+    return _snapshot_allows_optional_hitl_reannotation_from_snap(session_id, snap)
+
+
+def _snapshot_allows_hitl_resume_from_snap(session_id: str, snap: Dict[str, Any]) -> bool:
+    """单次快照判定：是否允许 resume（避免重复 ORDER BY 大 JSON）。"""
+    if not snap:
+        return False
+    if _snapshot_allows_optional_hitl_reannotation_from_snap(session_id, snap):
+        return True
+    if _snapshot_allows_soft_hitl_resume_from_snap(snap):
+        return True
+    if _snapshot_allows_reannotation_resume_from_snap(session_id, snap):
+        return True
+    return False
+
+
+_HITL_RESUME_ALLOWED_STATUSES = frozenset(
+    {SESSION_WAITING_FOR_HITL, SESSION_COMPLETED, SESSION_RUNNING}
+)
+
+
 def _session_allows_hitl_resume(
     db: OrmSession,
     session: SessionModel,
@@ -111,11 +157,16 @@ def _session_allows_hitl_resume(
     if st == SESSION_WAITING_FOR_HITL:
         return True
     if st in (SESSION_COMPLETED, SESSION_RUNNING):
-        if _snapshot_allows_soft_hitl_resume(db, session.id, owner_id):
-            return True
-        if _snapshot_allows_reannotation_resume(db, session.id, owner_id):
-            return True
+        from gibh_agent.core.hitl_resume import _load_latest_agent_snapshot
+
+        _msg, snap = _load_latest_agent_snapshot(db, session.id, owner_id)
+        return _snapshot_allows_hitl_resume_from_snap(session.id, snap)
     return False
+
+
+def _session_status_allows_hitl_resume_entry(status: str) -> bool:
+    """允许 waiting / completed / running 进入 resume（含 completed 二次覆写）。"""
+    return normalize_session_status(status) in _HITL_RESUME_ALLOWED_STATUSES
 
 
 def _verify_webhook(request: Request) -> bool:
@@ -285,39 +336,53 @@ async def resume_from_hitl(
         raise HTTPException(status_code=403, detail="无权操作该会话")
 
     st = normalize_session_status(getattr(session, "status", None))
+    if not _session_status_allows_hitl_resume_entry(st):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid session status for resume: {st}",
+        )
     if not _session_allows_hitl_resume(db, session, owner_id):
         raise HTTPException(
             status_code=409,
-            detail=f"会话状态为 {st}，且快照无 hitl_pending，无法唤醒（可能已完成 HITL 或未进入复核）",
+            detail=f"会话状态为 {st}，且快照缺少可恢复的 HITL 上下文（project_id / hitl 入口）",
         )
 
     from gibh_agent.core.hitl_resume import stream_resume_from_hitl, stream_skip_from_hitl
     from server import agent
     from gibh_agent.core.orchestrator import AgentOrchestrator
 
+    if agent is None:
+        raise HTTPException(status_code=503, detail="智能体未初始化，无法唤醒 HITL")
+
     upload_dir = os.getenv("UPLOAD_DIR", "/app/uploads")
     orchestrator = AgentOrchestrator(agent, upload_dir=upload_dir)
 
     async def _gen():
-        if body.skip:
-            async for chunk in stream_skip_from_hitl(
+        try:
+            if body.skip:
+                async for chunk in stream_skip_from_hitl(
+                    orchestrator=orchestrator,
+                    session_id=sid,
+                    owner_id=owner_id,
+                    db=db,
+                    trigger=body.trigger or "skip",
+                ):
+                    yield chunk
+                return
+            async for chunk in stream_resume_from_hitl(
                 orchestrator=orchestrator,
                 session_id=sid,
                 owner_id=owner_id,
                 db=db,
-                trigger=body.trigger or "skip",
+                project_id=body.project_id,
+                trigger=body.trigger or "frontend",
             ):
                 yield chunk
-            return
-        async for chunk in stream_resume_from_hitl(
-            orchestrator=orchestrator,
-            session_id=sid,
-            owner_id=owner_id,
-            db=db,
-            project_id=body.project_id,
-            trigger=body.trigger or "frontend",
-        ):
-            yield chunk
+        except Exception as exc:
+            logger.exception("[HITL API] resume_from_hitl stream failed session=%s: %s", sid, exc)
+            err_snap = {"text": "", "process_log": []}
+            yield orchestrator._emit_sse(err_snap, "error", {"message": str(exc)})
+            yield orchestrator._emit_sse(err_snap, "done", {"status": "error"})
 
     return StreamingResponse(
         _gen(),
