@@ -167,19 +167,12 @@ async def _async_analyze_user_intent_yields_intent_result() -> None:
     from types import SimpleNamespace
 
     class _LLM:
-        async def achat(self, *a, **kw):
-            return SimpleNamespace(
-                choices=[
-                    SimpleNamespace(
-                        message=SimpleNamespace(
-                            content='{"target_steps": ["rna_pca"], "skip_steps": []}'
-                        )
-                    )
-                ]
-            )
-
         async def astream(self, *a, **kw):
-            raise RuntimeError("不应走 astream")
+            payload = '{"target_steps": ["rna_pca"], "skip_steps": []}'
+            yield _chunk_dict(payload)
+
+        async def achat(self, *a, **kw):
+            raise RuntimeError("不应走 achat")
 
     registry = WorkflowRegistry()
     rna_wf = registry.get_workflow("RNA")

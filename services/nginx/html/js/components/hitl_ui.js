@@ -96,18 +96,21 @@
 
     function resolveHitlMountAnchor() {
         var zones = window.currentMessageZones;
-        if (zones && zones.logZone) return zones.logZone;
         if (zones && zones.cardZone) return zones.cardZone;
+        if (typeof window.normalizeArtifactMountAnchor === 'function') {
+            return window.normalizeArtifactMountAnchor(zones && zones.logZone ? zones.logZone : null);
+        }
+        if (zones && zones.logZone) return zones.logZone;
         var root = typeof getActiveChatContentEl === 'function' ? getActiveChatContentEl() : null;
         if (!root) root = document.getElementById('skillLiveContent') || document.getElementById('chatContent');
         if (!root) return null;
         var rows = root.querySelectorAll('.message-row.ai');
         for (var i = rows.length - 1; i >= 0; i--) {
             var row = rows[i];
-            var logZone = row.querySelector('.process-log-zone');
-            if (logZone) return logZone;
             var cardZone = row.querySelector('.cards-zone') || row.querySelector('.workflow-container');
             if (cardZone) return cardZone;
+            var logZone = row.querySelector('.process-log-zone');
+            if (logZone) return logZone;
         }
         return null;
     }

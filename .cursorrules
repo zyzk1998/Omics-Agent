@@ -9,3 +9,5 @@
 **Docker 构建（Agent 防卡死）**：禁止 `docker compose build ... | tail -N` 或 `| head -N`（管道会缓冲至子进程结束才输出）。请用 `scripts/build_api_server.sh`（`tee`）或 `docker compose --progress plain build api-server`。BepiPred 默认 `INSTALL_BEPIPRED3=1`；开发可挂载 `third_party/BepiPred-3.0/.venv` 并设 `BEPIPRED3_PYTHON`。
 
 **技能 Docker 验收（长记忆）**：修改首发 `gibh_agent/skills/` 或 `__dependencies__` 后，必须更新 `services/launch-skills/`、执行 `./scripts/build_launch_skills.sh`，在 `gibh_v2_launch_skills` 内跑 `verify_launch_skill_deps.sh`；`api-server` 经 `LAUNCH_SKILLS_BASE_URL` 委托。禁止仅改 api-server 全量镜像或仅宿主机 pytest 即交付（见 §5.11.1）。
+
+**Docker 重启/运维（长记忆）**：禁止裸 `docker compose restart …`（本地 `docker-compose.override.yml` 会导致 label-studio 解析失败）。交付中优先 `docker restart gibh_v2_api gibh_v2_nginx`；若用 compose 须 `docker compose -f docker-compose.yml restart …` 或显式叠加 `-f docker-compose.labelstudio.yml -f docker-compose.override.yml`。细则见 `.cursor/rules/docker-compose-ops.mdc`。

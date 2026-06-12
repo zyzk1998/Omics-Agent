@@ -951,17 +951,12 @@ class SOPPlanner:
                     lines.append(f"- {sid}: {hint}")
         return "\n".join(lines)
 
-    async def _analyze_user_intent_core(
-        self,
-        user_query: str,
-        workflow: "BaseWorkflow",
-    ) -> Dict[str, Any]:
+    async def _analyze_user_intent(self, user_query: str, workflow: "BaseWorkflow"):
         """
-        用户意图分析（单次 LLM 调用），返回 dict。
-        由 _analyze_user_intent 异步生成器包装，供 Orchestrator `async for` 消费。
+        异步生成器：规划期步骤意图 LLM 流式分析。
+        事件：("thought", {...}) | ("intent_parse_error", ...) | ("intent_result", dict)
         """
         _t_analyze_start = time.time()
-        # 获取可用步骤列表
         available_steps = list(workflow.steps_dag.keys())
 
         if _lite_task_mode_enabled():
@@ -972,7 +967,8 @@ class SOPPlanner:
                     "⚡ [LITE MODE] 关键词规则命中，阻断步骤意图 LLM：target_steps=%s",
                     valid_fb,
                 )
-                return {"target_steps": valid_fb, "skip_steps": []}
+                yield ("intent_result", {"target_steps": valid_fb, "skip_steps": []})
+                return
             logger.info(
                 "⚠️ [LITE MODE] 关键词未命中具体步骤，回退至 LLM 用户意图分析",
             )
@@ -1031,56 +1027,63 @@ From the user query, output a JSON object with "target_steps" and "skip_steps". 
         ]
         logger.info("⏱️ [性能探针] 用户意图分析-组装 Prompt 耗时: %.2fs", time.time() - _t_analyze_start)
         _t_llm_start = time.time()
-        response = await self.llm_client.achat(
-            messages=messages,
-            temperature=0.1,
-            max_tokens=512
-        )
-        logger.info("⏱️ [性能探针] 用户意图分析-LLM 规划生成耗时: %.2fs", time.time() - _t_llm_start)
-        # 🔥 FIX: 提取 ChatCompletion 对象的内容
-        if hasattr(response, 'choices') and response.choices:
-            response_text = response.choices[0].message.content or ""
-        else:
-            response_text = str(response)
-        
-        # 解析响应：支持 {"target_steps": [...], "skip_steps": [...]} 或旧版纯数组
-        _t_parse_start = time.time()
+        intent_raw: Optional[Dict[str, Any]] = None
         try:
-            raw = json.loads(response_text.strip())
-            if isinstance(raw, dict):
-                target_steps = raw.get("target_steps")
-                skip_steps = raw.get("skip_steps")
-                if not isinstance(target_steps, list):
-                    target_steps = []
-                if not isinstance(skip_steps, list):
-                    skip_steps = []
-            else:
-                target_steps = raw if isinstance(raw, list) else []
+            stream_iter = self.llm_client.astream(
+                messages=messages,
+                temperature=0.1,
+                max_tokens=512,
+            )
+            async for evt, payload in stream_and_extract_json(stream_iter):
+                if evt == "thought":
+                    yield ("thought", payload)
+                elif evt == "json" and isinstance(payload, dict):
+                    intent_raw = payload
+                    break
+                elif evt == "json_error" and isinstance(payload, dict):
+                    yield ("intent_parse_error", payload)
+        except Exception as e:
+            logger.exception("❌ [SOPPlanner] 用户意图分析流式调用异常: %s", e)
+
+        logger.info("⏱️ [性能探针] 用户意图分析-LLM 流式耗时: %.2fs", time.time() - _t_llm_start)
+        _t_parse_start = time.time()
+
+        if isinstance(intent_raw, dict):
+            target_steps = intent_raw.get("target_steps")
+            skip_steps = intent_raw.get("skip_steps")
+            if not isinstance(target_steps, list):
+                target_steps = []
+            if not isinstance(skip_steps, list):
                 skip_steps = []
-            
             valid_steps = [s for s in target_steps if s in available_steps]
             valid_skip = [s for s in skip_steps if s in available_steps]
             invalid = set(target_steps) - set(available_steps) | (set(skip_steps) - set(available_steps))
             if invalid:
                 logger.warning(f"⚠️ LLM 返回了无效的步骤ID: {invalid}，已过滤")
-            
             logger.info(f"✅ [SOPPlanner] 意图分析完成: target_steps={valid_steps}, skip_steps={valid_skip}")
             logger.info("⏱️ [性能探针] 用户意图分析-JSON 解析与后处理耗时: %.2fs", time.time() - _t_parse_start)
-            return {"target_steps": valid_steps, "skip_steps": valid_skip}
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ 意图分析 JSON 解析失败: {e}")
-            logger.error(f"响应内容: {response_text[:200] if 'response_text' in locals() else str(response)[:200]}")
-            fallback_list = self._fallback_intent_analysis(user_query, available_steps)
-            return {"target_steps": fallback_list, "skip_steps": []}
+            yield ("intent_result", {"target_steps": valid_steps, "skip_steps": valid_skip})
+            return
 
-    async def _analyze_user_intent(self, user_query: str, workflow: "BaseWorkflow"):
+        logger.error("❌ 意图分析 JSON 解析失败或未返回对象，回退关键词匹配")
+        fallback_list = self._fallback_intent_analysis(user_query, available_steps)
+        yield ("intent_result", {"target_steps": fallback_list, "skip_steps": []})
+
+    async def _analyze_user_intent_core(
+        self,
+        user_query: str,
+        workflow: "BaseWorkflow",
+    ) -> Dict[str, Any]:
         """
-        异步生成器契约：至少 yield 一次，供 `async for evt, data in ...` 使用。
-        事件：("intent_result", dict)；可扩展 ("thought", ...) / ("intent_parse_error", ...)。
+        用户意图分析（单次 LLM 调用），返回 dict。
+        兼容旧调用：内部消费 _analyze_user_intent 流式生成器。
         """
-        data = await self._analyze_user_intent_core(user_query, workflow)
-        yield ("intent_result", data)
-    
+        result: Dict[str, Any] = {"target_steps": [], "skip_steps": []}
+        async for evt, data in self._analyze_user_intent(user_query, workflow):
+            if evt == "intent_result" and isinstance(data, dict):
+                result = data
+        return result
+
     def _fallback_intent_analysis(self, user_query: str, available_steps: List[str]) -> List[str]:
         """
         回退的意图分析（基于关键词），含 Spatial / Radiomics 步骤关键词。
@@ -1256,7 +1259,9 @@ From the user query, output a JSON object with "target_steps" and "skip_steps". 
     async def _classify_intent(
         self,
         user_query: str,
-        file_metadata: Optional[Dict[str, Any]]
+        file_metadata: Optional[Dict[str, Any]],
+        thought_out: Optional[List[str]] = None,
+        thought_queue: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         使用 LLM 进行意图分类
@@ -1417,10 +1422,20 @@ Classify the intent and return JSON only. Remember:
                 max_tokens=512,
             )
             async for evt, payload in stream_and_extract_json(stream_iter):
-                if evt == "json" and isinstance(payload, dict):
+                if evt == "thought":
+                    _tc = (payload or {}).get("content") if isinstance(payload, dict) else ""
+                    if _tc:
+                        if thought_out is not None:
+                            thought_out.append(str(_tc))
+                        if thought_queue is not None:
+                            try:
+                                await thought_queue.put(str(_tc))
+                            except Exception:
+                                pass
+                elif evt == "json" and isinstance(payload, dict):
                     intent_raw = payload
                     break
-                if evt == "json_error" and isinstance(payload, dict):
+                elif evt == "json_error" and isinstance(payload, dict):
                     logger.warning(
                         "⚠️ [SOPPlanner] 意图分类流式 JSON 提取失败: %s",
                         payload.get("message", payload),

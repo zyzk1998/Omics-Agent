@@ -1166,6 +1166,7 @@ class AgentOrchestrator:
             except Exception:
                 pass
             yield self._emit_sse(state_snapshot, "done", done_payload)
+            self._merge_skill_reasoning_summary_into_state(state_snapshot, skill_agent)
             state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
             yield self._format_sse("state_snapshot", state_snapshot)
             return
@@ -1428,6 +1429,7 @@ class AgentOrchestrator:
             except Exception:
                 pass
             yield self._emit_sse(state_snapshot, "done", done_payload_fl)
+            self._merge_skill_reasoning_summary_into_state(state_snapshot, skill_agent_fl)
             state_snapshot["text"] = self._sanitize_snapshot_text(state_snapshot.get("text") or "")
             yield self._format_sse("state_snapshot", state_snapshot)
             return
@@ -2708,7 +2710,19 @@ class AgentOrchestrator:
                         file_metadata_for_intent, files
                     )
                     # Analyze intent: classify domain and determine target_steps
-                    intent_result = await planner._classify_intent(refined_query, file_metadata_for_intent)
+                    _classify_thought_q: asyncio.Queue = asyncio.Queue()
+                    _classify_task = asyncio.create_task(
+                        planner._classify_intent(
+                            refined_query,
+                            file_metadata_for_intent,
+                            thought_queue=_classify_thought_q,
+                        )
+                    )
+                    async for _cls_thought_sse in self._iter_planning_thoughts_from_queue(
+                        state_snapshot, _classify_thought_q, _classify_task
+                    ):
+                        yield _cls_thought_sse
+                    intent_result = await _classify_task
                     domain_name = intent_result.get("domain_name")
                     if not domain_name or not self.workflow_registry.is_supported(domain_name):
                         logger.warning(f"⚠️ [Orchestrator] 无法识别域名: {domain_name}")
@@ -3207,13 +3221,22 @@ class AgentOrchestrator:
                                         logger.debug(f"无法构建数据预览: {e}")
                                 
                                     # 调用诊断方法（BaseAgent 内按 workflow 模板提取步骤级 Key 白名单并注入致命约束）
-                                    diagnosis_message = await agent_instance._perform_data_diagnosis(
-                                        file_metadata=file_metadata,
-                                        omics_type=omics_type,
-                                        dataframe=dataframe,
-                                        workflow_for_whitelist=workflow,
-                                        target_step_ids_for_whitelist=target_steps,
+                                    _diag_thought_q: asyncio.Queue = asyncio.Queue()
+                                    _diag_task = asyncio.create_task(
+                                        agent_instance._perform_data_diagnosis(
+                                            file_metadata=file_metadata,
+                                            omics_type=omics_type,
+                                            dataframe=dataframe,
+                                            workflow_for_whitelist=workflow,
+                                            target_step_ids_for_whitelist=target_steps,
+                                            thought_queue=_diag_thought_q,
+                                        )
                                     )
+                                    async for _diag_thought_sse in self._iter_planning_thoughts_from_queue(
+                                        state_snapshot, _diag_thought_q, _diag_task
+                                    ):
+                                        yield _diag_thought_sse
+                                    diagnosis_message = await _diag_task
                                 
                                     # 从agent的context中获取参数推荐
                                     if hasattr(agent_instance, 'context') and "parameter_recommendation" in agent_instance.context:
@@ -4465,6 +4488,29 @@ class AgentOrchestrator:
             set_session_status(db, sid, SESSION_COMPLETED, owner_id=owner_id)
 
     @staticmethod
+    def _merge_skill_reasoning_summary_into_state(
+        state_snapshot: Dict[str, Any],
+        skill_agent: Any,
+        *,
+        max_len: int = 48000,
+    ) -> None:
+        """Skill 快车道结束时：将填参思考浓缩写入 state_snapshot.reasoning（不写入 process_log）。"""
+        if not skill_agent or not isinstance(state_snapshot, dict):
+            return
+        try:
+            summary = skill_agent.build_skill_reasoning_summary()
+        except Exception:
+            logger.debug("build_skill_reasoning_summary 失败", exc_info=True)
+            return
+        if not isinstance(summary, str) or not summary.strip():
+            return
+        prev = str(state_snapshot.get("reasoning") or "").strip()
+        combined = f"{prev}\n\n{summary.strip()}".strip() if prev else summary.strip()
+        if len(combined) > max_len:
+            combined = combined[: max_len - 20] + "\n…(已截断)"
+        state_snapshot["reasoning"] = combined
+
+    @staticmethod
     def _sanitize_snapshot_text(text: str) -> str:
         """清洗 state_snapshot 文本：剔除各类思考标签、追问块与占位符污染（含跨行）。"""
         if not text or not isinstance(text, str):
@@ -5444,6 +5490,32 @@ class AgentOrchestrator:
             session_title=session_title,
         ):
             yield chunk
+
+    async def _iter_planning_thoughts_from_queue(
+        self,
+        state_snapshot: Dict[str, Any],
+        thought_queue: "asyncio.Queue[str]",
+        done_task: "asyncio.Task[Any]",
+    ) -> AsyncIterator[str]:
+        """规划/诊断 LLM 流式思考：后台 task 写入 queue，本协程实时转为 thought SSE。"""
+        while True:
+            while not thought_queue.empty():
+                try:
+                    chunk = thought_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                if chunk:
+                    yield self._emit_sse(state_snapshot, "thought", {"content": chunk})
+            if done_task.done():
+                break
+            await asyncio.sleep(0.012)
+        while not thought_queue.empty():
+            try:
+                chunk = thought_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if chunk:
+                yield self._emit_sse(state_snapshot, "thought", {"content": chunk})
 
     def _emit_sse(
         self,

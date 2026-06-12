@@ -48,6 +48,51 @@
     display: none !important;
 }
 
+/* cards-zone：工作台卡 + 工作流卡垂直堆叠，禁止流式插入时横向挤压 */
+.cards-zone,
+.bubble > .cards-zone,
+.bubble > .workflow-container.cards-zone {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    width: 100% !important;
+    align-items: stretch !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+}
+.cards-zone > .hitl-artifact-row,
+.cards-zone > .chat-action-cards-wrapper,
+.cards-zone > .chat-action-card-group,
+.cards-zone > .params-form,
+.cards-zone > .alert-success,
+.cards-zone > #workflow-card-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex-shrink: 0 !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+}
+/* 仅工作台卡（无 LS 复核卡）时垂直全宽，避免双槽 row 挤压成竖条 */
+.cards-zone > .hitl-artifact-row:not(:has(.hitl-entry-card)) {
+    flex-direction: column !important;
+}
+.cards-zone > .hitl-artifact-row:not(:has(.hitl-entry-card)) .hitl-artifact-row__left,
+.cards-zone > .hitl-artifact-row:not(:has(.hitl-entry-card)) .hitl-artifact-row__right {
+    width: 100% !important;
+    flex: 0 0 auto !important;
+    max-width: 100% !important;
+}
+.cards-zone > .hitl-artifact-row .hitl-artifact-row__right:empty {
+    display: none !important;
+}
+/* 工作台卡不应出现在执行记录区（误挂 logZone 时的兜底） */
+.process-log-zone > .hitl-artifact-row,
+.process-log-zone > .analysis-artifact-card,
+.process-log-zone > .chat-action-cards-wrapper {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
 /* ========== 右侧工作台：双 Tab（极简科研风） ========== */
 .workspace-tabs {
     display: flex;

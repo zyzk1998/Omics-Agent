@@ -6414,6 +6414,68 @@
             }
 
             var WORKSPACE_TOGGLE_BTN_LABEL = '<i class="bi bi-layout-sidebar-inset-reverse"></i> 查看工作台';
+            window.currentSessionTitle = window.currentSessionTitle || '';
+
+            function isGenericAnalysisArtifactTitle(title) {
+                var s = (title != null ? String(title) : '').trim();
+                if (!s) return true;
+                if (s === '技能快车道' || s === '本次分析完成' || s === '历史分析' || s === '数据诊断报告') return true;
+                if (/^skill[\s_-]*fast[\s_-]*lane$/i.test(s)) return true;
+                return false;
+            }
+
+            function syncCurrentSessionTitle(title) {
+                var t = (title != null ? String(title) : '').trim();
+                if (t && t !== '新会话' && t !== '技能会话') {
+                    window.currentSessionTitle = t;
+                }
+            }
+            window.syncCurrentSessionTitle = syncCurrentSessionTitle;
+
+            function readSessionTitleFromDom() {
+                if (window.currentSessionTitle) return String(window.currentSessionTitle).trim();
+                var skillEl = document.getElementById('skill-live-title');
+                if (skillEl) {
+                    var st = (skillEl.textContent || '').trim();
+                    if (st && st !== '技能会话') return st;
+                }
+                var chatEl = document.getElementById('chat-conversation-title');
+                if (chatEl) {
+                    var ct = (chatEl.textContent || '').trim();
+                    if (ct && ct !== '新会话') return ct;
+                }
+                return '';
+            }
+
+            function resolveAnalysisArtifactCardTitle(fallbackTitle, opts) {
+                opts = opts || {};
+                var fromDom = readSessionTitleFromDom();
+                if (fromDom) return fromDom;
+                var fb = (fallbackTitle != null ? String(fallbackTitle) : '').trim();
+                if (fb && !isGenericAnalysisArtifactTitle(fb)) return fb;
+                if (window._activeSkillFromSquare && window._activeSkillFromSquare.name) {
+                    return String(window._activeSkillFromSquare.name).trim();
+                }
+                if (window._activeSkillPayload && window._activeSkillPayload.name) {
+                    return String(window._activeSkillPayload.name).trim();
+                }
+                if (typeof currentSessionId !== 'undefined' && currentSessionId && window.cachedFullSessionsList) {
+                    for (var i = 0; i < window.cachedFullSessionsList.length; i++) {
+                        var sess = window.cachedFullSessionsList[i];
+                        if (sess && String(sess.id) === String(currentSessionId) && sess.title) {
+                            return String(sess.title).trim();
+                        }
+                    }
+                }
+                var toolName = opts.toolName || opts.tool_name || '';
+                if (toolName && typeof getFriendlySkillName === 'function') {
+                    var friendly = getFriendlySkillName(toolName);
+                    if (friendly && String(friendly).trim()) return String(friendly).trim();
+                }
+                if (fb) return fb;
+                return '本次分析完成';
+            }
+            window.resolveAnalysisArtifactCardTitle = resolveAnalysisArtifactCardTitle;
 
             function syncAnalysisArtifactCardActiveStates() {
                 document.querySelectorAll('.analysis-artifact-card[data-snapshot-id]').forEach(function(card) {
@@ -6437,8 +6499,36 @@
                 });
             }
 
-            function ensureHitlArtifactRow(anchorEl) {
+            /** 工作台卡只允许挂在 cards-zone；禁止 logZone / 槽位内嵌套 */
+            function normalizeArtifactMountAnchor(anchorEl) {
                 if (!anchorEl) return null;
+                if (anchorEl.classList && (anchorEl.classList.contains('cards-zone') || anchorEl.classList.contains('workflow-container'))) {
+                    return anchorEl;
+                }
+                if (anchorEl.closest) {
+                    var cz = anchorEl.closest('.cards-zone') || anchorEl.closest('.workflow-container');
+                    if (cz) return cz;
+                    var bubble = anchorEl.closest('.bubble');
+                    if (bubble) {
+                        cz = bubble.querySelector('.cards-zone') || bubble.querySelector('.workflow-container');
+                        if (cz) return cz;
+                    }
+                }
+                return anchorEl;
+            }
+            window.normalizeArtifactMountAnchor = normalizeArtifactMountAnchor;
+
+            function ensureHitlArtifactRow(anchorEl) {
+                anchorEl = normalizeArtifactMountAnchor(anchorEl);
+                if (!anchorEl) return null;
+                if (anchorEl.classList && (
+                    anchorEl.classList.contains('hitl-artifact-row__left')
+                    || anchorEl.classList.contains('hitl-artifact-row__right')
+                    || anchorEl.classList.contains('action-card-slot')
+                )) {
+                    var slotRow = anchorEl.closest('.hitl-artifact-row');
+                    if (slotRow && slotRow.parentElement) anchorEl = slotRow.parentElement;
+                }
                 var row = anchorEl.querySelector(':scope > .chat-action-cards-wrapper');
                 if (!row) row = anchorEl.querySelector(':scope > .hitl-artifact-row');
                 if (!row) {
@@ -6450,9 +6540,14 @@
                     right.className = 'hitl-artifact-row__right action-card-slot';
                     row.appendChild(left);
                     row.appendChild(right);
-                    anchorEl.appendChild(row);
+                    anchorEl.insertBefore(row, anchorEl.firstChild);
                 } else {
                     row.classList.add('chat-action-cards-wrapper', 'chat-action-card-group');
+                }
+                var leftSlot = row.querySelector('.hitl-artifact-row__left');
+                var looseCard = anchorEl.querySelector(':scope > .analysis-artifact-card');
+                if (looseCard && leftSlot && !leftSlot.contains(looseCard)) {
+                    leftSlot.appendChild(looseCard);
                 }
                 return {
                     row: row,
@@ -6462,11 +6557,42 @@
             }
             window.ensureHitlArtifactRow = ensureHitlArtifactRow;
 
-            function renderAnalysisArtifactCard(anchorEl, snapshotId, titleLabel) {
+            function resolveAnalysisArtifactMountEl(anchorEl) {
+                anchorEl = normalizeArtifactMountAnchor(anchorEl);
+                if (!anchorEl) return { anchor: null, mountEl: null };
+                var bubble = anchorEl.closest ? anchorEl.closest('.bubble') : null;
+                if (bubble) {
+                    var strayRow = bubble.querySelector('.process-log-zone > .hitl-artifact-row');
+                    if (strayRow) {
+                        var strayCard = strayRow.querySelector('.analysis-artifact-card');
+                        if (strayCard) anchorEl.insertBefore(strayCard, anchorEl.firstChild);
+                        strayRow.remove();
+                    }
+                    var strayCardDirect = bubble.querySelector('.process-log-zone > .analysis-artifact-card');
+                    if (strayCardDirect) anchorEl.insertBefore(strayCardDirect, anchorEl.firstChild);
+                }
+                var hasHitlEntry = bubble && bubble.querySelector('.hitl-entry-card');
+                if (hasHitlEntry) {
+                    var slots = ensureHitlArtifactRow(anchorEl);
+                    return { anchor: anchorEl, mountEl: (slots && slots.left) ? slots.left : anchorEl };
+                }
+                var orphanRow = anchorEl.querySelector(':scope > .hitl-artifact-row');
+                if (orphanRow && !orphanRow.querySelector('.hitl-entry-card')) {
+                    var loneCard = orphanRow.querySelector('.analysis-artifact-card');
+                    if (loneCard) anchorEl.insertBefore(loneCard, orphanRow);
+                    orphanRow.remove();
+                }
+                return { anchor: anchorEl, mountEl: anchorEl };
+            }
+
+            function renderAnalysisArtifactCard(anchorEl, snapshotId, titleLabel, titleOpts) {
                 if (!anchorEl || !snapshotId) return null;
-                var slots = ensureHitlArtifactRow(anchorEl);
-                var mountEl = (slots && slots.left) ? slots.left : anchorEl;
-                var title = (titleLabel && String(titleLabel).trim()) ? String(titleLabel).trim() : '本次分析完成';
+                var _mount = resolveAnalysisArtifactMountEl(anchorEl);
+                anchorEl = _mount.anchor;
+                var mountEl = _mount.mountEl || anchorEl;
+                var title = (typeof resolveAnalysisArtifactCardTitle === 'function')
+                    ? resolveAnalysisArtifactCardTitle(titleLabel, titleOpts || {})
+                    : ((titleLabel && String(titleLabel).trim()) ? String(titleLabel).trim() : '本次分析完成');
                 var esc = typeof escapeHtml === 'function' ? escapeHtml : function (s) { return String(s || ''); };
                 var existingAny = mountEl.querySelector('.analysis-artifact-card') || anchorEl.querySelector('.analysis-artifact-card');
                 if (existingAny) {
@@ -6609,7 +6735,7 @@
                 var row = root ? root.querySelector('.message-row.ai:last-of-type') : null;
                 if (!row) row = document.querySelector('.active-chat-content .message-row.ai:last-of-type');
                 if (row) {
-                    return row.querySelector('.cards-zone') || row.querySelector('.process-log-zone') || row.querySelector('.bubble');
+                    return row.querySelector('.cards-zone') || row.querySelector('.bubble');
                 }
                 return null;
             }
@@ -9715,6 +9841,7 @@
                 if (window._sseRenderHost === 'skill' && skill && skill.name) {
                     var skillTitleEl = document.getElementById('skill-live-title');
                     if (skillTitleEl) skillTitleEl.textContent = String(skill.name).trim();
+                    if (typeof syncCurrentSessionTitle === 'function') syncCurrentSessionTitle(skill.name);
                 }
                 if (typeof rehydrateComposerAttachmentUi === 'function') rehydrateComposerAttachmentUi();
             }
@@ -9829,7 +9956,8 @@
                 if (!_isChatHostVisibleForRender()) return;
                 var cc = (typeof getActiveChatContentEl === 'function' ? getActiveChatContentEl() : null)
                     || document.getElementById('chatContent');
-                if (cc && typeof hydrateSkillMermaidBlocks === 'function') hydrateSkillMermaidBlocks(cc);
+                if (cc && typeof scheduleOmicsDeferredHydration === 'function') scheduleOmicsDeferredHydration(cc);
+                else if (cc && typeof hydrateSkillMermaidBlocks === 'function') hydrateSkillMermaidBlocks(cc);
             };
             /** 双轨路由 · 右侧工作台槽位隔离：切历史/活会话时 save/restore，避免状态粘连 */
             window.__workspaceSlotCache = window.__workspaceSlotCache || { skill_live: null, main: null };
@@ -11154,7 +11282,7 @@
                 }
                 var block = src.mol_block || src.sdf_content || src.sdf_text;
                 if (typeof block !== 'string' || block.trim().length < 24) return null;
-                var fmt = 'mol';
+                var fmt = 'sdf';
                 if (src.sdf_content || src.sdf_text) fmt = 'sdf';
                 else if (typeof src.format === 'string' && /sdf/i.test(src.format)) fmt = 'sdf';
                 var scalars = {};
@@ -11301,12 +11429,21 @@
                 if (typeof hydratePanZoomWidgets === 'function') {
                     hydratePanZoomWidgets(root);
                 }
+                if (typeof initializeAll3DViewers === 'function') {
+                    initializeAll3DViewers(root, { maxRetries: 40 });
+                }
                 requestAnimationFrame(function () {
                     if (typeof hydrateSkillMermaidBlocks === 'function') {
                         hydrateSkillMermaidBlocks(root, { force: true, retry: true });
                     }
                     if (typeof hydratePanZoomWidgets === 'function') {
                         hydratePanZoomWidgets(root);
+                    }
+                    if (typeof initializeAll3DViewers === 'function') {
+                        initializeAll3DViewers(root, { maxRetries: 40 });
+                    }
+                    if (typeof _skillVisReflowMol3dViewersInScope === 'function') {
+                        _skillVisReflowMol3dViewersInScope(root);
                     }
                 });
             }
@@ -11442,10 +11579,178 @@
                 });
             }
             _initGlobalFullscreenToggle();
+            window._moleculeDataCache = window._moleculeDataCache || {};
+
+            /** 语义格式（后端 mol_block / sdf 等）→ 3Dmol addModel 合法格式（pdb/sdf/mol2/xyz/pqr） */
+            function _skillVisFormatFor3DmolApi(fmtRaw, textOpt) {
+                var fmt = (fmtRaw || '').toLowerCase();
+                if (fmt === 'mol_block' || fmt === 'mol') fmt = 'sdf';
+                if (fmt === 'sdf' || fmt === 'sdf_text' || fmt === 'sdf_content') return 'sdf';
+                if (fmt === 'mol2') return 'mol2';
+                if (fmt === 'pdb') return 'pdb';
+                if (fmt === 'mmcif' || fmt === 'cif') return 'cif';
+                if (fmt === 'xyz') return 'xyz';
+                if (fmt === 'pqr') return 'pqr';
+                var t = textOpt ? String(textOpt).trim() : '';
+                if (t) {
+                    if (/^(ATOM|HETATM|MODEL|HEADER|CRYST1)/im.test(t.slice(0, 320))) return 'pdb';
+                    if (/V2000|V3000|M  END/i.test(t)) return 'sdf';
+                    if (/^\$\$\$\$/m.test(t)) return 'sdf';
+                }
+                return 'sdf';
+            }
+            window._skillVisFormatFor3DmolApi = _skillVisFormatFor3DmolApi;
+
+            function _skillVisNormalizeMolFormat(fmtRaw) {
+                return _skillVisFormatFor3DmolApi(fmtRaw, null);
+            }
+
+            function _skillVisInferMolFormatFromText(text) {
+                return _skillVisFormatFor3DmolApi(null, text);
+            }
+
+            /**
+             * RDKit MolToMolBlock 仅 3 行头（title / blank / counts@index2），
+             * 3Dmol SDF 解析器硬读 lines[3] 为 counts → 须补一行空行对齐 MDL 四行头。
+             */
+            function _skillVisNormalizeMolBlockFor3Dmol(text) {
+                var t = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+                var lines = t.split('\n');
+                var countsIdx = -1;
+                for (var i = 0; i < lines.length; i++) {
+                    if (/^\s*\d+\s+\d+\s+.*V2000/i.test(lines[i]) || /^\s*\d+\s+\d+\s+.*V3000/i.test(lines[i])) {
+                        countsIdx = i;
+                        break;
+                    }
+                }
+                if (countsIdx === 2) {
+                    lines.splice(countsIdx, 0, '');
+                } else if (countsIdx === 1) {
+                    lines.splice(countsIdx, 0, '', '');
+                }
+                var out = lines.join('\n').trim();
+                if (!/M  END/i.test(out)) out += '\nM  END\n';
+                return out;
+            }
+            window._skillVisNormalizeMolBlockFor3Dmol = _skillVisNormalizeMolBlockFor3Dmol;
+
+            function _skillVisPrepareMoleculeTextFor3Dmol(text, formatHint) {
+                var raw = String(text || '').trim();
+                if (!raw) return '';
+                var fmt = _skillVisFormatFor3DmolApi(formatHint, raw);
+                if (fmt === 'sdf' && /V2000|V3000|M  END/i.test(raw)) {
+                    return _skillVisNormalizeMolBlockFor3Dmol(raw);
+                }
+                return raw;
+            }
+            window._skillVisPrepareMoleculeTextFor3Dmol = _skillVisPrepareMoleculeTextFor3Dmol;
+
+            /** 注册分子文本到全局缓存（innerHTML 无法保留 script 载荷，必须数据驱动） */
+            function _skillVisRegisterMoleculeData(molInfo) {
+                if (!molInfo || molInfo.text == null) return null;
+                var text = (typeof molInfo.text === 'string') ? molInfo.text : String(molInfo.text);
+                if (!text.trim() || text.trim().length < 24) return null;
+                window._moleculeDataCache = window._moleculeDataCache || {};
+                var id = 'mol-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+                var fmt = _skillVisNormalizeMolFormat(molInfo.format);
+                if (_skillVisInferMolFormatFromText(text) === 'sdf') fmt = 'sdf';
+                window._moleculeDataCache[id] = {
+                    text: _skillVisPrepareMoleculeTextFor3Dmol(text.trim(), molInfo.format),
+                    format: fmt,
+                    registeredAt: Date.now()
+                };
+                return id;
+            }
+            window._skillVisRegisterMoleculeData = _skillVisRegisterMoleculeData;
+            window._skillVisNormalizeMolFormat = _skillVisNormalizeMolFormat;
+            window._skillVisInferMolFormatFromText = _skillVisInferMolFormatFromText;
+
+            function _skillVisResolveMoleculeData(molId, legacyWrap) {
+                var cache = window._moleculeDataCache || {};
+                if (molId && cache[molId] && cache[molId].text) {
+                    return { text: cache[molId].text, format: cache[molId].format || 'sdf' };
+                }
+                if (legacyWrap) {
+                    var payloadEl = legacyWrap.querySelector('.skill-vis-mol3d-payload');
+                    if (payloadEl && payloadEl.textContent) {
+                        try {
+                            var parsed = JSON.parse(payloadEl.textContent || '""');
+                            if (parsed != null) {
+                                return {
+                                    text: String(parsed),
+                                    format: _skillVisNormalizeMolFormat(legacyWrap.getAttribute('data-mol-format'))
+                                };
+                            }
+                        } catch (_legacyParse) { /* ignore */ }
+                    }
+                }
+                return null;
+            }
+
+            function _skillVisReflowMol3dViewersInScope(scope) {
+                var root = scope || document;
+                if (!root || !root.querySelectorAll) return;
+                root.querySelectorAll('.omics-3d-viewer-mountpoint, .skill-vis-mol3d-viewer').forEach(function (el) {
+                    var viewer = el.__mol3dViewer;
+                    if (!viewer) return;
+                    if (typeof viewer.resize === 'function') viewer.resize();
+                    if (typeof viewer.render === 'function') viewer.render();
+                });
+            }
+            window._skillVisReflowMol3dViewersInScope = _skillVisReflowMol3dViewersInScope;
+
+            /**
+             * 数据驱动 3D 挂载：从 _moleculeDataCache 读取 mol/pdb/sdf 文本，主动实例化 3Dmol。
+             * @returns {number} 成功挂载数量
+             */
+            function initializeAll3DViewers(scope, opts) {
+                opts = opts || {};
+                var root = scope || document;
+                if (!root || !root.querySelectorAll) return 0;
+                var mounted = 0;
+                root.querySelectorAll('.omics-3d-viewer-mountpoint:not(.hydrated)').forEach(function (container) {
+                    if (container.getAttribute('data-mol-mounting') === '1') return;
+                    if (typeof window._omicsMolViewerContainerReady === 'function'
+                        && !window._omicsMolViewerContainerReady(container)) {
+                        return;
+                    }
+                    var molId = container.getAttribute('data-molecule-id') || container.dataset.moleculeId || '';
+                    var legacyWrap = container.closest('[data-skill-mol3d="1"]');
+                    var resolved = _skillVisResolveMoleculeData(molId, legacyWrap);
+                    if (!resolved || !resolved.text) {
+                        console.warn('[initializeAll3DViewers] Molecule data missing for ID:', molId || '(no-id)');
+                        return;
+                    }
+                    var format = _skillVisFormatFor3DmolApi(
+                        container.getAttribute('data-molecule-format') || container.dataset.moleculeFormat || resolved.format,
+                        resolved.text
+                    );
+                    if (container.clientHeight < 8) container.style.height = '400px';
+                    if (container.clientWidth < 8) container.style.width = '100%';
+                    container.setAttribute('data-mol-mounting', '1');
+                    if (typeof window.mountSkillMol3dViewer !== 'function') return;
+                    var ok = window.mountSkillMol3dViewer(container, resolved.text, format, {
+                        wrapEl: legacyWrap,
+                        maxRetries: opts.maxRetries != null ? opts.maxRetries : 40,
+                        debug: opts.debug
+                    });
+                    container.removeAttribute('data-mol-mounting');
+                    if (ok) {
+                        container.classList.add('hydrated');
+                        if (legacyWrap) legacyWrap.setAttribute('data-mol-hydrated', '1');
+                        mounted++;
+                    }
+                });
+                return mounted;
+            }
+            window.initializeAll3DViewers = initializeAll3DViewers;
+
             function _skillVisBuildMol3dViewerHtml(molInfo, esc, opts) {
                 if (!molInfo || !molInfo.text) return '';
                 opts = opts || {};
-                var fmt = (molInfo.format || 'mol').toLowerCase();
+                var molId = opts.moleculeId || _skillVisRegisterMoleculeData(molInfo);
+                if (!molId) return '';
+                var fmt = _skillVisNormalizeMolFormat(molInfo.format);
                 var metrics = '';
                 if (molInfo.scalars && Object.keys(molInfo.scalars).length) {
                     metrics = _skillVisBuildMetricsGridHtml(molInfo.scalars, esc);
@@ -11453,20 +11758,13 @@
                 var heading = (opts.heading && !metrics)
                     ? ('<h6 class="skill-vis-heading small text-muted">' + esc(opts.heading) + '</h6>')
                     : '';
-                var payloadJson = '';
-                try {
-                    payloadJson = JSON.stringify(molInfo.text);
-                } catch (eJson) {
-                    return '';
-                }
                 return heading + metrics + _skillVisWrapFullscreenWidget(
                     '<div class="skill-vis-mol3d-block skill-mm-block my-3" data-skill-mol3d="1" data-mol-format="' + esc(fmt) + '">' +
                     '<p class="text-muted small mb-2"><i class="bi bi-hand-index-thumb me-1"></i>鼠标拖拽可旋转 · 滚轮缩放</p>' +
-                    '<div class="mol-viewer-container skill-vis-mol3d-viewer border rounded bg-light" ' +
-                    'style="height:400px;width:100%;max-width:100%;position:relative;min-width:0;box-sizing:border-box;"></div>' +
-                    '<script type="application/json" class="skill-vis-mol3d-payload">' +
-                    payloadJson.replace(/<\/script/gi, '<\\/script') +
-                    '</scr' + 'ipt></div>',
+                    '<div class="omics-3d-viewer-mountpoint mol-viewer-container skill-vis-mol3d-viewer border rounded bg-light" ' +
+                    'data-molecule-id="' + esc(molId) + '" data-molecule-format="' + esc(fmt) + '" ' +
+                    'style="width:100%;height:400px;min-height:400px;max-width:100%;position:relative;box-sizing:border-box;background:#f9fafb;"></div>' +
+                    '</div>',
                     'skill-vis-mol3d-widget'
                 );
             }
@@ -11963,7 +12261,8 @@
                         molInfo = _skillVisExtractMolStructure(opts.toolResult);
                     }
                     if (molInfo && molInfo.text) {
-                        var molHtml = _skillVisBuildMol3dViewerHtml(molInfo, esc, { heading: opts.heading });
+                        var molCacheId = _skillVisRegisterMoleculeData(molInfo);
+                        var molHtml = _skillVisBuildMol3dViewerHtml(molInfo, esc, { heading: opts.heading, moleculeId: molCacheId });
                         if (molHtml) {
                             return {
                                 handled: true,
@@ -12066,37 +12365,147 @@
                     box.setAttribute('data-skill-vis-exclusive', '1');
                     box.innerHTML = vis.html;
                     parent.appendChild(box);
-                    if (typeof hydrateSkillMol3dBlocks === 'function') hydrateSkillMol3dBlocks(box);
-                    if (typeof hydrateSkillMermaidBlocks === 'function') hydrateSkillMermaidBlocks(box);
-                    if (typeof hydratePptOutlineStudios === 'function') hydratePptOutlineStudios(box);
-                    if (typeof hydratePanZoomWidgets === 'function') hydratePanZoomWidgets(box);
+                    if (typeof scheduleOmicsDeferredHydration === 'function') scheduleOmicsDeferredHydration(box);
+                    else {
+                        if (typeof hydrateSkillMol3dBlocks === 'function') hydrateSkillMol3dBlocks(box);
+                        if (typeof hydrateSkillMermaidBlocks === 'function') hydrateSkillMermaidBlocks(box);
+                        if (typeof hydratePptOutlineStudios === 'function') hydratePptOutlineStudios(box);
+                        if (typeof hydratePanZoomWidgets === 'function') hydratePanZoomWidgets(box);
+                    }
                 });
             }
             window.hydrateSkillVisJsonBlocks = hydrateSkillVisJsonBlocks;
 
-            /** 技能结果区：将 mol_block / SDF 文本挂载为 3Dmol 交互视图 */
-            function hydrateSkillMol3dBlocks(scope) {
+            /** 等待 DOM 挂载并完成至少一帧绘制后再执行复杂组件初始化 */
+            function afterDomMount(callback, opts) {
+                opts = opts || {};
+                var retries = opts.retries != null ? opts.retries : 8;
+                var delay = opts.delay != null ? opts.delay : 50;
+                function tick(left) {
+                    requestAnimationFrame(function () {
+                        requestAnimationFrame(function () {
+                            var ok = false;
+                            try {
+                                ok = callback() !== false;
+                            } catch (eMount) {
+                                ok = false;
+                                console.warn('[afterDomMount]', eMount);
+                            }
+                            if (!ok && left > 0) {
+                                setTimeout(function () { tick(left - 1); }, delay);
+                            }
+                        });
+                    });
+                }
+                tick(retries);
+            }
+            window.afterDomMount = afterDomMount;
+
+            window._omicsMolViewerContainerReady = function (el) {
+                if (!el || !el.isConnected) return false;
+                var cs = window.getComputedStyle(el);
+                if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+                var rect = el.getBoundingClientRect();
+                if (rect.width >= 8 && rect.height >= 8) return true;
+                var mh = parseInt(cs.minHeight, 10);
+                var h = parseInt(cs.height, 10);
+                if (!isNaN(mh) && mh >= 120) return true;
+                if (!isNaN(h) && h >= 120) return true;
+                return false;
+            };
+
+            var __omicsDeferredHydrateTimer = null;
+            function scheduleOmicsDeferredHydration(scope, opts) {
+                opts = opts || {};
                 var root = scope || document;
-                if (!root || !root.querySelectorAll) return;
-                root.querySelectorAll('[data-skill-mol3d="1"]').forEach(function (wrap) {
-                    if (wrap.getAttribute('data-mol-hydrated') === '1') return;
-                    var viewerEl = wrap.querySelector('.skill-vis-mol3d-viewer');
-                    var payloadEl = wrap.querySelector('.skill-vis-mol3d-payload');
-                    if (!viewerEl || !payloadEl) return;
-                    wrap.setAttribute('data-mol-hydrated', '1');
-                    var molText = '';
-                    try {
-                        molText = JSON.parse(payloadEl.textContent || '""');
-                    } catch (eParse) {
-                        console.warn('[hydrateSkillMol3dBlocks] parse failed', eParse);
-                        viewerEl.innerHTML = '<p class="text-muted small p-2 mb-0">3D 结构数据解析失败</p>';
-                        return;
-                    }
-                    var fmt = wrap.getAttribute('data-mol-format') || 'mol';
-                    if (typeof window.mountSkillMol3dViewer === 'function') {
-                        window.mountSkillMol3dViewer(viewerEl, molText, fmt);
-                    }
+                if (__omicsDeferredHydrateTimer) clearTimeout(__omicsDeferredHydrateTimer);
+                __omicsDeferredHydrateTimer = setTimeout(function () {
+                    __omicsDeferredHydrateTimer = null;
+                    afterDomMount(function () {
+                        if (typeof initializeAll3DViewers === 'function') initializeAll3DViewers(root, opts);
+                        if (typeof hydrateSkillMermaidBlocks === 'function') hydrateSkillMermaidBlocks(root, opts);
+                        if (typeof hydrateSkillHtmlPreviewBlocks === 'function') hydrateSkillHtmlPreviewBlocks(root, opts);
+                        if (typeof hydrateSkillMarkdownDeliverableBlocks === 'function') hydrateSkillMarkdownDeliverableBlocks(root, opts);
+                        if (typeof hydratePptOutlineStudios === 'function') hydratePptOutlineStudios(root, opts);
+                        if (typeof hydratePanZoomWidgets === 'function') hydratePanZoomWidgets(root, opts);
+                        if (typeof hydrateSkillVisJsonBlocks === 'function') hydrateSkillVisJsonBlocks(root);
+                        if (typeof window.hydrateToolAssetPreviews === 'function') window.hydrateToolAssetPreviews(root);
+                        return true;
+                    }, { retries: opts.retries != null ? opts.retries : 10, delay: opts.delay != null ? opts.delay : 50 });
+                }, opts.debounceMs != null ? opts.debounceMs : 16);
+            }
+            window.scheduleOmicsDeferredHydration = scheduleOmicsDeferredHydration;
+
+            /** SSE/流式 Markdown 结束后：双 rAF 确认 DOM 宽高就绪，再水化 3D/Mermaid 等复杂组件 */
+            function initializeDeferredViewers(scope, opts) {
+                opts = opts || {};
+                var root = scope || document;
+                if (typeof scheduleOmicsDeferredHydration === 'function') {
+                    scheduleOmicsDeferredHydration(root, Object.assign({ retries: 12, delay: 60, debounceMs: 16 }, opts));
+                    return;
+                }
+                if (typeof afterDomMount === 'function') {
+                    afterDomMount(function () {
+                        if (typeof initializeAll3DViewers === 'function') initializeAll3DViewers(root, opts);
+                        if (typeof _skillVisReflowMol3dViewersInScope === 'function') _skillVisReflowMol3dViewersInScope(root);
+                        return true;
+                    }, { retries: opts.retries != null ? opts.retries : 12, delay: opts.delay != null ? opts.delay : 60 });
+                }
+            }
+            window.initializeDeferredViewers = initializeDeferredViewers;
+
+            function initOmicsComponentMountGuard() {
+                if (window.__omicsMountGuardInit) return;
+                window.__omicsMountGuardInit = true;
+                if (typeof MutationObserver !== 'undefined') {
+                    var observer = new MutationObserver(function (mutations) {
+                        var needsHydrate = false;
+                        mutations.forEach(function (m) {
+                            for (var i = 0; i < m.addedNodes.length; i++) {
+                                var node = m.addedNodes[i];
+                                if (!node || node.nodeType !== 1) continue;
+                                if (node.matches && (
+                                    node.matches('[data-skill-mermaid="1"]') ||
+                                    node.matches('[data-skill-html-preview="1"]') ||
+                                    node.matches('.omics-3d-viewer-mountpoint:not(.hydrated)')
+                                )) {
+                                    needsHydrate = true;
+                                    break;
+                                }
+                                if (node.querySelector && node.querySelector(
+                                    '[data-skill-mermaid="1"], [data-skill-html-preview="1"], .omics-3d-viewer-mountpoint:not(.hydrated)'
+                                )) {
+                                    needsHydrate = true;
+                                    break;
+                                }
+                            }
+                        });
+                        if (needsHydrate) scheduleOmicsDeferredHydration(document, { retries: 12, delay: 60 });
+                    });
+                    observer.observe(document.body, { childList: true, subtree: true });
+                }
+                document.addEventListener('shown.bs.collapse', function (ev) {
+                    if (!ev.target || !ev.target.classList || !ev.target.classList.contains('accordion-collapse')) return;
+                    afterDomMount(function () {
+                        if (typeof initializeAll3DViewers === 'function') {
+                            initializeAll3DViewers(ev.target, { maxRetries: 40 });
+                        }
+                        if (typeof _skillVisReflowMol3dViewersInScope === 'function') {
+                            _skillVisReflowMol3dViewersInScope(ev.target);
+                        }
+                        return true;
+                    }, { retries: 8, delay: 80 });
+                    scheduleOmicsDeferredHydration(ev.target, { retries: 8, delay: 80 });
                 });
+            }
+            initOmicsComponentMountGuard();
+
+            /** 技能结果区：数据驱动占位符 → initializeAll3DViewers 主动挂载 */
+            function hydrateSkillMol3dBlocks(scope, opts) {
+                if (typeof initializeAll3DViewers === 'function') {
+                    return initializeAll3DViewers(scope, opts);
+                }
+                return 0;
             }
             window.hydrateSkillMol3dBlocks = hydrateSkillMol3dBlocks;
 
@@ -12394,12 +12803,16 @@
                         el.innerHTML = '<p class="skill-ws-empty small mb-0 skill-csv-error">' + _skillWsEscapeHtml(String(err && err.message ? err.message : err)) + '</p>';
                     });
                 });
-                if (typeof hydrateSkillMol3dBlocks === 'function') hydrateSkillMol3dBlocks(skillRoot);
-                if (typeof hydrateSkillMermaidBlocks === 'function') hydrateSkillMermaidBlocks(skillRoot);
-                if (typeof hydrateSkillHtmlPreviewBlocks === 'function') hydrateSkillHtmlPreviewBlocks(skillRoot);
-                if (typeof hydrateSkillMarkdownDeliverableBlocks === 'function') hydrateSkillMarkdownDeliverableBlocks(skillRoot);
-                if (typeof hydratePptOutlineStudios === 'function') hydratePptOutlineStudios(skillRoot);
-                if (typeof hydratePanZoomWidgets === 'function') hydratePanZoomWidgets(skillRoot);
+                if (typeof scheduleOmicsDeferredHydration === 'function') {
+                    scheduleOmicsDeferredHydration(skillRoot, { retries: 12, delay: 60 });
+                } else {
+                    if (typeof hydrateSkillMol3dBlocks === 'function') hydrateSkillMol3dBlocks(skillRoot);
+                    if (typeof hydrateSkillMermaidBlocks === 'function') hydrateSkillMermaidBlocks(skillRoot);
+                    if (typeof hydrateSkillHtmlPreviewBlocks === 'function') hydrateSkillHtmlPreviewBlocks(skillRoot);
+                    if (typeof hydrateSkillMarkdownDeliverableBlocks === 'function') hydrateSkillMarkdownDeliverableBlocks(skillRoot);
+                    if (typeof hydratePptOutlineStudios === 'function') hydratePptOutlineStudios(skillRoot);
+                    if (typeof hydratePanZoomWidgets === 'function') hydratePanZoomWidgets(skillRoot);
+                }
             }
             function showSkillWorkspaceChrome() {
                 var wp = document.getElementById('workspace-pane');
@@ -12457,6 +12870,12 @@
                 chunks.push('</div>');
                 skillRoot.innerHTML = chunks.join('');
                 hydrateSkillWorkspacePanels(skillRoot);
+                if (typeof initializeAll3DViewers === 'function') {
+                    afterDomMount(function () {
+                        initializeAll3DViewers(skillRoot, { maxRetries: 40 });
+                        return true;
+                    }, { retries: 10, delay: 80 });
+                }
             }
             /**
              * Worker 返回的 stdout_tail / query_smiles 注入当前 AI 气泡的「执行记录」区（.process-log-zone），右侧工作台仅保留报告/表格。
@@ -13007,6 +13426,7 @@
                     nameEl.textContent = skillName;
                     nameEl.title = skillName;
                 }
+                if (typeof syncCurrentSessionTitle === 'function') syncCurrentSessionTitle(skillName);
                 var skillTitleEl = document.getElementById('skill-live-title');
                 if (skillTitleEl) skillTitleEl.textContent = skillName;
                 if (typeof refreshActiveSkillRunningFromSession === 'function') refreshActiveSkillRunningFromSession();
@@ -13125,12 +13545,14 @@
                         return r.json();
                     }).then(function() {
                         titleEl.textContent = newTitle;
+                        if (typeof syncCurrentSessionTitle === 'function') syncCurrentSessionTitle(newTitle);
                         if (typeof fetchSessions === 'function') fetchSessions();
                         editMode.style.display = 'none';
                         displayMode.style.display = 'flex';
                     }).catch(function(e) { alert(e.detail || e.message || '重命名失败'); });
                 } else {
                     titleEl.textContent = newTitle;
+                    if (typeof syncCurrentSessionTitle === 'function') syncCurrentSessionTitle(newTitle);
                     editMode.style.display = 'none';
                     displayMode.style.display = 'flex';
                 }
@@ -14950,6 +15372,7 @@
                     var displayTitle = typeof sanitizeSystemInjections === 'function' ? (sanitizeSystemInjections(title || '') || '').trim() : (title || '');
                     if (!displayTitle) displayTitle = '复用工作流';
                     titleEl.textContent = (displayTitle || sessionId).slice(0, 24);
+                    if (typeof syncCurrentSessionTitle === 'function') syncCurrentSessionTitle(displayTitle || sessionId);
                 }
                 if (typeof window.setRightPanelState === 'function') window.setRightPanelState('NONE');
                 else if (typeof setWorkspacePaneExpanded === 'function') setWorkspacePaneExpanded(false);
@@ -15415,17 +15838,28 @@
                 return formId;
             }
             // 🔥 时光机：根据 process_log 还原执行记录，与直播 addProcessStep 的 CSS/图标 100% 一致
-            function renderProcessLogToLogZone(logZone, processLog) {
-                if (!logZone || !processLog || !Array.isArray(processLog) || processLog.length === 0) return;
-                var filtered = processLog.filter(function(entry) {
+            function renderProcessLogToLogZone(logZone, processLog, reasoningSummary) {
+                if (!logZone || !processLog || !Array.isArray(processLog) || processLog.length === 0) {
+                    if (!logZone || !reasoningSummary || !String(reasoningSummary).trim()) return;
+                    processLog = [];
+                }
+                var filtered = (processLog || []).filter(function(entry) {
                     var c = (entry && entry.content != null) ? String(entry.content) : '';
                     return c.trim() === '' || c.indexOf('[AgenticLog] ') !== 0;
                 });
-                var skipped = processLog.length - filtered.length;
+                var skipped = (processLog || []).length - filtered.length;
+                var reasoningFallback = (reasoningSummary != null && String(reasoningSummary).trim()) ? String(reasoningSummary).trim() : '';
                 if (skipped > 0) {
                     filtered.push({
                         content: '技能执行：已省略 ' + skipped + ' 条内部步骤日志（[AgenticLog]），避免刷屏',
-                        state: 'completed'
+                        state: 'completed',
+                        reasoning_content: reasoningFallback
+                    });
+                } else if (reasoningFallback && !filtered.some(function(e) { return e && e.reasoning_content; })) {
+                    filtered.push({
+                        content: '技能填参推理摘要',
+                        state: 'completed',
+                        reasoning_content: reasoningFallback
                     });
                 }
                 if (filtered.length === 0) return;
@@ -15596,22 +16030,29 @@
                 }
                 // 2) process-log-zone：优先 process_log（与直播一致），否则用 steps 静态 checklist
                 if (snap.process_log && Array.isArray(snap.process_log) && snap.process_log.length > 0 && logZone) {
-                    renderProcessLogToLogZone(logZone, snap.process_log);
+                    renderProcessLogToLogZone(logZone, snap.process_log, snap.reasoning);
+                } else if (snap.reasoning && typeof snap.reasoning === 'string' && snap.reasoning.trim() && logZone) {
+                    renderProcessLogToLogZone(logZone, [], snap.reasoning);
                 }
                 if (snap.tool_calls && snap.tool_calls.length > 0 && logZone) {
                     renderToolCallsTerminalBlock(logZone, snap.tool_calls);
                 }
                 var _histSnapId = null;
                 var _hasExecMirror = snap.execution_snapshot || (snap.execution_snapshots && snap.execution_snapshots.snapshots);
-                if (_hasExecMirror && logZone) {
+                if (_hasExecMirror) {
                     _histSnapId = resolveSnapshotIdFromPayload(snap, null, 'task');
                     var _histTm = resolveExecutionSnapshotMirror(snap, createdAt);
                     _histTm.snapshot_id = _histSnapId;
                     window.__omicsSnapshotRegistry = window.__omicsSnapshotRegistry || {};
                     window.__omicsSnapshotRegistry[_histSnapId] = _histTm;
-                    var _histTitle = _histTm.workflow_name || (snap.workflow && snap.workflow.workflow_name) || '历史分析';
-                    if (typeof renderAnalysisArtifactCard === 'function') {
-                        renderAnalysisArtifactCard(logZone, _histSnapId, _histTitle);
+                    var _histTitle = (typeof resolveAnalysisArtifactCardTitle === 'function')
+                        ? resolveAnalysisArtifactCardTitle(_histTm.workflow_name || (snap.workflow && snap.workflow.workflow_name) || '历史分析', {
+                            toolName: snap.skill_last_tool && snap.skill_last_tool.tool_name
+                        })
+                        : (_histTm.workflow_name || (snap.workflow && snap.workflow.workflow_name) || '历史分析');
+                    var _histAnchor = cardZone || (typeof resolvePlanningArtifactAnchor === 'function' ? resolvePlanningArtifactAnchor() : null);
+                    if (_histAnchor && typeof renderAnalysisArtifactCard === 'function') {
+                        renderAnalysisArtifactCard(_histAnchor, _histSnapId, _histTitle);
                     }
                 }
                 // 3) text-zone
@@ -18567,7 +19008,8 @@
                                 <span class="look-right-hint">  <span class="arrow-bounce">➔</span></span>
                                 <span class="icon">▼</span>
                             </div>
-                            <div class="process-steps checklist-container"></div>
+                            <div class="process-steps checklist-container">
+                            </div>
                         `;
                         
                         processStepsDiv = processLogContainer.querySelector('.process-steps');
@@ -18669,6 +19111,10 @@
 
                         function renderExecutionLogs() {
                             if (!processStepsDiv) return;
+                            var agenticFragment = document.createDocumentFragment();
+                            Array.from(processStepsDiv.querySelectorAll('.agent-step')).forEach(function (node) {
+                                agenticFragment.appendChild(node);
+                            });
                             processStepsDiv.innerHTML = '';
                             activeExecutionLogs.forEach(function(entry) {
                                 var st = normalizeLogState(entry.state || 'active');
@@ -18701,6 +19147,9 @@
                                 `;
                                 processStepsDiv.appendChild(stepDiv);
                             });
+                            if (agenticFragment.childNodes.length) {
+                                processStepsDiv.appendChild(agenticFragment);
+                            }
                             processStepCount = activeExecutionLogs.length;
                             const countSpan = processLogContainer.querySelector('.step-count');
                             if (countSpan) countSpan.textContent = processStepCount;
@@ -19019,8 +19468,9 @@
                             var action = payload.action;
                             var stepId = payload.step_id != null ? String(payload.step_id) : '';
 
-                            /** 与灰色执行记录卡片融合：始终挂到当前文档中最后一个 .process-steps（即本轮 SSE 容器） */
+                            /** AgenticLog 挂载点：与 checklist 同容器，renderExecutionLogs 通过 DocumentFragment 备份保活 .agent-step */
                             function resolveProcessStepsMount() {
+                                if (processStepsDiv) return processStepsDiv;
                                 var nodes = document.querySelectorAll('.process-steps');
                                 if (!nodes.length) return null;
                                 return nodes[nodes.length - 1];
@@ -19135,9 +19585,6 @@
                                     sub.setAttribute('data-agentic-substep-id', String(payload.substep_id));
                                 }
                                 var kind = payload.kind || '';
-                                if (kind === 'thought' && sseApiMode === 'standard') {
-                                    return;
-                                }
                                 var badge = document.createElement('span');
                                 badge.className = 'agent-substep__badge';
                                 if (kind === 'thought') {
@@ -19655,6 +20102,11 @@
                                         var _sid = String(data.session_id);
                                         var _tit = String(data.title || '').trim();
                                         if (_tit) {
+                                            if (typeof currentSessionId !== 'undefined' && String(currentSessionId) === _sid) {
+                                                if (typeof syncCurrentSessionTitle === 'function') syncCurrentSessionTitle(_tit);
+                                                var _chatTitleEl = document.getElementById('chat-conversation-title');
+                                                if (_chatTitleEl) _chatTitleEl.textContent = _tit.length > 24 ? _tit.slice(0, 24) + '...' : _tit;
+                                            }
                                             var _items = document.querySelectorAll('#sidebar-sessions-list .sidebar-session-item');
                                             for (var _ii = 0; _ii < _items.length; _ii++) {
                                                 if (_items[_ii].dataset.sessionId === _sid) {
@@ -19673,6 +20125,14 @@
                                     if (data && data.tool_result != null && typeof data.tool_result === 'object' && !Array.isArray(data.tool_result) && data.tool_result.status === 'success') {
                                         try { renderSkillToolWorkspace(data.tool_name, data.tool_result); } catch (e) { console.warn('skill_tool_result', e); }
                                         try { injectSkillToolStdoutIntoProcessLog(data.tool_name, data.tool_result); } catch (e2) { console.warn('injectSkillToolStdoutIntoProcessLog', e2); }
+                                        if (typeof initializeDeferredViewers === 'function') {
+                                            initializeDeferredViewers(document.getElementById('skill-tool-workspace-root') || document, { maxRetries: 40, retries: 12, delay: 80 });
+                                        } else if (typeof initializeAll3DViewers === 'function') {
+                                            afterDomMount(function () {
+                                                initializeAll3DViewers(document.getElementById('skill-tool-workspace-root') || document, { maxRetries: 40 });
+                                                return true;
+                                            }, { retries: 12, delay: 80 });
+                                        }
                                     }
                                     break;
 
@@ -19823,6 +20283,19 @@
                                             window.renderHitlActionCard(data.hitl);
                                         } else if (data && data.hitl_pending && data.hitl && typeof window.restoreHitlFromSnapshot === 'function') {
                                             window.restoreHitlFromSnapshot(data, data.status || 'waiting_for_hitl');
+                                        }
+                                        if (data && typeof data.reasoning === 'string' && data.reasoning.trim()) {
+                                            var _rzSnap = (window.currentMessageZones && window.currentMessageZones.reasoningZone)
+                                                || (currentRow && currentRow.querySelector ? currentRow.querySelector('.reasoning-zone, .reasoning-container') : null);
+                                            if (_rzSnap && !_rzSnap.querySelector('.agent-thought-block, .thought-process-persistent')) {
+                                                var _detSnap = document.createElement('details');
+                                                _detSnap.className = 'agent-thought-block thought-process-persistent';
+                                                _detSnap.innerHTML = '<summary><svg class="thought-icon-open" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="none" stroke="currentColor" stroke-width="2" d="M6 9l6 6 6-6"/></svg><svg class="thought-icon-closed" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="none" stroke="currentColor" stroke-width="2" d="M9 18l6-6-6-6"/></svg><span class="thought-summary-text">思考过程</span></summary><div class="thought-content"></div>';
+                                                var _tcSnap = _detSnap.querySelector('.thought-content');
+                                                if (_tcSnap) _tcSnap.textContent = data.reasoning.trim();
+                                                _rzSnap.insertBefore(_detSnap, _rzSnap.firstChild);
+                                            }
+                                            if (currentRow) currentRow.dataset.reasoningContent = data.reasoning.trim();
                                         }
                                     } catch (e) { console.warn('[state_snapshot] 写入 dataset 失败:', e); }
                                     break;
@@ -21245,25 +21718,24 @@
                                 ingestExecutionSnapshotsFromContent(data, null);
                             }
                             var _artifactSnapId = resolveSnapshotIdFromPayload(_doneFullSnap || {}, data, 'task');
-                            var _artLogZone = (window.currentMessageZones && window.currentMessageZones.logZone)
-                                ? window.currentMessageZones.logZone
-                                : (_doneRow ? _doneRow.querySelector('.process-log-zone') : null);
                             var _planAnchor = (window.currentMessageZones && window.currentMessageZones.cardZone)
                                 || (_doneRow ? (_doneRow.querySelector('.cards-zone') || _doneRow.querySelector('.workflow-container')) : null);
-                            var _artifactAnchor = _artLogZone || _planAnchor
-                                || (_doneRow ? (_doneRow.querySelector('.process-log-zone') || _doneRow.querySelector('.cards-zone')) : null);
-                            if (_doneRow && _doneRow.querySelector('.analysis-artifact-card')) {
-                                var _existingCard = _doneRow.querySelector('.analysis-artifact-card');
-                                if (_existingCard && _existingCard.parentElement) {
-                                    _artifactAnchor = _existingCard.parentElement;
-                                }
+                            var _artifactAnchor = _planAnchor
+                                || (_doneRow ? (_doneRow.querySelector('.cards-zone') || _doneRow.querySelector('.workflow-container')) : null);
+                            if (typeof normalizeArtifactMountAnchor === 'function') {
+                                _artifactAnchor = normalizeArtifactMountAnchor(_artifactAnchor);
                             }
                             if (_snapExDone || (_doneFullSnap && (_doneFullSnap.execution_snapshot || _doneFullSnap.execution_snapshots))) {
                                 var _artPayload = resolveExecutionSnapshotMirror(_doneFullSnap || { execution_snapshot: _snapExDone }, null);
                                 _artPayload.snapshot_id = _artifactSnapId;
                                 window.__omicsSnapshotRegistry = window.__omicsSnapshotRegistry || {};
                                 window.__omicsSnapshotRegistry[_artifactSnapId] = _artPayload;
-                                var _artTitle = _artPayload.workflow_name || '本次分析完成';
+                                var _artTitle = (typeof resolveAnalysisArtifactCardTitle === 'function')
+                                    ? resolveAnalysisArtifactCardTitle(_artPayload.workflow_name || '本次分析完成', {
+                                        toolName: (data && data.tool_name)
+                                            || (_doneFullSnap && _doneFullSnap.skill_last_tool && _doneFullSnap.skill_last_tool.tool_name)
+                                    })
+                                    : (_artPayload.workflow_name || '本次分析完成');
                                 if (_artifactAnchor && typeof renderAnalysisArtifactCard === 'function') {
                                     renderAnalysisArtifactCard(_artifactAnchor, _artifactSnapId, _artTitle);
                                 }
@@ -21274,6 +21746,14 @@
                                 }
                                 window.__omicsActiveSnapshotId = _planSnapId;
                                 if (typeof syncAnalysisArtifactCardActiveStates === 'function') syncAnalysisArtifactCardActiveStates();
+                            }
+                            if (typeof initializeDeferredViewers === 'function') {
+                                initializeDeferredViewers(document.getElementById('skill-tool-workspace-root') || document, { maxRetries: 40, retries: 10, delay: 80 });
+                            } else if (typeof initializeAll3DViewers === 'function') {
+                                afterDomMount(function () {
+                                    initializeAll3DViewers(document.getElementById('skill-tool-workspace-root') || document, { maxRetries: 40 });
+                                    return true;
+                                }, { retries: 10, delay: 80 });
                             }
                             if (_doneFullSnap && typeof window.restoreHitlFromSnapshot === 'function') {
                                 window.restoreHitlFromSnapshot(_doneFullSnap, (data && data.status) || '');
@@ -22362,52 +22842,144 @@
             };
             /**
              * 技能/工具内联 mol_block 或 SDF 文本 → 3Dmol stick 模型（小分子专用）。
-             * @param {string} formatOpt  'mol' | 'sdf'
+             * @param {string} formatOpt  3Dmol 格式：sdf（RDKit mol_block）| mol2 | pdb | …
              */
-            window.mountSkillMol3dViewer = function (containerElement, molText, formatOpt) {
-                if (!containerElement || molText == null) return;
-                var molFormat = (formatOpt || 'mol').toLowerCase();
-                if (molFormat === 'mol_block') molFormat = 'mol';
-                if (molFormat !== 'sdf') molFormat = 'mol';
+            window.mountSkillMol3dViewer = function (containerElement, molText, formatOpt, mountOpts) {
+                mountOpts = mountOpts || {};
+                if (!containerElement || molText == null) return false;
+                if (containerElement.classList.contains('hydrated')) return true;
+                var rawInput = molText;
+                if (typeof rawInput === 'object') {
+                    console.error('[mountSkillMol3dViewer] 拒绝非字符串分子数据（可能是 JSON 对象而非 MOL/SDF 文本）', rawInput);
+                    return false;
+                }
+                var molFormat = (typeof _skillVisFormatFor3DmolApi === 'function')
+                    ? _skillVisFormatFor3DmolApi(formatOpt, molText)
+                    : 'sdf';
+                var molString = (typeof _skillVisPrepareMoleculeTextFor3Dmol === 'function')
+                    ? _skillVisPrepareMoleculeTextFor3Dmol(String(rawInput), formatOpt)
+                    : String(rawInput);
+                if (/^\s*[\[{]/.test(molString)) {
+                    console.error('[mountSkillMol3dViewer] 数据疑似 JSON 而非 MOL/SDF/PDB 文本，前 80 字符:', molString.slice(0, 80));
+                    return false;
+                }
+                if (mountOpts.debug !== false && typeof console !== 'undefined') {
+                    var _linesDbg = molString.split('\n');
+                    var _countsLine = '';
+                    for (var _di = 0; _di < _linesDbg.length; _di++) {
+                        if (/^\s*\d+\s+\d+\s+.*V2000/i.test(_linesDbg[_di]) || /^\s*\d+\s+\d+\s+.*V3000/i.test(_linesDbg[_di])) {
+                            _countsLine = 'idx=' + _di + ' ' + _linesDbg[_di].slice(0, 40);
+                            break;
+                        }
+                    }
+                    console.info('[mountSkillMol3dViewer] 3Dmol format=', molFormat, 'bytes=', molString.length,
+                        'counts=', _countsLine,
+                        'preview=', molString.slice(0, 120).replace(/\r?\n/g, '\\n'));
+                }
+                var wrapEl = mountOpts.wrapEl || (containerElement.closest ? containerElement.closest('[data-skill-mol3d="1"]') : null);
+                var mountIv = null;
+
+                function markHydrated() {
+                    containerElement.classList.add('hydrated');
+                    if (wrapEl) wrapEl.setAttribute('data-mol-hydrated', '1');
+                }
 
                 function showErr(msg) {
+                    if (mountIv) { clearInterval(mountIv); mountIv = null; }
                     containerElement.innerHTML =
-                        '<p class="text-muted small mb-0 p-2">' + (msg || '3D 预览不可用') + '</p>';
+                        '<p class="text-danger small mb-0 p-2">' + (msg || '3D 预览不可用') + '</p>';
+                    markHydrated();
                 }
-                function tryMount(raw) {
-                    if (typeof $3Dmol === 'undefined' || !$3Dmol.createViewer) return false;
+                function bindResizeObserver() {
+                    if (containerElement.__mol3dResizeObs || typeof ResizeObserver === 'undefined') return;
+                    containerElement.__mol3dResizeObs = new ResizeObserver(function () {
+                        var v = containerElement.__mol3dViewer;
+                        if (!v || typeof window._omicsMolViewerContainerReady !== 'function') return;
+                        if (!window._omicsMolViewerContainerReady(containerElement)) return;
+                        if (typeof v.resize === 'function') v.resize();
+                        if (typeof v.render === 'function') v.render();
+                    });
+                    containerElement.__mol3dResizeObs.observe(containerElement);
+                }
+                function countViewerAtoms(viewer) {
                     try {
+                        if (typeof viewer.selectedAtoms === 'function') {
+                            var sel = viewer.selectedAtoms({});
+                            if (sel && sel.length > 0) return sel.length;
+                        }
+                        if (typeof viewer.getModel === 'function') {
+                            var m = viewer.getModel();
+                            if (m && m.atoms && m.atoms.length) return m.atoms.length;
+                        }
+                        if (viewer.models && viewer.models.length) {
+                            var total = 0;
+                            for (var mi = 0; mi < viewer.models.length; mi++) {
+                                var mod = viewer.models[mi];
+                                if (mod && mod.atoms) total += mod.atoms.length;
+                            }
+                            if (total > 0) return total;
+                        }
+                    } catch (_atomCnt) { /* ignore */ }
+                    return 0;
+                }
+                /** @returns {'ok'|'wait'|'fail'} */
+                function tryMount(raw, fmtTry) {
+                    var useFmt = fmtTry || molFormat;
+                    if (typeof window._omicsMolViewerContainerReady === 'function'
+                        && !window._omicsMolViewerContainerReady(containerElement)) {
+                        return 'wait';
+                    }
+                    if (typeof $3Dmol === 'undefined' || !$3Dmol.createViewer) return 'wait';
+                    try {
+                        if (containerElement.__mol3dViewer && typeof containerElement.__mol3dViewer.clear === 'function') {
+                            containerElement.__mol3dViewer.clear();
+                        }
                         containerElement.innerHTML = '';
                         var viewer = $3Dmol.createViewer(containerElement, {
                             defaultBackgroundColor: '#f9fafb',
                             backgroundColor: '#f9fafb'
                         });
                         containerElement.__mol3dViewer = viewer;
-                        viewer.addModel(String(raw), molFormat);
+                        viewer.addModel(String(raw), useFmt);
                         viewer.setStyle({}, { stick: { radius: 0.12 }, sphere: { scale: 0.22 } });
                         viewer.zoomTo();
                         viewer.render();
-                        return true;
+                        if (typeof viewer.resize === 'function') viewer.resize();
+                        bindResizeObserver();
+                        var atomCount = countViewerAtoms(viewer);
+                        if (atomCount > 0) return 'ok';
+                        console.warn('[mountSkillMol3dViewer] parse yielded 0 atoms, format=', useFmt);
+                        return 'fail';
                     } catch (e) {
-                        console.warn('[mountSkillMol3dViewer]', e);
-                        showErr('3D 结构渲染失败');
-                        return true;
+                        console.error('[mountSkillMol3dViewer] 3Dmol render failed', e, 'format=', useFmt);
+                        return 'fail';
                     }
                 }
-                function waitThenMount(text) {
-                    if (tryMount(text)) return;
-                    var n = 0;
-                    var iv = setInterval(function () {
-                        n++;
-                        if (tryMount(text) || n > 200) {
-                            clearInterval(iv);
-                            if (n > 200 && !containerElement.querySelector('canvas')) {
-                                showErr('3Dmol 加载超时，请硬刷新后重试');
-                            }
-                        }
-                    }, 50);
+                function finishSuccess() {
+                    if (mountIv) { clearInterval(mountIv); mountIv = null; }
+                    markHydrated();
+                    return true;
                 }
-                waitThenMount(molText);
+                var first = tryMount(molString, molFormat);
+                if (first === 'ok') return finishSuccess();
+                if (first === 'fail') {
+                    showErr('3D 结构解析失败（MOL 块格式不兼容）');
+                    return false;
+                }
+                var n = 0;
+                var maxN = mountOpts.maxRetries != null ? mountOpts.maxRetries : 40;
+                mountIv = setInterval(function () {
+                    n++;
+                    var st = tryMount(molString, molFormat);
+                    if (st === 'ok') {
+                        finishSuccess();
+                    } else if (st === 'fail' || n >= maxN) {
+                        if (mountIv) { clearInterval(mountIv); mountIv = null; }
+                        if (st === 'fail') showErr('3D 结构解析失败（MOL 块格式不兼容）');
+                        else if (!containerElement.querySelector('canvas')) showErr('3Dmol 加载超时，请硬刷新后重试');
+                    }
+                }, 100);
+                return false;
             };
             /**
              * 3Dmol 渲染（.pdb / mmCIF）。失败时若传入 hydrateOpts.wrap + fallbackPath 则回退为普通下载卡片。
@@ -22460,6 +23032,10 @@
                 }
 
                 function tryMount(rawText) {
+                    if (typeof window._omicsMolViewerContainerReady === 'function'
+                        && !window._omicsMolViewerContainerReady(containerElement)) {
+                        return false;
+                    }
                     if (typeof $3Dmol === 'undefined' || !$3Dmol.createViewer) return false;
                     var useFmt = molFormat;
                     if (useFmt !== 'mmcif' && isLikelyCifText(rawText)) useFmt = 'mmcif';
@@ -22520,6 +23096,7 @@
             window.hydrateToolAssetPreviews = function(root) {
                 var scope = root || document.getElementById('chatContent');
                 if (!scope || !scope.querySelectorAll) return;
+                var runHydrate = function () {
                 scope.querySelectorAll('[data-mol-structure-url]').forEach(function (wrap) {
                     if (wrap.getAttribute('data-mol-hydrated') === '1') return;
                     wrap.setAttribute('data-mol-hydrated', '1');
@@ -22577,6 +23154,12 @@
                 }
                 if (typeof window.hydratePanZoomWidgets === 'function') {
                     window.hydratePanZoomWidgets(scope);
+                }
+                };
+                if (typeof afterDomMount === 'function') {
+                    afterDomMount(runHydrate, { retries: 10, delay: 50 });
+                } else {
+                    runHydrate();
                 }
             };
             function getUserId() {

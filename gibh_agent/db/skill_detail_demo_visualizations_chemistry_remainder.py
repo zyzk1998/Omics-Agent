@@ -2,7 +2,10 @@
 """化学大类 · demo_visualization 批量具象化（Phase 1.3）。"""
 from __future__ import annotations
 
+import json
 from typing import Dict
+
+from gibh_agent.db._demo_mol_block_aspirin import DEMO_ASPIRIN_MOL_BLOCK
 
 
 def _report(title: str, body: str, footnote: str = "") -> str:
@@ -41,6 +44,22 @@ def _smiles_block(label: str, smiles: str, color: str = "#475569") -> str:
     return (
         f'<div style="margin-bottom:6px;"><span style="color:#64748b;">{label}</span> '
         f'<code style="font-size:10px;word-break:break-all;color:{color};">{smiles}</code></div>'
+    )
+
+
+def _mol3d_viewer_demo(mol_block: str, height: str = "260px") -> str:
+    """技能广场抽屉 · 可交互 3D 预览（与运行时 omics-3d-viewer-mountpoint 同构）。"""
+    payload = json.dumps(mol_block)
+    return (
+        '<div class="skill-vis-mol3d-block" data-skill-mol3d="1" data-mol-format="mol_block">'
+        f'<div class="skill-vis-mol3d-payload" style="display:none" aria-hidden="true">{payload}</div>'
+        '<p style="margin:0 0 8px;color:#64748b;font-size:11px;">'
+        "鼠标拖拽旋转 · 滚轮缩放 · ETKDG + MMFF 3D 构象</p>"
+        '<div class="omics-3d-viewer-mountpoint mol-viewer-container skill-vis-mol3d-viewer" '
+        'data-molecule-format="mol_block" '
+        f'style="width:100%;height:{height};min-height:{height};border:1px solid #e2e8f0;'
+        'border-radius:8px;background:#f9fafb;position:relative;box-sizing:border-box;"></div>'
+        "</div>"
     )
 
 
@@ -133,17 +152,18 @@ CHEMISTRY_VIZ: Dict[str, str] = {
     ),
     "rdkit_3d_mol_render": _report(
         "3D 分子结构渲染 · 阿司匹林",
-        _smiles_block("输入", "CC(=O)Oc1ccccc1C(=O)O")
-        + '<div style="height:120px;background:linear-gradient(135deg,#eff6ff 0%,#f0fdf4 100%);border-radius:8px;display:flex;align-items:center;justify-content:center;margin:8px 0;border:1px dashed #cbd5e1;">'
-        '<span style="color:#64748b;font-size:11px;">3D 坐标 · MMFF 优化构象 · SDF/MOL 输出</span></div>'
+        _smiles_block("输入 SMILES", "CC(=O)Oc1ccccc1C(=O)O")
+        + _mol3d_viewer_demo(DEMO_ASPIRIN_MOL_BLOCK)
         + _table(
             ["指标", "值"],
             [
+                ["原子数 (含 H)", "21"],
                 ["重原子数", "13"],
-                ["构象能量", "−42.3 kcal/mol (示意)"],
-                ["输出格式", "SDF / MOL / PDB 块"],
+                ["输出字段", "data.mol_block"],
+                ["前端格式", "mol_block → 3Dmol sdf"],
             ],
         ),
+        "* 预览 MOL 块与 launch_skill_demos 默认可运行示例同源；打开详情抽屉后由 3Dmol.js 实时渲染。",
     ),
     "chem_molecule_image": _report(
         "分子 2D 结构图 · PNG 输出",

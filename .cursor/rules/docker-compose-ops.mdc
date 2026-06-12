@@ -1,0 +1,77 @@
+---
+description: Docker/Compose 运维指令铁律——禁止给出会解析失败的 compose 命令；优先容器名或显式 -f
+alwaysApply: true
+---
+
+# Docker Compose 运维指令铁律（长记忆）
+
+交付说明、DevOps Guide、或任何回复中**禁止**给出未在本机验证、可能报错的 `docker compose` 命令。
+
+## 1. 根因：`docker-compose.override.yml` 陷阱
+
+- 仓库根目录执行裸 `docker compose …` 时，Compose **自动合并** `docker-compose.override.yml`（已 gitignore，本地常存在）。
+- 该 override 仅 patch `label-studio` 的 `environment`，**不含** `image`/`build`。
+- `label-studio` 的完整定义在 `docker-compose.labelstudio.yml`；未显式 `-f` 合并时会出现：
+  `service "label-studio" has neither an image nor a build context specified`
+- **因此禁止**在交付中写：`docker compose restart api-server nginx`（无 `-f` 且存在 override 时必炸）。
+
+## 2. 推荐：按容器名重启（最稳，与 compose 解析无关）
+
+工作目录任意均可；容器名来自 `docker-compose.yml`：
+
+```bash
+# 仅前端静态 + API（最常见：改 index.html / Python 后端）
+docker restart gibh_v2_api gibh_v2_nginx
+
+# 技能栈变更后
+docker restart gibh_v2_api gibh_v2_launch_skills
+
+# 全栈 Worker 一并重启
+docker restart gibh_v2_api gibh_v2_nginx gibh_v2_worker gibh_v2_launch_skills
+```
+
+查看运行中容器：`docker ps --format 'table {{.Names}}\t{{.Status}}'`
+
+## 3. 次选：显式 `-f`，与启动栈一致
+
+**仅主栈（无 Label Studio override 补丁）**：
+
+```bash
+cd /home/ubuntu/GIBH-AGENT-V2
+docker compose -f docker-compose.yml restart api-server nginx
+```
+
+**本机已用 Label Studio 叠加启动时**（与 `docker-compose.labelstudio.yml` 注释一致）：
+
+```bash
+cd /home/ubuntu/GIBH-AGENT-V2
+docker compose -f docker-compose.yml -f docker-compose.labelstudio.yml -f docker-compose.override.yml restart api-server nginx
+```
+
+## 4. 服务名 ↔ 容器名对照（主栈）
+
+| compose 服务名 | 容器名 |
+|----------------|--------|
+| api-server | gibh_v2_api |
+| nginx | gibh_v2_nginx |
+| launch-skills | gibh_v2_launch_skills |
+| worker | gibh_v2_worker |
+| mysql | gibh_v2_mysql |
+| redis | gibh_v2_redis |
+| label-studio | gibh_label_studio（须 `-f docker-compose.labelstudio.yml`） |
+
+## 5. 构建与验收（已有纪律，此处复述）
+
+- 构建 api-server：`./scripts/build_api_server.sh` 或 `docker compose --progress plain build api-server`（**禁止** `| tail` / `| head` 管道）。
+- 构建 launch-skills：`./scripts/build_launch_skills.sh`
+- 改静态前端后：`docker restart gibh_v2_nginx` + 浏览器 **Ctrl+Shift+R**
+
+## 6. Agent 自检
+
+给出运维命令前须满足至少一条：
+
+1. 使用 **`docker restart <container_name>`**；或
+2. 使用 **`docker compose -f docker-compose.yml …`**（必要时加 labelstudio + override）；或
+3. 在本环境 **实际执行**过且无报错。
+
+**禁止**：无 `-f` 的裸 `docker compose restart/up/build`（当 override 可能存在时）。

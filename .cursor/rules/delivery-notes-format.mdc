@@ -29,3 +29,4 @@ alwaysApply: true
 - **直白纪律**：禁止「重启一下」「更新缓存」等无对象表述；须写清**对谁**执行**什么**。凡涉及宿主机命令，**必须粘贴完整、可复制执行的一行或多行 Shell**（含假定工作目录；`docker compose` / `kubectl` / `systemctl` 写全子命令与**典型服务名**）。若服务名因环境而异，在同一行或紧邻注释写明占位替换规则后仍给出可运行示例。
 - 若确实无需任何 CLI（例如纯静态 CSS 且无需清 CDN），仍须在该小节写一句结论（如「无需重启后端；请强制刷新浏览器」），避免默认省略。
 - **可执行指令纪律（与仓库《底层算子融合智能体系统标准方法论》§5.5 一致）**：确无 CLI 时写清「无需执行命令」及仍须留意的事项（配置、缓存、数据路径等）。
+- **Docker 纪律**：禁止裸 `docker compose restart/up/build`（本地 override 易触发 label-studio 解析错误）。优先 `docker restart gibh_v2_api gibh_v2_nginx`；compose 须 `-f docker-compose.yml` 或完整三文件叠加。见 `.cursor/rules/docker-compose-ops.mdc`。

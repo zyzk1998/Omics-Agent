@@ -9,7 +9,7 @@ from openai import AuthenticationError, APIError
 from ..core.llm_client import LLMClient
 from ..core.prompt_manager import PromptManager, DATA_DIAGNOSIS_PROMPT
 from ..core.data_diagnostician import DataDiagnostician
-from ..core.stream_utils import stream_from_llm_chunks, strip_suggestions_from_text
+from ..core.stream_utils import stream_from_llm_chunks, stream_llm_markdown_with_thought, strip_suggestions_from_text
 from ..core.openai_tools import (
     apply_hpc_mcp_tool_policy,
     hpc_chat_system_suffix,
@@ -572,6 +572,7 @@ class BaseAgent(ABC):
         valid_ui_param_names: Optional[List[str]] = None,
         workflow_for_whitelist: Any = None,
         target_step_ids_for_whitelist: Optional[List[str]] = None,
+        thought_queue: Optional[Any] = None,
     ) -> Optional[str]:
         """
         执行数据诊断并生成 Markdown 报告
@@ -931,13 +932,24 @@ Use Simplified Chinese for all content."""
                 logger.debug(f"📝 [DEBUG] LLM Client type: {type(llm_client_to_use)}")
                 logger.debug(f"📝 [DEBUG] LLM Client methods: {dir(llm_client_to_use)}")
                 
-                completion = await llm_client_to_use.achat(messages, temperature=0.3, max_tokens=1500)
-                logger.info(f"✅ [DataDiagnostician] LLM调用完成，开始解析响应...")
+                report_parts: List[str] = []
+                stream = llm_client_to_use.astream(messages, temperature=0.3, max_tokens=1500)
+                async for evt, data in stream_llm_markdown_with_thought(stream):
+                    if evt == "thought":
+                        _tc = (data or {}).get("content") if isinstance(data, dict) else ""
+                        if _tc and thought_queue is not None:
+                            try:
+                                await thought_queue.put(str(_tc))
+                            except Exception:
+                                pass
+                    elif evt == "message":
+                        _mc = (data or {}).get("content") if isinstance(data, dict) else ""
+                        if _mc:
+                            report_parts.append(str(_mc))
+                response = "".join(report_parts)
+                logger.info(f"✅ [DataDiagnostician] LLM流式调用完成，开始解析响应...")
                 
-                logger.debug(f"📝 [DEBUG] LLM completion type: {type(completion)}")
-                logger.debug(f"📝 [DEBUG] LLM completion: {completion}")
-                
-                think_content, response = llm_client_to_use.extract_think_and_content(completion)
+                think_content = None
                 # 🔥 DRY: Strip <<<SUGGESTIONS>>> block so it never reaches the frontend
                 if response:
                     response, suggestions = strip_suggestions_from_text(response)

@@ -1,14 +1,15 @@
 """
 Stream and text parsing utilities for LLM responses.
-- stream_from_llm_chunks：丢弃 delta.reasoning_content 与 THINK_TAG_PAIRS 标记的思考正文，不向用户 SSE 外露；外露仅 message suggest suggestions。
-- stream_and_extract_json：Planner 流式分拣——思考块不落 json_buffer；流结束后剥 fence + 括号平衡 json.loads。
+- stream_from_llm_chunks：默认丢弃 delta.reasoning_content 与 THINK 标签内字节（Chat 外露 message）。
+- stream_llm_markdown_with_thought：Task 规划/诊断专用——reasoning 与 THINK 标签内容 yield 为 thought。
+- stream_and_extract_json：Planner 流式分拣——思考块 yield thought 且不落 json_buffer；流结束后剥 fence + json.loads。
 
 工具执行期面向用户的过程日志（非 LLM token）：使用 gibh_agent.core.tool_stream_log.emit_tool_log，经 Executor/Orchestrator 转为 SSE status；本模块不重复拼装 SSE。
 """
 import json
 import re
 import logging
-from typing import Any, AsyncIterator, List, Optional, Set, Tuple, Union
+from typing import Any, AsyncIterator, Dict, List, Optional, Set, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +300,129 @@ async def stream_from_llm_chunks(
             )
             return
 
+        remaining = content_buffer
+        if TAG_SUGGEST_OPEN in remaining:
+            remaining = remaining.split(TAG_SUGGEST_OPEN, 1)[0]
+        remaining = remaining.split(SUGGEST_START, 1)[0]
+        if remaining:
+            yield ("message", {"content": remaining})
+
+
+async def stream_llm_markdown_with_thought(
+    chunk_iter: AsyncIterator[Any],
+) -> AsyncIterator[Tuple[str, Dict[str, Any]]]:
+    """
+    Task 规划/数据诊断：将 reasoning_content 与 THINK 标签内正文作为 thought 外露；
+    其余 content 作为 message 片段（供拼接 Markdown 报告）。
+    """
+    content_buffer = ""
+    in_think_tag = False
+    pending_close: Optional[str] = None
+
+    async for chunk in chunk_iter:
+        choices = getattr(chunk, "choices", None) if not isinstance(chunk, dict) else chunk.get("choices")
+        if not choices or len(choices) == 0:
+            continue
+        first = choices[0]
+        delta = getattr(first, "delta", None) if not isinstance(first, dict) else first.get("delta")
+
+        reasoning = _delta_get(delta, "reasoning_content")
+        if reasoning:
+            yield ("thought", {"content": reasoning})
+
+        content = _delta_get(delta, "content")
+        if content:
+            content_buffer += content
+
+        while True:
+            if TAG_SUGGEST_OPEN in content_buffer and TAG_SUGGEST_CLOSE in content_buffer:
+                io = content_buffer.find(TAG_SUGGEST_OPEN)
+                ic = content_buffer.find(TAG_SUGGEST_CLOSE)
+                if io != -1 and ic != -1 and io < ic:
+                    ic_full = ic + len(TAG_SUGGEST_CLOSE)
+                    inner = content_buffer[io + len(TAG_SUGGEST_OPEN) : ic].strip()
+                    qs = parse_suggest_questions_json(inner)
+                    if qs:
+                        yield ("suggest", {"questions": qs})
+                    content_buffer = content_buffer[:io] + content_buffer[ic_full:]
+                    continue
+
+            if SUGGEST_END in content_buffer and SUGGEST_START in content_buffer:
+                idx_start = content_buffer.find(SUGGEST_START)
+                idx_end = content_buffer.find(SUGGEST_END) + len(SUGGEST_END)
+                if idx_start < idx_end:
+                    try:
+                        json_str = content_buffer[
+                            idx_start + len(SUGGEST_START) : idx_end - len(SUGGEST_END)
+                        ].strip()
+                        suggestions = json.loads(json_str)
+                        if isinstance(suggestions, list) and suggestions:
+                            yield ("suggestions", suggestions)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                    content_buffer = content_buffer[:idx_start] + content_buffer[idx_end:]
+                    continue
+
+            if in_think_tag:
+                pc = pending_close or ""
+                pcl = len(pc)
+                if pcl and pc in content_buffer:
+                    idx = content_buffer.find(pc)
+                    think_part = content_buffer[:idx]
+                    if think_part:
+                        yield ("thought", {"content": think_part})
+                    content_buffer = content_buffer[idx + pcl :]
+                    in_think_tag = False
+                    pending_close = None
+                    continue
+                if pcl > 0 and len(content_buffer) > pcl:
+                    think_part = content_buffer[:-pcl]
+                    content_buffer = content_buffer[-pcl:]
+                    if think_part:
+                        yield ("thought", {"content": think_part})
+                    break
+                break
+
+            hit = _find_earliest_think_open(content_buffer)
+            if hit is not None:
+                idx, open_m, close_m = hit
+                message_part = content_buffer[:idx]
+                if message_part:
+                    yield ("message", {"content": message_part})
+                content_buffer = content_buffer[idx + len(open_m) :]
+                in_think_tag = True
+                pending_close = close_m
+                continue
+
+            if TAG_SUGGEST_OPEN in content_buffer:
+                io = content_buffer.find(TAG_SUGGEST_OPEN)
+                ic_rel = content_buffer.find(TAG_SUGGEST_CLOSE, io + len(TAG_SUGGEST_OPEN))
+                if ic_rel == -1:
+                    msg_part = content_buffer[:io]
+                    if msg_part:
+                        yield ("message", {"content": msg_part})
+                    content_buffer = content_buffer[io:]
+                    break
+            if SUGGEST_START in content_buffer:
+                safe_end = content_buffer.find(SUGGEST_START)
+                to_yield = content_buffer[:safe_end]
+                if to_yield:
+                    yield ("message", {"content": to_yield})
+                content_buffer = content_buffer[safe_end:]
+                break
+            if THINK_MAX_OPEN_LEN > 0 and len(content_buffer) > THINK_MAX_OPEN_LEN:
+                to_yield = content_buffer[:-THINK_MAX_OPEN_LEN]
+                content_buffer = content_buffer[-THINK_MAX_OPEN_LEN:]
+                if to_yield:
+                    yield ("message", {"content": to_yield})
+                break
+
+            break
+
+    if content_buffer:
+        if in_think_tag:
+            yield ("thought", {"content": content_buffer})
+            return
         remaining = content_buffer
         if TAG_SUGGEST_OPEN in remaining:
             remaining = remaining.split(TAG_SUGGEST_OPEN, 1)[0]
@@ -639,7 +763,7 @@ async def stream_and_extract_json(
     chunk_iter: AsyncIterator[Any],
 ) -> AsyncIterator[Tuple[str, object]]:
     """
-    Planner JSON 提取：剥离 delta.reasoning_content 与各类思考标签内字节（不外发）；仅向外 yield json/json_error。
+    Planner JSON 提取：reasoning / THINK 标签内字节 yield thought；JSON 正文 yield json/json_error。
     """
 
     is_thinking = False
@@ -657,10 +781,7 @@ async def stream_and_extract_json(
 
             reasoning = _delta_get(delta, "reasoning_content")
             if reasoning:
-                logger.debug(
-                    "stream_and_extract_json: dropped reasoning_content (~%d chars)",
-                    len(reasoning),
-                )
+                yield ("thought", {"content": reasoning})
 
             content = _delta_get(delta, "content")
             if not content:
@@ -674,12 +795,19 @@ async def stream_and_extract_json(
                     pcl = len(pc)
                     if pcl and pc in work_buf:
                         idx = work_buf.find(pc)
+                        think_body = work_buf[:idx]
+                        if think_body:
+                            yield ("thought", {"content": think_body})
                         work_buf = work_buf[idx + pcl :]
                         is_thinking = False
                         pending_close = None
                         continue
                     if pcl > 0 and len(work_buf) > pcl:
+                        think_part = work_buf[:-pcl]
                         work_buf = work_buf[-pcl:]
+                        if think_part:
+                            yield ("thought", {"content": think_part})
+                        break
                     break
 
                 hit = _find_earliest_think_open(work_buf)
@@ -713,9 +841,11 @@ async def stream_and_extract_json(
             )
             return
 
-    # 流结束：冲刷 work_buf（思考半成品不入库）
+    # 流结束：冲刷 work_buf（思考半成品作为 thought 外露）
     if work_buf:
-        if not is_thinking:
+        if is_thinking:
+            yield ("thought", {"content": work_buf})
+        else:
             json_buffer += work_buf
         work_buf = ""
 

@@ -25,6 +25,9 @@ from gibh_agent.core.utils import sanitize_for_json
 
 logger = logging.getLogger(__name__)
 
+# 技能填参思考写入 state_snapshot.reasoning 的上限（字符）
+SKILL_REASONING_SNAPSHOT_MAX = 48000
+
 # 双保险：快车道解析工具名前，确保 GI 等「侧车模块」已完成 @registry.register
 # （与 gibh_agent/tools/chem_rdkit_tools.py 末尾侧车一致；避免部分入口未 import gibh_agent.tools 全包）
 try:
@@ -431,6 +434,9 @@ class SkillAgent:
         self.llm_client = llm_client
         self._format_sse = format_sse
         self._pending_done_tool: Optional[Dict[str, Any]] = None
+        self._runtime_reasoning_parts: List[str] = []
+        self._runtime_tool_name: str = ""
+        self._runtime_tool_args: Dict[str, Any] = {}
 
     def consume_pending_done_tool(self) -> Optional[Dict[str, Any]]:
         """供 Orchestrator 在 `done` 事件中合并 `tool_result`（取后即清空）。"""
@@ -462,6 +468,8 @@ class SkillAgent:
             return
         st["sent"] = len(full)
         st["last"] = now
+        if tail:
+            self._runtime_reasoning_parts.append(tail)
         yield self._agentic_emit(
             {
                 "action": "substep_delta",
@@ -471,6 +479,26 @@ class SkillAgent:
                 "state": "running",
             }
         )
+
+    def build_skill_reasoning_summary(self) -> str:
+        """Skill 结束时一次性浓缩填参思考 + 工具参数，供 state_snapshot.reasoning 入库。"""
+        sections: List[str] = []
+        think_text = "".join(self._runtime_reasoning_parts).strip()
+        tool_name = (self._runtime_tool_name or "").strip()
+        if think_text:
+            header = f"[技能填参 · {tool_name}]" if tool_name else "[技能填参]"
+            sections.append(f"{header}\n{think_text}")
+        args = self._runtime_tool_args if isinstance(self._runtime_tool_args, dict) else {}
+        if args:
+            try:
+                args_json = json.dumps(args, ensure_ascii=False, indent=2, default=str)
+            except Exception:
+                args_json = str(args)
+            sections.append(f"[提取参数]\n{args_json}")
+        summary = "\n\n".join(sections).strip()
+        if len(summary) > SKILL_REASONING_SNAPSHOT_MAX:
+            summary = summary[: SKILL_REASONING_SNAPSHOT_MAX - 20] + "\n…(已截断)"
+        return summary
 
     def _agentic_emit(self, payload: Dict[str, Any]) -> str:
         """[AgenticLog] 行通过 status.content 透出，保证整条 SSE 合法。"""
@@ -1138,6 +1166,9 @@ class SkillAgent:
         经节流后以 substep_delta 流式写入执行记录（非逐 token、不入 process_log 爆炸性快照）。
         """
         self._pending_done_tool = None
+        self._runtime_reasoning_parts = []
+        self._runtime_tool_name = tool_name
+        self._runtime_tool_args = {}
         step_id = f"skill_{uuid.uuid4().hex[:8]}"
         step_banner = f"执行技能: {tool_name}"
         if tool_name == "lipinski_druglikeness":
@@ -1234,12 +1265,14 @@ class SkillAgent:
                 tool_kwargs = await self._llm_extract_args(tool_name, user_query, file_paths, model_name)
             if stream_ok:
                 if not "".join(_throttle_buf).strip():
+                    _fallback_think = "（模型未返回可展示的推理文本；已直接解析参数 JSON。）\n"
+                    self._runtime_reasoning_parts.append(_fallback_think)
                     yield self._agentic_emit(
                         {
                             "action": "substep_delta",
                             "step_id": step_id,
                             "substep_id": "think_1",
-                            "delta": "（模型未返回可展示的推理文本；已直接解析参数 JSON。）\n",
+                            "delta": _fallback_think,
                             "state": "running",
                         }
                     )
@@ -1266,6 +1299,7 @@ class SkillAgent:
         args = self._augment_args_from_user_text(tool_name, args, user_query, file_paths)
         if conversation_history:
             args["conversation_history"] = conversation_history
+        self._runtime_tool_args = dict(args)
         logger.info("🧠 [SkillAgent] 最终执行参数: %s", args)
 
         yield self._agentic_emit(
